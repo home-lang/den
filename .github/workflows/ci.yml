@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@v2.0.2
         with:
           bun-version: canary
 
@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@v2.0.2
         with:
           bun-version: canary
 
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@v2.0.2
         with:
           bun-version: canary
 
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@v2.0.2
         with:
           bun-version: canary
 
