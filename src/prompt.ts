@@ -24,7 +24,7 @@ export class PromptRenderer {
     this.simpleMode = !!(cfgSimpleWhenNotTTY && (notTty || termDumb || noColor))
     // In test environments, force colors to be enabled so unit tests that
     // assert on ANSI sequences and color differences are reliable.
-    if ((process.env.NODE_ENV || '').toLowerCase() === 'test')
+    if ((process.env.NODE_ENV || '').toLowerCase() === 'test' || (process.env.BUN_ENV || '').toLowerCase() === 'test')
       this.simpleMode = false
   }
 
@@ -113,14 +113,14 @@ export class PromptRenderer {
         const styledBranch = branchBold
           ? this.boldColorize(branchOnly, customBranchColor)
           : this.colorize(branchOnly, customBranchColor)
-        segments.push(`${branchSymbol} ${styledBranch}`)
+        segments.push(` ${branchSymbol} ${styledBranch}`)
       }
       else {
         // No color configured: optionally bold only the branch name
         const styledBranch = (branchBold && !this.simpleMode)
           ? `\x1B[1m${branchOnly}\x1B[22m`
           : branchOnly
-        segments.push(`${branchSymbol} ${styledBranch}`)
+        segments.push(` ${branchSymbol} ${styledBranch}`)
       }
     }
 
@@ -340,7 +340,7 @@ export class PromptRenderer {
       '🐹': 'go',
       '🦀': 'rs',
       '🐳': 'docker',
-      '❯': '>'
+      '❯': '>',
     }
     return map[symbol] || symbol
   }
@@ -398,7 +398,8 @@ export class PromptRenderer {
 
   private supportsTruecolor(): boolean {
     const env = process.env
-    if (!env) return false
+    if (!env)
+      return false
     const colorterm = (env.COLORTERM || '').toLowerCase()
     if (colorterm.includes('truecolor') || colorterm.includes('24bit'))
       return true
@@ -415,15 +416,19 @@ export class PromptRenderer {
   private rgbToXterm256(r: number, g: number, b: number): number {
     // Grayscale ramp detection
     if (r === g && g === b) {
-      if (r < 8) return 16
-      if (r > 248) return 231
+      if (r < 8)
+        return 16
+      if (r > 248)
+        return 231
       return Math.round(((r - 8) / 247) * 24) + 232
     }
 
     // 6x6x6 color cube mapping (values 0..5)
     const toCube = (v: number) => {
-      if (v < 48) return 0
-      if (v < 114) return 1
+      if (v < 48)
+        return 0
+      if (v < 114)
+        return 1
       return Math.round((v - 35) / 40)
     }
     const rc = toCube(r)

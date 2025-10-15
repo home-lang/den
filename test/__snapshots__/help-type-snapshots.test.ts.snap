@@ -23,7 +23,7 @@ code         Open the current directory in Visual Studio Code
 copyssh      Copy ~/.ssh/id_ed25519.pub to clipboard when available, else print
 dirs         Display the directory stack
 disown       Remove jobs from the job table
-dotfiles     Open $DOTFILES in VS Code when available, otherwise try macOS open, else print the path
+dotfiles     Open $DOTFILES in your preferred editor ($EDITOR) or default to VS Code
 echo         Display text
 emptytrash   Empty the user Trash on macOS (no sudo). Fails gracefully elsewhere.
 eval         Concatenate arguments and evaluate as a command
@@ -73,6 +73,7 @@ wait         Wait for background jobs or PIDs to finish
 web          cd to $HOME/Code
 which        Show the full path of commands
 wip          Create a work-in-progress commit and optionally push it
+yes          Execute the last suggested script correction
 return       Return from a function or script
 break        Break out of loops
 continue     Continue to next iteration of loop

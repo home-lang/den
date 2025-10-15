@@ -1,6 +1,6 @@
 import type { KrustyConfig } from '../src/types'
 import { describe, expect, it } from 'bun:test'
-import { KrustyShell } from '../src/shell'
+import { KrustyShell } from '../src'
 
 // Note: relies on `sleep` command being available on Unix-like systems
 

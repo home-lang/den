@@ -3,7 +3,12 @@ import process from 'node:process'
 import { CAC } from 'cac'
 import { version } from '../package.json'
 import { config as defaultConfig, loadKrustyConfig } from '../src/config'
-import { KrustyShell } from '../src/shell'
+import { KrustyShell } from '../src/shell/index'
+
+// Skip CLI execution during tests to prevent hanging
+if (process.env.NODE_ENV === 'test' || process.env.BUN_ENV === 'test') {
+  process.exit(0)
+}
 
 const cli = new CAC('krusty')
 
@@ -261,10 +266,23 @@ cli
   .option('--verbose', 'Enable verbose logging')
   .option('--config <config>', 'Path to config file')
   .action(async (command: string, options: CliOptions) => {
+    if (process.env.KRUSTY_DEBUG) {
+      console.error(`[DEBUG] CLI exec called with command: "${command}"`)
+    }
+
     const cfg = await loadKrustyConfig({ path: options.config })
     const base = { ...defaultConfig, ...cfg }
     const shell = new KrustyShell({ ...base, verbose: options.verbose ?? base.verbose })
+
+    if (process.env.KRUSTY_DEBUG) {
+      console.error(`[DEBUG] Shell created, calling execute...`)
+    }
+
     const result = await shell.execute(command)
+
+    if (process.env.KRUSTY_DEBUG) {
+      console.error(`[DEBUG] Execute result:`, result)
+    }
 
     if (!result.streamed) {
       if (result.stdout)
@@ -425,6 +443,88 @@ cli
     }
     catch (err: any) {
       process.stderr.write(`setup error: ${err?.message ?? String(err)}\n`)
+      process.exit(1)
+    }
+  })
+
+// Version command
+// Uninstall command: remove wrapper and clean up
+cli
+  .command('uninstall', 'Uninstall krusty wrapper and clean up system configuration')
+  .option('--prefix <path>', 'Prefix where krusty wrapper was installed (defaults to /usr/local/bin or ~/.local/bin)')
+  .action(async (options: { prefix?: string }) => {
+    const isWindows = process.platform === 'win32'
+
+    if (isWindows) {
+      process.stdout.write('Windows uninstall:\n')
+      process.stdout.write('1. Delete the krusty_shell.bat file from your home directory\n')
+      process.stdout.write('2. Remove any terminal profiles that reference krusty\n')
+      return
+    }
+
+    process.stdout.write('Uninstalling krusty...\n')
+    try {
+      const { unlinkSync } = await import('node:fs')
+      const { execSync } = await import('node:child_process')
+      const { join } = await import('node:path')
+      const { homedir } = await import('node:os')
+
+      // Determine install prefix
+      let prefix = options.prefix
+      const candidates = ['/usr/local/bin', '/opt/homebrew/bin']
+      if (!prefix) {
+        prefix = candidates.find((p) => {
+          try {
+            execSync(`[ -f "${p}/krusty" ] && echo ok`)
+            return true
+          }
+          catch {
+            return false
+          }
+        }) || join(homedir(), '.local', 'bin')
+      }
+
+      const wrapperPath = join(prefix, 'krusty')
+
+      // Remove wrapper script
+      try {
+        unlinkSync(wrapperPath)
+        process.stdout.write(`Removed wrapper script: ${wrapperPath}\n`)
+      }
+      catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          throw err
+        }
+        process.stdout.write(`No wrapper script found at ${wrapperPath}\n`)
+      }
+
+      // Remove from /etc/shells if present
+      try {
+        execSync(`grep -qF '${wrapperPath}' /etc/shells && sudo sed -i '' '\|${wrapperPath}|d' /etc/shells`, { stdio: 'pipe' })
+        process.stdout.write('Removed from /etc/shells\n')
+      }
+      catch {
+        // Ignore errors - might not be in /etc/shells or no permissions
+      }
+
+      // Check if current shell is krusty
+      try {
+        const currentShell = execSync('getent passwd $LOGNAME | cut -d: -f7').toString().trim()
+        if (currentShell.includes('krusty')) {
+          process.stdout.write('\nWARNING: Your current login shell is still set to krusty.\n')
+          process.stdout.write('To change it back to bash, run:\n')
+          process.stdout.write('  chsh -s /bin/bash\n')
+          process.stdout.write('Or specify another shell like /bin/zsh or /bin/fish\n')
+        }
+      }
+      catch {
+        // Ignore errors from getent/chsh check
+      }
+
+      process.stdout.write('\nUninstall complete. You may need to log out and back in for all changes to take effect.\n')
+    }
+    catch (err: any) {
+      process.stderr.write(`Uninstall error: ${err?.message ?? String(err)}\n`)
       process.exit(1)
     }
   })

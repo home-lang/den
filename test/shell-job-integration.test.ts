@@ -1,6 +1,6 @@
 import type { KrustyConfig } from '../src/types'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { KrustyShell } from '../src/shell'
+import { KrustyShell } from '../src'
 
 // Mock child process for testing
 const mockChildProcess = {

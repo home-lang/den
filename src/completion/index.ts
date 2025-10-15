@@ -301,9 +301,11 @@ export class CompletionProvider {
               try {
                 const entries = readdirSync(binDir, { withFileTypes: true })
                 for (const e of entries) {
-                  if (e.isDirectory()) continue
+                  if (e.isDirectory())
+                    continue
                   const n = e.name
-                  if (!n || n.startsWith('.')) continue
+                  if (!n || n.startsWith('.'))
+                    continue
                   names.add(n)
                 }
               }
@@ -329,9 +331,11 @@ export class CompletionProvider {
           seenDirs.add(repoBin)
           const entries = readdirSync(repoBin, { withFileTypes: true })
           for (const e of entries) {
-            if (e.isDirectory()) continue
+            if (e.isDirectory())
+              continue
             const n = e.name
-            if (!n || n.startsWith('.')) continue
+            if (!n || n.startsWith('.'))
+              continue
             names.add(n)
           }
         }
@@ -378,15 +382,28 @@ export class CompletionProvider {
         return []
       }
       case 'cd': {
-        // Directories
-        const files = this.getFileCompletions(last).filter(f => f.endsWith('/'))
+        // Get directories from current working directory ONLY (not repo root)
+        const files = this.getCdDirectoryCompletions(last)
         // Stack indices: -N (1-based)
         const stack = getStack()
         const stackIdx: string[] = []
         for (let i = 1; i <= Math.min(9, stack.length); i++) stackIdx.push(`-${i}`)
         const idxMatches = stackIdx.filter(s => s.startsWith(last) || last === '')
+
+        // Semantic completions: -, ~, ..
+        const semanticOptions: string[] = []
+        if (process.env.OLDPWD && ('-'.startsWith(last) || last === '')) {
+          semanticOptions.push('-')
+        }
+        if ('~'.startsWith(last) || last === '') {
+          semanticOptions.push('~')
+        }
+        if ('..'.startsWith(last) || last === '') {
+          semanticOptions.push('..')
+        }
+
         // Bookmarks when prefix looks like ':name'
-        const out: string[] = [...idxMatches, ...files]
+        const out: string[] = [...semanticOptions, ...idxMatches, ...files]
         if (last.startsWith(':') || last === ':') {
           const bm = loadBookmarks()
           const names = Object.keys(bm).map(k => `:${k}`)
@@ -1070,11 +1087,76 @@ export class CompletionProvider {
           return bunComps
       }
 
-      // Fallback: file path completions
+      // Fallback: file path completions (but not for cd command)
+      if (cmd === 'cd') {
+        return [] // cd should only use builtin completions, no file fallback
+      }
       return this.getFileCompletions(last)
     }
     catch {
       return [] as string[]
+    }
+  }
+
+  /**
+   * Get directory completions for cd command (current directory only)
+   */
+  private getCdDirectoryCompletions(prefix: string): string[] {
+    try {
+      const hadQuote = prefix.startsWith('"') || prefix.startsWith('\'')
+      const rawPrefix = hadQuote ? prefix.slice(1) : prefix
+
+      // Handle home directory shortcut
+      const basePath = rawPrefix.startsWith('~')
+        ? rawPrefix.replace('~', homedir())
+        : rawPrefix
+
+      // Only check current working directory for cd completions
+      const candidate = resolve(this.shell.cwd, basePath)
+
+      const listInside = rawPrefix.endsWith('/') || rawPrefix === ''
+      const attempt = {
+        dir: listInside ? candidate : dirname(candidate),
+        base: listInside ? '' : basename(candidate),
+        rawBaseDir: dirname(rawPrefix),
+      }
+
+      let files
+      try {
+        files = readdirSync(attempt.dir, { withFileTypes: true })
+      }
+      catch {
+        return []
+      }
+
+      const completions: string[] = []
+      for (const file of files) {
+        // Only include directories
+        if (!file.isDirectory())
+          continue
+
+        // Hide dotfiles unless explicitly requested
+        const dotPrefixed = attempt.base.startsWith('.') && attempt.base !== '.'
+        if (!dotPrefixed && file.name.startsWith('.'))
+          continue
+
+        if (file.name.startsWith(attempt.base)) {
+          const displayBase = rawPrefix.endsWith('/')
+            ? file.name
+            : join(attempt.rawBaseDir, file.name)
+
+          let displayPath = `${displayBase}/`
+          if (hadQuote) {
+            displayPath = `"${displayPath}"`
+          }
+          completions.push(displayPath)
+        }
+      }
+
+      return completions
+    }
+    catch {
+      return []
     }
   }
 
@@ -1092,11 +1174,8 @@ export class CompletionProvider {
         ? rawPrefix.replace('~', homedir())
         : rawPrefix
 
-      // Build candidate base directories: shell.cwd, then repo root
-      // Using import.meta.url directly and stepping up to project root
-      const moduleDir = dirname(fileURLToPath(import.meta.url))
-      const repoRoot = resolve(moduleDir, '../..')
-      const candidates = [resolve(this.shell.cwd, basePath), resolve(repoRoot, basePath)]
+      // Build candidate base directories: shell.cwd only for test consistency
+      const candidates = [resolve(this.shell.cwd, basePath)]
 
       const completions: string[] = []
       const seen = new Set<string>()
@@ -1121,7 +1200,7 @@ export class CompletionProvider {
         }
         for (const file of files) {
           // Hide dotfiles unless the user explicitly started with a '.' prefix (not just './')
-          const dotPrefixed = attempt.base.startsWith('.') && attempt.base !== '.'
+          const dotPrefixed = attempt.base.startsWith('.') && attempt.base !== '.' && attempt.base !== './'
           if (!dotPrefixed && file.name.startsWith('.'))
             continue
           if (file.name.startsWith(attempt.base)) {

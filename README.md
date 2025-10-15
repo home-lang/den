@@ -8,19 +8,19 @@
 
 # Krusty Shell
 
-Krusty is a modern, feature-rich shell built with TypeScript and Bun. It provides a familiar shell experience with enhanced features, extensibility, and developer-friendly tooling.
+Krusty is a modern, feature-rich shell built with TypeScript and Bun. It provides a familiar shell experience with enhanced features, intelligent auto-suggestions, comprehensive scripting support, and extensive customization options for developers.
 
 ## Features
 
-- 🚀 **Performance**: Built on Bun
-- 🧠 **Smart completion**: Context-aware command/file completions
-- 🧩 **Aliases & functions**: Powerful aliasing and shell functions
-- 🧵 **Pipelines & redirections**: Full `|`, `>`, `>>`, `2>&1`, here-strings, etc.
-- 🧭 **Job control**: `jobs`, `bg`, `fg`, `kill`, `wait` with proper signal handling
-- 📜 **Scripting**: if/then/else, for/while/until, case/esac, functions, and more
-- 🎨 **Themes**: Configurable prompt with Git integration
-- 🔌 **Plugins**: Extend functionality cleanly
-- 🧪 **Tested**: Comprehensive test suite for reliability
+- 🚀 **Performance**: Built on Bun for lightning-fast execution
+- 🧠 **Smart completion**: Context-aware command/file completions with caching
+- 💡 **Auto-suggestions**: Intelligent inline suggestions with history integration
+- 🧩 **Aliases & functions**: Powerful aliasing and shell functions with expansion
+- 🧵 **Pipelines & redirections**: Full `|`, `>`, `>>`, `2>&1`, here-strings, process substitution
+- 🧭 **Job control**: Advanced job management with `Ctrl+Z`, `Ctrl+C`, `jobs`, `bg`, `fg`, `kill`, `wait`
+- 📜 **Scripting**: Complete scripting engine with control flow, functions, and error handling
+- 🎨 **Themes**: Highly configurable prompts with Git status and runtime detection
+- 🔌 **Plugins**: Extensible plugin system with hooks and lifecycle management
 
 ## Quick start
 
@@ -33,6 +33,9 @@ pnpm global add krusty
 
 # Start the shell
 krusty
+
+# Or run directly with Bun
+bunx krusty
 ```
 
 ## Built-in Commands
@@ -85,7 +88,6 @@ Krusty ships with a comprehensive set of built-ins. Run `help` for details.
 - [`pstorm`](https://krusty.sh/commands/pstorm) — open in PhpStorm
 - [`code`](https://krusty.sh/commands/code) — open in VS Code
 - [`shrug`](https://krusty.sh/commands/shrug) — print ¯\\_(ツ)_/¯
-- [`web`](https://krusty.sh/commands/web) — open URLs/web helpers
 - [`wip`](https://krusty.sh/commands/wip) — work-in-progress helper
 
 ### Short aliases (quality-of-life)
@@ -96,73 +98,302 @@ _Note: A few items are convenience helpers specific to Krusty and not POSIX/Bash
 
 ## Usage
 
+### Basic Commands
+
 - Execute external commands and pipelines: `echo hi | tr a-z A-Z`
 - Redirect output and duplicate FDs: `sh -c 'echo out; echo err 1>&2' 2>&1 | wc -l`
-- Backgrounding and job control: `sleep 5 &` → `jobs` → `fg %1`
+- Process substitution: `diff <(ls /tmp) <(ls /var/tmp)`
+
+### Job Control
+
+- Background processes: `sleep 5 &`
+- Suspend with `Ctrl+Z`, resume with `bg %1` or `fg %1`
+- List jobs: `jobs`, kill jobs: `kill %1`, wait for completion: `wait %1`
+
+### Auto-suggestions & History
+
+- Navigate history with `↑`/`↓` arrows
+- Inline suggestions appear as you type
+- History expansion: `!!` (last command), `!n` (command n), `!prefix` (last command starting with prefix)
+- Fuzzy history search with `Ctrl+R`
 
 ## Customization
 
-### Aliases
+### Configuration File
 
-Create command aliases in your `krusty.config.ts` file:
+Krusty uses a `krusty.config.ts` file for configuration. Create one in your project root or home directory:
 
 ```typescript
 export default {
-  // ... other config
+  // Core settings
+  verbose: false,
+  streamOutput: true,
+
+  // Aliases
   aliases: {
     ll: 'ls -la',
     gs: 'git status',
+    commit: 'git add .; git commit -m',
+    wip: 'git add -A && git commit -m "chore: wip" && git push',
   },
-  // ... other config
-}
-```
 
-### Themes
+  // Environment variables
+  environment: {
+    EDITOR: 'code',
+    PAGER: 'less',
+  },
 
-Theme configuration powers prompt styling and Git status:
+  // History configuration
+  history: {
+    maxEntries: 10000,
+    file: '~/.krusty_history',
+    ignoreDuplicates: true,
+    ignoreSpace: true,
+    searchMode: 'fuzzy', // 'fuzzy' | 'exact' | 'startswith' | 'regex'
+  },
 
-```ts
-export default {
-  theme: {
-    prompt: {
-      left: '{cwd} ❯ ',
-      right: '',
+  // Completion settings
+  completion: {
+    enabled: true,
+    caseSensitive: false,
+    showDescriptions: true,
+    maxSuggestions: 10,
+    cache: {
+      enabled: true,
+      ttl: 3600000, // 1 hour
+      maxEntries: 1000,
     },
-    git: { enabled: true },
   },
 }
 ```
 
-### Environment Variables
+### Themes & Prompts
 
-Set environment variables in your `krusty.config.ts` file:
+Krusty supports extensive prompt customization with module detection:
 
 ```typescript
 export default {
-  // ... other config
-  env: {
-    EDITOR: 'code',
-    PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}`,
+  // Prompt format with placeholders
+  prompt: {
+    format: '{path} on {git} {modules} {duration} \n{symbol} ',
+    showGit: true,
+    showTime: false,
+    showUser: false,
+    showHost: false,
+    showPath: true,
+    showExitCode: true,
+    transient: false,
   },
-  // ... other config
+
+  // Theme configuration
+  theme: {
+    name: 'default',
+    autoDetectColorScheme: true,
+    enableRightPrompt: true,
+
+    // Git status display
+    gitStatus: {
+      enabled: true,
+      showStaged: true,
+      showUnstaged: true,
+      showUntracked: true,
+      showAheadBehind: true,
+      format: '({branch}{ahead}{behind}{staged}{unstaged}{untracked})',
+    },
+
+    // Colors
+    colors: {
+      primary: '#00D9FF',
+      secondary: '#FF6B9D',
+      success: '#00FF88',
+      warning: '#FFD700',
+      error: '#FF4757',
+      git: {
+        branch: '#A277FF',
+        ahead: '#50FA7B',
+        behind: '#FF5555',
+        staged: '#50FA7B',
+        unstaged: '#FFB86C',
+        untracked: '#FF79C6',
+      },
+    },
+
+    // Symbols
+    symbols: {
+      prompt: '❯',
+      git: {
+        branch: '',
+        ahead: '⇡',
+        behind: '⇣',
+        staged: '●',
+        unstaged: '○',
+        untracked: '?',
+      },
+    },
+  },
+
+  // Runtime modules (auto-detected)
+  modules: {
+    bun: { enabled: true, format: 'via {symbol} {version}', symbol: '🐰' },
+    nodejs: { enabled: true, format: 'via {symbol} {version}', symbol: '⬢' },
+    python: { enabled: true, format: 'via {symbol} {version}', symbol: '🐍' },
+    // ... many more supported runtimes
+  },
+}
+```
+
+### Plugins & Hooks
+
+Extend Krusty with plugins and lifecycle hooks:
+
+```typescript
+export default {
+  // Plugin system
+  plugins: [
+    'my-custom-plugin',
+    {
+      name: 'git-plugin',
+      enabled: true,
+      config: { autoFetch: true },
+    },
+  ],
+
+  // Lifecycle hooks
+  hooks: {
+    'shell:init': [
+      { command: 'echo "Welcome to Krusty!"' },
+    ],
+    'command:before': [
+      { script: 'echo "Executing: $1"' },
+    ],
+    'directory:change': [
+      { command: 'ls -la', conditions: ['directory'] },
+    ],
+  },
+
+  // Expansion cache limits
+  expansion: {
+    cacheLimits: {
+      arg: 200,
+      exec: 500,
+      arithmetic: 500,
+    },
+  },
 }
 ```
 
 ## Scripting
 
-Krusty includes a script engine with:
+Krusty includes a comprehensive scripting engine with full shell compatibility:
 
-- Control flow: `if/then/else/fi`, `for/while/until`, `case/esac`
-- Functions: `name() { … }` and `function name { … }`
-- Built-ins: `source`, `test`, `true/false`, `local/declare/readonly`, `return/break/continue`
+### Control Flow
 
-See `test/scripting.test.ts` for examples.
+```bash
+# Conditional statements
+if [ -f "file.txt" ]; then
+    echo "File exists"
+else
+    echo "File not found"
+fi
 
-## Job Control
+# Loops
+for i in {1..5}; do
+    echo "Count: $i"
+done
 
-- Ctrl+Z suspends the foreground job (SIGTSTP), `bg` resumes in background, `fg` brings it back
-- Ctrl+C sends SIGINT to the foreground job
-- `kill -SIGNAL %n` sends signals to a job; `wait %n` awaits completion
+while [ $count -lt 10 ]; do
+    echo $count
+    ((count++))
+done
+
+# Case statements
+case $1 in
+    start) echo "Starting..." ;;
+    stop)  echo "Stopping..." ;;
+    *)     echo "Usage: $0 {start|stop}" ;;
+esac
+```
+
+### Functions
+
+```bash
+# Function definitions
+function greet() {
+    local name=${1:-"World"}
+    echo "Hello, $name!"
+}
+
+# Alternative syntax
+greet() {
+    echo "Hello, $1!"
+}
+```
+
+### Error Handling
+
+```bash
+# Set error handling modes
+set -e  # Exit on error
+set -u  # Exit on undefined variable
+set -o pipefail  # Exit on pipe failure
+
+# Trap signals
+trap 'echo "Cleanup on exit"' EXIT
+```
+
+### Script Built-in Commands
+
+- **Control**: `source`, `eval`, `exec`, `return`, `break`, `continue`
+- **Variables**: `local`, `declare`, `readonly`, `unset`, `export`
+- **Testing**: `test`, `[`, `[[`, `true`, `false`
+- **I/O**: `read`, `printf`, `echo`
+
+See `test/scripting.test.ts` for comprehensive examples.
+
+## Advanced Job Management
+
+Krusty provides advanced job management with proper signal handling:
+
+### Signal Handling
+
+- **Ctrl+Z**: Suspend foreground job (SIGTSTP)
+- **Ctrl+C**: Terminate foreground job (SIGINT)
+- **Process Groups**: Proper process group management for signal propagation
+
+### Job Management Commands
+
+```bash
+# Background a command
+sleep 60 &
+
+# List all jobs
+jobs
+# Output: [1]+ Running    sleep 60 &
+
+# Bring job to foreground
+fg %1
+
+# Resume job in background
+bg %1
+
+# Send signals to jobs
+kill -TERM %1    # Terminate job 1
+kill -STOP %2    # Stop job 2
+kill -CONT %2    # Continue job 2
+
+# Wait for job completion
+wait %1          # Wait for job 1
+wait             # Wait for all jobs
+
+# Remove job from job table
+disown %1
+```
+
+### Real-time Monitoring
+
+- Automatic job status updates
+- Background job completion notifications
+- Process group cleanup on job termination
 
 ## Development
 

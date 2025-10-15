@@ -43,7 +43,8 @@ class AutoSuggestPlugin implements Plugin {
         const partialIsCd = /^\s*cd\b/i.test(partial)
         if (!partialIsCd) {
           for (const h of history) {
-            if (h.startsWith('cd ')) continue
+            if (h.startsWith('cd '))
+              continue
             if (!partial || startsWith(h, partial)) {
               if (!suggestions.includes(h))
                 suggestions.push(h)

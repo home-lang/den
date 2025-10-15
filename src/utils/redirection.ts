@@ -296,12 +296,25 @@ export class RedirectionHandler {
                 }
                 catch {}
               })
+
+              // Handle pipe errors gracefully
               ;(process.stdin as any)?.on?.('error', (err: any) => {
                 if (err && (err.code === 'EPIPE' || err.code === 'ERR_STREAM_WRITE_AFTER_END')) {
                   // ignore benign pipe errors
                 }
               })
-              stream.pipe(process.stdin as any, { end: true })
+
+              // End stdin after piping to prevent hanging
+              stream.on('end', () => {
+                try {
+                  const sin: any = process.stdin as any
+                  if (sin && typeof sin.end === 'function')
+                    sin.end()
+                }
+                catch {}
+              })
+
+              stream.pipe(process.stdin as any, { end: false })
             }
             catch {}
           }

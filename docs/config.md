@@ -23,9 +23,15 @@ const config: KrustyConfig = {
       enabled: true,
       format: '{symbol} {percentage}%',
       // Legacy keys still supported
-      full_symbol: '🔋', charging_symbol: '🔌', discharging_symbol: '🔋', unknown_symbol: '🔋', empty_symbol: '🪫',
+      full_symbol: '🔋',
+      charging_symbol: '🔌',
+      discharging_symbol: '🔋',
+      unknown_symbol: '🔋',
+      empty_symbol: '🪫',
       // New unified keys
-      symbol: '🔋', symbol_charging: '🔌', symbol_low: '🪫',
+      symbol: '🔋',
+      symbol_charging: '🔌',
+      symbol_low: '🪫',
     },
     cmd_duration: { enabled: true, format: 'took {duration}', min_time: 2000, min_ms: 2000, show_milliseconds: false },
     time: { enabled: false, format: '{symbol} {time}', symbol: '🕐', locale: undefined, options: { hour: '2-digit', minute: '2-digit' } },

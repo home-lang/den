@@ -86,8 +86,22 @@ export class CompletionManager {
       // If we don't have a cwd and the request is for relative paths, avoid using process.cwd().
       // Only serve semantic entries (cd -, cd ~, cd ..) in that case.
       const canList = Boolean(searchPath)
-      const fullPath = canList ? resolve(searchPath) : ''
-      const entries = canList ? readdirSync(fullPath) : []
+      let fullPath = ''
+      let entries: string[] = []
+
+      if (canList) {
+        try {
+          fullPath = resolve(searchPath)
+          // Only read directory if it exists and is accessible
+          if (existsSync(fullPath) && statSync(fullPath).isDirectory()) {
+            entries = readdirSync(fullPath)
+          }
+        }
+        catch {
+          // If we can't access the directory, return empty entries
+          entries = []
+        }
+      }
 
       const out: string[] = []
 
@@ -103,19 +117,25 @@ export class CompletionManager {
       if (!prefix || match('..', prefix))
         out.push('cd ..')
 
-      // If no prefix was provided (user typed just `cd `), avoid listing directories to prevent noise.
-      // Only semantic entries above are returned in that case.
-      for (const entry of (prefix ? entries : [])) {
+      // List directories, but limit when no prefix to prevent noise
+      const entriesToCheck = prefix ? entries : entries.slice(0, 5) // Limit to 5 when no prefix
+      for (const entry of entriesToCheck) {
         if (prefix && !match(entry, prefix))
           continue
         const entryPath = join(fullPath, entry)
-        let isDir = false
+
+        // Validate that the entry exists and is actually a directory
         try {
-          isDir = statSync(entryPath).isDirectory()
+          if (!existsSync(entryPath))
+            continue
+          const stat = statSync(entryPath)
+          if (!stat.isDirectory())
+            continue
         }
-        catch {}
-        if (!isDir)
+        catch {
+          // Skip entries we can't access
           continue
+        }
 
         // Build displayed result using the same style as user input
         let result: string

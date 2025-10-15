@@ -1,4 +1,7 @@
+import type { EventEmitter } from 'node:events'
+import type { HookManager } from './hooks'
 import type { Logger } from './logger'
+import type { ThemeManager } from './theme/theme-manager'
 
 export interface KrustyConfig {
   verbose: boolean
@@ -9,7 +12,8 @@ export interface KrustyConfig {
   completion?: CompletionConfig
   aliases?: Record<string, string>
   environment?: Record<string, string>
-  plugins?: PluginConfig[]
+  plugins?: (Plugin | string)[]
+  pluginsConfig?: PluginsConfig // New global plugin config
   theme?: ThemeConfig
   modules?: ModuleConfig
   hooks?: HooksConfig
@@ -307,7 +311,7 @@ export interface BuiltinCommand {
   execute: (args: string[], shell: Shell) => Promise<CommandResult>
 }
 
-export interface Shell {
+export interface Shell extends EventEmitter {
   config: KrustyConfig
   cwd: string
   environment: Record<string, string>
@@ -315,6 +319,7 @@ export interface Shell {
   aliases: Record<string, string>
   builtins: Map<string, BuiltinCommand>
   log: Logger
+  hookManager: HookManager
 
   // Execution flags
   nounset?: boolean
@@ -372,6 +377,7 @@ export interface Shell {
   }>
   setJobStatus: (id: number, status: 'running' | 'stopped' | 'done') => boolean
   removeJob: (id: number, force?: boolean) => boolean
+  getThemeManager: () => ThemeManager
 
   // Enhanced job control methods
   suspendJob?: (jobId: number) => boolean
@@ -812,27 +818,23 @@ export interface PluginUpdateConfig {
   lastChecked?: number
 }
 
-export interface PluginConfig {
-  // Enable/disable plugin system
-  enabled?: boolean
+export interface PluginsConfig {
   // Directory to look for plugins (relative to config directory)
   directory?: string
-  // List of plugins to load (can be local paths or npm package names)
-  list?: Array<{
-    name: string
-    enabled?: boolean
-    /**
-     * Lazily load this plugin on first access (e.g., when completions or getPlugin are requested).
-     * Defaults to false to preserve current behavior.
-     */
-    lazy?: boolean
-    path?: string
-    url?: string
-    version?: string
-    config?: Record<string, any>
-  }>
-  // Plugin update settings
-  update?: PluginUpdateConfig
+  // Enable/disable plugin system
+  enabled?: boolean
+  autoUpdate?: boolean
+  checkInterval?: number
+}
+
+export interface Plugin {
+  name: string
+  enabled?: boolean
+  lazy?: boolean
+  url?: string
+  path?: string
+  version?: string
+  config?: Record<string, any>
 }
 
 // Execution behavior configuration
@@ -963,17 +965,17 @@ export interface HookCondition {
   operator?: 'equals' | 'contains' | 'startsWith' | 'endsWith' | 'exists' | 'not'
 }
 
-export interface HookContext {
+export interface HookContext<T = any> {
   shell: Shell
   event: string
-  data: any
+  data: T
   config: KrustyConfig
   environment: Record<string, string>
   cwd: string
   timestamp: number
 }
 
-export type HookHandler = (context: HookContext) => Promise<HookResult> | HookResult
+export type HookHandler<T = any> = (context: HookContext<T>) => Promise<HookResult> | HookResult
 
 export interface HookResult {
   success: boolean

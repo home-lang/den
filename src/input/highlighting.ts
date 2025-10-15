@@ -69,8 +69,11 @@ export function renderHighlighted(
   // Operators and pipes/redirections
   out = out.replace(/(\|\||&&|;|<<?|>>?)/g, `${colors.operator}$1${reset}`)
 
-  // Numbers
-  out = out.replace(/\b(\d+)\b/g, `${colors.number}$1${reset}`)
+  // Numbers - only standalone numbers, not digits within words/tokens
+  out = out.replace(/(?:^|\s)(\d+)(?=\s|$)/g, (match, digits) => {
+    const prefix = match.slice(0, -digits.length)
+    return `${prefix}${colors.number}${digits}${reset}`
+  })
 
   // Paths: ./foo, ../bar, /usr/bin, ~/x
   out = out.replace(/((?:\.{1,2}|~)?\/[\w@%\-./]+)/g, `${colors.path}$1${reset}`)

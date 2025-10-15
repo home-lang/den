@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
-import { KrustyShell } from '../src/shell'
 
 /**
  * Tests for builtin-aware argument completions

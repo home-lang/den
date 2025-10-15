@@ -88,8 +88,13 @@ export const setCommand: BuiltinCommand = {
       const name = args[i + 1]
       if (!name)
         break
-      if (name === 'pipefail')
+      if (name === 'pipefail') {
         shell.pipefail = enable
+        // Sync with command executor if available (KrustyShell instance)
+        if ('syncPipefailToExecutor' in shell && typeof shell.syncPipefailToExecutor === 'function') {
+          shell.syncPipefailToExecutor(enable)
+        }
+      }
       i += 2
     }
 

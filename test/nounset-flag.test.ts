@@ -1,6 +1,6 @@
 import type { KrustyConfig } from '../src/types'
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { KrustyShell } from '../src/shell'
+import { KrustyShell } from '../src'
 
 describe('nounset (-u) flag', () => {
   let shell: KrustyShell

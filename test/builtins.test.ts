@@ -3,14 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { mkdtemp, rmdir } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
-import { KrustyShell } from '../src/shell'
 
 describe('Builtin Commands', () => {
   let shell: KrustyShell
   let testConfig: KrustyConfig
   let tempDir: string
   let originalExecuteCommand: any
+  let originalCwd: string
 
   beforeEach(async () => {
     testConfig = {
@@ -23,6 +24,9 @@ describe('Builtin Commands', () => {
     }
     shell = new KrustyShell(testConfig)
     tempDir = await mkdtemp(join(tmpdir(), 'krusty-test-'))
+
+    // Store original cwd for restoration
+    originalCwd = shell.cwd
 
     // Mock executeCommand to prevent actual command execution
     originalExecuteCommand = shell.executeCommand
@@ -41,6 +45,9 @@ describe('Builtin Commands', () => {
   })
 
   afterEach(async () => {
+    // Restore original cwd to prevent test isolation issues
+    shell.cwd = originalCwd
+
     // Restore original method
     if (originalExecuteCommand) {
       shell.executeCommand = originalExecuteCommand

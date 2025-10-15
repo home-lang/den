@@ -1,8 +1,8 @@
 import type { KrustyConfig } from '../src/types'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
 import { CommandParser } from '../src/parser'
-import { KrustyShell } from '../src/shell'
 
 function randInt(n: number) {
   return Math.floor(Math.random() * n)

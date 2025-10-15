@@ -43,10 +43,10 @@ jobs:
         uses: stacksjs/action-releaser@v1.1.0
         with:
           files: |
-            bin/krusty-linux-x64
-            bin/krusty-linux-arm64
-            bin/krusty-windows-x64.exe
-            bin/krusty-darwin-x64
-            bin/krusty-darwin-arm64
+            bin/krusty-linux-x64.zip
+            bin/krusty-linux-arm64.zip
+            bin/krusty-windows-x64.zip
+            bin/krusty-darwin-x64.zip
+            bin/krusty-darwin-arm64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -109,15 +109,7 @@ export const defaultConfig: KrustyConfig = {
   },
   environment: {},
   // Plugin system configuration
-  plugins: [
-    // Example plugin configuration:
-    // {
-    //   name: 'example-plugin',
-    //   enabled: true,
-    //   path: './plugins/example',
-    //   config: {}
-    // }
-  ],
+  plugins: [],
   theme: {
     // Theme name to use (must match a theme in themes/ directory)
     name: 'default',

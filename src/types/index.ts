@@ -101,7 +101,7 @@ export interface Shell {
   // Methods
   start: () => Promise<void>
   stop: () => void
-  execute: (input: string, options?: { bypassAliases?: boolean, bypassFunctions?: boolean }) => Promise<CommandResult>
+  execute: (input: string, options?: { bypassAliases?: boolean, bypassFunctions?: boolean, aliasDepth?: number }) => Promise<CommandResult>
   executeCommand: (command: string, args: string[]) => Promise<number>
   executeBuiltin: (command: string, args: string[]) => Promise<number>
   executeExternal: (command: string, args: string[]) => Promise<number>
@@ -113,7 +113,7 @@ export interface Shell {
   getJobs: () => Array<{ id: number, pid: number, command: string, status: 'running' | 'stopped' | 'done' }>
   initializeEnhancedFeatures: () => Promise<void>
   executeParsedCommand: (parsed: ParsedCommand) => Promise<number>
-  executeCommandChain: (parsed: ParsedCommand, options?: { bypassAliases?: boolean, bypassFunctions?: boolean }) => Promise<CommandResult>
-  executeSingleCommand: (command: any, options?: { bypassAliases?: boolean, bypassFunctions?: boolean }) => Promise<CommandResult>
-  executePipedCommands: (commands: any[], options?: { bypassAliases?: boolean, bypassFunctions?: boolean }) => Promise<CommandResult>
+  executeCommandChain: (parsed: ParsedCommand, options?: { bypassAliases?: boolean, bypassFunctions?: boolean, aliasDepth?: number }) => Promise<CommandResult>
+  executeSingleCommand: (command: any, options?: { bypassAliases?: boolean, bypassFunctions?: boolean, aliasDepth?: number }) => Promise<CommandResult>
+  executePipedCommands: (commands: any[], options?: { bypassAliases?: boolean, bypassFunctions?: boolean, aliasDepth?: number }) => Promise<CommandResult>
 }

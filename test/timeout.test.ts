@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
-import { KrustyShell } from '../src/shell'
 
 // Tests focus on parsing and successful execution within time limit.
 // We avoid asserting forced termination behavior since the shell API doesn't expose cancellation.

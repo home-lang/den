@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
 import { HookUtils } from '../src/hooks'
-import { KrustyShell } from '../src/shell'
 
 describe('Hooks System', () => {
   let shell: KrustyShell
@@ -22,7 +22,7 @@ describe('Hooks System', () => {
     hookManager = (shell as any).hookManager
 
     // Clear any existing hooks and reset state
-    hookManager.clearHooks()
+    hookManager.clear()
 
     // Ensure clean environment for each test
     process.env.NODE_ENV = 'test'
@@ -31,7 +31,7 @@ describe('Hooks System', () => {
   afterEach(async () => {
     try {
       if (hookManager)
-        hookManager.clearHooks()
+        hookManager.clear()
       if (shell)
         await shell.stop()
       if (tempDir)
@@ -388,7 +388,7 @@ describe('Hooks System', () => {
     hookManager.registerHook('test:event', hookConfig)
     expect(hookManager.getHooks('test:event')).toHaveLength(1)
 
-    hookManager.clearHooks()
+    hookManager.clear()
     expect(hookManager.getHooks('test:event')).toHaveLength(0)
   })
 })
