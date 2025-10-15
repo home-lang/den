@@ -1,13 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
-import { KrustyShell } from '../src/shell'
-
-// Helper to safely treat CompletionResults as string[] when we expect flat results
-function flatStrings(out: any): string[] {
-  if (Array.isArray(out) && out.length && typeof out[0] === 'object' && 'title' in out[0])
-    return []
-  return out as string[]
-}
 
 describe('Bun CLI completions', () => {
   let shell: KrustyShell
@@ -37,6 +30,7 @@ describe('Bun CLI completions', () => {
     const out = shell.getCompletions(input, input.length)
     expect(out).toContain('run')
     // Should not include unrelated subcommands like 'test' for prefix 'r'
+    // @ts-expect-error testing
     expect(out.includes('test')).toBe(false)
   })
 
@@ -138,13 +132,14 @@ describe('Bun CLI completions', () => {
     const input = 'bun run --cwd '
     const out = shell.getCompletions(input, input.length)
     // repo directories
+    // @ts-expect-error testing
     expect(out.find(x => x.endsWith('/'))).toBeTruthy()
     expect(out).toContain('docs/')
   })
-
   it('completes directories for --public-dir', () => {
     const input = 'bun build --public-dir '
     const out = shell.getCompletions(input, input.length)
+    // @ts-expect-error testing
     expect(out.find(x => x.endsWith('/'))).toBeTruthy()
   })
 })

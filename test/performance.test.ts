@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { KrustyShell } from '../src/shell'
+import { KrustyShell } from '../src'
 
 describe('Performance Tests', () => {
   let shell: KrustyShell

@@ -82,16 +82,20 @@ describe('Typo Corrections Test', () => {
 
     // Start readLine
     const readLinePromise = autoSuggestInput.readLine(prompt)
-    const keypressHandler = keypressHandlers[0]
+
+    // Debug: Check how many keypress handlers were registered
+    console.log(`DEBUG: ${keypressHandlers.length} keypress handlers registered`)
+
+    const keypressHandler = keypressHandlers[keypressHandlers.length - 1] // Use the last one
 
     // Type 'g'
-    keypressHandler('g', { name: 'g', sequence: 'g', ctrl: false, meta: false })
+    keypressHandler('g', { name: 'g', sequence: 'g', ctrl: false, meta: false, shift: false })
 
     // Type 't'
-    keypressHandler('t', { name: 't', sequence: 't', ctrl: false, meta: false })
+    keypressHandler('t', { name: 't', sequence: 't', ctrl: false, meta: false, shift: false })
 
     // Type 'i' - should trigger 'git' suggestion
-    keypressHandler('i', { name: 'i', sequence: 'i', ctrl: false, meta: false })
+    keypressHandler('i', { name: 'i', sequence: 'i', ctrl: false, meta: false, shift: false })
 
     console.log(`After typing 'gti': ${JSON.stringify(mockOutput)}`)
 
@@ -128,10 +132,14 @@ describe('Typo Corrections Test', () => {
 
     // Start readLine
     const readLinePromise = autoSuggestInput.readLine(prompt)
-    const keypressHandler = keypressHandlers[0]
+
+    // Debug: Check how many keypress handlers were registered
+    console.log(`DEBUG: ${keypressHandlers.length} keypress handlers registered`)
+
+    const keypressHandler = keypressHandlers[keypressHandlers.length - 1] // Use the last one
 
     // Type 'b' - should show 'build' or 'bundle' suggestion
-    keypressHandler('b', { name: 'b', sequence: 'b', ctrl: false, meta: false })
+    keypressHandler('b', { name: 'b', sequence: 'b', ctrl: false, meta: false, shift: false })
 
     console.log(`After typing 'b': ${JSON.stringify(mockOutput)}`)
 

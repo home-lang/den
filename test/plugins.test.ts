@@ -1,10 +1,10 @@
-import type { KrustyConfig, PluginConfig } from '../src/types'
+import type { KrustyConfig, Plugin } from '../src/types'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { KrustyShell } from '../src'
 import { PluginManager } from '../src/plugins/plugin-manager'
-import { KrustyShell } from '../src/shell'
 
 describe('Plugin System', () => {
   let shell: KrustyShell
@@ -20,6 +20,7 @@ describe('Plugin System', () => {
     }
 
     shell = new KrustyShell(config)
+    // Re-instantiate PluginManager before each test to ensure isolation
     pluginManager = new PluginManager(shell, config)
 
     // Create temporary directory for test plugin
@@ -74,16 +75,13 @@ describe('Plugin System', () => {
   })
 
   it('should load plugin from path', async () => {
-    const config: PluginConfig = {
+    const pluginToLoad: Plugin = {
+      name: 'test-plugin',
+      path: pluginPath,
       enabled: true,
-      list: [{
-        name: 'test-plugin',
-        path: pluginPath,
-        enabled: true,
-      }],
     }
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugin(pluginToLoad)
 
     const plugin = pluginManager.getPlugin('test-plugin')
     expect(plugin).toBeDefined()
@@ -92,16 +90,13 @@ describe('Plugin System', () => {
   })
 
   it('should register plugin commands', async () => {
-    const config: PluginConfig = {
+    const pluginToLoad: Plugin = {
+      name: 'test-plugin',
+      path: pluginPath,
       enabled: true,
-      list: [{
-        name: 'test-plugin',
-        path: pluginPath,
-        enabled: true,
-      }],
     }
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugin(pluginToLoad)
 
     const plugin = pluginManager.getPlugin('test-plugin')
     expect(plugin).toBeDefined()
@@ -110,16 +105,13 @@ describe('Plugin System', () => {
   })
 
   it('should execute plugin commands', async () => {
-    const config: PluginConfig = {
+    const pluginToLoad: Plugin = {
+      name: 'test-plugin',
+      path: pluginPath,
       enabled: true,
-      list: [{
-        name: 'test-plugin',
-        path: pluginPath,
-        enabled: true,
-      }],
     }
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugin(pluginToLoad)
 
     const plugin = pluginManager.getPlugin('test-plugin')
     const context = pluginManager.getPluginContext('test-plugin')
@@ -134,16 +126,13 @@ describe('Plugin System', () => {
   })
 
   it('should unload plugins', async () => {
-    const config: PluginConfig = {
+    const pluginToLoad: Plugin = {
+      name: 'test-plugin',
+      path: pluginPath,
       enabled: true,
-      list: [{
-        name: 'test-plugin',
-        path: pluginPath,
-        enabled: true,
-      }],
     }
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugin(pluginToLoad)
     expect(pluginManager.getPlugin('test-plugin')).toBeDefined()
 
     await pluginManager.unloadPlugin('test-plugin')
@@ -151,53 +140,45 @@ describe('Plugin System', () => {
   })
 
   it('should handle plugin loading errors', async () => {
-    const config: PluginConfig = {
+    const pluginToLoad: Plugin = {
+      name: 'invalid-plugin',
+      path: '/nonexistent/path/plugin.js',
       enabled: true,
-      list: [{
-        name: 'invalid-plugin',
-        path: '/nonexistent/path/plugin.js',
-        enabled: true,
-      }],
     }
 
     // Should not throw, but should log error and continue
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugin(pluginToLoad)
     expect(pluginManager.getPlugin('invalid-plugin')).toBeUndefined()
   })
 
   it('should skip disabled plugins', async () => {
-    const pluginConfig: PluginConfig = {
-      enabled: true,
-      list: [{
-        name: 'test-plugin',
-        path: pluginPath,
-        enabled: false,
-      }],
+    const pluginToLoad: Plugin = {
+      name: 'test-plugin',
+      path: pluginPath,
+      enabled: false,
     }
 
     const shellConfig: KrustyConfig = {
       verbose: false,
-      plugins: [pluginConfig],
+      plugins: [pluginToLoad],
       hooks: {},
     }
 
-    const testPluginManager = new PluginManager(shell, shellConfig)
-    await testPluginManager.loadPlugins()
+    // Use a new PluginManager instance for this specific test case
+    const localPluginManager = new PluginManager(shell, shellConfig)
+    await localPluginManager.loadPlugins()
 
-    expect(testPluginManager.getPlugin('test-plugin')).toBeUndefined()
+    expect(localPluginManager.getPlugin('test-plugin')).toBeUndefined()
   })
 
   it('should provide plugin utilities', async () => {
-    const config: PluginConfig = {
+    const pluginToLoad: Plugin = {
+      name: 'test-plugin',
+      path: pluginPath,
       enabled: true,
-      list: [{
-        name: 'test-plugin',
-        path: pluginPath,
-        enabled: true,
-      }],
     }
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugin(pluginToLoad)
 
     const context = pluginManager.getPluginContext('test-plugin')
     expect(context).toBeDefined()
@@ -211,16 +192,13 @@ describe('Plugin System', () => {
   })
 
   it('should provide plugin logger', async () => {
-    const config: PluginConfig = {
+    const pluginToLoad: Plugin = {
+      name: 'test-plugin',
+      path: pluginPath,
       enabled: true,
-      list: [{
-        name: 'test-plugin',
-        path: pluginPath,
-        enabled: true,
-      }],
     }
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugin(pluginToLoad)
 
     const context = pluginManager.getPluginContext('test-plugin')
     expect(context).toBeDefined()

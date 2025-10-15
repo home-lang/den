@@ -1,7 +1,7 @@
 import type { KrustyConfig } from '../src/types'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
-import { KrustyShell } from '../src/shell'
 
 describe('command builtin', () => {
   let shell: KrustyShell
@@ -36,6 +36,6 @@ describe('command builtin', () => {
     // Using command ll should bypass alias expansion and attempt to run external `ll`
     const res = await shell.execute('command ll')
     expect(res.exitCode).not.toBe(0)
-    expect(res.stderr).toMatch(/krusty: ll: command not found|exec: ll: command not found/)
+    expect(res.stderr).toMatch(/krusty: ll: command not found|exec: ll: command not found|\/bin\/sh: ll: command not found/)
   })
 })

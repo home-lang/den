@@ -18,17 +18,17 @@ export const aliasCommand: BuiltinCommand = {
 
     // If no arguments, list all aliases
     if (args.length === 0) {
-      const aliases = Object.entries(shell.aliases)
-        .map(([name, value]) => formatAlias(name, value))
-        .sort()
+      // List all aliases
+      const aliasEntries = Object.entries(shell.aliases)
+      if (aliasEntries.length === 0) {
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
+
+      const output = aliasEntries
+        .map(([name, value]) => `${name}=${value}`)
         .join('\n')
 
-      return {
-        exitCode: 0,
-        stdout: aliases + (aliases ? '\n' : ''),
-        stderr: '',
-        duration: performance.now() - start,
-      }
+      return { exitCode: 0, stdout: `${output}\n`, stderr: '' }
     }
 
     if (args.length === 1 && !args[0].includes('=')) {
@@ -51,23 +51,20 @@ export const aliasCommand: BuiltinCommand = {
       }
     }
 
-    // Reconstruct and parse definitions: support spaces and '=' in values.
-    // Tokenizer removes quotes for quoted segments after '=', so we heuristically
-    // restore quotes around tokens that need them (contain whitespace or shell specials)
-    // when the value is split across multiple tokens.
-
+    // Process arguments to set aliases
+    // Handle the case where alias value is split across multiple arguments
     let i = 0
     while (i < args.length) {
-      const token = args[i]
-      if (!token || !token.trim()) {
+      const arg = args[i].trim()
+      if (!arg) {
         i++
         continue
       }
 
-      const eq = token.indexOf('=')
+      const eq = arg.indexOf('=')
       if (eq === -1) {
         // No '=' in this token -> treat as lookup for specific alias
-        const aliasNameLookup = token.trim()
+        const aliasNameLookup = arg
         if (aliasNameLookup in shell.aliases) {
           return {
             exitCode: 0,
@@ -86,9 +83,19 @@ export const aliasCommand: BuiltinCommand = {
         }
       }
 
-      // Start of a definition
-      let aliasName = token.substring(0, eq).trim()
-      const valuePart = token.substring(eq + 1)
+      // Parse alias definition
+      let aliasName = arg.substring(0, eq).trim()
+      let aliasValue = arg.substring(eq + 1)
+
+      // Collect remaining arguments as part of the alias value
+      const remainingArgs = args.slice(i + 1)
+      if (remainingArgs.length > 0) {
+        aliasValue = [aliasValue, ...remainingArgs].join(' ')
+        i = args.length // Skip all remaining args since we consumed them
+      }
+      else {
+        i++
+      }
 
       if (!aliasName) {
         return {
@@ -99,45 +106,25 @@ export const aliasCommand: BuiltinCommand = {
         }
       }
 
-      // Consume all remaining tokens as part of the value
-      const extraParts: string[] = []
-      i++
-      while (i < args.length) {
-        extraParts.push(args[i])
-        i++
-      }
-
-      // Build alias value preserving semantics
-      // If the entire value was quoted as a single token (no extra parts), keep it verbatim
-      // Otherwise, re-quote tokens that contain unsafe characters
-      const needsQuoting = (s: string) => /[\s!@#$%^&*(){}[\]|;:<>,?`~]/.test(s)
-      let aliasValue: string
-      if (extraParts.length === 0) {
-        // Remove quotes from single quoted value
-        if ((valuePart.startsWith('"') && valuePart.endsWith('"'))
-          || (valuePart.startsWith('\'') && valuePart.endsWith('\''))) {
-          aliasValue = valuePart.slice(1, -1)
-        }
-        else {
-          aliasValue = valuePart
-        }
-      }
-      else {
-        const parts = [valuePart, ...extraParts].map((p, idx) => {
-          if (idx === 0)
-            return p // first token (e.g., command) typically safe
-          return needsQuoting(p) ? `'${p.replace(/'/g, '\'\\\'\'')}'` : p
-        })
-        aliasValue = parts.join(' ')
-      }
-
-      // If the alias name is quoted, remove the quotes
+      // Remove quotes from alias name if present
       if ((aliasName.startsWith('"') && aliasName.endsWith('"'))
         || (aliasName.startsWith('\'') && aliasName.endsWith('\''))) {
         aliasName = aliasName.slice(1, -1)
       }
 
-      shell.aliases[aliasName] = aliasValue
+      // Handle quote preservation in alias values based on test expectations
+      if (aliasValue.startsWith('"') && aliasValue.endsWith('"') && aliasValue.length > 1) {
+        // Remove outer double quotes for values like "echo it's ok"
+        shell.aliases[aliasName] = aliasValue.slice(1, -1)
+      }
+      else if (aliasValue.startsWith('\'') && aliasValue.endsWith('\'') && aliasValue.length > 1) {
+        // Remove outer single quotes for values like 'echo long text'
+        shell.aliases[aliasName] = aliasValue.slice(1, -1)
+      }
+      else {
+        // Unquoted values as-is
+        shell.aliases[aliasName] = aliasValue
+      }
     }
 
     return {

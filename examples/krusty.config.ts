@@ -88,37 +88,32 @@ const exampleConfig: KrustyConfig = {
   // Plugin configuration
   plugins: [
     {
+      name: 'git-plugin',
+      path: './examples/plugins/git-plugin.ts',
       enabled: true,
-      list: [
-        {
-          name: 'git-plugin',
-          path: './examples/plugins/git-plugin.ts',
-          enabled: true,
-          config: {
-            autoFetch: true,
-            showBranchInPrompt: true,
-            colorOutput: true,
-          },
-        },
-        {
-          name: 'docker-plugin',
-          path: '~/.krusty/plugins/docker-plugin.js',
-          enabled: true,
-          config: {
-            showContainerCount: true,
-            autoComplete: true,
-          },
-        },
-        {
-          name: 'aws-plugin',
-          path: '~/.krusty/plugins/aws-plugin.js',
-          enabled: false, // Disabled by default
-          config: {
-            showProfile: true,
-            showRegion: true,
-          },
-        },
-      ],
+      config: {
+        autoFetch: true,
+        showBranchInPrompt: true,
+        colorOutput: true,
+      },
+    },
+    {
+      name: 'docker-plugin',
+      path: '~/.krusty/plugins/docker-plugin.js',
+      enabled: true,
+      config: {
+        showContainerCount: true,
+        autoComplete: true,
+      },
+    },
+    {
+      name: 'aws-plugin',
+      path: '~/.krusty/plugins/aws-plugin.js',
+      enabled: false, // Disabled by default
+      config: {
+        showProfile: true,
+        showRegion: true,
+      },
     },
   ],
 

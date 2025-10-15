@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
-import { KrustyShell } from '../src/shell'
 
 describe('Scripts + Chaining Integration', () => {
   let shell: KrustyShell
@@ -34,7 +34,8 @@ describe('Scripts + Chaining Integration', () => {
       'myfn() { echo X; return 0; }',
       'myfn && echo Y',
     ].join('\n')
-    const res = await shell.execute(script, { bypassScriptDetection: true })
+    // Remove bypassScriptDetection to allow proper script parsing and function handling
+    const res = await shell.execute(script)
     expect(res.exitCode).toBe(0)
     expect(res.stdout).toContain('X')
     expect(res.stdout).toContain('Y')

@@ -29,11 +29,12 @@ describe('Flat completions backward-compatibility', () => {
       config: { completion: { enabled: true } },
       history: [],
     } as any
-    const inp = new AutoSuggestInput(shell)
+    const inp = new AutoSuggestInput(shell, { syntaxHighlight: false })
 
     ;(inp as any).setInputForTesting('g', undefined)
 
-    // Open list and select index 0
+    // Set up suggestions manually since updateSuggestions isn't called
+    ;(inp as any)['suggestions'] = ['git', 'grep', 'go']
     ;(inp as any)['isShowingSuggestions'] = true
     ;(inp as any)['selectedIndex'] = 0
 
@@ -60,6 +61,7 @@ describe('Flat completions backward-compatibility', () => {
     const inp = new AutoSuggestInput(shell)
 
     ;(inp as any).setInputForTesting('g', undefined)
+    ;(inp as any)['suggestions'] = ['git', 'grep']
     ;(inp as any)['isShowingSuggestions'] = true
     ;(inp as any)['selectedIndex'] = 1 // 'grep'
 
@@ -74,10 +76,12 @@ describe('Flat completions backward-compatibility', () => {
       config: { completion: { enabled: true } },
       history: [],
     } as any
-    const inp = new AutoSuggestInput(shell)
+    const inp = new AutoSuggestInput(shell, { syntaxHighlight: false })
 
     ;(inp as any).setInputForTesting('b', undefined)
 
+    // Set up current suggestion for inline display
+    ;(inp as any)['currentSuggestion'] = 'undle'
     ;(inp as any)['isShowingSuggestions'] = false
     ;(inp as any)['selectedIndex'] = 0 // 'bundle'
 

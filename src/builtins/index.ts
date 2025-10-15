@@ -65,6 +65,7 @@ import { waitCommand } from './wait'
 import { webCommand } from './web'
 import { whichCommand } from './which'
 import { wipCommand } from './wip'
+import { yes } from './yes'
 
 export function createBuiltins(): Map<string, BuiltinCommand> {
   const builtins = new Map<string, BuiltinCommand>()
@@ -141,6 +142,7 @@ export function createBuiltins(): Map<string, BuiltinCommand> {
   builtins.set('web', webCommand)
   builtins.set('which', whichCommand)
   builtins.set('wip', wipCommand)
+  builtins.set('yes', { name: 'yes', execute: yes, description: 'Execute the last suggested script correction', usage: 'yes' })
 
   // Add script-related builtins
   const scriptBuiltins = createScriptBuiltins()

@@ -6,7 +6,7 @@ import type {
   HookResult,
   KrustyConfig,
   Shell,
-} from '../types'
+} from './types'
 import { execSync, spawn } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -150,7 +150,32 @@ function execCommand(command: string, options: { cwd?: string, env?: Record<stri
 // Hook manager
 export class HookManager {
   private hooks = new Map<string, RegisteredHook[]>()
+  private programmaticHooks = new Map<string, HookHandler[]>()
   private executing = new Set<string>()
+
+  /**
+   * Programmatically register a hook handler.
+   * @param hookName The name of the hook to register.
+   * @param callback The handler to execute when the hook is triggered.
+   * @returns A function to unregister the hook.
+   */
+  public on<T = unknown>(hookName: string, callback: HookHandler<T>): () => void {
+    if (!this.programmaticHooks.has(hookName)) {
+      this.programmaticHooks.set(hookName, [])
+    }
+    this.programmaticHooks.get(hookName)!.push(callback as HookHandler)
+
+    // Return a function to unregister the hook
+    return () => {
+      const hooks = this.programmaticHooks.get(hookName)
+      if (hooks) {
+        const index = hooks.indexOf(callback as HookHandler)
+        if (index > -1) {
+          hooks.splice(index, 1)
+        }
+      }
+    }
+  }
 
   constructor(private shell: Shell, private config: KrustyConfig) {
     this.loadHooks()
@@ -506,6 +531,18 @@ export class HookManager {
       let _preventDefault = false
       let stopPropagation = false
 
+      // Execute programmatic hooks first
+      const programmaticHooks = this.programmaticHooks.get(event) || []
+      for (const programmaticHook of programmaticHooks) {
+        try {
+          await programmaticHook(data)
+        }
+        catch (error) {
+          this.shell.log.error(`Error in programmatic hook '${event}':`, error)
+        }
+      }
+
+      // Execute all hooks that match the current context
       for (const hook of hooks) {
         if (stopPropagation)
           break
@@ -605,9 +642,10 @@ export class HookManager {
     this.hooks.delete(event)
   }
 
-  // Clear all hooks
-  clearHooks(): void {
+  // Clear all registered hooks
+  public clear(): void {
     this.hooks.clear()
+    this.programmaticHooks.clear()
   }
 }
 

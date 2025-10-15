@@ -289,8 +289,12 @@ export function renderGroupedSuggestionList(
       const items: Array<string | { text: string }> = []
       for (const it of (g.items || [])) {
         const key = getText(it)
-        if (!key) continue
-        if (!seen.has(key)) { seen.add(key); items.push(it) }
+        if (!key)
+          continue
+        if (!seen.has(key)) {
+          seen.add(key)
+          items.push(it)
+        }
       }
       mergedGroups.push({ title: (g.title || '').trim(), items })
       indexByNorm.set(norm, mergedGroups.length - 1)
@@ -301,8 +305,12 @@ export function renderGroupedSuggestionList(
       const seen = new Set(existing.items.map(getText))
       for (const it of (g.items || [])) {
         const key = getText(it)
-        if (!key) continue
-        if (!seen.has(key)) { seen.add(key); existing.items.push(it) }
+        if (!key)
+          continue
+        if (!seen.has(key)) {
+          seen.add(key)
+          existing.items.push(it)
+        }
       }
     }
   }
@@ -338,7 +346,7 @@ export function renderGroupedSuggestionList(
   }
 
   if (flat.length > 0) {
-    const reset = '\x1B[0m'
+    // const _reset = '\x1B[0m'
     const selectedBg = '\x1B[47m' // white background
     const selectedFg = '\x1B[30m' // black text
 
@@ -353,7 +361,8 @@ export function renderGroupedSuggestionList(
     let truncated = false
 
     for (let gi = 0; gi < mergedGroups.length; gi++) {
-      if (truncated) break
+      if (truncated)
+        break
       const g = mergedGroups[gi]
       const labels = labelsByGroup[gi]
       if (labels.length <= 0)
@@ -366,7 +375,10 @@ export function renderGroupedSuggestionList(
       const header = `\n\x1B[2K${dim}${italic}${g.title.toUpperCase()}:${reset}`
 
       // If adding the header would exceed available rows, mark truncated
-      if (rowsAvail > 0 && producedLines + 1 > rowsAvail) { truncated = true; break }
+      if (rowsAvail > 0 && producedLines + 1 > rowsAvail) {
+        truncated = true
+        break
+      }
       out += header
       producedLines += 1
 
@@ -379,7 +391,10 @@ export function renderGroupedSuggestionList(
       const rows = Math.max(1, Math.ceil(labels.length / columns))
 
       for (let r = 0; r < rows; r++) {
-        if (rowsAvail > 0 && producedLines + 1 > rowsAvail) { truncated = true; break }
+        if (rowsAvail > 0 && producedLines + 1 > rowsAvail) {
+          truncated = true
+          break
+        }
         let line = '\n\x1B[2K'
         for (let c = 0; c < columns; c++) {
           const idx = r * columns + c
@@ -422,7 +437,7 @@ export function renderGroupedSuggestionList(
     }
 
     // Ensure content fits terminal width per line (ANSI-aware)
-    const lines = out.split('\n').map((l) => truncateAnsiToWidth(l, cols))
+    const lines = out.split('\n').map(l => truncateAnsiToWidth(l, cols))
 
     // Clear the previous render blocks completely (both grouped and flat)
     stdout.write(`\x1B[s`)

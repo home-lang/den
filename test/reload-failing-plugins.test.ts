@@ -1,10 +1,10 @@
-import type { KrustyConfig, PluginConfig } from '../src/types'
+import type { KrustyConfig, Plugin } from '../src/types'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { KrustyShell } from '../src'
 import { PluginManager } from '../src/plugins/plugin-manager'
-import { KrustyShell } from '../src/shell'
 
 /**
  * These tests ensure plugin errors during lifecycle hooks don't crash the shell
@@ -12,17 +12,12 @@ import { KrustyShell } from '../src/shell'
  */
 describe('Plugin lifecycle error isolation', () => {
   let shell: KrustyShell
-  let pluginManager: PluginManager
   let tempDir: string
   let badInitPath: string
   let badActivatePath: string
   let badDeactivatePath: string
 
   beforeEach(() => {
-    const cfg: KrustyConfig = { verbose: false, plugins: [], hooks: {} }
-    shell = new KrustyShell(cfg)
-    pluginManager = new PluginManager(shell, cfg)
-
     tempDir = mkdtempSync(join(tmpdir(), 'krusty-plugin-fail-'))
     badInitPath = join(tempDir, 'bad-init.js')
     badActivatePath = join(tempDir, 'bad-activate.js')
@@ -66,15 +61,15 @@ describe('Plugin lifecycle error isolation', () => {
   })
 
   it('should isolate initialize/activate errors during load', async () => {
-    const config: PluginConfig = {
-      enabled: true,
-      list: [
-        { name: 'bad-init', path: badInitPath, enabled: true },
-        { name: 'bad-activate', path: badActivatePath, enabled: true },
-      ],
-    }
+    const plugins: Plugin[] = [
+      { name: 'bad-init', path: badInitPath, enabled: true },
+      { name: 'bad-activate', path: badActivatePath, enabled: true },
+    ]
+    const config: KrustyConfig = { verbose: false, plugins, hooks: {} }
+    shell = new KrustyShell(config)
+    const pluginManager = new PluginManager(shell, config)
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugins()
 
     // Manager should not throw and continue operating
     expect(pluginManager.getAllPlugins()).toBeDefined()
@@ -84,12 +79,12 @@ describe('Plugin lifecycle error isolation', () => {
   })
 
   it('should isolate deactivate errors during unload', async () => {
-    const config: PluginConfig = {
-      enabled: true,
-      list: [{ name: 'bad-deactivate', path: badDeactivatePath, enabled: true }],
-    }
+    const plugins: Plugin[] = [{ name: 'bad-deactivate', path: badDeactivatePath, enabled: true }]
+    const config: KrustyConfig = { verbose: false, plugins, hooks: {} }
+    shell = new KrustyShell(config)
+    const pluginManager = new PluginManager(shell, config)
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugins()
     expect(pluginManager.getPlugin('bad-deactivate')).toBeDefined()
 
     // Unload should not throw even if deactivate fails
@@ -98,12 +93,12 @@ describe('Plugin lifecycle error isolation', () => {
   })
 
   it('shutdown should not throw even if plugins fail to deactivate', async () => {
-    const config: PluginConfig = {
-      enabled: true,
-      list: [{ name: 'bad-deactivate', path: badDeactivatePath, enabled: true }],
-    }
+    const plugins: Plugin[] = [{ name: 'bad-deactivate', path: badDeactivatePath, enabled: true }]
+    const config: KrustyConfig = { verbose: false, plugins, hooks: {} }
+    shell = new KrustyShell(config)
+    const pluginManager = new PluginManager(shell, config)
 
-    await pluginManager.loadPlugin(config)
+    await pluginManager.loadPlugins()
     await expect(pluginManager.shutdown()).resolves.toBeUndefined()
   })
 })

@@ -306,15 +306,8 @@ export default {
   // Plugin configuration - start with essential plugins
   plugins: [
     {
-      name: 'git-plugin',
-      path: './examples/plugins/git-plugin.ts',
-      enabled: true,
-      config: {
-        autoFetch: true,
-        showBranchInPrompt: true,
-        colorOutput: true,
-        enhancedStatus: true,
-      },
+      name: 'script-suggester',
+      path: './src/plugins/script-suggester.ts',
     },
   ],
 

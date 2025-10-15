@@ -1,7 +1,7 @@
 import type { KrustyConfig } from '../src/types'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
+import { KrustyShell } from '../src'
 import { defaultConfig } from '../src/config'
-import { KrustyShell } from '../src/shell'
 
 // Table-driven negative tests for core builtins: invalid flags and too few args
 // We aim for coverage breadth without asserting overly specific stderr across all commands.

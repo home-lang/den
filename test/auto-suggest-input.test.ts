@@ -167,8 +167,11 @@ describe('AutoSuggestInput', () => {
       autoSuggestInput['updateDisplay'](prompt)
 
       // Expect each suggestion on its own line below the prompt, not a single inline row
+      // eslint-disable-next-line no-control-regex
       const occurrencesRun = (mockOutput.match(/\n\x1B\[2K.*run/g) || []).length
+      // eslint-disable-next-line no-control-regex
       const occurrencesBuild = (mockOutput.match(/\n\x1B\[2K.*build/g) || []).length
+      // eslint-disable-next-line no-control-regex
       const occurrencesTest = (mockOutput.match(/\n\x1B\[2K.*test/g) || []).length
       expect(occurrencesRun).toBe(1)
       expect(occurrencesBuild).toBe(1)

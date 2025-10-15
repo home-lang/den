@@ -1,4 +1,4 @@
-import type { KrustyConfig as BaseKrustyConfig, PluginConfig } from '../types'
+import type { KrustyConfig as BaseKrustyConfig, Plugin } from '../types'
 
 /**
  * Extended KrustyConfig with required properties for the shell
@@ -7,7 +7,7 @@ export interface KrustyShellConfig extends Omit<BaseKrustyConfig, 'plugins'> {
   historySize: number
   historyFile: string
   verbose: boolean
-  plugins: Array<string | PluginConfig>
+  plugins: Array<string | Plugin>
   aliases: Record<string, string>
   theme?: {
     colorScheme?: 'dark' | 'light' | 'auto'
@@ -34,6 +34,9 @@ export interface Shell {
   nounset: boolean
   xtrace: boolean
   pipefail: boolean
+  // Interactive session management
+  isInteractive: () => boolean
+  getCurrentInputForTesting?: () => string
 
   // Core methods
   execute: (command: string, options?: { bypassAliases?: boolean, bypassFunctions?: boolean, bypassScriptDetection?: boolean }) => Promise<CommandResult>

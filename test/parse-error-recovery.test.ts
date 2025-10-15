@@ -1,6 +1,6 @@
 import type { KrustyConfig } from '../src/types'
 import { describe, expect, it } from 'bun:test'
-import { KrustyShell } from '../src/shell'
+import { KrustyShell } from '../src'
 
 describe('Error Recovery - Parse Errors', () => {
   it('returns a clear syntax error with exitCode 2 when parsing fails', async () => {

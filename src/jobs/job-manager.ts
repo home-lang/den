@@ -93,6 +93,9 @@ export class JobManager extends EventEmitter {
   private startBackgroundMonitoring(): void {
     if (this.monitoringInterval)
       return
+    // Skip background monitoring in test environment to prevent hanging
+    if (process.env.NODE_ENV === 'test')
+      return
     this.monitoringInterval = setInterval(() => {
       this.checkJobStatuses()
     }, 1000)
