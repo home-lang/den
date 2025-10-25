@@ -7,7 +7,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "paths": {
-      "krusty": ["./src"]
+      "den": ["./src-ts"]
     },
     "resolveJsonModule": true,
     "types": ["bun", "node"],
@@ -26,6 +26,6 @@
     "skipDefaultLibCheck": true,
     "skipLibCheck": true
   },
-  "include": ["src"],
+  "include": ["src-ts"],
   "exclude": ["node_modules", "dist"]
 }

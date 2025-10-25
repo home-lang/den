@@ -1,7 +1,7 @@
-import type { KrustyConfig } from './src/types'
+import type { DenConfig } from './src-ts/types'
 
 /**
- * Krusty Configuration
+ * Den Configuration
  *
  * This configuration provides a familiar zsh-like experience with:
  * - Starship-inspired prompt with dynamic modules
@@ -30,7 +30,7 @@ export default {
   // History settings - optimized for development workflow
   history: {
     maxEntries: 50000,
-    file: '~/.krusty_history',
+    file: '~/.den_history',
     ignoreDuplicates: true,
     ignoreSpace: true,
     searchMode: 'fuzzy',
@@ -531,4 +531,4 @@ export default {
       },
     ],
   },
-} satisfies KrustyConfig
+} satisfies DenConfig

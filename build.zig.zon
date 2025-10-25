@@ -1,0 +1,22 @@
+.{
+    .name = "den",
+    .version = "0.1.0",
+    .description = "A performant & customizable, cross-platform shell",
+    .minimum_zig_version = "0.13.0",
+
+    .dependencies = .{
+        // TODO: Add zig-config dependency
+        // .@"zig-config" = .{
+        //     .path = "../zig-config",
+        // },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "bench",
+        "README.md",
+        "LICENSE",
+    },
+}
