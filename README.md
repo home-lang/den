@@ -13,14 +13,16 @@ Krusty is a modern, feature-rich shell built with TypeScript and Bun. It provide
 ## Features
 
 - 🚀 **Performance**: Built on Bun for lightning-fast execution
-- 🧠 **Smart completion**: Context-aware command/file completions with caching
-- 💡 **Auto-suggestions**: Intelligent inline suggestions with history integration
+- 🧠 **Smart completion**: Context-aware command/file completions with fuzzy matching and caching
+- 💡 **Auto-suggestions**: Intelligent inline suggestions with history integration and typo correction
 - 🧩 **Aliases & functions**: Powerful aliasing and shell functions with expansion
 - 🧵 **Pipelines & redirections**: Full `|`, `>`, `>>`, `2>&1`, here-strings, process substitution
 - 🧭 **Job control**: Advanced job management with `Ctrl+Z`, `Ctrl+C`, `jobs`, `bg`, `fg`, `kill`, `wait`
 - 📜 **Scripting**: Complete scripting engine with control flow, functions, and error handling
 - 🎨 **Themes**: Highly configurable prompts with Git status and runtime detection
 - 🔌 **Plugins**: Extensible plugin system with hooks and lifecycle management
+- 🎯 **Enhanced search**: Fuzzy file finding with interactive selection
+- 🌈 **Syntax highlighting**: Advanced token-based highlighting for commands, builtins, and aliases
 
 ## Quick start
 
@@ -37,6 +39,30 @@ krusty
 # Or run directly with Bun
 bunx krusty
 ```
+
+## What's New in 1.0
+
+🎉 **Krusty 1.0** brings major improvements to performance, usability, and developer experience:
+
+### ✨ Enhanced Features
+- **Fuzzy completion**: Smart command and file completion with fuzzy matching
+- **Advanced auto-suggestions**: Context-aware suggestions with typo correction and command history
+- **Improved syntax highlighting**: Token-based highlighting for better visual feedback
+- **New built-in commands**: `find`, `tree`, `grep`, and `watch` for enhanced productivity
+- **Better error handling**: Fixed reverse search cursor positioning and improved reliability
+
+### 🚀 Performance Improvements
+- Optimized completion caching system
+- Faster command execution and response times
+- Improved memory usage and startup performance
+
+### 🛠️ Developer Experience
+- Enhanced debugging and logging capabilities
+- Better plugin architecture and extensibility
+- Comprehensive test coverage with 796 passing tests
+- Improved documentation and examples
+
+Ready to experience the next generation of shell productivity? Let's get started! 🚀
 
 ## Built-in Commands
 
@@ -93,6 +119,19 @@ Krusty ships with a comprehensive set of built-ins. Run `help` for details.
 ### Short aliases (quality-of-life)
 
 - [`b`](https://krusty.sh/commands/b), [`bb`](https://krusty.sh/commands/bb), [`bd`](https://krusty.sh/commands/bd), [`bf`](https://krusty.sh/commands/bf), [`bi`](https://krusty.sh/commands/bi), [`bl`](https://krusty.sh/commands/bl), [`br`](https://krusty.sh/commands/br) — convenience wrappers
+
+### Advanced tools
+
+- [`find`](https://krusty.sh/commands/find) — fuzzy file finder with interactive selection
+- [`tree`](https://krusty.sh/commands/tree) — directory tree display with filtering
+- [`grep`](https://krusty.sh/commands/grep) — text search with highlighting and context
+- [`watch`](https://krusty.sh/commands/watch) — execute commands repeatedly with change detection
+
+### Modern utilities
+
+- [`json`](https://krusty.sh/commands/json) — parse, format, and query JSON data with dot notation
+- [`http`](https://krusty.sh/commands/http) — make HTTP requests with JSON support and formatting
+- [`calc`](https://krusty.sh/commands/calc) — mathematical calculator with functions and constants
 
 _Note: A few items are convenience helpers specific to Krusty and not POSIX/Bash standard._
 

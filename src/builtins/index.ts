@@ -10,6 +10,7 @@ import { blCommand } from './bl'
 import { bookmarkCommand } from './bookmark'
 import { brCommand } from './br'
 import { builtinCommand } from './builtin'
+import { calc } from './calc'
 import { cdCommand } from './cd'
 import { clearCommand } from './clear'
 import { codeCommand } from './code'
@@ -27,19 +28,27 @@ import { exitCommand } from './exit'
 import { exportCommand } from './export'
 import { falseCommand } from './false'
 import { fgCommand } from './fg'
+import { find } from './find'
 import { ftCommand } from './ft'
 import { getoptsCommand } from './getopts'
+import { grep } from './grep'
 import { hashCommand } from './hash'
 import { helpCommand } from './help'
 import { hideCommand } from './hide'
 import { historyCommand } from './history'
+import { http } from './http'
 import { ipCommand } from './ip'
 import { jobsCommand } from './jobs'
+import { json } from './json'
 import { killCommand } from './kill'
 import { libraryCommand } from './library'
 import { localipCommand } from './localip'
+import { logParse } from './log-parse'
+import { logTail } from './log-tail'
+import { netCheck } from './net-check'
 import { popdCommand } from './popd'
 import { printfCommand } from './printf'
+import { procMonitor } from './proc-monitor'
 import { pstormCommand } from './pstorm'
 import { pushdCommand } from './pushd'
 import { pwdCommand } from './pwd'
@@ -51,17 +60,20 @@ import { setCommand } from './set'
 import { showCommand } from './show'
 import { shrugCommand } from './shrug'
 import { sourceCommand } from './source'
+import { sysStats } from './sys-stats'
 import { testCommand } from './test'
 import { timeCommand } from './time'
 import { timeoutCommand } from './timeout'
 import { timesCommand } from './times'
 import { trapCommand } from './trap'
+import { tree } from './tree'
 import { trueCommand } from './true'
 import { typeCommand } from './type'
 import { umaskCommand } from './umask'
 import { unaliasCommand } from './unalias'
 import { unsetCommand } from './unset'
 import { waitCommand } from './wait'
+import { watch } from './watch'
 import { webCommand } from './web'
 import { whichCommand } from './which'
 import { wipCommand } from './wip'
@@ -86,6 +98,7 @@ export function createBuiltins(): Map<string, BuiltinCommand> {
   builtins.set('jump', { ...bookmarkCommand, name: 'jump' })
   builtins.set('builtin', builtinCommand)
   builtins.set('c', clearCommand)
+  builtins.set('calc', calc)
   builtins.set('cd', cdCommand)
   builtins.set('command', commandCommand)
   builtins.set('code', codeCommand)
@@ -102,17 +115,25 @@ export function createBuiltins(): Map<string, BuiltinCommand> {
   builtins.set('export', exportCommand)
   builtins.set('false', falseCommand)
   builtins.set('fg', fgCommand)
+  builtins.set('find', find)
   builtins.set('ft', ftCommand)
   builtins.set('getopts', getoptsCommand)
+  builtins.set('grep', grep)
   builtins.set('hash', hashCommand)
   builtins.set('help', helpCommand)
   builtins.set('hide', hideCommand)
   builtins.set('history', historyCommand)
+  builtins.set('http', http)
   builtins.set('ip', ipCommand)
   builtins.set('jobs', jobsCommand)
+  builtins.set('json', json)
   builtins.set('kill', killCommand)
   builtins.set('library', libraryCommand)
   builtins.set('localip', localipCommand)
+  builtins.set('log-parse', logParse)
+  builtins.set('log-tail', logTail)
+  builtins.set('net-check', netCheck)
+  builtins.set('proc-monitor', procMonitor)
   builtins.set('pstorm', pstormCommand)
   builtins.set('popd', popdCommand)
   builtins.set('printf', printfCommand)
@@ -127,18 +148,21 @@ export function createBuiltins(): Map<string, BuiltinCommand> {
   builtins.set('shrug', shrugCommand)
   builtins.set('source', sourceCommand)
   builtins.set('.', { ...sourceCommand, name: '.' }) // POSIX alias for source
+  builtins.set('sys-stats', sysStats)
   builtins.set('test', testCommand)
   builtins.set('[', { ...testCommand, name: '[' }) // POSIX alias for test
   builtins.set('time', timeCommand)
   builtins.set('timeout', timeoutCommand)
   builtins.set('times', timesCommand)
   builtins.set('trap', trapCommand)
+  builtins.set('tree', tree)
   builtins.set('true', trueCommand)
   builtins.set('type', typeCommand)
   builtins.set('umask', umaskCommand)
   builtins.set('unalias', unaliasCommand)
   builtins.set('unset', unsetCommand)
   builtins.set('wait', waitCommand)
+  builtins.set('watch', watch)
   builtins.set('web', webCommand)
   builtins.set('which', whichCommand)
   builtins.set('wip', wipCommand)

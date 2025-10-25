@@ -196,9 +196,7 @@ export class CompletionManager {
         return
 
       const now = Date.now()
-      const files = readFileSync(this.cacheDir, 'utf8')
-        .split('\n')
-        .filter(Boolean)
+      const files = readdirSync(this.cacheDir).filter(f => f.endsWith('.json'))
 
       for (const file of files) {
         try {
@@ -364,13 +362,36 @@ export class CompletionManager {
     const aliases = Object.keys(shell.aliases || {})
     const pathCommands = this.getPathCommands()
     const caseSensitive = shell.config.completion?.caseSensitive ?? false
+    const enableFuzzy = shell.config.completion?.enableFuzzy ?? true
 
-    const match = (s: string) =>
-      caseSensitive ? s.startsWith(prefix) : s.toLowerCase().startsWith(prefix.toLowerCase())
+    const match = enableFuzzy
+      ? (s: string) => this.fuzzyMatch(s, prefix, caseSensitive)
+      : (s: string) => caseSensitive ? s.startsWith(prefix) : s.toLowerCase().startsWith(prefix.toLowerCase())
 
-    const b = builtins.filter(match)
-    const a = aliases.filter(match)
-    const p = pathCommands.filter(match)
+    const score = enableFuzzy
+      ? (s: string) => this.fuzzyScore(s, prefix, caseSensitive)
+      : (s: string) => s.length
+
+    // Filter with exact match first, then fuzzy if needed
+    let b = builtins.filter(s => caseSensitive ? s.startsWith(prefix) : s.toLowerCase().startsWith(prefix.toLowerCase()))
+    let a = aliases.filter(s => caseSensitive ? s.startsWith(prefix) : s.toLowerCase().startsWith(prefix.toLowerCase()))
+    let p = pathCommands.filter(s => caseSensitive ? s.startsWith(prefix) : s.toLowerCase().startsWith(prefix.toLowerCase()))
+
+    // If not enough exact matches and fuzzy is enabled, add fuzzy matches
+    if (enableFuzzy && (b.length + a.length + p.length) < 5) {
+      const fuzzyBuiltins = builtins.filter(s => !b.includes(s) && match(s))
+      const fuzzyAliases = aliases.filter(s => !a.includes(s) && match(s))
+      const fuzzyPath = pathCommands.filter(s => !p.includes(s) && match(s))
+
+      b = [...b, ...fuzzyBuiltins]
+      a = [...a, ...fuzzyAliases]
+      p = [...p, ...fuzzyPath]
+    }
+
+    // Sort by score (better matches first)
+    b.sort((x, y) => score(x) - score(y))
+    a.sort((x, y) => score(x) - score(y))
+    p.sort((x, y) => score(x) - score(y))
 
     // Keep order: builtins, aliases, then PATH commands; dedupe while preserving order
     const ordered = [...b, ...a, ...p]
@@ -384,6 +405,55 @@ export class CompletionManager {
     }
 
     return result
+  }
+
+  private fuzzyMatch(text: string, pattern: string, caseSensitive: boolean): boolean {
+    if (!pattern) return true
+
+    const t = caseSensitive ? text : text.toLowerCase()
+    const p = caseSensitive ? pattern : pattern.toLowerCase()
+
+    let textIndex = 0
+    let patternIndex = 0
+
+    while (textIndex < t.length && patternIndex < p.length) {
+      if (t[textIndex] === p[patternIndex]) {
+        patternIndex++
+      }
+      textIndex++
+    }
+
+    return patternIndex === p.length
+  }
+
+  private fuzzyScore(text: string, pattern: string, caseSensitive: boolean): number {
+    if (!pattern) return 0
+
+    const t = caseSensitive ? text : text.toLowerCase()
+    const p = caseSensitive ? pattern : pattern.toLowerCase()
+
+    // Exact prefix match gets best score
+    if (t.startsWith(p)) return 0
+
+    // Calculate fuzzy score based on character distance
+    let score = 0
+    let lastMatchIndex = -1
+    let patternIndex = 0
+
+    for (let i = 0; i < t.length && patternIndex < p.length; i++) {
+      if (t[i] === p[patternIndex]) {
+        score += i - lastMatchIndex - 1
+        lastMatchIndex = i
+        patternIndex++
+      }
+    }
+
+    // Penalize if not all pattern characters were matched
+    if (patternIndex < p.length) {
+      score += 1000
+    }
+
+    return score
   }
 
   private getArgumentCompletions(partial: string, _shell: any): string[] {

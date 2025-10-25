@@ -539,30 +539,30 @@ describe('AutoSuggestInput', () => {
       expect(mockOutput).toContain('\x1B[36mgit\x1B[0m \x1B[94mcommit\x1B[0m')
     })
 
-    it('highlights flags (yellow) and operators (gray)', () => {
+    it('highlights flags (yellow) and operators (yellow)', () => {
       autoSuggestInput['currentInput'] = 'ls -la && echo done'
       autoSuggestInput['cursorPosition'] = autoSuggestInput['currentInput'].length
       mockOutput = ''
       autoSuggestInput['updateDisplay'](prompt)
       expect(mockOutput).toContain(' \x1B[33m-la\x1B[0m')
-      expect(mockOutput).toContain('\x1B[90m&&\x1B[0m')
+      expect(mockOutput).toContain('\x1B[93m&&\x1B[0m')
     })
 
-    it('highlights variables (gray) and numbers (magenta)', () => {
+    it('highlights variables (magenta) and numbers (magenta)', () => {
       autoSuggestInput['currentInput'] = 'echo $HOME 42'
       autoSuggestInput['cursorPosition'] = autoSuggestInput['currentInput'].length
       mockOutput = ''
       autoSuggestInput['updateDisplay'](prompt)
-      expect(mockOutput).toContain('\x1B[90m$HOME\x1B[0m')
+      expect(mockOutput).toContain('\x1B[95m$HOME\x1B[0m')
       expect(mockOutput).toContain('\x1B[35m42\x1B[0m')
     })
 
-    it('highlights paths (green)', () => {
+    it('highlights paths (bright green)', () => {
       autoSuggestInput['currentInput'] = 'cat ~/notes.txt'
       autoSuggestInput['cursorPosition'] = autoSuggestInput['currentInput'].length
       mockOutput = ''
       autoSuggestInput['updateDisplay'](prompt)
-      expect(mockOutput).toContain('\x1B[32m~/notes.txt\x1B[0m')
+      expect(mockOutput).toContain('\x1B[92m~/notes.txt\x1B[0m')
     })
 
     it('highlights comments (gray) from # to end', () => {

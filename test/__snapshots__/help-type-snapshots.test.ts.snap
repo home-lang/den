@@ -17,6 +17,7 @@ mark         Manage directory bookmarks and navigate quickly
 jump         Manage directory bookmarks and navigate quickly
 builtin      Run a shell builtin explicitly
 c            Clear the screen
+calc         Simple calculator with support for mathematical expressions
 cd           Change the current directory
 command      Run a command ignoring functions and aliases
 code         Open the current directory in Visual Studio Code
@@ -33,17 +34,25 @@ exit         Exit the shell
 export       Set environment variables
 false        Return unsuccessful exit status
 fg           Bring a background job to the foreground
+find         Find files and directories with optional fuzzy matching
 ft           Fix/Unstick macOS Touch Bar when it freezes
 getopts      Parse positional parameters as options
+grep         Search text patterns in files
 hash         Remember or display command locations
 help         Display help information
 hide         Hide hidden files in Finder (macOS)
 history      Display or manipulate the command history
+http         Simple HTTP client for making web requests
 ip           Show public IP address via OpenDNS diagnostic service
 jobs         List background jobs
+json         Parse and format JSON data with query support
 kill         Send a signal to a process or job
 library      cd to $HOME/Library
 localip      Show local IP addresses (IPv4/IPv6) from ifconfig output
+log-parse    Parse and analyze structured log files
+log-tail     Enhanced tail with filtering and log analysis
+net-check    Network connectivity and port checking tools
+proc-monitor Monitor running processes and system activity
 pstorm       Open the current directory in PhpStorm
 popd         Pop directory from stack and change to it
 printf       Format and print data
@@ -58,18 +67,21 @@ show         Show hidden files in Finder (macOS)
 shrug        Copy ¯\\_(ツ)_/¯ to clipboard (when available) or print it
 source       Execute commands from a file in the current shell environment
 source       Execute commands from a file in the current shell environment
+sys-stats    Display system resource usage and statistics
 test         Evaluate conditional expressions
 [            Evaluate conditional expressions (alias for test)
 time         Measure command execution time
 timeout      Run a command with a time limit
 times        Print accumulated user and system times
 trap         Trap signals and other events
+tree         Display directory tree structure
 true         Return successful exit status
 type         Display the type of a command
 umask        Get or set the file mode creation mask
 unalias      Remove aliases
 unset        Unset (remove) shell variables or functions
 wait         Wait for background jobs or PIDs to finish
+watch        Execute a command repeatedly and show output
 web          cd to $HOME/Code
 which        Show the full path of commands
 wip          Create a work-in-progress commit and optionally push it

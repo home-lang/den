@@ -621,7 +621,15 @@ export class AutoSuggestInput {
 
     const status = this.reverseSearchStatus()
     process.stdout.write(`\r${status}`)
-    readline.cursorTo(process.stdout, process.stdout.columns - 1)
+
+    // Safety check for terminal columns - fallback to end of status if undefined
+    const columns = process.stdout.columns
+    if (typeof columns === 'number' && !isNaN(columns) && columns > 0) {
+      readline.cursorTo(process.stdout, columns - 1)
+    } else {
+      // Fallback: position cursor at end of status line
+      readline.cursorTo(process.stdout, status.length)
+    }
   }
 
   public reverseSearchStatus(): string {
