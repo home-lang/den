@@ -7,7 +7,6 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     std.debug.print("Den Shell v0.1.0\n", .{});
-    std.debug.print("Zig implementation starting...\n\n", .{});
 
     // Parse command line arguments
     var args = try std.process.argsWithAllocator(allocator);
