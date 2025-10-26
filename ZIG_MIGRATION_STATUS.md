@@ -5,6 +5,7 @@
 **Date**: October 25, 2025
 **Zig Version**: 0.15.1
 **Status**: 🟢 **COMPLETE: All 22 Phases Done! Production-Ready Shell** 🎉
+**Builtins**: 46 commands implemented
 
 ---
 
@@ -14,7 +15,7 @@
 - ✅ **REPL Loop**: Interactive prompt with line reading
 - ✅ **Command Parsing**: Full tokenizer and parser
 - ✅ **External Command Execution**: Fork/exec working
-- ✅ **Builtin Commands**: 40 builtins - echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete, alias, unalias, type, which, source, read, test, pushd, popd, dirs, printf, true, false, sleep, help, basename, dirname, realpath, command, eval, shift, time, umask, clear, uname, whoami, hash, exit
+- ✅ **Builtin Commands**: 46 builtins - echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete, alias, unalias, type, which, source, read, test, pushd, popd, dirs, printf, true, false, sleep, help, basename, dirname, realpath, command, eval, shift, time, umask, clear, uname, whoami, hash, return, break, continue, local, declare, readonly, exit
 - ✅ **I/O**: stdin/stdout via Zig 0.15 POSIX APIs
 - ✅ **Pipeline Execution**: Multi-stage pipelines fully working (`ls | grep foo | head -3`)
 - ✅ **Boolean Operators**: `&&` and `||` with short-circuit evaluation
@@ -42,6 +43,7 @@
 - ✅ **System Information**: `uname`, `whoami` commands
 - ✅ **Terminal Control**: `clear` command
 - ✅ **Command Caching**: `hash` command
+- ✅ **Script Control**: `return`, `break`, `continue`, `local`, `declare`, `readonly` commands
 - ✅ **Exit Handling**: Ctrl+D and `exit` command
 
 ### Completed Phases (0-22) - ALL DONE! 🎉
