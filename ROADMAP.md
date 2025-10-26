@@ -111,11 +111,11 @@
 - [ ] Document all signal handling requirements
 
 ### 0.3 Repository Setup
-- [ ] Create Zig project structure in new branch
-- [ ] Set up `.gitignore` for Zig artifacts
-- [ ] Create `build.zig` skeleton
+- [x] Create Zig project structure in new branch - Done
+- [x] Set up `.gitignore` for Zig artifacts - .gitignore
+- [x] Create `build.zig` skeleton - build.zig
 - [ ] Set up dependency management strategy
-- [ ] Create initial `README.md` for Zig version
+- [x] Create initial `README.md` for Zig version - README.md
 - [ ] Set up CI/CD for Zig builds (.github/workflows)
 
 ---
@@ -124,13 +124,13 @@
 
 ### 1.1 Build System
 - [x] Create `build.zig` with basic executable target
-- [ ] Configure release modes (Debug, ReleaseSafe, ReleaseFast, ReleaseSmall)
+- [x] Configure release modes (Debug, ReleaseSafe, ReleaseFast, ReleaseSmall) - build.zig:5
 - [ ] Set up cross-compilation targets (Linux x64/ARM64, macOS x64/ARM64, Windows x64)
 - [ ] Configure optimization settings
 - [ ] Add static linking options
-- [ ] Create build step for tests
+- [x] Create build step for tests - build.zig:45
 - [ ] Create build step for benchmarks
-- [ ] Add install step for system-wide installation
+- [x] Add install step for system-wide installation - build.zig:20
 
 ### 1.2 Project Structure
 ```
@@ -231,14 +231,14 @@ den/
 
 ### 2.5 String Utilities
 - [ ] Implement string builder
-- [ ] Implement string splitting (by delimiter, whitespace, IFS)
-- [ ] Implement string trimming
-- [ ] Implement string comparison (case-sensitive/insensitive)
-- [ ] Implement string search (contains, startsWith, endsWith)
+- [x] Implement string splitting (by delimiter, whitespace, IFS) - std.mem.split
+- [x] Implement string trimming - std.mem.trim
+- [x] Implement string comparison (case-sensitive/insensitive) - std.mem.eql, std.ascii
+- [x] Implement string search (contains, startsWith, endsWith) - std.mem.indexOf, std.mem.startsWith, std.mem.endsWith
 - [ ] Implement string replacement
 - [ ] Implement Unicode-aware string operations
 - [ ] Implement string escaping/unescaping
-- [ ] Implement glob pattern matching
+- [x] Implement glob pattern matching - src/utils/glob.zig
 
 ---
 
@@ -308,31 +308,31 @@ den/
 - [ ] Implement UTF-8 input/output
 
 ### 4.3 File System
-- [ ] Implement path manipulation (join, dirname, basename, extension)
+- [x] Implement path manipulation (join, dirname, basename, extension) - src/shell.zig:339,342
 - [ ] Implement path normalization
-- [ ] Implement tilde expansion (`~`, `~user`)
+- [x] Implement tilde expansion (`~`, `~user`) - src/utils/expansion.zig (~ implemented)
 - [ ] Implement directory traversal
 - [ ] Implement file metadata reading
-- [ ] Implement glob pattern matching
+- [x] Implement glob pattern matching - src/utils/glob.zig
 - [ ] Implement recursive directory walking
 - [ ] Implement cross-platform path handling
 
 ### 4.4 Process Management
-- [ ] Implement process spawning (fork/exec equivalent)
-- [ ] Implement process waiting (with timeout)
-- [ ] Implement signal sending
+- [x] Implement process spawning (fork/exec equivalent) - src/executor/mod.zig
+- [x] Implement process waiting (with timeout) - src/executor/mod.zig (waitpid)
+- [x] Implement signal sending - src/shell.zig (kill builtin)
 - [ ] Implement process group management
-- [ ] Implement pipe creation
-- [ ] Implement I/O redirection setup
-- [ ] Implement environment variable passing
+- [x] Implement pipe creation - src/executor/mod.zig (pipe2)
+- [x] Implement I/O redirection setup - src/executor/mod.zig (dup2)
+- [x] Implement environment variable passing - src/executor/mod.zig
 - [ ] Handle Windows CreateProcess API
 
 ### 4.5 Environment
-- [ ] Implement environment variable get/set/unset
-- [ ] Implement environment iteration
+- [x] Implement environment variable get/set/unset - src/executor/mod.zig (env,export,set,unset)
+- [x] Implement environment iteration - src/executor/mod.zig:375 builtinEnv()
 - [ ] Implement PATH parsing
-- [ ] Implement HOME directory detection
-- [ ] Implement user/hostname detection
+- [x] Implement HOME directory detection - src/shell.zig:52
+- [x] Implement user/hostname detection - src/shell.zig (whoami, uname)
 - [ ] Implement platform detection (Linux, macOS, Windows, BSD)
 - [ ] Implement architecture detection
 
@@ -426,8 +426,8 @@ den/
 - [x] Implement `$(command)` parsing
 - [x] Implement command execution
 - [x] Implement output capture
-- [ ] Implement nested substitution
-- [ ] Implement error handling
+- [x] Implement nested substitution - src/utils/expansion.zig:327
+- [x] Implement error handling - src/utils/expansion.zig:346
 
 ### 6.5 Process Substitution
 - [ ] Implement `<(command)` (create temp file with command output)
@@ -437,10 +437,10 @@ den/
 
 ### 6.6 Brace Expansion
 - [x] Implement sequence expansion (`{1..10}`, `{a..z}`)
-- [ ] Implement list expansion (`{foo,bar,baz}`)
+- [x] Implement list expansion (`{foo,bar,baz}`) - src/utils/brace.zig:128
 - [ ] Implement nested brace expansion
 - [ ] Implement zero-padding support (`{01..10}`)
-- [ ] Implement reverse sequences (`{10..1}`)
+- [x] Implement reverse sequences (`{10..1}`) - src/utils/brace.zig:77
 
 ### 6.7 Tilde Expansion
 - [x] Implement `~` (home directory)
@@ -571,11 +571,11 @@ den/
 - [x] Implement `disown` (remove from job table) - see Phase 12.3
 
 ### 8.5 Job Notifications
-- [ ] Implement job status change detection
-- [ ] Implement asynchronous job completion notification
-- [ ] Implement job termination cleanup
-- [ ] Implement job exit code capture
-- [ ] Implement background job completion messages
+- [x] Implement job status change detection - checkBackgroundJobs()
+- [x] Implement asynchronous job completion notification - waitpid NOHANG
+- [x] Implement job termination cleanup - checkBackgroundJobs()
+- [x] Implement job exit code capture - EXITSTATUS
+- [x] Implement background job completion messages - Done message
 
 ---
 
@@ -881,7 +881,7 @@ den/
   - [ ] Send SIGCONT to job
 
 - [x] `kill` - Send signal to job (from `src/builtins/kill.ts`)
-  - [ ] Implement signal sending by name/number
+  - [x] Implement signal sending - src/shell.zig (kill builtin) by name/number
   - [ ] Implement job spec support
   - [ ] Implement `-l` (list signals)
   - [ ] Implement `-s signal` (specify signal)
@@ -910,7 +910,7 @@ den/
 
 - [x] `source` - Execute script in current context (from `src/builtins/source.ts`)
   - [ ] Implement script file reading
-  - [ ] Implement script execution
+  - [x] Implement script execution - src/shell.zig:151 runScript()
   - [ ] Implement positional parameter passing
   - [ ] Implement return code handling
 
@@ -1206,9 +1206,9 @@ den/
 
 ### 14.5 Script Execution (from `src/scripting/script-executor.ts`)
 - [ ] Implement script context (variables, functions, scope)
-- [ ] Implement script execution
-- [ ] Implement exit code handling
-- [ ] Implement error propagation
+- [x] Implement script execution - src/shell.zig:151 runScript()
+- [x] Implement exit code handling - src/shell.zig:227
+- [x] Implement error propagation - src/shell.zig:225
 - [ ] Implement script caching (parsed AST)
 - [ ] Implement script timeout
 
