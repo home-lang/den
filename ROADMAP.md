@@ -399,7 +399,7 @@ den/
 - [x] Implement `${VAR:offset:length}` (substring)
 
 ### 6.2 Special Variables
-- [ ] Implement `$0` (shell name)
+- [x] Implement `$0` (shell name)
 - [ ] Implement `$1`, `$2`, ... (positional parameters)
 - [ ] Implement `$@` (all arguments, separately quoted)
 - [ ] Implement `$*` (all arguments, single string)
@@ -411,8 +411,8 @@ den/
 - [ ] Implement `$_` (last argument of previous command)
 
 ### 6.3 Arithmetic Expansion
-- [ ] Implement `$((expression))` parser
-- [ ] Implement arithmetic operators (+, -, *, /, %, **)
+- [x] Implement `$((expression))` parser
+- [x] Implement arithmetic operators (+, -, *, /, %, **)
 - [ ] Implement comparison operators (<, >, <=, >=, ==, !=)
 - [ ] Implement logical operators (&&, ||, !)
 - [ ] Implement bitwise operators (&, |, ^, ~, <<, >>)
@@ -436,7 +436,7 @@ den/
 - [ ] Implement cleanup on command completion
 
 ### 6.6 Brace Expansion
-- [ ] Implement sequence expansion (`{1..10}`, `{a..z}`)
+- [x] Implement sequence expansion (`{1..10}`, `{a..z}`)
 - [ ] Implement list expansion (`{foo,bar,baz}`)
 - [ ] Implement nested brace expansion
 - [ ] Implement zero-padding support (`{01..10}`)

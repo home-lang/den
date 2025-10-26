@@ -48,7 +48,11 @@ echo 'echo "Hello from Den!"' | ./zig-out/bin/den
 - **Background Jobs**: Job control with `&`, `jobs`, `fg`, `bg`
 - **Boolean Operators**: Conditional execution with `&&` and `||`
 - **Command Chaining**: Sequential commands with `;`
-- **Variable Expansion**: `$VAR`, `${VAR}`, `${VAR:-default}`
+- **Variable Expansion**: `$VAR`, `${VAR}`, `${VAR:-default}`, special vars (`$?`, `$$`, `$0-$9`, `$@`, `$*`, `$#`)
+- **Command Substitution**: `$(command)` for capturing command output
+- **Arithmetic Expansion**: `$((expression))` with `+`, `-`, `*`, `/`, `%`, `**` operators
+- **Brace Expansion**: Sequences `{1..10}`, `{a..z}` and lists `{foo,bar,baz}`
+- **Tilde Expansion**: `~` for home directory
 - **Glob Expansion**: Pattern matching (`*.zig`, `**/*.txt`)
 - **Command History**: Persistent history with search
 - **Tab Completion**: Smart completion for commands and file paths
@@ -207,13 +211,16 @@ Contributions are welcome! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md)
 - 54 essential builtin commands
 - Job control and process management (jobs, fg, bg, kill, wait, disown)
 - History and tab completion
-- Variable expansion ($VAR, ${VAR:-default}, $?, $$)
-- **Command substitution** ($(command)) ← NEW!
+- Variable expansion ($VAR, ${VAR:-default}, special vars: $?, $$, $0-$9, $@, $*, $#)
+- Command substitution ($(command))
+- Arithmetic expansion ($((expr)) with +, -, *, /, %, ** operators)
+- **Brace expansion** ({1..10}, {a..z}, {foo,bar,baz}) ← NEW!
 - Tilde expansion (~, ~/path)
 - Glob expansion (*.txt, **/*.zig)
 - Pipelines, redirections, and operators
 - Script control builtins (return, break, continue, local, declare, readonly)
 - Advanced execution (exec, builtin, trap, getopts, times)
+- Script execution with positional parameters
 
 **🔮 Future Enhancements** (Optional):
 - Advanced scripting (if/while/for/case control flow)

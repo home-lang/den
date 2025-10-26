@@ -1,4 +1,5 @@
 const std = @import("std");
+const Arithmetic = @import("arithmetic.zig").Arithmetic;
 
 /// Variable expansion utilities
 pub const Expansion = struct {
@@ -125,13 +126,89 @@ pub const Expansion = struct {
                 const value = try std.fmt.allocPrint(self.allocator, "{d}", .{pid});
                 return ExpansionResult{ .value = value, .consumed = 2 };
             },
-            '0'...'9' => {
-                // $0, $1, etc. - positional arguments (TODO: implement when we have functions)
+            '#' => {
+                // $# - number of positional parameters
+                const value = try std.fmt.allocPrint(self.allocator, "{d}", .{self.positional_params.len});
+                return ExpansionResult{ .value = value, .consumed = 2 };
+            },
+            '@' => {
+                // $@ - all positional parameters as separate words
+                if (self.positional_params.len == 0) {
+                    return ExpansionResult{ .value = "", .consumed = 2 };
+                }
+                // Calculate total length needed
+                var total_len: usize = 0;
+                for (self.positional_params) |param| {
+                    total_len += param.len;
+                }
+                if (self.positional_params.len > 1) {
+                    total_len += self.positional_params.len - 1; // spaces
+                }
+
+                // Build result string
+                var result = try self.allocator.alloc(u8, total_len);
+                var pos: usize = 0;
+                for (self.positional_params, 0..) |param, i| {
+                    @memcpy(result[pos..pos + param.len], param);
+                    pos += param.len;
+                    if (i < self.positional_params.len - 1) {
+                        result[pos] = ' ';
+                        pos += 1;
+                    }
+                }
+                return ExpansionResult{ .value = result, .consumed = 2 };
+            },
+            '*' => {
+                // $* - all positional parameters as single word
+                if (self.positional_params.len == 0) {
+                    return ExpansionResult{ .value = "", .consumed = 2 };
+                }
+                // Calculate total length needed
+                var total_len: usize = 0;
+                for (self.positional_params) |param| {
+                    total_len += param.len;
+                }
+                if (self.positional_params.len > 1) {
+                    total_len += self.positional_params.len - 1; // spaces
+                }
+
+                // Build result string
+                var result = try self.allocator.alloc(u8, total_len);
+                var pos: usize = 0;
+                for (self.positional_params, 0..) |param, i| {
+                    @memcpy(result[pos..pos + param.len], param);
+                    pos += param.len;
+                    if (i < self.positional_params.len - 1) {
+                        result[pos] = ' ';
+                        pos += 1;
+                    }
+                }
+                return ExpansionResult{ .value = result, .consumed = 2 };
+            },
+            '0' => {
+                // $0 - shell name or script name
+                const value = try self.allocator.dupe(u8, self.shell_name);
+                return ExpansionResult{ .value = value, .consumed = 2 };
+            },
+            '1'...'9' => {
+                // $1, $2, etc. - positional arguments
+                const digit = next_char - '0';
+                if (digit <= self.positional_params.len) {
+                    const value = try self.allocator.dupe(u8, self.positional_params[digit - 1]);
+                    return ExpansionResult{ .value = value, .consumed = 2 };
+                }
+                // Parameter not set - return empty string
                 return ExpansionResult{ .value = "", .consumed = 2 };
             },
             '(' => {
-                // $(command) - command substitution
-                return try self.expandCommandSubstitution(input);
+                // Check if it's $(( for arithmetic or $( for command substitution
+                if (input.len > 2 and input[2] == '(') {
+                    // $((expression)) - arithmetic expansion
+                    return try self.expandArithmetic(input);
+                } else {
+                    // $(command) - command substitution
+                    return try self.expandCommandSubstitution(input);
+                }
             },
             '{' => {
                 // ${VAR} - braced expansion
@@ -282,6 +359,45 @@ pub const Expansion = struct {
         _ = term;
 
         return output;
+    }
+
+    /// Expand $((expression)) - arithmetic expansion
+    fn expandArithmetic(self: *Expansion, input: []const u8) !ExpansionResult {
+        if (input.len < 4 or input[0] != '$' or input[1] != '(' or input[2] != '(') {
+            return ExpansionResult{ .value = "$", .consumed = 1 };
+        }
+
+        // Find matching closing parentheses ))
+        var depth: u32 = 2; // Start with depth 2 for ((
+        var end: usize = 3;
+        while (end < input.len and depth > 0) {
+            if (input[end] == '(') {
+                depth += 1;
+            } else if (input[end] == ')') {
+                depth -= 1;
+            }
+            if (depth > 0) end += 1;
+        }
+
+        if (depth != 0 or end >= input.len or input[end - 1] != ')') {
+            // Unmatched parentheses
+            return ExpansionResult{ .value = "$((", .consumed = 3 };
+        }
+
+        // Extract expression (between (( and ))
+        const expr = input[3..end - 1];
+
+        // Evaluate arithmetic expression
+        var arith = Arithmetic.init(self.allocator);
+        const result_value = arith.eval(expr) catch {
+            // On error, return 0
+            const value = try std.fmt.allocPrint(self.allocator, "0", .{});
+            return ExpansionResult{ .value = value, .consumed = end + 1 };
+        };
+
+        // Format result as string
+        const value = try std.fmt.allocPrint(self.allocator, "{d}", .{result_value});
+        return ExpansionResult{ .value = value, .consumed = end + 1 };
     }
 
     /// Expand tilde (~) to home directory

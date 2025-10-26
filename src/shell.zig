@@ -5,6 +5,7 @@ const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
 const Expansion = @import("utils/expansion.zig").Expansion;
 const Glob = @import("utils/glob.zig").Glob;
+const BraceExpander = @import("utils/brace.zig").BraceExpander;
 const Completion = @import("utils/completion.zig").Completion;
 
 /// Job status
@@ -39,6 +40,7 @@ pub const Shell = struct {
     dir_stack_count: usize,
     positional_params: [64]?[]const u8,
     positional_params_count: usize,
+    shell_name: []const u8,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         const config = types.DenConfig{};
@@ -75,6 +77,7 @@ pub const Shell = struct {
             .dir_stack_count = 0,
             .positional_params = [_]?[]const u8{null} ** 64,
             .positional_params_count = 0,
+            .shell_name = "den",
         };
 
         // Load history from file
@@ -118,6 +121,11 @@ pub const Shell = struct {
             if (maybe_param) |param| {
                 self.allocator.free(param);
             }
+        }
+
+        // Clean up shell_name if it was dynamically allocated
+        if (!std.mem.eql(u8, self.shell_name, "den")) {
+            self.allocator.free(self.shell_name);
         }
 
         // Clean up environment variables (values were allocated)
@@ -175,6 +183,45 @@ pub const Shell = struct {
 
             // Execute command
             try self.executeCommand(trimmed);
+        }
+    }
+
+    /// Run a script file with positional parameters
+    pub fn runScript(self: *Shell, script_path: []const u8, shell_name: []const u8, args: []const []const u8) !void {
+        // Set positional parameters for this script
+        var param_count: usize = 0;
+        for (args) |arg| {
+            if (param_count >= 9) break; // Only support $1-$9 for now
+            const param_copy = try self.allocator.dupe(u8, arg);
+            self.positional_params[param_count] = param_copy;
+            param_count += 1;
+        }
+        self.positional_params_count = param_count;
+
+        // Set shell name ($0)
+        const shell_name_copy = try self.allocator.dupe(u8, shell_name);
+        self.shell_name = shell_name_copy;
+
+        // Read script file
+        const file = try std.fs.cwd().openFile(script_path, .{});
+        defer file.close();
+
+        const file_content = try file.readToEndAlloc(self.allocator, 1024 * 1024); // Max 1MB
+        defer self.allocator.free(file_content);
+
+        // Split into lines and execute each one
+        var line_iter = std.mem.splitScalar(u8, file_content, '\n');
+        while (line_iter.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+
+            // Skip empty lines and comments
+            if (trimmed.len == 0 or trimmed[0] == '#') continue;
+
+            // Execute the line
+            self.executeCommand(trimmed) catch |err| {
+                try IO.print("Error executing '{s}': {}\n", .{ trimmed, err });
+                self.last_exit_code = 1;
+            };
         }
     }
 
@@ -408,8 +455,25 @@ pub const Shell = struct {
     }
 
     fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
-        var expander = Expansion.init(self.allocator, &self.environment, self.last_exit_code);
+        // Collect non-null positional params for the expander
+        var positional_params_slice: [64][]const u8 = undefined;
+        var param_count: usize = 0;
+        for (self.positional_params) |maybe_param| {
+            if (maybe_param) |param| {
+                positional_params_slice[param_count] = param;
+                param_count += 1;
+            }
+        }
+
+        var expander = Expansion.initWithParams(
+            self.allocator,
+            &self.environment,
+            self.last_exit_code,
+            positional_params_slice[0..param_count],
+            self.shell_name,
+        );
         var glob = Glob.init(self.allocator);
+        var brace = BraceExpander.init(self.allocator);
 
         // Get current working directory for glob expansion
         var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -421,7 +485,7 @@ pub const Shell = struct {
             self.allocator.free(cmd.name);
             cmd.name = expanded_name;
 
-            // Expand arguments (variables + globs)
+            // Expand arguments (variables + braces + globs)
             var expanded_args_buffer: [128][]const u8 = undefined;
             var expanded_args_count: usize = 0;
 
@@ -430,22 +494,33 @@ pub const Shell = struct {
                 const var_expanded = try expander.expand(arg);
                 defer self.allocator.free(var_expanded);
 
-                // Then expand globs
-                const glob_expanded = try glob.expand(var_expanded, cwd);
+                // Then expand braces
+                const brace_expanded = try brace.expand(var_expanded);
                 defer {
-                    for (glob_expanded) |path| {
-                        self.allocator.free(path);
+                    for (brace_expanded) |item| {
+                        self.allocator.free(item);
                     }
-                    self.allocator.free(glob_expanded);
+                    self.allocator.free(brace_expanded);
                 }
 
-                // Add all glob matches to args
-                for (glob_expanded) |path| {
-                    if (expanded_args_count >= expanded_args_buffer.len) {
-                        return error.TooManyArguments;
+                // Then expand globs on each brace expansion result
+                for (brace_expanded) |brace_item| {
+                    const glob_expanded = try glob.expand(brace_item, cwd);
+                    defer {
+                        for (glob_expanded) |path| {
+                            self.allocator.free(path);
+                        }
+                        self.allocator.free(glob_expanded);
                     }
-                    expanded_args_buffer[expanded_args_count] = try self.allocator.dupe(u8, path);
-                    expanded_args_count += 1;
+
+                    // Add all glob matches to args
+                    for (glob_expanded) |path| {
+                        if (expanded_args_count >= expanded_args_buffer.len) {
+                            return error.TooManyArguments;
+                        }
+                        expanded_args_buffer[expanded_args_count] = try self.allocator.dupe(u8, path);
+                        expanded_args_count += 1;
+                    }
                 }
 
                 // Free original arg
