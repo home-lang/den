@@ -1,5 +1,6 @@
 const std = @import("std");
 const shell = @import("shell.zig");
+const Completion = @import("utils/completion.zig").Completion;
 
 /// Den Shell CLI
 /// Provides command-line interface and subcommand handling
@@ -180,17 +181,44 @@ fn execCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 /// Get completions for input (JSON output)
-fn getCompletions(_: std.mem.Allocator, args: []const []const u8) !void {
+fn getCompletions(allocator: std.mem.Allocator, args: []const []const u8) !void {
     if (args.len == 0) {
         std.debug.print("Error: 'complete' requires input argument\n", .{});
         std.debug.print("Usage: den complete <input>\n", .{});
         return error.MissingInput;
     }
 
-    // TODO: Implement actual completion logic
-    // For now, return empty JSON array
+    // For simplicity, just use the first argument as the input to complete
+    const input = args[0];
 
-    std.debug.print("[]\n", .{});
+    // Initialize completion system
+    var comp = Completion.init(allocator);
+
+    // Determine what to complete
+    var completions: [][]const u8 = &[_][]const u8{};
+    defer {
+        for (completions) |c| allocator.free(c);
+        allocator.free(completions);
+    }
+
+    // Simple heuristic: if input contains '/' or starts with '.', complete files
+    // Otherwise, complete commands
+    if (std.mem.indexOf(u8, input, "/") != null or std.mem.startsWith(u8, input, ".")) {
+        completions = comp.completeFile(input) catch &[_][]const u8{};
+    } else {
+        // Get the last word to complete
+        const last_space = std.mem.lastIndexOfScalar(u8, input, ' ');
+        const word_to_complete = if (last_space) |idx| input[idx + 1 ..] else input;
+        completions = comp.completeCommand(word_to_complete) catch &[_][]const u8{};
+    }
+
+    // Output as JSON array
+    std.debug.print("[", .{});
+    for (completions, 0..) |completion, i| {
+        if (i > 0) std.debug.print(",", .{});
+        std.debug.print("\"{s}\"", .{completion});
+    }
+    std.debug.print("]\n", .{});
 }
 
 /// Create development shim

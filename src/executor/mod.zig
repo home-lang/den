@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
+const Expansion = @import("../utils/expansion.zig").Expansion;
 
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
@@ -77,11 +78,7 @@ pub const Executor = struct {
                     },
                     .semicolon, .background => {
                         // ; and & - always execute next command
-                        // TODO(executor): Implement proper background process handling
-                        // Issue: Background processes currently block instead of running async
-                        // Solution: Spawn process without waiting, add to job control
-                        // Related: Phase 11 - Job Control (see ROADMAP.md)
-                        // Priority: Medium - needed for full POSIX compliance
+                        // Background handling is implemented below in the execute logic
                     },
                 }
             }
@@ -107,18 +104,27 @@ pub const Executor = struct {
                 continue;
             }
 
-            // Execute single command
-            last_exit_code = try self.executeCommand(&chain.commands[i]);
+            // Check if this command should run in background
+            const run_in_background = i < chain.operators.len and chain.operators[i] == .background;
 
-            // Check for errexit option (set -e)
-            if (self.shell) |shell| {
-                if (shell.option_errexit and last_exit_code != 0) {
-                    // Exit on error if errexit is enabled
-                    try IO.eprint("den: command failed with exit code {d} (errexit enabled)\n", .{last_exit_code});
-                    if (shell.current_line > 0) {
-                        try IO.eprint("den: line {d}\n", .{shell.current_line});
+            if (run_in_background) {
+                // Execute command in background (don't wait for it)
+                try self.executeCommandBackground(&chain.commands[i]);
+                last_exit_code = 0; // Background commands always return 0
+            } else {
+                // Execute single command normally
+                last_exit_code = try self.executeCommand(&chain.commands[i]);
+
+                // Check for errexit option (set -e)
+                if (self.shell) |shell| {
+                    if (shell.option_errexit and last_exit_code != 0) {
+                        // Exit on error if errexit is enabled
+                        try IO.eprint("den: command failed with exit code {d} (errexit enabled)\n", .{last_exit_code});
+                        if (shell.current_line > 0) {
+                            try IO.eprint("den: line {d}\n", .{shell.current_line});
+                        }
+                        return last_exit_code;
                     }
-                    return last_exit_code;
                 }
             }
 
@@ -289,21 +295,66 @@ pub const Executor = struct {
                     std.posix.close(fd);
                 },
                 .heredoc, .herestring => {
-                    // TODO(executor): Implement heredoc/herestring support
-                    // Issue: Here-documents and here-strings not yet supported
-                    // Solution: Parse heredoc delimiter, collect lines until delimiter
-                    //           For herestring, expand string and pass as stdin
-                    // Related: Phase 7.3 - Heredoc/Herestring (see ROADMAP.md)
-                    // Priority: Medium - common shell feature
-                    try IO.eprint("den: heredoc/herestring not yet implemented\n", .{});
+                    // Create a pipe for the content
+                    const pipe_fds = try std.posix.pipe();
+                    const read_fd = pipe_fds[0];
+                    const write_fd = pipe_fds[1];
+
+                    // Write content to pipe
+                    const content = blk: {
+                        if (redir.kind == .herestring) {
+                            // For herestring, expand variables and use the content
+                            var expansion = Expansion.init(self.allocator, self.environment, 0);
+                            const expanded = expansion.expand(redir.target) catch redir.target;
+                            // Add newline for herestring
+                            var buf: [4096]u8 = undefined;
+                            const with_newline = std.fmt.bufPrint(&buf, "{s}\n", .{expanded}) catch redir.target;
+                            if (expanded.ptr != redir.target.ptr) {
+                                self.allocator.free(expanded);
+                            }
+                            break :blk try self.allocator.dupe(u8, with_newline);
+                        } else {
+                            // For heredoc, use the target as-is (it contains the content)
+                            // Note: Full heredoc support requires parser changes
+                            // This provides basic support for single-line heredocs
+                            break :blk try self.allocator.dupe(u8, redir.target);
+                        }
+                    };
+                    defer self.allocator.free(content);
+
+                    // Fork to write content (avoid blocking)
+                    const writer_pid = try std.posix.fork();
+                    if (writer_pid == 0) {
+                        // Child: write content and exit
+                        std.posix.close(read_fd);
+                        _ = std.posix.write(write_fd, content) catch {};
+                        std.posix.close(write_fd);
+                        std.posix.exit(0);
+                    }
+
+                    // Parent: close write end and dup read end to stdin
+                    std.posix.close(write_fd);
+                    try std.posix.dup2(read_fd, std.posix.STDIN_FILENO);
+                    std.posix.close(read_fd);
+
+                    // Wait for writer to finish
+                    _ = std.posix.waitpid(writer_pid, 0);
                 },
-                .fd_duplicate, .fd_close => {
-                    // TODO(executor): Implement file descriptor duplication and closing
-                    // Issue: Advanced fd operations (>&3, <&4, etc.) not supported
-                    // Solution: Implement dup2 for custom fd numbers, track open fds
-                    // Related: Phase 7.4 - Advanced Redirections (see ROADMAP.md)
-                    // Priority: Low - advanced feature, rarely used
-                    try IO.eprint("den: fd duplication/closing not yet implemented\n", .{});
+                .fd_duplicate => {
+                    // Parse target as file descriptor number
+                    // Format: N>&M or N<&M (duplicate fd M to fd N)
+                    const target_fd = std.fmt.parseInt(u32, redir.target, 10) catch {
+                        try IO.eprint("den: invalid file descriptor: {s}\n", .{redir.target});
+                        return error.InvalidFd;
+                    };
+
+                    // Duplicate the target_fd to redir.fd
+                    try std.posix.dup2(@intCast(target_fd), @intCast(redir.fd));
+                },
+                .fd_close => {
+                    // Close the specified file descriptor
+                    // Format: N>&- or N<&- (close fd N)
+                    std.posix.close(@intCast(redir.fd));
                 },
             }
         }
@@ -574,6 +625,60 @@ pub const Executor = struct {
             // Parent process - wait for child
             const result = std.posix.waitpid(pid, 0);
             return @intCast(std.posix.W.EXITSTATUS(result.status));
+        }
+    }
+
+    /// Execute command in background (don't wait for it to complete)
+    fn executeCommandBackground(self: *Executor, command: *types.ParsedCommand) !void {
+        // Check if it's a builtin - builtins can't run in background
+        if (self.isBuiltin(command.name)) {
+            try IO.eprint("den: cannot run builtin '{s}' in background\n", .{command.name});
+            return error.BuiltinBackground;
+        }
+
+        // Build argv (command name + args)
+        const argv_len = 1 + command.args.len;
+        var argv = try self.allocator.alloc(?[*:0]const u8, argv_len + 1);
+        defer self.allocator.free(argv);
+
+        // Allocate command name as null-terminated string
+        const cmd_z = try self.allocator.dupeZ(u8, command.name);
+        defer self.allocator.free(cmd_z);
+        argv[0] = cmd_z.ptr;
+
+        // Allocate args as null-terminated strings
+        var arg_zs = try self.allocator.alloc([:0]u8, command.args.len);
+        defer {
+            for (arg_zs) |arg_z| {
+                self.allocator.free(arg_z);
+            }
+            self.allocator.free(arg_zs);
+        }
+
+        for (command.args, 0..) |arg, i| {
+            arg_zs[i] = try self.allocator.dupeZ(u8, arg);
+            argv[i + 1] = arg_zs[i].ptr;
+        }
+        argv[argv_len] = null;
+
+        // Fork and exec
+        const pid = try std.posix.fork();
+
+        if (pid == 0) {
+            // Child process - apply redirections before exec
+            self.applyRedirections(command.redirections) catch {
+                std.posix.exit(1);
+            };
+
+            _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), @ptrCast(std.os.environ.ptr)) catch {
+                // If execvpe returns, it failed
+                IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
+                std.posix.exit(127);
+            };
+            unreachable;
+        } else {
+            // Parent process - DON'T wait, just print the PID
+            try IO.print("[{d}]\n", .{pid});
         }
     }
 };

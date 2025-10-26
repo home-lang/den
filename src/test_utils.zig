@@ -227,13 +227,22 @@ pub const ShellFixture = struct {
         child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Pipe;
 
-        // TODO(test-utils): Environment variable passing needs proper lifetime management
-        // Issue: EnvMap needs to outlive child process spawn
-        // Solution: Use heap-allocated EnvMap or Child-owned env_map
-        // Priority: Low - not critical for core test functionality
-        // Skip for now to avoid process hanging
+        // Pass environment variables to child process
+        if (self.env_vars.count() > 0) {
+            var env_map = std.process.EnvMap.init(self.allocator);
+            defer env_map.deinit();
 
-        try child.spawn();
+            // Copy all environment variables
+            var it = self.env_vars.iterator();
+            while (it.next()) |entry| {
+                try env_map.put(entry.key_ptr.*, entry.value_ptr.*);
+            }
+
+            child.env_map = &env_map;
+            try child.spawn();
+        } else {
+            try child.spawn();
+        }
 
         // Use fixed buffers instead of ArrayList
         var stdout_buf: [1024 * 1024]u8 = undefined;
@@ -336,20 +345,21 @@ test "TestAssert.expectEndsWith works" {
     try TestAssert.expectEndsWith("hello world", "world");
 }
 
-// TODO(test-utils): Re-enable once environment variable passing is fixed
-// Issue: ShellFixture.exec() needs env var lifetime management fixes
-// Blocked by: TODO above (line 235)
-// Priority: Low - environment variable setting/getting already works
-// Test disabled to prevent hanging during test execution
-//
-// test "ShellFixture environment variables" {
-//     const allocator = std.testing.allocator;
-//
-//     var fixture = try ShellFixture.init(allocator);
-//     defer fixture.deinit();
-//
-//     try fixture.setEnv("TEST_VAR", "test_value");
-//
-//     const value = fixture.getEnv("TEST_VAR");
-//     try TestAssert.expectEqualStrings("test_value", value.?);
-// }
+test "ShellFixture environment variables" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    try fixture.setEnv("TEST_VAR", "test_value");
+
+    const value = fixture.getEnv("TEST_VAR");
+    try TestAssert.expectEqualStrings("test_value", value.?);
+
+    // Test that env vars are passed to child processes
+    const result = try fixture.exec("echo $TEST_VAR");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try TestAssert.expectContains(result.stdout, "test_value");
+}
