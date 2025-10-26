@@ -174,6 +174,9 @@ pub const Shell = struct {
         // Expand variables in all commands
         try self.expandCommandChain(&chain);
 
+        // Expand aliases in command names
+        try self.expandAliases(&chain);
+
         // Check for shell-context builtins (jobs, history, etc.)
         if (chain.commands.len == 1 and chain.operators.len == 0) {
             const cmd = &chain.commands[0];
@@ -193,6 +196,22 @@ pub const Shell = struct {
                 return;
             } else if (std.mem.eql(u8, cmd.name, "complete")) {
                 try self.builtinComplete(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "alias")) {
+                try self.builtinAlias(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "unalias")) {
+                try self.builtinUnalias(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "type")) {
+                try self.builtinType(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "which")) {
+                try self.builtinWhich(cmd);
                 self.last_exit_code = 0;
                 return;
             }
@@ -692,6 +711,181 @@ pub const Shell = struct {
                 for (matches) |match| {
                     try IO.print("{s}\n", .{match});
                 }
+            }
+        }
+    }
+
+    /// Expand aliases in command chain
+    fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
+        for (chain.commands) |*cmd| {
+            if (self.aliases.get(cmd.name)) |alias_value| {
+                // Replace command name with alias value
+                const expanded = try self.allocator.dupe(u8, alias_value);
+                self.allocator.free(cmd.name);
+                cmd.name = expanded;
+            }
+        }
+    }
+
+    /// Builtin: alias - define or list aliases
+    fn builtinAlias(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            // List all aliases
+            var iter = self.aliases.iterator();
+            while (iter.next()) |entry| {
+                try IO.print("alias {s}='{s}'\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+            }
+        } else {
+            // Parse alias definition: name=value
+            for (cmd.args) |arg| {
+                if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
+                    const name = arg[0..eq_pos];
+                    const value = arg[eq_pos + 1 ..];
+
+                    // Remove quotes if present
+                    const clean_value = if (value.len >= 2 and
+                        ((value[0] == '\'' and value[value.len - 1] == '\'') or
+                        (value[0] == '"' and value[value.len - 1] == '"')))
+                        value[1 .. value.len - 1]
+                    else
+                        value;
+
+                    // Store alias
+                    const name_copy = try self.allocator.dupe(u8, name);
+                    const value_copy = try self.allocator.dupe(u8, clean_value);
+
+                    // Free old value if exists
+                    if (self.aliases.get(name)) |old_value| {
+                        self.allocator.free(old_value);
+                    }
+
+                    try self.aliases.put(name_copy, value_copy);
+                } else {
+                    // Show specific alias
+                    if (self.aliases.get(arg)) |value| {
+                        try IO.print("alias {s}='{s}'\n", .{ arg, value });
+                    } else {
+                        try IO.eprint("den: alias: {s}: not found\n", .{arg});
+                    }
+                }
+            }
+        }
+    }
+
+    /// Builtin: unalias - remove alias
+    fn builtinUnalias(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: unalias: usage: unalias name [name ...]\n", .{});
+            return;
+        }
+
+        for (cmd.args) |name| {
+            if (self.aliases.fetchRemove(name)) |kv| {
+                self.allocator.free(kv.key);
+                self.allocator.free(kv.value);
+            } else {
+                try IO.eprint("den: unalias: {s}: not found\n", .{name});
+            }
+        }
+    }
+
+    /// Builtin: type - identify command type
+    fn builtinType(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: type: usage: type name [name ...]\n", .{});
+            return;
+        }
+
+        const builtins = [_][]const u8{
+            "cd",      "pwd",      "echo",    "exit",  "env",
+            "export",  "set",      "unset",   "jobs",  "fg",
+            "bg",      "history",  "complete", "alias", "unalias",
+            "type",    "which",
+        };
+
+        for (cmd.args) |name| {
+            // Check if it's an alias
+            if (self.aliases.get(name)) |alias_value| {
+                try IO.print("{s} is aliased to `{s}'\n", .{ name, alias_value });
+                continue;
+            }
+
+            // Check if it's a builtin
+            var is_builtin = false;
+            for (builtins) |builtin| {
+                if (std.mem.eql(u8, name, builtin)) {
+                    try IO.print("{s} is a shell builtin\n", .{name});
+                    is_builtin = true;
+                    break;
+                }
+            }
+            if (is_builtin) continue;
+
+            // Check if it's in PATH
+            var completion = Completion.init(self.allocator);
+            const matches = try completion.completeCommand(name);
+            defer {
+                for (matches) |match| {
+                    self.allocator.free(match);
+                }
+                self.allocator.free(matches);
+            }
+
+            if (matches.len > 0) {
+                // Find exact match
+                for (matches) |match| {
+                    if (std.mem.eql(u8, match, name)) {
+                        // Find full path
+                        const path = std.posix.getenv("PATH") orelse "";
+                        var path_iter = std.mem.splitScalar(u8, path, ':');
+                        while (path_iter.next()) |dir_path| {
+                            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                            const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, name }) catch continue;
+
+                            // Check if file exists
+                            std.fs.cwd().access(full_path, .{}) catch continue;
+                            try IO.print("{s} is {s}\n", .{ name, full_path });
+                            break;
+                        }
+                        break;
+                    }
+                }
+            } else {
+                try IO.eprint("den: type: {s}: not found\n", .{name});
+            }
+        }
+    }
+
+    /// Builtin: which - locate command in PATH
+    fn builtinWhich(self: *Shell, cmd: *types.ParsedCommand) !void {
+        _ = self;
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: which: usage: which name [name ...]\n", .{});
+            return;
+        }
+
+        for (cmd.args) |name| {
+            const path = std.posix.getenv("PATH") orelse "";
+            var path_iter = std.mem.splitScalar(u8, path, ':');
+            var found = false;
+
+            while (path_iter.next()) |dir_path| {
+                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, name }) catch continue;
+
+                // Check if file exists and is executable
+                const stat = std.fs.cwd().statFile(full_path) catch continue;
+                const is_executable = (stat.mode & 0o111) != 0;
+
+                if (is_executable) {
+                    try IO.print("{s}\n", .{full_path});
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                try IO.eprint("den: which: {s}: not found\n", .{name});
             }
         }
     }

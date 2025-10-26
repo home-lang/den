@@ -14,7 +14,7 @@
 - ✅ **REPL Loop**: Interactive prompt with line reading
 - ✅ **Command Parsing**: Full tokenizer and parser
 - ✅ **External Command Execution**: Fork/exec working
-- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete implemented
+- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete, alias, unalias, type, which implemented
 - ✅ **I/O**: stdin/stdout via Zig 0.15 POSIX APIs
 - ✅ **Pipeline Execution**: Multi-stage pipelines fully working (`ls | grep foo | head -3`)
 - ✅ **Boolean Operators**: `&&` and `||` with short-circuit evaluation
@@ -26,9 +26,11 @@
 - ✅ **Job Control**: `jobs`, `fg`, `bg` commands for managing background processes
 - ✅ **Command History**: Persistent history with file storage and `history` command
 - ✅ **Tab Completion**: Command and file completion with `complete` builtin
+- ✅ **Aliases**: Define and expand command aliases
+- ✅ **Command Introspection**: `type` and `which` commands
 - ✅ **Exit Handling**: Ctrl+D and `exit` command
 
-### Completed Phases (0-16)
+### Completed Phases (0-17)
 
 **Phase 0: Pre-Migration** ✅
 - Renamed Krusty → Den across critical files
@@ -146,6 +148,16 @@
 - Alphabetical sorting of results
 - Directory trailing slash support
 
+**Phase 17: Essential Builtins** ✅ **NEW!**
+- `alias` - define command aliases
+- `alias name=value` - create alias
+- `alias` - list all aliases
+- `unalias name` - remove alias
+- `type name` - identify command type (alias/builtin/command)
+- `which name` - locate command in PATH
+- Alias expansion in command execution
+- Quote handling in alias definitions
+
 ---
 
 ## 📊 Statistics
@@ -153,14 +165,14 @@
 | Metric | Value |
 |--------|-------|
 | **Zig Files** | 15 |
-| **Lines of Zig** | ~2,946 |
+| **Lines of Zig** | ~3,140 |
 | **TypeScript Files Remaining** | 141 |
 | **TypeScript LOC** | ~28,712 |
 | **Progress** | ~8% of codebase ported |
 | **Binary Size (Debug)** | ~880KB |
 | **Build Time** | <2 seconds |
-| **Builtins Implemented** | 13 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg, history, complete) |
-| **Phases Completed** | 16 out of 22 (73%) |
+| **Builtins Implemented** | 17 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg, history, complete, alias, unalias, type, which) |
+| **Phases Completed** | 17 out of 22 (77%) |
 
 ---
 
@@ -371,7 +383,31 @@ $ printf "complete -f src/shell\nexit\n" | ./zig-out/bin/den
 den> src/shell.zig
 ```
 
-**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, history, and tab completion fully working!** ✅
+### Aliases and Command Introspection
+```bash
+# Define and list aliases
+$ printf "alias ll='ls -la'\nalias\nexit\n" | ./zig-out/bin/den
+den> alias ll='ls -la'
+
+# Remove alias
+$ printf "alias test=echo\nalias\nunalias test\nalias\nexit\n" | ./zig-out/bin/den
+den> alias test='echo'
+den>
+
+# Type command - identify command types
+$ printf "type cd\ntype ls\ntype foo\nexit\n" | ./zig-out/bin/den
+den> cd is a shell builtin
+den> ls is /Users/chrisbreuer/.local/bin/ls
+den> den: type: foo: not found
+
+# Which command - locate in PATH
+$ printf "which ls\nwhich zig\nwhich notfound\nexit\n" | ./zig-out/bin/den
+den> /Users/chrisbreuer/.local/bin/ls
+den> /Users/chrisbreuer/.local/share/launchpad/envs/.../bin/zig
+den> den: which: notfound: not found
+```
+
+**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, history, tab completion, and aliases fully working!** ✅
 
 ---
 
