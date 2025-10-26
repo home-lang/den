@@ -1,17 +1,17 @@
 {
-  "name": "krusty",
+  "name": "den",
   "type": "module",
   "version": "0.1.0",
   "description": "A performant & customizable, cross-platform shell for your terminal.",
   "author": "Chris Breuer <chris@stacksjs.org>",
   "license": "MIT",
-  "homepage": "https://github.com/stacksjs/krusty#readme",
+  "homepage": "https://github.com/stacksjs/den#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/stacksjs/krusty.git"
+    "url": "git+https://github.com/stacksjs/den.git"
   },
   "bugs": {
-    "url": "https://github.com/stacksjs/krusty/issues"
+    "url": "https://github.com/stacksjs/den/issues"
   },
   "keywords": ["typescript", "shell", "cross-platform", "bun"],
   "exports": {
@@ -26,25 +26,25 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "krusty": "./dist/bin/cli.js"
+    "den": "./dist/bin/cli.js"
   },
   "files": ["README.md", "dist"],
   "scripts": {
     "build": "bun --bun build.ts",
-    "compile": "bun build ./bin/cli.ts --compile --minify --outfile bin/krusty",
+    "compile": "bun build ./bin/cli.ts --compile --minify --outfile bin/den",
     "compile:all": "bun run compile:linux-x64 && bun run compile:linux-arm64 && bun run compile:windows-x64 && bun run compile:darwin-x64 && bun run compile:darwin-arm64",
-    "compile:linux-x64": "bun build ./bin/cli.ts --compile --minify --target=bun-linux-x64 --outfile bin/krusty-linux-x64",
-    "compile:linux-arm64": "bun build ./bin/cli.ts --compile --minify --target=bun-linux-arm64 --outfile bin/krusty-linux-arm64",
-    "compile:windows-x64": "bun build ./bin/cli.ts --compile --minify --target=bun-windows-x64 --outfile bin/krusty-windows-x64.exe",
-    "compile:darwin-x64": "bun build ./bin/cli.ts --compile --minify --target=bun-darwin-x64 --outfile bin/krusty-darwin-x64",
-    "compile:darwin-arm64": "bun build ./bin/cli.ts --compile --minify --target=bun-darwin-arm64 --outfile bin/krusty-darwin-arm64",
+    "compile:linux-x64": "bun build ./bin/cli.ts --compile --minify --target=bun-linux-x64 --outfile bin/den-linux-x64",
+    "compile:linux-arm64": "bun build ./bin/cli.ts --compile --minify --target=bun-linux-arm64 --outfile bin/den-linux-arm64",
+    "compile:windows-x64": "bun build ./bin/cli.ts --compile --minify --target=bun-windows-x64 --outfile bin/den-windows-x64.exe",
+    "compile:darwin-x64": "bun build ./bin/cli.ts --compile --minify --target=bun-darwin-x64 --outfile bin/den-darwin-x64",
+    "compile:darwin-arm64": "bun build ./bin/cli.ts --compile --minify --target=bun-darwin-arm64 --outfile bin/den-darwin-arm64",
     "zip": "bun run zip:all",
     "zip:all": "bun run zip:linux-x64 && bun run zip:linux-arm64 && bun run zip:windows-x64 && bun run zip:darwin-x64 && bun run zip:darwin-arm64",
-    "zip:linux-x64": "zip -j bin/krusty-linux-x64.zip bin/krusty-linux-x64",
-    "zip:linux-arm64": "zip -j bin/krusty-linux-arm64.zip bin/krusty-linux-arm64",
-    "zip:windows-x64": "zip -j bin/krusty-windows-x64.zip bin/krusty-windows-x64.exe",
-    "zip:darwin-x64": "zip -j bin/krusty-darwin-x64.zip bin/krusty-darwin-x64",
-    "zip:darwin-arm64": "zip -j bin/krusty-darwin-arm64.zip bin/krusty-darwin-arm64",
+    "zip:linux-x64": "zip -j bin/den-linux-x64.zip bin/den-linux-x64",
+    "zip:linux-arm64": "zip -j bin/den-linux-arm64.zip bin/den-linux-arm64",
+    "zip:windows-x64": "zip -j bin/den-windows-x64.zip bin/den-windows-x64.exe",
+    "zip:darwin-x64": "zip -j bin/den-darwin-x64.zip bin/den-darwin-x64",
+    "zip:darwin-arm64": "zip -j bin/den-darwin-arm64.zip bin/den-darwin-arm64",
     "fresh": "bunx rimraf node_modules/ bun.lock && bun i",
     "prepublishOnly": "bun --bun run build && bun run compile:all && bun run zip",
     "test": "bun test",
