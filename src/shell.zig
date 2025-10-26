@@ -6,6 +6,13 @@ const IO = @import("utils/io.zig").IO;
 const Expansion = @import("utils/expansion.zig").Expansion;
 const Glob = @import("utils/glob.zig").Glob;
 
+/// Background job information
+const BackgroundJob = struct {
+    pid: std.posix.pid_t,
+    job_id: usize,
+    command: []const u8,
+};
+
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     running: bool,
@@ -13,6 +20,9 @@ pub const Shell = struct {
     environment: std.StringHashMap([]const u8),
     aliases: std.StringHashMap([]const u8),
     last_exit_code: i32,
+    background_jobs: [16]?BackgroundJob,
+    background_jobs_count: usize,
+    next_job_id: usize,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         const config = types.DenConfig{};
@@ -34,10 +44,20 @@ pub const Shell = struct {
             .environment = env,
             .aliases = std.StringHashMap([]const u8).init(allocator),
             .last_exit_code = 0,
+            .background_jobs = [_]?BackgroundJob{null} ** 16,
+            .background_jobs_count = 0,
+            .next_job_id = 1,
         };
     }
 
     pub fn deinit(self: *Shell) void {
+        // Clean up background jobs
+        for (self.background_jobs) |maybe_job| {
+            if (maybe_job) |job| {
+                self.allocator.free(job.command);
+            }
+        }
+
         self.environment.deinit();
         self.aliases.deinit();
     }
@@ -49,6 +69,9 @@ pub const Shell = struct {
         try IO.print("Type 'exit' to quit or Ctrl+D to exit.\n\n", .{});
 
         while (self.running) {
+            // Check for completed background jobs
+            try self.checkBackgroundJobs();
+
             // Render prompt
             try self.renderPrompt();
 
@@ -108,15 +131,40 @@ pub const Shell = struct {
         // Expand variables in all commands
         try self.expandCommandChain(&chain);
 
-        // Execute
-        var executor = executor_mod.Executor.init(self.allocator, &self.environment);
-        const exit_code = executor.executeChain(&chain) catch |err| {
-            try IO.eprint("den: execution error: {}\n", .{err});
-            self.last_exit_code = 1;
-            return;
-        };
+        // Check if this is a background job (last operator is &)
+        const is_background = chain.operators.len > 0 and
+            chain.operators[chain.operators.len - 1] == .background;
 
-        self.last_exit_code = exit_code;
+        if (is_background) {
+            // Execute in background
+            try self.executeInBackground(&chain, input);
+            self.last_exit_code = 0;
+        } else {
+            // Execute normally
+            var executor = executor_mod.Executor.init(self.allocator, &self.environment);
+            const exit_code = executor.executeChain(&chain) catch |err| {
+                try IO.eprint("den: execution error: {}\n", .{err});
+                self.last_exit_code = 1;
+                return;
+            };
+
+            self.last_exit_code = exit_code;
+        }
+    }
+
+    fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_input: []const u8) !void {
+        // Fork the process
+        const pid = try std.posix.fork();
+
+        if (pid == 0) {
+            // Child process - execute the chain
+            var executor = executor_mod.Executor.init(self.allocator, &self.environment);
+            const exit_code = executor.executeChain(chain) catch 1;
+            std.posix.exit(@intCast(exit_code));
+        } else {
+            // Parent process - add to background jobs
+            try self.addBackgroundJob(pid, original_input);
+        }
     }
 
     fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
@@ -177,6 +225,63 @@ pub const Shell = struct {
                 cmd.redirections[i].target = expanded_target;
             }
         }
+    }
+
+    fn checkBackgroundJobs(self: *Shell) !void {
+        var i: usize = 0;
+        while (i < self.background_jobs.len) {
+            if (self.background_jobs[i]) |job| {
+                // Check if job has completed (non-blocking waitpid)
+                const result = std.posix.waitpid(job.pid, std.posix.W.NOHANG);
+
+                if (result.pid == job.pid) {
+                    // Job completed
+                    const exit_status = std.posix.W.EXITSTATUS(result.status);
+                    try IO.print("[{d}]  Done ({d})    {s}\n", .{ job.job_id, exit_status, job.command });
+
+                    // Free command string and remove from array
+                    self.allocator.free(job.command);
+                    self.background_jobs[i] = null;
+                    self.background_jobs_count -= 1;
+                    // Don't increment i, check this slot again
+                } else {
+                    // Job still running
+                    i += 1;
+                }
+            } else {
+                // Empty slot
+                i += 1;
+            }
+        }
+    }
+
+    pub fn addBackgroundJob(self: *Shell, pid: std.posix.pid_t, command: []const u8) !void {
+        // Find first empty slot
+        var slot_index: ?usize = null;
+        for (self.background_jobs, 0..) |maybe_job, i| {
+            if (maybe_job == null) {
+                slot_index = i;
+                break;
+            }
+        }
+
+        if (slot_index == null) {
+            return error.TooManyBackgroundJobs;
+        }
+
+        const job_id = self.next_job_id;
+        self.next_job_id += 1;
+
+        const command_copy = try self.allocator.dupe(u8, command);
+
+        self.background_jobs[slot_index.?] = BackgroundJob{
+            .pid = pid,
+            .job_id = job_id,
+            .command = command_copy,
+        };
+        self.background_jobs_count += 1;
+
+        try IO.print("[{d}] {d}\n", .{ job_id, pid });
     }
 };
 

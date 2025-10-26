@@ -50,6 +50,11 @@ pub const Parser = struct {
             operators_buffer[op_count] = op;
             op_count += 1;
 
+            // Background operator can be at end of input
+            if (op == .background) {
+                break;
+            }
+
             if (self.pos >= self.tokens.len) {
                 return error.UnexpectedEndOfInput;
             }

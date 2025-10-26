@@ -22,9 +22,10 @@
 - ✅ **File Redirections**: `>`, `>>`, `<`, `2>` all working
 - ✅ **Variable Expansion**: `$VAR`, `${VAR}`, `${VAR:-default}`, `$?`, `$$`
 - ✅ **Glob Expansion**: `*.txt`, `src/**/*.zig`, pattern matching
+- ✅ **Background Jobs**: `&` operator with job tracking and completion notifications
 - ✅ **Exit Handling**: Ctrl+D and `exit` command
 
-### Completed Phases (0-12)
+### Completed Phases (0-13)
 
 **Phase 0: Pre-Migration** ✅
 - Renamed Krusty → Den across critical files
@@ -68,7 +69,6 @@
 - Pipe creation and fd management (up to 16 pipes)
 - Boolean operators (`&&`, `||`) with short-circuit evaluation
 - Sequential execution (`;`)
-- Background operator (`&`) parsing (execution pending)
 - Process synchronization and exit code propagation
 
 **Phase 9: File Redirection** ✅
@@ -95,7 +95,7 @@
 - Variable persistence across commands
 - Memory management for variable lifecycle
 
-**Phase 12: Glob Expansion** ✅ **NEW!**
+**Phase 12: Glob Expansion** ✅
 - Wildcard `*` - matches any characters
 - Wildcard `?` - matches single character
 - Character classes `[abc]` - matches any char in set
@@ -103,6 +103,15 @@
 - Combined with variable expansion (`$DIR/*.txt`)
 - Alphabetical sorting of matches
 - Fixed buffer (256 matches max)
+
+**Phase 13: Background Jobs** ✅ **NEW!**
+- Background operator (`&`) execution
+- Fork-based asynchronous job execution
+- Job tracking with PID, job ID, and command
+- Non-blocking job status checks (waitpid with NOHANG)
+- Completion notifications with exit codes
+- Multiple concurrent jobs (up to 16)
+- Fixed array job tracking structure
 
 ---
 
@@ -118,7 +127,7 @@
 | **Binary Size (Debug)** | ~880KB |
 | **Build Time** | <2 seconds |
 | **Builtins Implemented** | 8 (echo, pwd, cd, env, export, set, unset, exit) |
-| **Phases Completed** | 12 out of 22 (55%) |
+| **Phases Completed** | 13 out of 22 (59%) |
 
 ---
 
@@ -228,7 +237,24 @@ $ printf "export DIR=src\necho \$DIR/*.zig\nexit\n" | ./zig-out/bin/den
 den> den> src/main.zig src/shell.zig
 ```
 
-**All shell operations including pipelines, operators, redirections, variables, builtins, and glob expansion fully working!** ✅
+### Background Jobs
+```bash
+$ printf "sleep 1 &\necho Immediate command\nsleep 2\nexit\n" | timeout 5 ./zig-out/bin/den
+den> [1] 96503
+den> Immediate command
+den> [1]  Done (0)    sleep 1 &
+den> Goodbye from Den!
+
+$ printf "sleep 1 &\nsleep 2 &\necho Both started\nsleep 3\nexit\n" | timeout 6 ./zig-out/bin/den
+den> [1] 96610
+den> [2] 96612
+den> Both started
+den> [1]  Done (0)    sleep 1 &
+[2]  Done (0)    sleep 2 &
+den> Goodbye from Den!
+```
+
+**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, and background jobs fully working!** ✅
 
 ---
 
@@ -245,7 +271,7 @@ den> den> src/main.zig src/shell.zig
 - [x] ~~File redirections (`>`, `>>`, `<`, `2>`)~~ **DONE in Phase 9!**
 - [x] ~~Variable expansion (`$VAR`, `${VAR}`, `${VAR:-default}`)~~ **DONE in Phase 10!**
 - [x] ~~Glob expansion (`*.txt`, `src/*.zig`)~~ **DONE in Phase 12!**
-- [ ] Background jobs (`&`) - parsed but not executing in background yet
+- [x] ~~Background jobs (`&`)~~ **DONE in Phase 13!**
 - [ ] Advanced parameter expansion (`${VAR#pattern}`, `${VAR##pattern}`, etc.)
 - [ ] Heredoc/herestring (`<<`, `<<<`)
 - [ ] FD duplication (`>&`, `<&`)
@@ -288,20 +314,42 @@ den> den> src/main.zig src/shell.zig
 - [x] Expansion in commands, args, and redirections
 - [ ] Advanced parameter expansion (`${VAR#pattern}`, etc.) (advanced)
 
-**Phase 11: More Builtins**
-- [ ] `set` (shell options)
-- [ ] `export` (variable export)
-- [ ] `unset` (variable deletion)
+**Phase 11: More Builtins** ✅ **COMPLETED!**
+- [x] `export` (variable export)
+- [x] `set` (shell variables)
+- [x] `unset` (variable deletion)
 - [ ] `alias` / `unalias`
 - [ ] `type` / `which`
 
-**Phase 12: History**
+**Phase 12: Glob Expansion** ✅ **COMPLETED!**
+- [x] Wildcard patterns (`*`, `?`)
+- [x] Character classes (`[abc]`)
+- [x] Directory-aware expansion
+- [x] Alphabetically sorted results
+- [x] Fallback to literal if no matches
+
+**Phase 13: Background Jobs** ✅ **COMPLETED!**
+- [x] `&` operator parsing
+- [x] Background job execution (fork)
+- [x] Job tracking (pid, job_id, command)
+- [x] Non-blocking job status checks
+- [x] Completion notifications
+- [x] Multiple concurrent jobs (up to 16)
+
+**Phase 14: Job Control**
+- [ ] `jobs` command
+- [ ] `fg` command (foreground)
+- [ ] `bg` command (background)
+- [ ] Job status tracking (running, stopped)
+- [ ] Ctrl+Z to suspend
+
+**Phase 15: History**
 - [ ] History file (`~/.den_history`)
 - [ ] Up/down arrow navigation
 - [ ] Ctrl+R reverse search
 - [ ] History expansion (`!!`, `!$`)
 
-**Phase 13: Completion**
+**Phase 16: Completion**
 - [ ] Tab completion framework
 - [ ] Command completion (PATH)
 - [ ] File completion
