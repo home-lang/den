@@ -400,15 +400,15 @@ den/
 
 ### 6.2 Special Variables
 - [x] Implement `$0` (shell name)
-- [ ] Implement `$1`, `$2`, ... (positional parameters)
-- [ ] Implement `$@` (all arguments, separately quoted)
-- [ ] Implement `$*` (all arguments, single string)
-- [ ] Implement `$#` (argument count)
+- [x] Implement `$1`, `$2`, ... (positional parameters)
+- [x] Implement `$@` (all arguments, separately quoted)
+- [x] Implement `$*` (all arguments, single string)
+- [x] Implement `$#` (argument count)
 - [x] Implement `$?` (last exit code)
 - [x] Implement `$$` (shell PID)
-- [ ] Implement `$!` (last background job PID)
+- [x] Implement `$!` (last background job PID)
 - [ ] Implement `$-` (current shell options)
-- [ ] Implement `$_` (last argument of previous command)
+- [x] Implement `$_` (last argument of previous command)
 
 ### 6.3 Arithmetic Expansion
 - [x] Implement `$((expression))` parser
@@ -1196,13 +1196,13 @@ den/
 - [ ] Implement function overriding
 
 ### 14.4 Script Builtins (from `src/builtins/script-builtins.ts`)
-- [ ] `return` - Return from function/script
-- [ ] `break` - Exit from loop
-- [ ] `continue` - Skip to next iteration
-- [ ] `local` - Declare local variable
-- [ ] `declare` - Declare variable with attributes
-- [ ] `readonly` - Declare readonly variable
-- [ ] `shift` - Shift positional parameters
+- [x] `return` - Return from function/script
+- [x] `break` - Exit from loop
+- [x] `continue` - Skip to next iteration
+- [x] `local` - Declare local variable
+- [x] `declare` - Declare variable with attributes
+- [x] `readonly` - Declare readonly variable
+- [x] `shift` - Shift positional parameters
 
 ### 14.5 Script Execution (from `src/scripting/script-executor.ts`)
 - [ ] Implement script context (variables, functions, scope)

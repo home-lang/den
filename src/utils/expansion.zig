@@ -8,6 +8,8 @@ pub const Expansion = struct {
     last_exit_code: i32,
     positional_params: []const []const u8, // $1, $2, etc.
     shell_name: []const u8, // $0
+    last_background_pid: i32, // $!
+    last_arg: []const u8, // $_
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), last_exit_code: i32) Expansion {
         return .{
@@ -16,6 +18,8 @@ pub const Expansion = struct {
             .last_exit_code = last_exit_code,
             .positional_params = &[_][]const u8{},
             .shell_name = "den",
+            .last_background_pid = 0,
+            .last_arg = "",
         };
     }
 
@@ -25,6 +29,8 @@ pub const Expansion = struct {
         last_exit_code: i32,
         positional_params: []const []const u8,
         shell_name: []const u8,
+        last_background_pid: i32,
+        last_arg: []const u8,
     ) Expansion {
         return .{
             .allocator = allocator,
@@ -32,6 +38,8 @@ pub const Expansion = struct {
             .last_exit_code = last_exit_code,
             .positional_params = positional_params,
             .shell_name = shell_name,
+            .last_background_pid = last_background_pid,
+            .last_arg = last_arg,
         };
     }
 
@@ -199,6 +207,16 @@ pub const Expansion = struct {
                 }
                 // Parameter not set - return empty string
                 return ExpansionResult{ .value = "", .consumed = 2 };
+            },
+            '!' => {
+                // $! - last background job PID
+                const value = try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_background_pid});
+                return ExpansionResult{ .value = value, .consumed = 2 };
+            },
+            '_' => {
+                // $_ - last argument of previous command
+                const value = try self.allocator.dupe(u8, self.last_arg);
+                return ExpansionResult{ .value = value, .consumed = 2 };
             },
             '(' => {
                 // Check if it's $(( for arithmetic or $( for command substitution

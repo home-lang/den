@@ -33,6 +33,7 @@ pub const Shell = struct {
     background_jobs: [16]?BackgroundJob,
     background_jobs_count: usize,
     next_job_id: usize,
+    last_background_pid: std.posix.pid_t,
     history: [1000]?[]const u8,
     history_count: usize,
     history_file_path: []const u8,
@@ -41,6 +42,7 @@ pub const Shell = struct {
     positional_params: [64]?[]const u8,
     positional_params_count: usize,
     shell_name: []const u8,
+    last_arg: []const u8,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         const config = types.DenConfig{};
@@ -70,6 +72,7 @@ pub const Shell = struct {
             .background_jobs = [_]?BackgroundJob{null} ** 16,
             .background_jobs_count = 0,
             .next_job_id = 1,
+            .last_background_pid = 0,
             .history = [_]?[]const u8{null} ** 1000,
             .history_count = 0,
             .history_file_path = history_path_owned,
@@ -78,6 +81,7 @@ pub const Shell = struct {
             .positional_params = [_]?[]const u8{null} ** 64,
             .positional_params_count = 0,
             .shell_name = "den",
+            .last_arg = "",
         };
 
         // Load history from file
@@ -471,6 +475,8 @@ pub const Shell = struct {
             self.last_exit_code,
             positional_params_slice[0..param_count],
             self.shell_name,
+            self.last_background_pid,
+            self.last_arg,
         );
         var glob = Glob.init(self.allocator);
         var brace = BraceExpander.init(self.allocator);
@@ -588,6 +594,9 @@ pub const Shell = struct {
         self.next_job_id += 1;
 
         const command_copy = try self.allocator.dupe(u8, command);
+
+        // Track last background PID
+        self.last_background_pid = pid;
 
         self.background_jobs[slot_index.?] = BackgroundJob{
             .pid = pid,
