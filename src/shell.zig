@@ -4,6 +4,7 @@ const parser_mod = @import("parser/mod.zig");
 const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
 const Expansion = @import("utils/expansion.zig").Expansion;
+const Glob = @import("utils/glob.zig").Glob;
 
 pub const Shell = struct {
     allocator: std.mem.Allocator,
@@ -120,22 +121,56 @@ pub const Shell = struct {
 
     fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
         var expander = Expansion.init(self.allocator, &self.environment, self.last_exit_code);
+        var glob = Glob.init(self.allocator);
+
+        // Get current working directory for glob expansion
+        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cwd = try std.posix.getcwd(&cwd_buf);
 
         for (chain.commands) |*cmd| {
-            // Expand command name
+            // Expand command name (variables only, no globs for command names)
             const expanded_name = try expander.expand(cmd.name);
-            // Free the old name and replace with expanded version
             self.allocator.free(cmd.name);
             cmd.name = expanded_name;
 
-            // Expand arguments
-            for (cmd.args, 0..) |arg, i| {
-                const expanded_arg = try expander.expand(arg);
-                self.allocator.free(cmd.args[i]);
-                cmd.args[i] = expanded_arg;
+            // Expand arguments (variables + globs)
+            var expanded_args_buffer: [128][]const u8 = undefined;
+            var expanded_args_count: usize = 0;
+
+            for (cmd.args) |arg| {
+                // First expand variables
+                const var_expanded = try expander.expand(arg);
+                defer self.allocator.free(var_expanded);
+
+                // Then expand globs
+                const glob_expanded = try glob.expand(var_expanded, cwd);
+                defer {
+                    for (glob_expanded) |path| {
+                        self.allocator.free(path);
+                    }
+                    self.allocator.free(glob_expanded);
+                }
+
+                // Add all glob matches to args
+                for (glob_expanded) |path| {
+                    if (expanded_args_count >= expanded_args_buffer.len) {
+                        return error.TooManyArguments;
+                    }
+                    expanded_args_buffer[expanded_args_count] = try self.allocator.dupe(u8, path);
+                    expanded_args_count += 1;
+                }
+
+                // Free original arg
+                self.allocator.free(arg);
             }
 
-            // Expand redirection targets
+            // Replace args with expanded version
+            self.allocator.free(cmd.args);
+            const new_args = try self.allocator.alloc([]const u8, expanded_args_count);
+            @memcpy(new_args, expanded_args_buffer[0..expanded_args_count]);
+            cmd.args = new_args;
+
+            // Expand redirection targets (variables only, no globs)
             for (cmd.redirections, 0..) |*redir, i| {
                 const expanded_target = try expander.expand(redir.target);
                 self.allocator.free(cmd.redirections[i].target);
