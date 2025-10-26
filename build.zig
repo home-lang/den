@@ -577,6 +577,87 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(prompt_bench);
     bench_step.dependOn(&prompt_bench.step);
 
+    // Memory optimization benchmark
+    const memory_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/memory.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    const memory_bench_module = b.createModule(.{
+        .root_source_file = b.path("bench/memory_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    memory_bench_module.addImport("profiling", profiling_module);
+    memory_bench_module.addImport("memory", memory_module);
+
+    const memory_bench = b.addExecutable(.{
+        .name = "memory_bench",
+        .root_module = memory_bench_module,
+    });
+    b.installArtifact(memory_bench);
+    bench_step.dependOn(&memory_bench.step);
+
+    // CPU optimization benchmark
+    const cpu_opt_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/cpu_opt.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    const optimized_parser_module = b.createModule(.{
+        .root_source_file = b.path("src/parser/optimized_parser.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    const cpu_bench_module = b.createModule(.{
+        .root_source_file = b.path("bench/cpu_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    cpu_bench_module.addImport("profiling", profiling_module);
+    cpu_bench_module.addImport("cpu_opt", cpu_opt_module);
+    cpu_bench_module.addImport("optimized_parser", optimized_parser_module);
+
+    const cpu_bench = b.addExecutable(.{
+        .name = "cpu_bench",
+        .root_module = cpu_bench_module,
+    });
+    b.installArtifact(cpu_bench);
+    bench_step.dependOn(&cpu_bench.step);
+
+    // Concurrency benchmark
+    const concurrency_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/concurrency.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    const parallel_discovery_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/parallel_discovery.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    parallel_discovery_module.addImport("concurrency", concurrency_module);
+
+    const concurrency_bench_module = b.createModule(.{
+        .root_source_file = b.path("bench/concurrency_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    concurrency_bench_module.addImport("profiling", profiling_module);
+    concurrency_bench_module.addImport("concurrency", concurrency_module);
+    concurrency_bench_module.addImport("parallel_discovery", parallel_discovery_module);
+
+    const concurrency_bench = b.addExecutable(.{
+        .name = "concurrency_bench",
+        .root_module = concurrency_bench_module,
+    });
+    b.installArtifact(concurrency_bench);
+    bench_step.dependOn(&concurrency_bench.step);
+
     // Profiler tests
     const profiler_test_module = b.createModule(.{
         .root_source_file = b.path("src/profiling/profiler.zig"),
@@ -610,4 +691,37 @@ pub fn build(b: *std.Build) void {
     // Add profiler tests to all_tests
     all_tests_step.dependOn(&run_profiler_tests.step);
     all_tests_step.dependOn(&run_benchmark_tests.step);
+
+    // Concurrency tests
+    const concurrency_test_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/test_concurrency.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const concurrency_import_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/concurrency.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const parallel_discovery_import_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/parallel_discovery.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    parallel_discovery_import_module.addImport("concurrency", concurrency_import_module);
+
+    concurrency_test_module.addImport("concurrency", concurrency_import_module);
+    concurrency_test_module.addImport("parallel_discovery", parallel_discovery_import_module);
+
+    const concurrency_tests = b.addTest(.{
+        .root_module = concurrency_test_module,
+    });
+
+    const run_concurrency_tests = b.addRunArtifact(concurrency_tests);
+    const concurrency_test_step = b.step("test-concurrency", "Run concurrency tests");
+    concurrency_test_step.dependOn(&run_concurrency_tests.step);
+
+    // Add to all tests
+    all_tests_step.dependOn(&run_concurrency_tests.step);
 }

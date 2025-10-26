@@ -16,6 +16,7 @@ const HookContext = @import("plugins/interface.zig").HookContext;
 const AutoSuggestPlugin = @import("plugins/builtin_plugins_advanced.zig").AutoSuggestPlugin;
 const HighlightPlugin = @import("plugins/builtin_plugins_advanced.zig").HighlightPlugin;
 const ScriptSuggesterPlugin = @import("plugins/builtin_plugins_advanced.zig").ScriptSuggesterPlugin;
+const concurrency = @import("utils/concurrency.zig");
 
 /// Job status
 const JobStatus = enum {
@@ -67,6 +68,8 @@ pub const Shell = struct {
     auto_suggest: ?AutoSuggestPlugin,
     highlighter: ?HighlightPlugin,
     script_suggester: ?ScriptSuggesterPlugin,
+    // Concurrency
+    thread_pool: concurrency.ThreadPool,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         const config = types.DenConfig{};
@@ -88,6 +91,9 @@ pub const Shell = struct {
         var history_path_buf: [std.fs.max_path_bytes]u8 = undefined;
         const history_path = try std.fmt.bufPrint(&history_path_buf, "{s}/.den_history", .{home});
         const history_path_owned = try allocator.dupe(u8, history_path);
+
+        // Initialize thread pool with automatic CPU detection
+        const thread_pool = try concurrency.ThreadPool.init(allocator, 0);
 
         var shell = Shell{
             .allocator = allocator,
@@ -119,6 +125,7 @@ pub const Shell = struct {
             .auto_suggest = null, // Initialized on demand
             .highlighter = null,  // Initialized on demand
             .script_suggester = null, // Initialized on demand
+            .thread_pool = thread_pool,
         };
 
         // Load history from file
@@ -215,6 +222,9 @@ pub const Shell = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.aliases.deinit();
+
+        // Clean up thread pool
+        self.thread_pool.deinit();
     }
 
     /// Initialize AutoSuggest plugin

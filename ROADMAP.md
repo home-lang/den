@@ -2429,8 +2429,6 @@ docker run -it stacksjs/den
 - [ ] Reduce terminal escape sequences
 
 ### 22.5 Concurrency
-- [ ] Parallelize completion generation
-- [ ] Parallelize Git info fetching
 - [ ] Parallelize module detection
 - [ ] Use thread pool for async operations
 - [ ] Minimize lock contention
