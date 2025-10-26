@@ -9,7 +9,7 @@ Den is a modern shell that combines the familiarity of traditional shells with n
 - ⚡ **Native Performance**: No runtime overhead, instant startup (~5ms)
 - 📦 **Tiny Binary**: ~1.8MB executable with zero dependencies
 - 🛡️ **Memory Safe**: Zig's compile-time safety prevents common bugs
-- 🎯 **Feature Complete**: 46 builtins, full scripting support, job control
+- 🎯 **Feature Rich**: 54 builtins, job control, history, completion, tilde expansion
 - ✅ **Production Ready**: Thoroughly tested, proper memory management, POSIX-compliant
 
 ### Performance Comparison
@@ -54,7 +54,7 @@ echo 'echo "Hello from Den!"' | ./zig-out/bin/den
 - **Tab Completion**: Smart completion for commands and file paths
 - **Aliases**: Command aliases with expansion
 
-### 46 Built-in Commands
+### 54 Built-in Commands
 
 **Core** (4): `exit`, `help`, `true`, `false`
 
@@ -79,6 +79,10 @@ echo 'echo "Hello from Den!"' | ./zig-out/bin/den
 **Info** (3): `clear`, `uname`, `whoami`
 
 **Script Control** (6): `return`, `break`, `continue`, `local`, `declare`, `readonly`
+
+**Job Management** (3): `kill`, `wait`, `disown`
+
+**Advanced Execution** (5): `exec`, `builtin`, `trap`, `getopts`, `times`
 
 Run `help` in Den for detailed information on each command.
 
@@ -200,12 +204,15 @@ Contributions are welcome! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md)
 
 **✅ Completed** (Production Ready):
 - Core shell functionality (parsing, execution, I/O)
-- 46 essential builtin commands
-- Job control and process management
+- 54 essential builtin commands
+- Job control and process management (jobs, fg, bg, kill, wait, disown)
 - History and tab completion
-- Variable and glob expansion
+- Variable expansion ($VAR, ${VAR:-default}, $?, $$)
+- Tilde expansion (~, ~/path)
+- Glob expansion (*.txt, **/*.zig)
 - Pipelines, redirections, and operators
-- Script control (return, break, continue, local, declare, readonly)
+- Script control builtins (return, break, continue, local, declare, readonly)
+- Advanced execution (exec, builtin, trap, getopts, times)
 
 **🔮 Future Enhancements** (Optional):
 - Advanced scripting (if/while/for/case control flow)

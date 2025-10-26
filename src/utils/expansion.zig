@@ -25,6 +25,26 @@ pub const Expansion = struct {
         while (i < input.len) {
             const char = input[i];
 
+            // Handle tilde expansion at start of word or after : =
+            if (char == '~') {
+                const should_expand = i == 0 or
+                    (i > 0 and (input[i - 1] == ':' or input[i - 1] == '='));
+
+                if (should_expand) {
+                    const expansion_result = try self.expandTilde(input[i..]);
+
+                    // Copy expansion result to buffer
+                    if (result_len + expansion_result.value.len > result_buffer.len) {
+                        return error.ExpansionTooLong;
+                    }
+                    @memcpy(result_buffer[result_len..result_len + expansion_result.value.len], expansion_result.value);
+                    result_len += expansion_result.value.len;
+
+                    i += expansion_result.consumed;
+                    continue;
+                }
+            }
+
             if (char == '$') {
                 // Check if this is an escape sequence
                 if (i > 0 and input[i - 1] == '\\') {
@@ -176,6 +196,56 @@ pub const Expansion = struct {
 
         // Variable not found - return empty string
         return ExpansionResult{ .value = "", .consumed = end };
+    }
+
+    /// Expand tilde (~) to home directory
+    fn expandTilde(self: *Expansion, input: []const u8) !ExpansionResult {
+        if (input.len < 1 or input[0] != '~') {
+            return ExpansionResult{ .value = "~", .consumed = 1 };
+        }
+
+        // Find end of username (or tilde alone)
+        var end: usize = 1;
+        while (end < input.len) {
+            const c = input[end];
+            if (c == '/' or c == ':' or std.ascii.isWhitespace(c)) {
+                break;
+            }
+            end += 1;
+        }
+
+        const expanded_path = if (end == 1) blk: {
+            // ~ alone - expand to current user's home
+            if (self.environment.get("HOME")) |home| {
+                break :blk try self.allocator.dupe(u8, home);
+            } else if (std.posix.getenv("HOME")) |home| {
+                break :blk try self.allocator.dupe(u8, home);
+            } else {
+                // Fallback - return tilde unchanged
+                break :blk try self.allocator.dupe(u8, "~");
+            }
+        } else blk: {
+            // ~username - expand to specified user's home
+            const username = input[1..end];
+
+            // Try to get user's home directory (simplified - would need pwd.h for full implementation)
+            // For now, just handle current user
+            if (self.environment.get("USER")) |current_user| {
+                if (std.mem.eql(u8, username, current_user)) {
+                    if (self.environment.get("HOME")) |home| {
+                        break :blk try self.allocator.dupe(u8, home);
+                    }
+                }
+            }
+
+            // If we can't resolve, return unchanged
+            break :blk try self.allocator.dupe(u8, input[0..end]);
+        };
+
+        return ExpansionResult{
+            .value = expanded_path,
+            .consumed = end,
+        };
     }
 };
 
