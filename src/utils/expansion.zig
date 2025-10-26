@@ -74,7 +74,19 @@ pub const Expansion = struct {
                 }
             }
 
-            if (char == '$') {
+            if (char == '`') {
+                // Backtick command substitution
+                const expansion_result = try self.expandBacktick(input[i..]);
+
+                // Copy expansion result to buffer
+                if (result_len + expansion_result.value.len > result_buffer.len) {
+                    return error.ExpansionTooLong;
+                }
+                @memcpy(result_buffer[result_len..result_len + expansion_result.value.len], expansion_result.value);
+                result_len += expansion_result.value.len;
+
+                i += expansion_result.consumed;
+            } else if (char == '$') {
                 // Check if this is an escape sequence
                 if (i > 0 and input[i - 1] == '\\') {
                     // Remove the backslash, keep the $
@@ -341,6 +353,46 @@ pub const Expansion = struct {
         }
 
         const command = input[2..end];
+
+        // Execute the command and capture output
+        const output = self.executeCommandForSubstitution(command) catch {
+            // On error, return empty string
+            return ExpansionResult{ .value = "", .consumed = end + 1 };
+        };
+
+        // Trim trailing newlines (bash behavior)
+        var trimmed_len = output.len;
+        while (trimmed_len > 0 and output[trimmed_len - 1] == '\n') {
+            trimmed_len -= 1;
+        }
+
+        const result = try self.allocator.dupe(u8, output[0..trimmed_len]);
+        return ExpansionResult{ .value = result, .consumed = end + 1 };
+    }
+
+    /// Expand backtick command substitution: `command`
+    fn expandBacktick(self: *Expansion, input: []const u8) !ExpansionResult {
+        if (input.len < 2 or input[0] != '`') {
+            return ExpansionResult{ .value = "`", .consumed = 1 };
+        }
+
+        // Find matching closing backtick
+        var end: usize = 1;
+        while (end < input.len and input[end] != '`') {
+            // Handle escaped backticks
+            if (input[end] == '\\' and end + 1 < input.len and input[end + 1] == '`') {
+                end += 2;
+                continue;
+            }
+            end += 1;
+        }
+
+        if (end >= input.len) {
+            // Unmatched backtick
+            return ExpansionResult{ .value = "`", .consumed = 1 };
+        }
+
+        const command = input[1..end];
 
         // Execute the command and capture output
         const output = self.executeCommandForSubstitution(command) catch {

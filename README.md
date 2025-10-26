@@ -212,7 +212,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md)
 - Job control and process management (jobs, fg, bg, kill, wait, disown)
 - History and tab completion
 - Variable expansion ($VAR, ${VAR:-default}, special vars: $?, $$, $!, $_, $0-$9, $@, $*, $#)
-- Command substitution ($(command))
+- Command substitution ($(command) and `` `command` ``)
 - Arithmetic expansion ($((expr)) with +, -, *, /, %, ** operators)
 - Brace expansion ({1..10}, {a..z}, {foo,bar,baz})
 - Tilde expansion (~, ~/path)

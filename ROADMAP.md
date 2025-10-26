@@ -422,7 +422,7 @@ den/
 - [ ] Implement expression caching
 
 ### 6.4 Command Substitution
-- [ ] Implement backtick parsing (`` `command` ``)
+- [x] Implement backtick parsing (`` `command` ``) - src/utils/expansion.zig:373
 - [x] Implement `$(command)` parsing
 - [x] Implement command execution
 - [x] Implement output capture
