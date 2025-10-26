@@ -5,12 +5,32 @@ pub const Expansion = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
     last_exit_code: i32,
+    positional_params: []const []const u8, // $1, $2, etc.
+    shell_name: []const u8, // $0
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), last_exit_code: i32) Expansion {
         return .{
             .allocator = allocator,
             .environment = environment,
             .last_exit_code = last_exit_code,
+            .positional_params = &[_][]const u8{},
+            .shell_name = "den",
+        };
+    }
+
+    pub fn initWithParams(
+        allocator: std.mem.Allocator,
+        environment: *std.StringHashMap([]const u8),
+        last_exit_code: i32,
+        positional_params: []const []const u8,
+        shell_name: []const u8,
+    ) Expansion {
+        return .{
+            .allocator = allocator,
+            .environment = environment,
+            .last_exit_code = last_exit_code,
+            .positional_params = positional_params,
+            .shell_name = shell_name,
         };
     }
 
@@ -109,6 +129,10 @@ pub const Expansion = struct {
                 // $0, $1, etc. - positional arguments (TODO: implement when we have functions)
                 return ExpansionResult{ .value = "", .consumed = 2 };
             },
+            '(' => {
+                // $(command) - command substitution
+                return try self.expandCommandSubstitution(input);
+            },
             '{' => {
                 // ${VAR} - braced expansion
                 return try self.expandBracedVariable(input);
@@ -196,6 +220,68 @@ pub const Expansion = struct {
 
         // Variable not found - return empty string
         return ExpansionResult{ .value = "", .consumed = end };
+    }
+
+    /// Expand $(command) - command substitution
+    fn expandCommandSubstitution(self: *Expansion, input: []const u8) !ExpansionResult {
+        if (input.len < 3 or input[0] != '$' or input[1] != '(') {
+            return ExpansionResult{ .value = "$", .consumed = 1 };
+        }
+
+        // Find matching closing parenthesis
+        var depth: u32 = 1;
+        var end: usize = 2;
+        while (end < input.len and depth > 0) {
+            if (input[end] == '(') {
+                depth += 1;
+            } else if (input[end] == ')') {
+                depth -= 1;
+            }
+            if (depth > 0) end += 1;
+        }
+
+        if (depth != 0) {
+            // Unmatched parenthesis
+            return ExpansionResult{ .value = "$(", .consumed = 2 };
+        }
+
+        const command = input[2..end];
+
+        // Execute the command and capture output
+        const output = self.executeCommandForSubstitution(command) catch {
+            // On error, return empty string
+            return ExpansionResult{ .value = "", .consumed = end + 1 };
+        };
+
+        // Trim trailing newlines (bash behavior)
+        var trimmed_len = output.len;
+        while (trimmed_len > 0 and output[trimmed_len - 1] == '\n') {
+            trimmed_len -= 1;
+        }
+
+        const result = try self.allocator.dupe(u8, output[0..trimmed_len]);
+        return ExpansionResult{ .value = result, .consumed = end + 1 };
+    }
+
+    /// Execute a command and return its output
+    fn executeCommandForSubstitution(self: *Expansion, command: []const u8) ![]const u8 {
+        // Create a child process to execute the command
+        const argv = [_][]const u8{ "sh", "-c", command };
+
+        var child = std.process.Child.init(&argv, self.allocator);
+        child.stdout_behavior = .Pipe;
+        child.stderr_behavior = .Ignore;
+
+        try child.spawn();
+
+        // Read stdout
+        const stdout = child.stdout.?;
+        const output = try stdout.readToEndAlloc(self.allocator, 1024 * 1024); // Max 1MB output
+
+        const term = try child.wait();
+        _ = term;
+
+        return output;
     }
 
     /// Expand tilde (~) to home directory

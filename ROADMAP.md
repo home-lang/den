@@ -77,28 +77,28 @@
 ## Phase 0: Pre-Migration Tasks
 
 ### 0.1 Project Renaming (Krusty → Den)
-- [ ] Rename `package.json` name field: `"krusty"` → `"den"`
-- [ ] Rename `package.json` bin field: `"krusty"` → `"den"`
-- [ ] Update repository URLs in `package.json` (3 locations)
-- [ ] Rename config file: `krusty.config.ts` → `den.config.ts`
-- [ ] Update `tsconfig.json` paths: `"krusty": ["./src"]` → `"den": ["./src"]`
-- [ ] Rename `src/types.ts` interface: `KrustyConfig` → `DenConfig`
-- [ ] Rename `src/shell/index.ts` class: `KrustyShell` → `DenShell`
-- [ ] Update `src/config.ts`: `loadKrustyConfig()` → `loadDenConfig()`
-- [ ] Update history file path: `.krusty_history` → `.den_history` (in `src/history/history-manager.ts`)
-- [ ] Rename example config: `examples/krusty.config.ts` → `examples/den.config.ts`
-- [ ] Update CLI program name in `bin/cli.ts` (multiple locations)
-- [ ] Update 11+ test files referencing "krusty" command
-- [ ] Update `.github/workflows/release.yml` artifact names
-- [ ] Update `README.md` - all "Krusty" references
-- [ ] Update `docs/config.md` - all "Krusty" references
-- [ ] Update `docs/intro.md` - all "Krusty" references
-- [ ] Update `.vscode/dictionary.txt`
-- [ ] Update `src/hooks.ts` messages and documentation
-- [ ] Update plugin references in `src/plugins/plugin-manager.ts`
-- [ ] Update all 116 files containing "krusty" (case-insensitive)
-- [ ] Update compilation target names in `package.json` scripts (6+ scripts)
-- [ ] Update website URLs: `krusty.sh` → appropriate domain
+- [x] Rename `package.json` name field: `"krusty"` → `"den"`
+- [x] Rename `package.json` bin field: `"krusty"` → `"den"`
+- [x] Update repository URLs in `package.json` (3 locations)
+- [x] Rename config file: `krusty.config.ts` → `den.config.ts`
+- [x] Update `tsconfig.json` paths: `"krusty": ["./src"]` → `"den": ["./src"]`
+- [x] Rename `src/types.ts` interface: `KrustyConfig` → `DenConfig`
+- [x] Rename `src/shell/index.ts` class: `KrustyShell` → `DenShell`
+- [x] Update `src/config.ts`: `loadKrustyConfig()` → `loadDenConfig()`
+- [x] Update history file path: `.krusty_history` → `.den_history` (in `src/history/history-manager.ts`)
+- [x] Rename example config: `examples/krusty.config.ts` → `examples/den.config.ts`
+- [x] Update CLI program name in `bin/cli.ts` (multiple locations)
+- [x] Update 11+ test files referencing "krusty" command
+- [x] Update `.github/workflows/release.yml` artifact names
+- [x] Update `README.md` - all "Krusty" references
+- [x] Update `docs/config.md` - all "Krusty" references
+- [x] Update `docs/intro.md` - all "Krusty" references
+- [x] Update `.vscode/dictionary.txt`
+- [x] Update `src/hooks.ts` messages and documentation
+- [x] Update plugin references in `src/plugins/plugin-manager.ts`
+- [x] Update all 116 files containing "krusty" (case-insensitive)
+- [x] Update compilation target names in `package.json` scripts (6+ scripts)
+- [x] Update website URLs: `krusty.sh` → appropriate domain
 
 ### 0.2 Documentation & Analysis
 - [ ] Document all external TypeScript/Bun-specific APIs used
@@ -123,7 +123,7 @@
 ## Phase 1: Project Setup & Infrastructure
 
 ### 1.1 Build System
-- [ ] Create `build.zig` with basic executable target
+- [x] Create `build.zig` with basic executable target
 - [ ] Configure release modes (Debug, ReleaseSafe, ReleaseFast, ReleaseSmall)
 - [ ] Set up cross-compilation targets (Linux x64/ARM64, macOS x64/ARM64, Windows x64)
 - [ ] Configure optimization settings
@@ -160,10 +160,10 @@ den/
 ├── bench/                       # Benchmarks
 └── docs/                        # Documentation
 ```
-- [ ] Create directory structure
-- [ ] Set up module organization
-- [ ] Create index files for each module
-- [ ] Set up public/private exports
+- [x] Create directory structure
+- [x] Set up module organization
+- [x] Create index files for each module
+- [x] Set up public/private exports
 
 ### 1.3 Logging & Debugging
 - [ ] Implement logging infrastructure (debug, info, warn, error levels)
@@ -187,7 +187,7 @@ den/
 ## Phase 2: Core Type System & Data Structures
 
 ### 2.1 Basic Types (from `src/types.ts`)
-- [ ] Port `DenConfig` interface (formerly KrustyConfig)
+- [x] Port `DenConfig` interface (formerly KrustyConfig)
 - [ ] Port `PromptConfig` interface
 - [ ] Port `HistoryConfig` interface
 - [ ] Port `CompletionConfig` interface
@@ -200,34 +200,34 @@ den/
 - [ ] Port `LoggingConfig` interface
 
 ### 2.2 Command Types
-- [ ] Port `ParsedCommand` interface
-- [ ] Port `CommandChain` interface
-- [ ] Port `Redirection` interface
-- [ ] Port `Token` type
-- [ ] Port `CommandType` enum (builtin, alias, external, function)
-- [ ] Port `OperatorType` enum (pipe, and, or, semicolon, background)
+- [x] Port `ParsedCommand` interface
+- [x] Port `CommandChain` interface
+- [x] Port `Redirection` interface
+- [x] Port `Token` type
+- [x] Port `CommandType` enum (builtin, alias, external, function)
+- [x] Port `OperatorType` enum (pipe, and, or, semicolon, background)
 
 ### 2.3 Shell State Types
-- [ ] Port `ShellState` interface
-- [ ] Port `ShellOptions` interface (pipefail, xtrace, nounset, errexit)
-- [ ] Port `BuiltinCommand` interface
-- [ ] Port `Plugin` interface
-- [ ] Port `Hook` interface
-- [ ] Port `Job` interface
-- [ ] Port `JobStatus` enum
+- [x] Port `ShellState` interface
+- [x] Port `ShellOptions` interface (pipefail, xtrace, nounset, errexit)
+- [x] Port `BuiltinCommand` interface
+- [x] Port `Plugin` interface
+- [x] Port `Hook` interface
+- [x] Port `Job` interface
+- [x] Port `JobStatus` enum
 
 ### 2.4 Data Structures
-- [ ] Implement dynamic string (ArrayList(u8) wrapper)
-- [ ] Implement hash map for environment variables
-- [ ] Implement hash map for aliases
-- [ ] Implement hash map for functions
-- [ ] Implement hash map for variables
-- [ ] Implement hash map for PATH cache
-- [ ] Implement array list for command history
-- [ ] Implement array list for directory stack
-- [ ] Implement array list for jobs
-- [ ] Implement LRU cache (for completions, expansions)
-- [ ] Implement ring buffer (for history)
+- [x] Implement dynamic string (ArrayList(u8) wrapper)
+- [x] Implement hash map for environment variables
+- [x] Implement hash map for aliases
+- [x] Implement hash map for functions
+- [x] Implement hash map for variables
+- [x] Implement hash map for PATH cache
+- [x] Implement array list for command history
+- [x] Implement array list for directory stack
+- [x] Implement array list for jobs
+- [x] Implement LRU cache (for completions, expansions)
+- [x] Implement ring buffer (for history)
 
 ### 2.5 String Utilities
 - [ ] Implement string builder
@@ -341,35 +341,35 @@ den/
 ## Phase 5: Parser & Tokenizer
 
 ### 5.1 Tokenizer (from `src/parser.ts`)
-- [ ] Implement token type enum (Word, Operator, Redirect, String, etc.)
-- [ ] Implement tokenization state machine
-- [ ] Implement whitespace handling
-- [ ] Implement quote parsing (single, double, backticks)
-- [ ] Implement escape sequence handling (`\`)
-- [ ] Implement operator detection (`|`, `||`, `&&`, `;`, `&`, `>`, `>>`, `<`, etc.)
-- [ ] Implement redirect parsing (`>file`, `2>&1`, `&>file`, etc.)
-- [ ] Implement heredoc/herestring parsing (`<<EOF`, `<<<string`)
-- [ ] Implement comment handling (`#`)
-- [ ] Implement line continuation (`\` at EOL)
+- [x] Implement token type enum (Word, Operator, Redirect, String, etc.)
+- [x] Implement tokenization state machine
+- [x] Implement whitespace handling
+- [x] Implement quote parsing (single, double, backticks)
+- [x] Implement escape sequence handling (`\`)
+- [x] Implement operator detection (`|`, `||`, `&&`, `;`, `&`, `>`, `>>`, `<`, etc.)
+- [x] Implement redirect parsing (`>file`, `2>&1`, `&>file`, etc.)
+- [x] Implement heredoc/herestring parsing (`<<EOF`, `<<<string`)
+- [x] Implement comment handling (`#`)
+- [x] Implement line continuation (`\` at EOL)
 
 ### 5.2 Command Parser
-- [ ] Implement command structure builder
-- [ ] Implement command chain parsing (pipelines, sequences)
-- [ ] Implement operator precedence handling
-- [ ] Implement redirection attachment
-- [ ] Implement background job detection (`&`)
-- [ ] Implement subshell detection (`(...)`)
-- [ ] Implement command substitution detection (`` `...` ``, `$(...)`)
-- [ ] Implement process substitution detection (`<(...)`, `>(...)`)
-- [ ] Implement brace expansion detection (`{a,b,c}`, `{1..10}`)
+- [x] Implement command structure builder
+- [x] Implement command chain parsing (pipelines, sequences)
+- [x] Implement operator precedence handling
+- [x] Implement redirection attachment
+- [x] Implement background job detection (`&`)
+- [x] Implement subshell detection (`(...)`)
+- [x] Implement command substitution detection (`` `...` ``, `$(...)`)
+- [x] Implement process substitution detection (`<(...)`, `>(...)`)
+- [x] Implement brace expansion detection (`{a,b,c}`, `{1..10}`)
 
 ### 5.3 Syntax Validation
-- [ ] Implement quote balance checking
-- [ ] Implement operator validation
-- [ ] Implement redirect validation
-- [ ] Implement syntax error reporting with line/column
-- [ ] Implement error recovery suggestions
-- [ ] Implement partial command detection (for completion)
+- [x] Implement quote balance checking
+- [x] Implement operator validation
+- [x] Implement redirect validation
+- [x] Implement syntax error reporting with line/column
+- [x] Implement error recovery suggestions
+- [x] Implement partial command detection (for completion)
 
 ### 5.4 AST Construction
 - [ ] Design abstract syntax tree structure
@@ -383,20 +383,20 @@ den/
 ## Phase 6: Expansion Engine
 
 ### 6.1 Variable Expansion (from `src/utils/expansion.ts`)
-- [ ] Implement `$VAR` expansion
-- [ ] Implement `${VAR}` expansion
-- [ ] Implement `${VAR:-default}` (default value if unset)
-- [ ] Implement `${VAR:=default}` (assign default if unset)
-- [ ] Implement `${VAR:?error}` (error if unset)
-- [ ] Implement `${VAR:+alternate}` (alternate if set)
-- [ ] Implement `${#VAR}` (string length)
-- [ ] Implement `${VAR#pattern}` (remove shortest prefix)
-- [ ] Implement `${VAR##pattern}` (remove longest prefix)
-- [ ] Implement `${VAR%pattern}` (remove shortest suffix)
-- [ ] Implement `${VAR%%pattern}` (remove longest suffix)
-- [ ] Implement `${VAR/pattern/replacement}` (substitute first)
-- [ ] Implement `${VAR//pattern/replacement}` (substitute all)
-- [ ] Implement `${VAR:offset:length}` (substring)
+- [x] Implement `$VAR` expansion
+- [x] Implement `${VAR}` expansion
+- [x] Implement `${VAR:-default}` (default value if unset)
+- [x] Implement `${VAR:=default}` (assign default if unset)
+- [x] Implement `${VAR:?error}` (error if unset)
+- [x] Implement `${VAR:+alternate}` (alternate if set)
+- [x] Implement `${#VAR}` (string length)
+- [x] Implement `${VAR#pattern}` (remove shortest prefix)
+- [x] Implement `${VAR##pattern}` (remove longest prefix)
+- [x] Implement `${VAR%pattern}` (remove shortest suffix)
+- [x] Implement `${VAR%%pattern}` (remove longest suffix)
+- [x] Implement `${VAR/pattern/replacement}` (substitute first)
+- [x] Implement `${VAR//pattern/replacement}` (substitute all)
+- [x] Implement `${VAR:offset:length}` (substring)
 
 ### 6.2 Special Variables
 - [ ] Implement `$0` (shell name)
@@ -404,8 +404,8 @@ den/
 - [ ] Implement `$@` (all arguments, separately quoted)
 - [ ] Implement `$*` (all arguments, single string)
 - [ ] Implement `$#` (argument count)
-- [ ] Implement `$?` (last exit code)
-- [ ] Implement `$$` (shell PID)
+- [x] Implement `$?` (last exit code)
+- [x] Implement `$$` (shell PID)
 - [ ] Implement `$!` (last background job PID)
 - [ ] Implement `$-` (current shell options)
 - [ ] Implement `$_` (last argument of previous command)
@@ -423,9 +423,9 @@ den/
 
 ### 6.4 Command Substitution
 - [ ] Implement backtick parsing (`` `command` ``)
-- [ ] Implement `$(command)` parsing
-- [ ] Implement command execution
-- [ ] Implement output capture
+- [x] Implement `$(command)` parsing
+- [x] Implement command execution
+- [x] Implement output capture
 - [ ] Implement nested substitution
 - [ ] Implement error handling
 
@@ -443,21 +443,21 @@ den/
 - [ ] Implement reverse sequences (`{10..1}`)
 
 ### 6.7 Tilde Expansion
-- [ ] Implement `~` (home directory)
+- [x] Implement `~` (home directory)
 - [ ] Implement `~user` (user's home directory)
 - [ ] Implement `~+` (current working directory)
 - [ ] Implement `~-` (previous working directory)
 
 ### 6.8 Glob Expansion
-- [ ] Implement `*` (match any characters)
-- [ ] Implement `?` (match single character)
-- [ ] Implement `[abc]` (character class)
-- [ ] Implement `[!abc]` (negated character class)
-- [ ] Implement `[a-z]` (character range)
-- [ ] Implement `**` (recursive directory matching)
-- [ ] Implement glob sorting
-- [ ] Implement GLOBIGNORE support
-- [ ] Implement dotglob option (include hidden files)
+- [x] Implement `*` (match any characters)
+- [x] Implement `?` (match single character)
+- [x] Implement `[abc]` (character class)
+- [x] Implement `[!abc]` (negated character class)
+- [x] Implement `[a-z]` (character range)
+- [x] Implement `**` (recursive directory matching)
+- [x] Implement glob sorting
+- [x] Implement GLOBIGNORE support
+- [x] Implement dotglob option (include hidden files)
 
 ### 6.9 Quote Removal & Word Splitting
 - [ ] Implement quote removal (after expansion)
@@ -478,53 +478,53 @@ den/
 ## Phase 7: Command Execution
 
 ### 7.1 Command Resolution (from `src/shell/command-executor.ts`)
-- [ ] Implement builtin command lookup
-- [ ] Implement function lookup
-- [ ] Implement alias expansion
-- [ ] Implement PATH search
-- [ ] Implement PATH caching with TTL
-- [ ] Implement hash table for command paths
-- [ ] Implement `hash` builtin support
-- [ ] Handle command not found errors
+- [x] Implement builtin command lookup
+- [x] Implement function lookup
+- [x] Implement alias expansion
+- [x] Implement PATH search
+- [x] Implement PATH caching with TTL
+- [x] Implement hash table for command paths
+- [x] Implement `hash` builtin support
+- [x] Handle command not found errors
 
 ### 7.2 External Command Execution
-- [ ] Implement command spawning
-- [ ] Implement argument array construction
-- [ ] Implement environment variable passing
-- [ ] Implement working directory setting
-- [ ] Implement stdin/stdout/stderr redirection
-- [ ] Implement exit code capture
-- [ ] Implement timeout support
-- [ ] Implement shell signal handling during execution
+- [x] Implement command spawning
+- [x] Implement argument array construction
+- [x] Implement environment variable passing
+- [x] Implement working directory setting
+- [x] Implement stdin/stdout/stderr redirection
+- [x] Implement exit code capture
+- [x] Implement timeout support
+- [x] Implement shell signal handling during execution
 
 ### 7.3 Redirection Handling (from `src/utils/redirection.ts`)
-- [ ] Implement `>file` (stdout to file, truncate)
-- [ ] Implement `>>file` (stdout to file, append)
-- [ ] Implement `<file` (stdin from file)
-- [ ] Implement `2>file` (stderr to file)
-- [ ] Implement `2>&1` (stderr to stdout)
-- [ ] Implement `&>file` (both stdout/stderr to file)
-- [ ] Implement `<<<string` (herestring)
-- [ ] Implement `<<EOF` (heredoc)
-- [ ] Implement file descriptor duplication (3>&1, etc.)
-- [ ] Implement file descriptor closing (2>&-)
-- [ ] Implement noclobber option
+- [x] Implement `>file` (stdout to file, truncate)
+- [x] Implement `>>file` (stdout to file, append)
+- [x] Implement `<file` (stdin from file)
+- [x] Implement `2>file` (stderr to file)
+- [x] Implement `2>&1` (stderr to stdout)
+- [x] Implement `&>file` (both stdout/stderr to file)
+- [x] Implement `<<<string` (herestring)
+- [x] Implement `<<EOF` (heredoc)
+- [x] Implement file descriptor duplication (3>&1, etc.)
+- [x] Implement file descriptor closing (2>&-)
+- [x] Implement noclobber option
 
 ### 7.4 Pipeline Execution (from `src/shell/command-chain-executor.ts`)
-- [ ] Implement pipe creation between commands
-- [ ] Implement pipeline execution (sequential spawning)
-- [ ] Implement PIPESTATUS array
-- [ ] Implement pipefail option
-- [ ] Implement pipeline signal handling
-- [ ] Implement pipeline cleanup on error
+- [x] Implement pipe creation between commands
+- [x] Implement pipeline execution (sequential spawning)
+- [x] Implement PIPESTATUS array
+- [x] Implement pipefail option
+- [x] Implement pipeline signal handling
+- [x] Implement pipeline cleanup on error
 
 ### 7.5 Command Chains
-- [ ] Implement `;` (sequence execution)
-- [ ] Implement `&&` (AND execution with short-circuit)
-- [ ] Implement `||` (OR execution with short-circuit)
-- [ ] Implement `&` (background execution)
-- [ ] Implement chain exit code handling
-- [ ] Implement errexit (set -e) support
+- [x] Implement `;` (sequence execution)
+- [x] Implement `&&` (AND execution with short-circuit)
+- [x] Implement `||` (OR execution with short-circuit)
+- [x] Implement `&` (background execution)
+- [x] Implement chain exit code handling
+- [x] Implement errexit (set -e) support
 
 ### 7.6 Execution Options
 - [ ] Implement `set -x` (xtrace - print commands before execution)
@@ -539,36 +539,36 @@ den/
 ## Phase 8: Job Control & Process Management
 
 ### 8.1 Job Tracking (from `src/jobs/job-manager.ts`)
-- [ ] Implement Job struct (ID, PID, command, status, etc.)
-- [ ] Implement job table (array list of jobs)
-- [ ] Implement job ID assignment
-- [ ] Implement job status tracking (running, stopped, done, terminated)
-- [ ] Implement current job (`%`, `%%`) tracking
-- [ ] Implement previous job (`%-`) tracking
-- [ ] Implement job lookup by ID/PID/spec (`%N`, `%string`)
+- [x] Implement Job struct (ID, PID, command, status, etc.)
+- [x] Implement job table (array list of jobs)
+- [x] Implement job ID assignment
+- [x] Implement job status tracking (running, stopped, done, terminated)
+- [x] Implement current job (`%`, `%%`) tracking
+- [x] Implement previous job (`%-`) tracking
+- [x] Implement job lookup by ID/PID/spec (`%N`, `%string`)
 
 ### 8.2 Process Group Management
-- [ ] Implement process group creation (setpgid)
-- [ ] Implement foreground process group control (tcsetpgrp)
-- [ ] Implement signal forwarding to process group
-- [ ] Implement orphaned process group handling
-- [ ] Implement session management
+- [x] Implement process group creation (setpgid)
+- [x] Implement foreground process group control (tcsetpgrp)
+- [x] Implement signal forwarding to process group
+- [x] Implement orphaned process group handling
+- [x] Implement session management
 
 ### 8.3 Signal Handling
-- [ ] Implement SIGINT handling (Ctrl+C - terminate foreground job)
-- [ ] Implement SIGTSTP handling (Ctrl+Z - suspend foreground job)
-- [ ] Implement SIGCHLD handling (child process state change)
-- [ ] Implement SIGCONT handling (continue stopped job)
-- [ ] Implement signal masks for critical sections
-- [ ] Implement shell signal restoration after job exit
+- [x] Implement SIGINT handling (Ctrl+C - terminate foreground job)
+- [x] Implement SIGTSTP handling (Ctrl+Z - suspend foreground job)
+- [x] Implement SIGCHLD handling (child process state change)
+- [x] Implement SIGCONT handling (continue stopped job)
+- [x] Implement signal masks for critical sections
+- [x] Implement shell signal restoration after job exit
 
 ### 8.4 Job Control Builtins
-- [ ] Implement `jobs` (list jobs) - see Phase 12.3
-- [ ] Implement `fg` (foreground job) - see Phase 12.3
-- [ ] Implement `bg` (background job) - see Phase 12.3
-- [ ] Implement `kill` (send signal to job) - see Phase 12.3
-- [ ] Implement `wait` (wait for job completion) - see Phase 12.3
-- [ ] Implement `disown` (remove from job table) - see Phase 12.3
+- [x] Implement `jobs` (list jobs) - see Phase 12.3
+- [x] Implement `fg` (foreground job) - see Phase 12.3
+- [x] Implement `bg` (background job) - see Phase 12.3
+- [x] Implement `kill` (send signal to job) - see Phase 12.3
+- [x] Implement `wait` (wait for job completion) - see Phase 12.3
+- [x] Implement `disown` (remove from job table) - see Phase 12.3
 
 ### 8.5 Job Notifications
 - [ ] Implement job status change detection
@@ -582,30 +582,30 @@ den/
 ## Phase 9: REPL & Input Handling
 
 ### 9.1 REPL Loop (from `src/shell/repl-manager.ts`)
-- [ ] Implement main REPL loop
-- [ ] Implement prompt rendering
-- [ ] Implement line input reading
-- [ ] Implement command execution
-- [ ] Implement exit code handling
-- [ ] Implement error recovery
-- [ ] Implement graceful shutdown (Ctrl+D)
-- [ ] Implement startup timestamp printing
+- [x] Implement main REPL loop
+- [x] Implement prompt rendering
+- [x] Implement line input reading
+- [x] Implement command execution
+- [x] Implement exit code handling
+- [x] Implement error recovery
+- [x] Implement graceful shutdown (Ctrl+D)
+- [x] Implement startup timestamp printing
 
 ### 9.2 Raw Input Mode (from `src/input/auto-suggest.ts`)
-- [ ] Implement terminal raw mode activation
-- [ ] Implement byte-by-byte input reading
-- [ ] Implement UTF-8 multi-byte character handling
-- [ ] Implement escape sequence detection
-- [ ] Implement input buffering
-- [ ] Implement terminal mode restoration on exit
+- [x] Implement terminal raw mode activation
+- [x] Implement byte-by-byte input reading
+- [x] Implement UTF-8 multi-byte character handling
+- [x] Implement escape sequence detection
+- [x] Implement input buffering
+- [x] Implement terminal mode restoration on exit
 
 ### 9.3 Line Editing
-- [ ] Implement character insertion
-- [ ] Implement character deletion (backspace, delete)
-- [ ] Implement line clearing (Ctrl+U, Ctrl+K)
-- [ ] Implement word deletion (Ctrl+W)
-- [ ] Implement undo/redo
-- [ ] Implement clipboard integration (Ctrl+Y)
+- [x] Implement character insertion
+- [x] Implement character deletion (backspace, delete)
+- [x] Implement line clearing (Ctrl+U, Ctrl+K)
+- [x] Implement word deletion (Ctrl+W)
+- [x] Implement undo/redo
+- [x] Implement clipboard integration (Ctrl+Y)
 
 ### 9.4 Cursor Movement (from `src/input/cursor-movement.ts`)
 - [ ] Implement left/right arrow keys
@@ -661,31 +661,31 @@ den/
 - [ ] Implement multi-line syntax highlighting
 
 ### 9.10 Signal Handling During Input
-- [ ] Implement SIGINT during input (Ctrl+C - clear line)
-- [ ] Implement SIGWINCH (terminal resize - redraw prompt)
-- [ ] Implement SIGTSTP during input (Ctrl+Z - suspend shell)
-- [ ] Implement signal-safe input handling
+- [x] Implement SIGINT during input (Ctrl+C - clear line)
+- [x] Implement SIGWINCH (terminal resize - redraw prompt)
+- [x] Implement SIGTSTP during input (Ctrl+Z - suspend shell)
+- [x] Implement signal-safe input handling
 
 ---
 
 ## Phase 10: History Management
 
 ### 10.1 History File (from `src/history/history-manager.ts`)
-- [ ] Implement history file path resolution (`~/.den_history`)
-- [ ] Implement history file loading on startup
-- [ ] Implement history file saving on exit
-- [ ] Implement incremental history saving (after each command)
-- [ ] Implement history file locking (multi-session support)
-- [ ] Implement history file corruption recovery
+- [x] Implement history file path resolution (`~/.den_history`)
+- [x] Implement history file loading on startup
+- [x] Implement history file saving on exit
+- [x] Implement incremental history saving (after each command)
+- [x] Implement history file locking (multi-session support)
+- [x] Implement history file corruption recovery
 
 ### 10.2 History Storage
-- [ ] Implement history ring buffer
-- [ ] Implement history entry struct (command, timestamp, exit code)
-- [ ] Implement max entries limit (configurable, default 50k)
-- [ ] Implement history entry eviction (FIFO)
-- [ ] Implement history deduplication
-- [ ] Implement ignore duplicates option
-- [ ] Implement ignore space-prefixed commands option
+- [x] Implement history ring buffer
+- [x] Implement history entry struct (command, timestamp, exit code)
+- [x] Implement max entries limit (configurable, default 50k)
+- [x] Implement history entry eviction (FIFO)
+- [x] Implement history deduplication
+- [x] Implement ignore duplicates option
+- [x] Implement ignore space-prefixed commands option
 
 ### 10.3 History Search (from `src/history/history-navigator.ts`)
 - [ ] Implement fuzzy search
@@ -707,46 +707,46 @@ den/
 - [ ] Implement word designators (`:0`, `:1`, `:$`, `:*`)
 
 ### 10.5 History Builtin (from `src/builtins/history.ts`)
-- [ ] Implement `history` command (list history)
-- [ ] Implement `history -c` (clear history)
-- [ ] Implement `history -d N` (delete entry N)
-- [ ] Implement `history N` (show last N entries)
-- [ ] Implement `history -a` (append new entries to file)
-- [ ] Implement `history -r` (reload from file)
-- [ ] Implement `history -w` (write to file)
+- [x] Implement `history` command (list history)
+- [x] Implement `history -c` (clear history)
+- [x] Implement `history -d N` (delete entry N)
+- [x] Implement `history N` (show last N entries)
+- [x] Implement `history -a` (append new entries to file)
+- [x] Implement `history -r` (reload from file)
+- [x] Implement `history -w` (write to file)
 
 ---
 
 ## Phase 11: Completion System
 
 ### 11.1 Completion Engine (from `src/completion/index.ts`)
-- [ ] Implement completion provider interface
-- [ ] Implement completion trigger detection (Tab key)
-- [ ] Implement completion context analysis (cursor position, command structure)
-- [ ] Implement completion candidate generation
-- [ ] Implement completion filtering
-- [ ] Implement completion ranking/scoring
-- [ ] Implement completion display (list, inline)
-- [ ] Implement completion selection (Tab cycling)
+- [x] Implement completion provider interface
+- [x] Implement completion trigger detection (Tab key)
+- [x] Implement completion context analysis (cursor position, command structure)
+- [x] Implement completion candidate generation
+- [x] Implement completion filtering
+- [x] Implement completion ranking/scoring
+- [x] Implement completion display (list, inline)
+- [x] Implement completion selection (Tab cycling)
 
 ### 11.2 Command Completion
-- [ ] Implement builtin command completion
-- [ ] Implement alias completion
-- [ ] Implement function completion
-- [ ] Implement PATH command completion
-- [ ] Implement command caching
-- [ ] Implement fuzzy command matching
-- [ ] Implement command description display
+- [x] Implement builtin command completion
+- [x] Implement alias completion
+- [x] Implement function completion
+- [x] Implement PATH command completion
+- [x] Implement command caching
+- [x] Implement fuzzy command matching
+- [x] Implement command description display
 
 ### 11.3 File Path Completion
-- [ ] Implement file/directory completion
-- [ ] Implement relative path completion
-- [ ] Implement absolute path completion
-- [ ] Implement tilde expansion in paths
-- [ ] Implement hidden file filtering
-- [ ] Implement file type detection (dir, file, symlink)
-- [ ] Implement file permission-based filtering
-- [ ] Implement case-insensitive matching option
+- [x] Implement file/directory completion
+- [x] Implement relative path completion
+- [x] Implement absolute path completion
+- [x] Implement tilde expansion in paths
+- [x] Implement hidden file filtering
+- [x] Implement file type detection (dir, file, symlink)
+- [x] Implement file permission-based filtering
+- [x] Implement case-insensitive matching option
 
 ### 11.4 Context-Aware Completion
 - [ ] Implement argument position detection
@@ -783,7 +783,7 @@ den/
 ## Phase 12: Builtin Commands (Core)
 
 ### 12.1 Core Shell Builtins
-- [ ] `cd` - Change directory (from `src/builtins/cd.ts`)
+- [x] `cd` - Change directory (from `src/builtins/cd.ts`)
   - [ ] Implement directory change with path
   - [ ] Implement `cd -` (previous directory)
   - [ ] Implement `cd` (home directory)
@@ -792,38 +792,38 @@ den/
   - [ ] Implement error handling (non-existent directory)
   - [ ] Implement `directory:change` hook trigger
 
-- [ ] `pwd` - Print working directory (from `src/builtins/pwd.ts`)
+- [x] `pwd` - Print working directory (from `src/builtins/pwd.ts`)
   - [ ] Implement `-L` (logical path with symlinks)
   - [ ] Implement `-P` (physical path without symlinks)
 
-- [ ] `pushd` - Push directory onto stack (from `src/builtins/pushd.ts`)
+- [x] `pushd` - Push directory onto stack (from `src/builtins/pushd.ts`)
   - [ ] Implement directory push
   - [ ] Implement stack rotation
   - [ ] Implement `pushd +N` / `pushd -N`
 
-- [ ] `popd` - Pop directory from stack (from `src/builtins/popd.ts`)
+- [x] `popd` - Pop directory from stack (from `src/builtins/popd.ts`)
   - [ ] Implement directory pop
   - [ ] Implement stack rotation
   - [ ] Implement `popd +N` / `popd -N`
 
-- [ ] `dirs` - Display directory stack (from `src/builtins/dirs.ts`)
+- [x] `dirs` - Display directory stack (from `src/builtins/dirs.ts`)
   - [ ] Implement `-c` (clear stack)
   - [ ] Implement `-l` (long format with ~)
   - [ ] Implement `-p` (one per line)
   - [ ] Implement `-v` (with indices)
 
-- [ ] `exit` - Exit shell (from `src/builtins/exit.ts`)
+- [x] `exit` - Exit shell (from `src/builtins/exit.ts`)
   - [ ] Implement exit with code
   - [ ] Implement `shell:exit` hook trigger
   - [ ] Implement cleanup (save history, kill jobs)
 
-- [ ] `echo` - Print arguments (from `src/builtins/echo.ts`)
+- [x] `echo` - Print arguments (from `src/builtins/echo.ts`)
   - [ ] Implement `-n` (no trailing newline)
   - [ ] Implement `-e` (interpret escape sequences)
   - [ ] Implement `-E` (disable escape sequences)
   - [ ] Implement escape sequences (\n, \t, \r, \\, \a, \b, \f, \v)
 
-- [ ] `printf` - Formatted output (from `src/builtins/printf.ts`)
+- [x] `printf` - Formatted output (from `src/builtins/printf.ts`)
   - [ ] Implement format string parsing
   - [ ] Implement `%s`, `%d`, `%i`, `%u`, `%o`, `%x`, `%X`, `%f`, `%e`, `%g`, `%c`, `%%`
   - [ ] Implement width/precision modifiers
@@ -831,22 +831,22 @@ den/
   - [ ] Implement escape sequences
 
 ### 12.2 Environment & Variables
-- [ ] `env` - Display environment (from `src/builtins/env.ts`)
+- [x] `env` - Display environment (from `src/builtins/env.ts`)
   - [ ] Implement environment listing
   - [ ] Implement `env VAR=value command` (temp env)
 
-- [ ] `export` - Export variables (from `src/builtins/export.ts`)
+- [x] `export` - Export variables (from `src/builtins/export.ts`)
   - [ ] Implement variable export
   - [ ] Implement `export VAR=value`
   - [ ] Implement `export -n` (unexport)
   - [ ] Implement `export -p` (list exports)
 
-- [ ] `unset` - Unset variables (from `src/builtins/unset.ts`)
+- [x] `unset` - Unset variables (from `src/builtins/unset.ts`)
   - [ ] Implement variable deletion
   - [ ] Implement function deletion
   - [ ] Implement `-v` (variable) and `-f` (function) flags
 
-- [ ] `set` - Set shell options (from `src/builtins/set.ts`)
+- [x] `set` - Set shell options (from `src/builtins/set.ts`)
   - [ ] Implement `set -e` (errexit)
   - [ ] Implement `set -u` (nounset)
   - [ ] Implement `set -x` (xtrace)
@@ -856,109 +856,109 @@ den/
   - [ ] Implement `set` (list variables)
   - [ ] Implement `set --` (set positional params)
 
-- [ ] `umask` - Set file creation mask (from `src/builtins/umask.ts`)
+- [x] `umask` - Set file creation mask (from `src/builtins/umask.ts`)
   - [ ] Implement umask display
   - [ ] Implement umask setting (octal)
   - [ ] Implement `-S` (symbolic format)
   - [ ] Implement `-p` (portable format)
 
 ### 12.3 Job Control
-- [ ] `jobs` - List jobs (from `src/builtins/jobs.ts`)
+- [x] `jobs` - List jobs (from `src/builtins/jobs.ts`)
   - [ ] Implement job listing
   - [ ] Implement `-l` (include PIDs)
   - [ ] Implement `-p` (PIDs only)
   - [ ] Implement `-r` (running jobs only)
   - [ ] Implement `-s` (stopped jobs only)
 
-- [ ] `bg` - Background job (from `src/builtins/bg.ts`)
+- [x] `bg` - Background job (from `src/builtins/bg.ts`)
   - [ ] Implement job resumption in background
   - [ ] Implement job spec parsing (`%N`, `%%`, `%-`)
   - [ ] Send SIGCONT to job
 
-- [ ] `fg` - Foreground job (from `src/builtins/fg.ts`)
+- [x] `fg` - Foreground job (from `src/builtins/fg.ts`)
   - [ ] Implement job restoration to foreground
   - [ ] Implement terminal control handoff
   - [ ] Send SIGCONT to job
 
-- [ ] `kill` - Send signal to job (from `src/builtins/kill.ts`)
+- [x] `kill` - Send signal to job (from `src/builtins/kill.ts`)
   - [ ] Implement signal sending by name/number
   - [ ] Implement job spec support
   - [ ] Implement `-l` (list signals)
   - [ ] Implement `-s signal` (specify signal)
 
-- [ ] `wait` - Wait for job (from `src/builtins/wait.ts`)
+- [x] `wait` - Wait for job (from `src/builtins/wait.ts`)
   - [ ] Implement wait for specific job
   - [ ] Implement wait for all jobs
   - [ ] Implement exit code return
 
-- [ ] `disown` - Remove job from table (from `src/builtins/disown.ts`)
+- [x] `disown` - Remove job from table (from `src/builtins/disown.ts`)
   - [ ] Implement job removal
   - [ ] Implement `-h` (keep in table but don't send SIGHUP)
   - [ ] Implement `-a` (all jobs)
   - [ ] Implement `-r` (running jobs only)
 
 ### 12.4 Execution Control
-- [ ] `eval` - Evaluate arguments as command (from `src/builtins/eval.ts`)
+- [x] `eval` - Evaluate arguments as command (from `src/builtins/eval.ts`)
   - [ ] Implement argument concatenation
   - [ ] Implement command parsing
   - [ ] Implement command execution in current context
 
-- [ ] `exec` - Replace shell with command (from `src/builtins/exec.ts`)
+- [x] `exec` - Replace shell with command (from `src/builtins/exec.ts`)
   - [ ] Implement shell replacement
   - [ ] Implement I/O redirection before exec
   - [ ] Implement error handling (command not found)
 
-- [ ] `source` - Execute script in current context (from `src/builtins/source.ts`)
+- [x] `source` - Execute script in current context (from `src/builtins/source.ts`)
   - [ ] Implement script file reading
   - [ ] Implement script execution
   - [ ] Implement positional parameter passing
   - [ ] Implement return code handling
 
-- [ ] `command` - Run command bypassing functions/aliases (from `src/builtins/command.ts`)
+- [x] `command` - Run command bypassing functions/aliases (from `src/builtins/command.ts`)
   - [ ] Implement alias/function bypass
   - [ ] Implement `-p` (use default PATH)
   - [ ] Implement `-v` (describe command)
   - [ ] Implement `-V` (verbose description)
 
-- [ ] `builtin` - Run builtin command (from `src/builtins/builtin.ts`)
+- [x] `builtin` - Run builtin command (from `src/builtins/builtin.ts`)
   - [ ] Implement builtin execution
   - [ ] Bypass functions with same name
 
 ### 12.5 Introspection
-- [ ] `type` - Describe command (from `src/builtins/type.ts`)
+- [x] `type` - Describe command (from `src/builtins/type.ts`)
   - [ ] Implement command type detection
   - [ ] Implement `-a` (show all matches)
   - [ ] Implement `-p` (show path for external commands)
   - [ ] Implement `-t` (show type only: alias/builtin/function/file)
 
-- [ ] `which` - Locate command (from `src/builtins/which.ts`)
+- [x] `which` - Locate command (from `src/builtins/which.ts`)
   - [ ] Implement PATH search
   - [ ] Implement alias/function detection
   - [ ] Implement `-a` (show all matches)
 
-- [ ] `hash` - Command path cache (from `src/builtins/hash.ts`)
+- [x] `hash` - Command path cache (from `src/builtins/hash.ts`)
   - [ ] Implement hash table display
   - [ ] Implement `-r` (clear cache)
   - [ ] Implement `-d name` (delete entry)
   - [ ] Implement `-l` (display as reusable input)
   - [ ] Implement `-p path name` (add entry)
 
-- [ ] `help` - Builtin help (from `src/builtins/help.ts`)
+- [x] `help` - Builtin help (from `src/builtins/help.ts`)
   - [ ] Implement help listing (all builtins)
   - [ ] Implement `help <command>` (specific help)
   - [ ] Implement help text formatting
 
 ### 12.6 Timing & Signals
-- [ ] `time` - Time command execution (from `src/builtins/time.ts`)
+- [x] `time` - Time command execution (from `src/builtins/time.ts`)
   - [ ] Implement command timing
   - [ ] Implement real/user/sys time display
   - [ ] Implement `-p` (POSIX format)
 
-- [ ] `times` - Shell process times (from `src/builtins/times.ts`)
+- [x] `times` - Shell process times (from `src/builtins/times.ts`)
   - [ ] Implement shell user/sys time display
   - [ ] Implement children user/sys time display
 
-- [ ] `trap` - Signal handling (from `src/builtins/trap.ts`)
+- [x] `trap` - Signal handling (from `src/builtins/trap.ts`)
   - [ ] Implement trap command registration
   - [ ] Implement signal name/number parsing
   - [ ] Implement trap execution on signal
@@ -966,21 +966,21 @@ den/
   - [ ] Implement `trap -p` (show traps)
   - [ ] Implement ERR/EXIT/DEBUG/RETURN pseudo-signals
 
-- [ ] `timeout` - Execute with timeout (from `src/builtins/timeout.ts`)
+- [x] `timeout` - Execute with timeout (from `src/builtins/timeout.ts`)
   - [ ] Implement timeout duration parsing
   - [ ] Implement command execution with timer
   - [ ] Implement SIGTERM/SIGKILL on timeout
   - [ ] Implement `-s signal` (custom signal)
   - [ ] Implement `-k duration` (kill after duration)
 
-- [ ] `getopts` - Parse options (from `src/builtins/getopts.ts`)
+- [x] `getopts` - Parse options (from `src/builtins/getopts.ts`)
   - [ ] Implement option specification parsing
   - [ ] Implement option extraction
   - [ ] Implement OPTARG/OPTIND variables
   - [ ] Implement error handling (invalid option)
 
 ### 12.7 I/O
-- [ ] `read` - Read input (from `src/builtins/read.ts`)
+- [x] `read` - Read input (from `src/builtins/read.ts`)
   - [ ] Implement line reading
   - [ ] Implement variable assignment
   - [ ] Implement `-r` (raw mode, no backslash escapes)
@@ -992,34 +992,34 @@ den/
   - [ ] Implement `-s` (silent mode)
 
 ### 12.8 Testing
-- [ ] `test` / `[` - Conditional evaluation (from `src/builtins/test.ts`)
+- [x] `test` / `[` - Conditional evaluation (from `src/builtins/test.ts`)
   - [ ] Implement file tests (`-e`, `-f`, `-d`, `-r`, `-w`, `-x`, `-s`, etc.)
   - [ ] Implement string tests (`-z`, `-n`, `=`, `!=`, `<`, `>`)
   - [ ] Implement integer tests (`-eq`, `-ne`, `-lt`, `-le`, `-gt`, `-ge`)
   - [ ] Implement logical operators (`!`, `-a`, `-o`)
   - [ ] Implement `[[ ]]` extended test (pattern matching, regex)
 
-- [ ] `true` - Return success (from `src/builtins/true.ts`)
+- [x] `true` - Return success (from `src/builtins/true.ts`)
   - [ ] Always return 0
 
-- [ ] `false` - Return failure (from `src/builtins/false.ts`)
+- [x] `false` - Return failure (from `src/builtins/false.ts`)
   - [ ] Always return 1
 
 ### 12.9 Utility
-- [ ] `clear` - Clear screen (from `src/builtins/clear.ts`)
+- [x] `clear` - Clear screen (from `src/builtins/clear.ts`)
   - [ ] Send clear sequence
   - [ ] Handle different terminal types
 
-- [ ] `alias` - Manage aliases (from `src/builtins/alias.ts` via alias-manager)
+- [x] `alias` - Manage aliases (from `src/builtins/alias.ts` via alias-manager)
   - [ ] Implement alias definition
   - [ ] Implement alias listing
   - [ ] Implement `-p` (print all aliases)
 
-- [ ] `unalias` - Remove alias (from `src/builtins/unalias.ts`)
+- [x] `unalias` - Remove alias (from `src/builtins/unalias.ts`)
   - [ ] Implement alias removal
   - [ ] Implement `-a` (remove all)
 
-- [ ] `history` - History management (see Phase 10.5)
+- [x] `history` - History management (see Phase 10.5)
 
 ---
 
@@ -1306,7 +1306,7 @@ den/
 ### 16.4 Hook Configuration
 - [ ] Implement hook enable/disable
 - [ ] Implement conditional execution (file/env/custom predicates)
-- [ ] Implement command execution from hooks
+- [x] Implement command execution from hooks
 - [ ] Implement script execution from hooks
 
 ---

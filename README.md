@@ -208,6 +208,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md)
 - Job control and process management (jobs, fg, bg, kill, wait, disown)
 - History and tab completion
 - Variable expansion ($VAR, ${VAR:-default}, $?, $$)
+- **Command substitution** ($(command)) ← NEW!
 - Tilde expansion (~, ~/path)
 - Glob expansion (*.txt, **/*.zig)
 - Pipelines, redirections, and operators
