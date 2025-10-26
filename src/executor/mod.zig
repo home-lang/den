@@ -298,7 +298,7 @@ pub const Executor = struct {
 
     fn isBuiltin(self: *Executor, name: []const u8) bool {
         _ = self;
-        const builtins = [_][]const u8{ "cd", "pwd", "echo", "exit", "env", "export" };
+        const builtins = [_][]const u8{ "cd", "pwd", "echo", "exit", "env", "export", "set", "unset" };
         for (builtins) |builtin| {
             if (std.mem.eql(u8, name, builtin)) return true;
         }
@@ -314,6 +314,12 @@ pub const Executor = struct {
             return try self.builtinCd(command);
         } else if (std.mem.eql(u8, command.name, "env")) {
             return try self.builtinEnv();
+        } else if (std.mem.eql(u8, command.name, "export")) {
+            return try self.builtinExport(command);
+        } else if (std.mem.eql(u8, command.name, "set")) {
+            return try self.builtinSet(command);
+        } else if (std.mem.eql(u8, command.name, "unset")) {
+            return try self.builtinUnset(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -363,6 +369,82 @@ pub const Executor = struct {
         while (iter.next()) |entry| {
             try IO.print("{s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
         }
+        return 0;
+    }
+
+    fn builtinExport(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // export VAR=value or export VAR
+        if (command.args.len == 0) {
+            // No args - print all exported variables (same as env for now)
+            return try self.builtinEnv();
+        }
+
+        for (command.args) |arg| {
+            // Parse VAR=value format
+            if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
+                const var_name = arg[0..eq_pos];
+                const var_value = arg[eq_pos + 1 ..];
+
+                // Duplicate the key and value
+                const key = try self.allocator.dupe(u8, var_name);
+                const value = try self.allocator.dupe(u8, var_value);
+
+                // Put in environment (will replace if exists)
+                try self.environment.put(key, value);
+            } else {
+                // Just variable name - export with empty value or existing value
+                if (!self.environment.contains(arg)) {
+                    const key = try self.allocator.dupe(u8, arg);
+                    const value = try self.allocator.dupe(u8, "");
+                    try self.environment.put(key, value);
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    fn builtinSet(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // set VAR=value (similar to export but doesn't mark for export to child processes)
+        // For now, we'll treat it the same as export
+        if (command.args.len == 0) {
+            // No args - print all variables
+            return try self.builtinEnv();
+        }
+
+        for (command.args) |arg| {
+            if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
+                const var_name = arg[0..eq_pos];
+                const var_value = arg[eq_pos + 1 ..];
+
+                const key = try self.allocator.dupe(u8, var_name);
+                const value = try self.allocator.dupe(u8, var_value);
+
+                try self.environment.put(key, value);
+            } else {
+                try IO.eprint("den: set: {s}: not a valid identifier\n", .{arg});
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    fn builtinUnset(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // unset VAR - remove variable from environment
+        if (command.args.len == 0) {
+            try IO.eprint("den: unset: not enough arguments\n", .{});
+            return 1;
+        }
+
+        for (command.args) |var_name| {
+            if (self.environment.fetchRemove(var_name)) |entry| {
+                // Free the removed key and value
+                self.allocator.free(entry.key);
+                self.allocator.free(entry.value);
+            }
+        }
+
         return 0;
     }
 
