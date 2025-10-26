@@ -44,13 +44,20 @@
   - Plugin discovery with dependency resolution
   - Complete Plugin API (hooks, commands, completions, config, logging, utilities)
   - 111 comprehensive tests
+- ✅ **Phase 16**: Hooks system (complete)
+  - Enhanced hook manager with async and timeout support
+  - 10 built-in hooks (shell, command, directory, prompt, completion, history)
+  - Hook data structures for all contexts
+  - Hook enable/disable and configuration
+  - 36 comprehensive tests
 
 **Pending** (Optional Features):
 - ⏸️ **Phase 3**: Configuration system (not critical for core shell)
 - ⏸️ **Phase 4**: Some foundation libraries (async I/O, advanced file ops)
 - ⏸️ **Phase 9**: Advanced REPL (syntax highlighting, auto-suggestions)
 - ⏸️ **Phase 13**: Extended builtins (productivity tools, dev helpers)
-- ⏸️ **Phases 16-18**: Hooks system integration, themes, modules
+- ⏸️ **Phase 16**: Custom hooks (git, docker, npm)
+- ⏸️ **Phases 17-18**: Themes and modules
 - ⏸️ **Phases 19-22**: Full test port, packaging, docs, optimization
 
 **Current State**: Fully functional POSIX shell suitable for daily use, interactive sessions, and basic scripting.
@@ -1329,28 +1336,69 @@ den/
 
 ---
 
-## Phase 16: Hooks System
+## Phase 16: Hooks System ✅ **COMPLETE**
 
-### 16.1 Hook Manager (from `src/hooks.ts`)
-- [ ] Implement hook registration
-- [ ] Implement hook execution
-- [ ] Implement hook priority ordering
-- [ ] Implement async hook support
-- [ ] Implement hook timeout
-- [ ] Implement hook error handling
-- [ ] Implement hook context passing
+### 16.1 Hook Manager ✅
+- [x] Implement hook registration
+- [x] Implement hook execution
+- [x] Implement hook priority ordering
+- [x] Implement async hook support
+- [x] Implement hook timeout
+- [x] Implement hook error handling
+- [x] Implement hook context passing
 
-### 16.2 Built-in Hooks
-- [ ] `shell:init` - Shell initialization
-- [ ] `shell:start` - REPL start
-- [ ] `shell:exit` - Shell exit
-- [ ] `command:before` - Before command execution
-- [ ] `command:after` - After command execution
-- [ ] `command:error` - Command error
-- [ ] `directory:change` - Directory change (cd)
-- [ ] `prompt:before` - Before prompt render
-- [ ] `completion:before` - Before completion generation
-- [ ] `history:add` - Before adding to history
+**Implementation**: `src/hooks/manager.zig` (282 lines)
+- **HookManager**: Enhanced hook management with async and timeout support
+  - Hook registration with priority-based sorting
+  - Synchronous and asynchronous execution modes
+  - Timeout enforcement with configurable default (5s)
+  - Error handling with continue-on-error option
+  - Hook enable/disable functionality
+  - Execution result tracking with timing
+- **HookOptions**: Configurable execution parameters
+  - timeout_ms: Optional timeout in milliseconds
+  - async_exec: Enable asynchronous execution
+  - continue_on_error: Continue executing hooks on error
+- **HookResult**: Detailed execution results
+  - success: Execution status
+  - error_message: Optional error description
+  - execution_time_ms: Timing information
+- **AsyncHookState**: Async execution tracking
+  - Timeout detection
+  - Result management
+- 15 comprehensive tests
+
+### 16.2 Built-in Hooks ✅
+- [x] `shell:init` - Shell initialization
+- [x] `shell:start` - REPL start
+- [x] `shell:exit` - Shell exit
+- [x] `command:before` - Before command execution
+- [x] `command:after` - After command execution
+- [x] `command:error` - Command error
+- [x] `directory:change` - Directory change (cd)
+- [x] `prompt:before` - Before prompt render
+- [x] `completion:before` - Before completion generation
+- [x] `history:add` - Before adding to history
+
+**Implementation**: `src/hooks/builtin.zig` (296 lines)
+- **BuiltinHook enum**: 10 standard hooks with names and types
+- **Hook Data Structures**:
+  - CommandHookData: Command execution context
+  - DirectoryHookData: Directory change context
+  - PromptHookData: Prompt rendering context with customization
+  - CompletionHookData: Completion generation context
+  - HistoryHookData: History addition context with filtering
+- **BuiltinHooks**: Registry for enabling/disabling built-in hooks
+  - enable/disable individual hooks
+  - enableAll/disableAll helpers
+  - listEnabled query
+- **Context Helpers**: Factory functions for creating hook contexts
+- 21 comprehensive tests
+
+**Test Coverage**:
+- 36 total hook tests across 2 test suites
+- No memory leaks
+- Full coverage of manager and built-in hooks
 
 ### 16.3 Custom Hooks
 - [ ] `git:push` - Before git push
@@ -1359,7 +1407,7 @@ den/
 - [ ] Support user-defined custom hooks
 
 ### 16.4 Hook Configuration
-- [ ] Implement hook enable/disable
+- [x] Implement hook enable/disable
 - [ ] Implement conditional execution (file/env/custom predicates)
 - [x] Implement command execution from hooks
 - [ ] Implement script execution from hooks

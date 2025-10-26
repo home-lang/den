@@ -143,4 +143,39 @@ pub fn build(b: *std.Build) void {
     all_plugin_test_step.dependOn(&run_integration_tests.step);
     all_plugin_test_step.dependOn(&run_discovery_tests.step);
     all_plugin_test_step.dependOn(&run_api_tests.step);
+
+    // Hook manager tests
+    const hook_manager_test_module = b.createModule(.{
+        .root_source_file = b.path("src/hooks/test_manager.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const hook_manager_tests = b.addTest(.{
+        .root_module = hook_manager_test_module,
+    });
+
+    const run_hook_manager_tests = b.addRunArtifact(hook_manager_tests);
+    const hook_manager_test_step = b.step("test-hook-manager", "Run hook manager tests");
+    hook_manager_test_step.dependOn(&run_hook_manager_tests.step);
+
+    // Built-in hooks tests
+    const builtin_hooks_test_module = b.createModule(.{
+        .root_source_file = b.path("src/hooks/test_builtin.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const builtin_hooks_tests = b.addTest(.{
+        .root_module = builtin_hooks_test_module,
+    });
+
+    const run_builtin_hooks_tests = b.addRunArtifact(builtin_hooks_tests);
+    const builtin_hooks_test_step = b.step("test-builtin-hooks", "Run built-in hooks tests");
+    builtin_hooks_test_step.dependOn(&run_builtin_hooks_tests.step);
+
+    // All hook tests combined
+    const all_hook_test_step = b.step("test-all-hooks", "Run all hook tests");
+    all_hook_test_step.dependOn(&run_hook_manager_tests.step);
+    all_hook_test_step.dependOn(&run_builtin_hooks_tests.step);
 }
