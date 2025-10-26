@@ -10,6 +10,7 @@ pub const Expansion = struct {
     shell_name: []const u8, // $0
     last_background_pid: i32, // $!
     last_arg: []const u8, // $_
+    shell: ?*anyopaque, // Optional shell reference for function local vars
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), last_exit_code: i32) Expansion {
         return .{
@@ -20,6 +21,7 @@ pub const Expansion = struct {
             .shell_name = "den",
             .last_background_pid = 0,
             .last_arg = "",
+            .shell = null,
         };
     }
 
@@ -40,6 +42,29 @@ pub const Expansion = struct {
             .shell_name = shell_name,
             .last_background_pid = last_background_pid,
             .last_arg = last_arg,
+            .shell = null,
+        };
+    }
+
+    pub fn initWithShell(
+        allocator: std.mem.Allocator,
+        environment: *std.StringHashMap([]const u8),
+        last_exit_code: i32,
+        positional_params: []const []const u8,
+        shell_name: []const u8,
+        last_background_pid: i32,
+        last_arg: []const u8,
+        shell: *anyopaque,
+    ) Expansion {
+        return .{
+            .allocator = allocator,
+            .environment = environment,
+            .last_exit_code = last_exit_code,
+            .positional_params = positional_params,
+            .shell_name = shell_name,
+            .last_background_pid = last_background_pid,
+            .last_arg = last_arg,
+            .shell = shell,
         };
     }
 

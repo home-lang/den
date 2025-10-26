@@ -2,14 +2,27 @@ const std = @import("std");
 const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 
+// Forward declaration for Shell type
+const Shell = @import("../shell.zig").Shell;
+
 pub const Executor = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
+    shell: ?*Shell, // Optional reference to shell for options
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8)) Executor {
         return .{
             .allocator = allocator,
             .environment = environment,
+            .shell = null,
+        };
+    }
+
+    pub fn initWithShell(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), shell: *Shell) Executor {
+        return .{
+            .allocator = allocator,
+            .environment = environment,
+            .shell = shell,
         };
     }
 
@@ -92,6 +105,19 @@ pub const Executor = struct {
 
             // Execute single command
             last_exit_code = try self.executeCommand(&chain.commands[i]);
+
+            // Check for errexit option (set -e)
+            if (self.shell) |shell| {
+                if (shell.option_errexit and last_exit_code != 0) {
+                    // Exit on error if errexit is enabled
+                    try IO.eprint("den: command failed with exit code {d} (errexit enabled)\n", .{last_exit_code});
+                    if (shell.current_line > 0) {
+                        try IO.eprint("den: line {d}\n", .{shell.current_line});
+                    }
+                    return last_exit_code;
+                }
+            }
+
             i += 1;
         }
 
@@ -414,15 +440,48 @@ pub const Executor = struct {
     }
 
     fn builtinSet(self: *Executor, command: *types.ParsedCommand) !i32 {
-        // set VAR=value (similar to export but doesn't mark for export to child processes)
-        // For now, we'll treat it the same as export
         if (command.args.len == 0) {
             // No args - print all variables
             return try self.builtinEnv();
         }
 
         for (command.args) |arg| {
-            if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
+            // Handle shell options (-e, -E, +e, +E, etc.)
+            if (arg.len > 0 and (arg[0] == '-' or arg[0] == '+')) {
+                const enable = arg[0] == '-';
+                const option = arg[1..];
+
+                if (self.shell) |shell| {
+                    if (std.mem.eql(u8, option, "e")) {
+                        shell.option_errexit = enable;
+                        if (enable) {
+                            try IO.print("errexit enabled (exit on error)\n", .{});
+                        } else {
+                            try IO.print("errexit disabled\n", .{});
+                        }
+                    } else if (std.mem.eql(u8, option, "E")) {
+                        shell.option_errtrace = enable;
+                        if (enable) {
+                            try IO.print("errtrace enabled (ERR trap inheritance)\n", .{});
+                        } else {
+                            try IO.print("errtrace disabled\n", .{});
+                        }
+                    } else if (std.mem.eql(u8, option, "o")) {
+                        // set -o option_name
+                        if (command.args.len > 1) {
+                            try IO.eprint("den: set: -o requires option name\n", .{});
+                            return 1;
+                        }
+                    } else {
+                        try IO.eprint("den: set: unknown option: {s}\n", .{arg});
+                        return 1;
+                    }
+                } else {
+                    try IO.eprint("den: set: shell options not available in this context\n", .{});
+                    return 1;
+                }
+            } else if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
+                // VAR=value assignment
                 const var_name = arg[0..eq_pos];
                 const var_value = arg[eq_pos + 1 ..];
 

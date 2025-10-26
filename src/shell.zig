@@ -7,6 +7,15 @@ const Expansion = @import("utils/expansion.zig").Expansion;
 const Glob = @import("utils/glob.zig").Glob;
 const BraceExpander = @import("utils/brace.zig").BraceExpander;
 const Completion = @import("utils/completion.zig").Completion;
+const ScriptManager = @import("scripting/script_manager.zig").ScriptManager;
+const FunctionManager = @import("scripting/functions.zig").FunctionManager;
+const PluginRegistry = @import("plugins/interface.zig").PluginRegistry;
+const PluginManager = @import("plugins/manager.zig").PluginManager;
+const HookType = @import("plugins/interface.zig").HookType;
+const HookContext = @import("plugins/interface.zig").HookContext;
+const AutoSuggestPlugin = @import("plugins/builtin_plugins_advanced.zig").AutoSuggestPlugin;
+const HighlightPlugin = @import("plugins/builtin_plugins_advanced.zig").HighlightPlugin;
+const ScriptSuggesterPlugin = @import("plugins/builtin_plugins_advanced.zig").ScriptSuggesterPlugin;
 
 /// Job status
 const JobStatus = enum {
@@ -43,6 +52,21 @@ pub const Shell = struct {
     positional_params_count: usize,
     shell_name: []const u8,
     last_arg: []const u8,
+    // Shell options
+    option_errexit: bool, // set -e: exit on error
+    option_errtrace: bool, // set -E: inherit ERR trap
+    current_line: usize, // For error reporting
+    // Script management
+    script_manager: ScriptManager,
+    // Function management
+    function_manager: FunctionManager,
+    // Plugin system
+    plugin_registry: PluginRegistry,
+    plugin_manager: PluginManager,
+    // Builtin plugins (optional)
+    auto_suggest: ?AutoSuggestPlugin,
+    highlighter: ?HighlightPlugin,
+    script_suggester: ?ScriptSuggesterPlugin,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         const config = types.DenConfig{};
@@ -82,6 +106,16 @@ pub const Shell = struct {
             .positional_params_count = 0,
             .shell_name = "den",
             .last_arg = "",
+            .option_errexit = false,
+            .option_errtrace = false,
+            .current_line = 0,
+            .script_manager = ScriptManager.init(allocator),
+            .function_manager = FunctionManager.init(allocator),
+            .plugin_registry = PluginRegistry.init(allocator),
+            .plugin_manager = PluginManager.init(allocator),
+            .auto_suggest = null, // Initialized on demand
+            .highlighter = null,  // Initialized on demand
+            .script_suggester = null, // Initialized on demand
         };
 
         // Load history from file
@@ -89,14 +123,47 @@ pub const Shell = struct {
             // Ignore errors loading history (file might not exist yet)
         };
 
+        // Execute shell_init hooks
+        var init_context = HookContext{
+            .hook_type = .shell_init,
+            .data = null,
+            .user_data = null,
+            .allocator = allocator,
+        };
+        shell.plugin_registry.executeHooks(.shell_init, &init_context) catch {};
+
         return shell;
     }
 
     pub fn deinit(self: *Shell) void {
+        // Execute shell_exit hooks
+        var exit_context = HookContext{
+            .hook_type = .shell_exit,
+            .data = null,
+            .user_data = null,
+            .allocator = self.allocator,
+        };
+        self.plugin_registry.executeHooks(.shell_exit, &exit_context) catch {};
+
         // Save history before cleanup
         self.saveHistory() catch {
             // Ignore errors saving history
         };
+
+        // Clean up builtin plugins
+        if (self.script_suggester) |*suggester| {
+            suggester.deinit();
+        }
+
+        // Clean up plugin system
+        self.plugin_manager.deinit();
+        self.plugin_registry.deinit();
+
+        // Clean up script manager
+        self.script_manager.deinit();
+
+        // Clean up function manager
+        self.function_manager.deinit();
 
         // Clean up background jobs
         for (self.background_jobs) |maybe_job| {
@@ -147,6 +214,59 @@ pub const Shell = struct {
         self.aliases.deinit();
     }
 
+    /// Initialize AutoSuggest plugin
+    pub fn initAutoSuggest(self: *Shell) void {
+        if (self.auto_suggest == null) {
+            self.auto_suggest = AutoSuggestPlugin.init(
+                self.allocator,
+                &self.history,
+                &self.history_count,
+                &self.environment,
+            );
+        }
+    }
+
+    /// Initialize Highlight plugin
+    pub fn initHighlighter(self: *Shell) void {
+        if (self.highlighter == null) {
+            self.highlighter = HighlightPlugin.init(self.allocator);
+        }
+    }
+
+    /// Initialize ScriptSuggester plugin
+    pub fn initScriptSuggester(self: *Shell) void {
+        if (self.script_suggester == null) {
+            self.script_suggester = ScriptSuggesterPlugin.init(self.allocator);
+        }
+    }
+
+    /// Get command suggestions using AutoSuggest plugin
+    pub fn getCommandSuggestions(self: *Shell, input: []const u8) ![][]const u8 {
+        self.initAutoSuggest();
+        if (self.auto_suggest) |*plugin| {
+            return try plugin.getSuggestions(input);
+        }
+        return try self.allocator.alloc([]const u8, 0);
+    }
+
+    /// Highlight command using Highlight plugin
+    pub fn highlightCommand(self: *Shell, input: []const u8) ![]HighlightPlugin.HighlightToken {
+        self.initHighlighter();
+        if (self.highlighter) |*plugin| {
+            return try plugin.highlight(input);
+        }
+        return try self.allocator.alloc(HighlightPlugin.HighlightToken, 0);
+    }
+
+    /// Get script suggestions using ScriptSuggester plugin
+    pub fn getScriptSuggestions(self: *Shell, input: []const u8) ![][]const u8 {
+        self.initScriptSuggester();
+        if (self.script_suggester) |*plugin| {
+            return try plugin.getSuggestions(input, &self.environment);
+        }
+        return try self.allocator.alloc([]const u8, 0);
+    }
+
     pub fn run(self: *Shell) !void {
         self.running = true;
 
@@ -190,43 +310,18 @@ pub const Shell = struct {
         }
     }
 
-    /// Run a script file with positional parameters
-    pub fn runScript(self: *Shell, script_path: []const u8, shell_name: []const u8, args: []const []const u8) !void {
-        // Set positional parameters for this script
-        var param_count: usize = 0;
-        for (args) |arg| {
-            if (param_count >= 9) break; // Only support $1-$9 for now
-            const param_copy = try self.allocator.dupe(u8, arg);
-            self.positional_params[param_count] = param_copy;
-            param_count += 1;
+    /// Run a script file with positional parameters (using ScriptManager)
+    pub fn runScript(self: *Shell, script_path: []const u8, _: []const u8, args: []const []const u8) !void {
+        // Use ScriptManager for enhanced script execution with caching
+        const result = try self.script_manager.executeScript(self, script_path, args);
+
+        // Report execution result
+        if (result.error_message) |err_msg| {
+            try IO.eprint("Script execution failed: {s}\n", .{err_msg});
+            self.allocator.free(err_msg);
         }
-        self.positional_params_count = param_count;
 
-        // Set shell name ($0)
-        const shell_name_copy = try self.allocator.dupe(u8, shell_name);
-        self.shell_name = shell_name_copy;
-
-        // Read script file
-        const file = try std.fs.cwd().openFile(script_path, .{});
-        defer file.close();
-
-        const file_content = try file.readToEndAlloc(self.allocator, 1024 * 1024); // Max 1MB
-        defer self.allocator.free(file_content);
-
-        // Split into lines and execute each one
-        var line_iter = std.mem.splitScalar(u8, file_content, '\n');
-        while (line_iter.next()) |line| {
-            const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
-
-            // Skip empty lines and comments
-            if (trimmed.len == 0 or trimmed[0] == '#') continue;
-
-            // Execute the line
-            self.executeCommand(trimmed) catch |err| {
-                try IO.print("Error executing '{s}': {}\n", .{ trimmed, err });
-                self.last_exit_code = 1;
-            };
-        }
+        self.last_exit_code = result.exit_code;
     }
 
     fn renderPrompt(self: *Shell) !void {
@@ -234,7 +329,19 @@ pub const Shell = struct {
         try IO.print("den> ", .{});
     }
 
-    fn executeCommand(self: *Shell, input: []const u8) !void {
+    pub fn executeCommand(self: *Shell, input: []const u8) !void {
+        // Execute pre_command hooks
+        const cmd_copy = try self.allocator.dupe(u8, input);
+        defer self.allocator.free(cmd_copy);
+        var cmd_ptr = cmd_copy;
+        var pre_context = HookContext{
+            .hook_type = .pre_command,
+            .data = @ptrCast(@alignCast(&cmd_ptr)),
+            .user_data = null,
+            .allocator = self.allocator,
+        };
+        self.plugin_registry.executeHooks(.pre_command, &pre_context) catch {};
+
         // Tokenize
         var tokenizer = parser_mod.Tokenizer.init(self.allocator, input);
         const tokens = tokenizer.tokenize() catch |err| {
@@ -260,6 +367,38 @@ pub const Shell = struct {
 
         // Expand aliases in command names
         try self.expandAliases(&chain);
+
+        // Check for function calls (single command, no operators)
+        if (chain.commands.len == 1 and chain.operators.len == 0) {
+            const cmd = &chain.commands[0];
+
+            // Check if this is a function call
+            if (self.function_manager.hasFunction(cmd.name)) {
+                const exit_code = self.function_manager.executeFunction(self, cmd.name, cmd.args) catch |err| {
+                    try IO.eprint("den: function error: {}\n", .{err});
+                    self.last_exit_code = 1;
+                    // Execute post_command hooks
+                    var post_context = HookContext{
+                        .hook_type = .post_command,
+                        .data = @ptrCast(@alignCast(&cmd_ptr)),
+                        .user_data = null,
+                        .allocator = self.allocator,
+                    };
+                    self.plugin_registry.executeHooks(.post_command, &post_context) catch {};
+                    return;
+                };
+                self.last_exit_code = exit_code;
+                // Execute post_command hooks
+                var post_context = HookContext{
+                    .hook_type = .post_command,
+                    .data = @ptrCast(@alignCast(&cmd_ptr)),
+                    .user_data = null,
+                    .allocator = self.allocator,
+                };
+                self.plugin_registry.executeHooks(.post_command, &post_context) catch {};
+                return;
+            }
+        }
 
         // Check for shell-context builtins (jobs, history, etc.)
         if (chain.commands.len == 1 and chain.operators.len == 0) {
@@ -432,15 +571,32 @@ pub const Shell = struct {
             self.last_exit_code = 0;
         } else {
             // Execute normally
-            var executor = executor_mod.Executor.init(self.allocator, &self.environment);
+            var executor = executor_mod.Executor.initWithShell(self.allocator, &self.environment, self);
             const exit_code = executor.executeChain(&chain) catch |err| {
                 try IO.eprint("den: execution error: {}\n", .{err});
                 self.last_exit_code = 1;
+                // Execute post_command hooks even on error
+                var post_context = HookContext{
+                    .hook_type = .post_command,
+                    .data = @ptrCast(@alignCast(&cmd_ptr)),
+                    .user_data = null,
+                    .allocator = self.allocator,
+                };
+                self.plugin_registry.executeHooks(.post_command, &post_context) catch {};
                 return;
             };
 
             self.last_exit_code = exit_code;
         }
+
+        // Execute post_command hooks
+        var post_context = HookContext{
+            .hook_type = .post_command,
+            .data = @ptrCast(@alignCast(&cmd_ptr)),
+            .user_data = null,
+            .allocator = self.allocator,
+        };
+        self.plugin_registry.executeHooks(.post_command, &post_context) catch {};
     }
 
     fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_input: []const u8) !void {

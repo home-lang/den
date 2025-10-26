@@ -221,9 +221,12 @@ Contributions are welcome! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md)
 - Script control builtins (return, break, continue, local, declare, readonly)
 - Advanced execution (exec, builtin, trap, getopts, times)
 - Script execution with positional parameters
+- Error handling (set -e errexit, set -E errtrace, line number reporting)
+- Script management (caching, reloading, validation, enhanced error reporting)
+- Control flow (if/elif/else/fi, while, until, for loops with break/continue support)
 
 **🔮 Future Enhancements** (Optional):
-- Advanced scripting (if/while/for/case control flow)
+- Additional control flow (select menus, C-style for loops)
 - Plugin system for extensibility
 - Theme and prompt customization
 - Syntax highlighting and auto-suggestions
