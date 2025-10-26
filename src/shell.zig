@@ -1442,10 +1442,26 @@ pub const Shell = struct {
         try IO.print("  true              Return success (exit code 0)\n", .{});
         try IO.print("  false             Return failure (exit code 1)\n", .{});
         try IO.print("  sleep n           Pause for n seconds\n", .{});
+        try IO.print("  eval args         Execute arguments as command\n", .{});
+        try IO.print("  command cmd       Execute bypassing aliases\n", .{});
+        try IO.print("  shift [n]         Shift positional parameters\n", .{});
+        try IO.print("\nPath Utilities:\n", .{});
+        try IO.print("  basename path     Extract filename from path\n", .{});
+        try IO.print("  dirname path      Extract directory from path\n", .{});
+        try IO.print("  realpath path     Resolve absolute path\n", .{});
+        try IO.print("\nSystem Info:\n", .{});
+        try IO.print("  uname [-a]        Print system information\n", .{});
+        try IO.print("  whoami            Print current username\n", .{});
+        try IO.print("  umask [mode]      Get/set file creation mask\n", .{});
+        try IO.print("\nPerformance:\n", .{});
+        try IO.print("  time command      Measure execution time\n", .{});
+        try IO.print("  hash [-r] [cmd]   Command path caching\n", .{});
         try IO.print("\nOutput:\n", .{});
         try IO.print("  echo [args...]    Print arguments\n", .{});
         try IO.print("  printf fmt args   Formatted output\n", .{});
-        try IO.print("\nFor more help, use 'man bash' or visit docs.den.sh\n", .{});
+        try IO.print("  clear             Clear terminal screen\n", .{});
+        try IO.print("\nTotal: 40 builtin commands available\n", .{});
+        try IO.print("For more help, use 'man bash' or visit docs.den.sh\n", .{});
     }
 
     /// Builtin: basename - extract filename from path

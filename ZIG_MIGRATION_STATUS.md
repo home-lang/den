@@ -566,7 +566,35 @@ File System:
   dirs              Show directory stack
 ```
 
-**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, history, tab completion, aliases, script execution, conditionals, directory stack, and formatted output fully working!** ✅
+### System Information and Final Features
+```bash
+# System information
+$ printf "uname\nuname -a\nexit\n" | ./zig-out/bin/den
+den> Darwin
+den> Darwin Chris's MacBook 25.0.0 Darwin Kernel Version... arm64
+
+# User identification
+$ printf "whoami\nexit\n" | ./zig-out/bin/den
+den> chrisbreuer
+
+# Time measurement
+$ printf "time sleep 1\nexit\n" | ./zig-out/bin/den
+real	1.001s
+
+# File permissions
+$ printf "umask\nexit\n" | ./zig-out/bin/den
+den> 0022
+
+# Terminal control
+$ printf "clear\nexit\n" | ./zig-out/bin/den
+[Screen cleared]
+
+# Help system
+$ printf "help\nexit\n" | ./zig-out/bin/den | grep "Total:"
+Total: 40 builtin commands available
+```
+
+**All 40 builtins working! Complete shell with pipelines, operators, redirections, variables, glob expansion, background jobs, job control, history, tab completion, aliases, script execution, conditionals, directory stack, path manipulation, system info, and performance measurement!** ✅
 
 ---
 
