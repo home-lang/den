@@ -14,7 +14,7 @@
 - ✅ **REPL Loop**: Interactive prompt with line reading
 - ✅ **Command Parsing**: Full tokenizer and parser
 - ✅ **External Command Execution**: Fork/exec working
-- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset, jobs, fg, bg implemented
+- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete implemented
 - ✅ **I/O**: stdin/stdout via Zig 0.15 POSIX APIs
 - ✅ **Pipeline Execution**: Multi-stage pipelines fully working (`ls | grep foo | head -3`)
 - ✅ **Boolean Operators**: `&&` and `||` with short-circuit evaluation
@@ -24,9 +24,11 @@
 - ✅ **Glob Expansion**: `*.txt`, `src/**/*.zig`, pattern matching
 - ✅ **Background Jobs**: `&` operator with job tracking and completion notifications
 - ✅ **Job Control**: `jobs`, `fg`, `bg` commands for managing background processes
+- ✅ **Command History**: Persistent history with file storage and `history` command
+- ✅ **Tab Completion**: Command and file completion with `complete` builtin
 - ✅ **Exit Handling**: Ctrl+D and `exit` command
 
-### Completed Phases (0-14)
+### Completed Phases (0-16)
 
 **Phase 0: Pre-Migration** ✅
 - Renamed Krusty → Den across critical files
@@ -114,7 +116,7 @@
 - Multiple concurrent jobs (up to 16)
 - Fixed array job tracking structure
 
-**Phase 14: Job Control** ✅ **NEW!**
+**Phase 14: Job Control** ✅
 - `jobs` command - list all background jobs with status
 - `fg` command - bring background job to foreground
 - `fg [job_id]` - bring specific job to foreground
@@ -123,21 +125,42 @@
 - Proper job cleanup on completion
 - Error handling for invalid job IDs
 
+**Phase 15: Command History** ✅
+- Persistent history storage (~/.den_history)
+- Load history on shell startup
+- Save history on shell exit
+- `history` command - show all history
+- `history [n]` - show last n entries
+- Duplicate prevention (consecutive duplicates)
+- History limit (1000 entries with FIFO)
+- Line-numbered output
+
+**Phase 16: Tab Completion** ✅ **NEW!**
+- Command completion from PATH directories
+- File and directory completion
+- `complete <prefix>` - show all completions
+- `complete -c <prefix>` - command completions only
+- `complete -f <prefix>` - file completions only
+- Executable file detection (mode & 0o111)
+- Duplicate filtering in PATH
+- Alphabetical sorting of results
+- Directory trailing slash support
+
 ---
 
 ## 📊 Statistics
 
 | Metric | Value |
 |--------|-------|
-| **Zig Files** | 14 |
-| **Lines of Zig** | ~2,560 |
+| **Zig Files** | 15 |
+| **Lines of Zig** | ~2,946 |
 | **TypeScript Files Remaining** | 141 |
 | **TypeScript LOC** | ~28,712 |
 | **Progress** | ~8% of codebase ported |
 | **Binary Size (Debug)** | ~880KB |
 | **Build Time** | <2 seconds |
-| **Builtins Implemented** | 11 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg) |
-| **Phases Completed** | 14 out of 22 (64%) |
+| **Builtins Implemented** | 13 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg, history, complete) |
+| **Phases Completed** | 16 out of 22 (73%) |
 
 ---
 
@@ -287,7 +310,42 @@ den> sleep 2 &
 den> [3]  Running    sleep 3 &
 ```
 
-**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, and job control fully working!** ✅
+### Command History
+```bash
+$ rm -f ~/.den_history && printf "echo test1\necho test2\necho test3\nhistory\nexit\n" | ./zig-out/bin/den
+den> test1
+den> test2
+den> test3
+den>     1  echo test1
+    2  echo test2
+    3  echo test3
+    4  history
+
+# History persists across sessions
+$ printf "pwd\nls\nexit\n" | ./zig-out/bin/den
+$ printf "history\nexit\n" | ./zig-out/bin/den
+den>     1  echo test1
+    2  echo test2
+    3  echo test3
+    4  history
+    5  exit
+    6  pwd
+    7  ls
+    8  exit
+    9  history
+
+# Show last n entries
+$ printf "history 3\nexit\n" | ./zig-out/bin/den
+den>    10  exit
+   11  history 3
+
+# Duplicate prevention
+$ rm -f ~/.den_history && printf "echo same\necho same\necho same\nhistory\nexit\n" | ./zig-out/bin/den
+den>     1  echo same
+    2  history
+```
+
+**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, and history fully working!** ✅
 
 ---
 
@@ -306,10 +364,11 @@ den> [3]  Running    sleep 3 &
 - [x] ~~Glob expansion (`*.txt`, `src/*.zig`)~~ **DONE in Phase 12!**
 - [x] ~~Background jobs (`&`)~~ **DONE in Phase 13!**
 - [x] ~~Job control (`jobs`, `fg`, `bg`)~~ **DONE in Phase 14!**
+- [x] ~~Command history with file persistence~~ **DONE in Phase 15!**
 - [ ] Advanced parameter expansion (`${VAR#pattern}`, `${VAR##pattern}`, etc.)
 - [ ] Heredoc/herestring (`<<`, `<<<`)
 - [ ] FD duplication (`>&`, `<&`)
-- [ ] History (file-based persistence)
+- [ ] History navigation (up/down arrows)
 - [ ] Tab completion
 - [ ] Line editing (arrows, Ctrl+A/E)
 - [ ] Remaining 60+ builtins
@@ -378,10 +437,16 @@ den> [3]  Running    sleep 3 &
 - [x] Job status tracking (running, stopped, done)
 - [ ] Ctrl+Z to suspend (requires signal handling)
 
-**Phase 15: History**
-- [ ] History file (`~/.den_history`)
-- [ ] Up/down arrow navigation
-- [ ] Ctrl+R reverse search
+**Phase 15: Command History** ✅ **COMPLETED!**
+- [x] History file (`~/.den_history`)
+- [x] Load history on startup
+- [x] Save history on exit
+- [x] `history` command
+- [x] `history [n]` - show last n entries
+- [x] Duplicate prevention
+- [x] 1000 entry limit with FIFO
+- [ ] Up/down arrow navigation (requires terminal raw mode)
+- [ ] Ctrl+R reverse search (requires terminal raw mode)
 - [ ] History expansion (`!!`, `!$`)
 
 **Phase 16: Completion**

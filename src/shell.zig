@@ -5,6 +5,7 @@ const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
 const Expansion = @import("utils/expansion.zig").Expansion;
 const Glob = @import("utils/glob.zig").Glob;
+const Completion = @import("utils/completion.zig").Completion;
 
 /// Job status
 const JobStatus = enum {
@@ -31,6 +32,9 @@ pub const Shell = struct {
     background_jobs: [16]?BackgroundJob,
     background_jobs_count: usize,
     next_job_id: usize,
+    history: [1000]?[]const u8,
+    history_count: usize,
+    history_file_path: []const u8,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         const config = types.DenConfig{};
@@ -45,7 +49,12 @@ pub const Shell = struct {
         const path = std.posix.getenv("PATH") orelse "/usr/bin:/bin";
         try env.put("PATH", try allocator.dupe(u8, path));
 
-        return Shell{
+        // Build history file path: ~/.den_history
+        var history_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const history_path = try std.fmt.bufPrint(&history_path_buf, "{s}/.den_history", .{home});
+        const history_path_owned = try allocator.dupe(u8, history_path);
+
+        var shell = Shell{
             .allocator = allocator,
             .running = false,
             .config = config,
@@ -55,16 +64,39 @@ pub const Shell = struct {
             .background_jobs = [_]?BackgroundJob{null} ** 16,
             .background_jobs_count = 0,
             .next_job_id = 1,
+            .history = [_]?[]const u8{null} ** 1000,
+            .history_count = 0,
+            .history_file_path = history_path_owned,
         };
+
+        // Load history from file
+        shell.loadHistory() catch {
+            // Ignore errors loading history (file might not exist yet)
+        };
+
+        return shell;
     }
 
     pub fn deinit(self: *Shell) void {
+        // Save history before cleanup
+        self.saveHistory() catch {
+            // Ignore errors saving history
+        };
+
         // Clean up background jobs
         for (self.background_jobs) |maybe_job| {
             if (maybe_job) |job| {
                 self.allocator.free(job.command);
             }
         }
+
+        // Clean up history
+        for (self.history) |maybe_entry| {
+            if (maybe_entry) |entry| {
+                self.allocator.free(entry);
+            }
+        }
+        self.allocator.free(self.history_file_path);
 
         self.environment.deinit();
         self.aliases.deinit();
@@ -97,6 +129,9 @@ pub const Shell = struct {
             const trimmed = std.mem.trim(u8, line.?, &std.ascii.whitespace);
 
             if (trimmed.len == 0) continue;
+
+            // Add to history (before execution)
+            try self.addToHistory(trimmed);
 
             // Handle exit command
             if (std.mem.eql(u8, trimmed, "exit")) {
@@ -139,7 +174,7 @@ pub const Shell = struct {
         // Expand variables in all commands
         try self.expandCommandChain(&chain);
 
-        // Check for job control builtins (need shell context)
+        // Check for shell-context builtins (jobs, history, etc.)
         if (chain.commands.len == 1 and chain.operators.len == 0) {
             const cmd = &chain.commands[0];
             if (std.mem.eql(u8, cmd.name, "jobs")) {
@@ -151,6 +186,14 @@ pub const Shell = struct {
                 return;
             } else if (std.mem.eql(u8, cmd.name, "bg")) {
                 try self.builtinBg(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "history")) {
+                try self.builtinHistory(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "complete")) {
+                try self.builtinComplete(cmd);
+                self.last_exit_code = 0;
                 return;
             }
         }
@@ -447,6 +490,210 @@ pub const Shell = struct {
         self.background_jobs[job_slot.?].?.status = .running;
         try IO.print("[{d}]+ {s} &\n", .{ job.job_id, job.command });
         self.last_exit_code = 0;
+    }
+
+    /// Add command to history
+    fn addToHistory(self: *Shell, command: []const u8) !void {
+        // Don't add empty commands or duplicate of last command
+        if (command.len == 0) return;
+
+        if (self.history_count > 0) {
+            if (self.history[self.history_count - 1]) |last_cmd| {
+                if (std.mem.eql(u8, last_cmd, command)) {
+                    return; // Skip duplicate
+                }
+            }
+        }
+
+        // If history is full, shift everything left
+        if (self.history_count >= self.history.len) {
+            // Free oldest entry
+            if (self.history[0]) |oldest| {
+                self.allocator.free(oldest);
+            }
+
+            // Shift all entries left
+            var i: usize = 0;
+            while (i < self.history.len - 1) : (i += 1) {
+                self.history[i] = self.history[i + 1];
+            }
+            self.history[self.history.len - 1] = null;
+            self.history_count -= 1;
+        }
+
+        // Add new entry
+        const cmd_copy = try self.allocator.dupe(u8, command);
+        self.history[self.history_count] = cmd_copy;
+        self.history_count += 1;
+    }
+
+    /// Load history from file
+    fn loadHistory(self: *Shell) !void {
+        const file = std.fs.cwd().openFile(self.history_file_path, .{}) catch |err| {
+            if (err == error.FileNotFound) return; // File doesn't exist yet
+            return err;
+        };
+        defer file.close();
+
+        // Read entire file
+        const max_size = 1024 * 1024; // 1MB max
+        const content = try file.readToEndAlloc(self.allocator, max_size);
+        defer self.allocator.free(content);
+
+        // Split by newlines and add to history
+        var iter = std.mem.splitScalar(u8, content, '\n');
+        while (iter.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+            if (trimmed.len > 0 and self.history_count < self.history.len) {
+                const cmd_copy = try self.allocator.dupe(u8, trimmed);
+                self.history[self.history_count] = cmd_copy;
+                self.history_count += 1;
+            }
+        }
+    }
+
+    /// Save history to file
+    fn saveHistory(self: *Shell) !void {
+        const file = try std.fs.cwd().createFile(self.history_file_path, .{});
+        defer file.close();
+
+        for (self.history) |maybe_entry| {
+            if (maybe_entry) |entry| {
+                _ = try file.writeAll(entry);
+                _ = try file.write("\n");
+            }
+        }
+    }
+
+    /// Builtin: history - show command history
+    fn builtinHistory(self: *Shell, cmd: *types.ParsedCommand) !void {
+        // Parse optional argument for number of entries to show
+        var num_entries: usize = self.history_count;
+        if (cmd.args.len > 0) {
+            num_entries = std.fmt.parseInt(usize, cmd.args[0], 10) catch {
+                try IO.eprint("den: history: {s}: numeric argument required\n", .{cmd.args[0]});
+                return;
+            };
+            if (num_entries > self.history_count) {
+                num_entries = self.history_count;
+            }
+        }
+
+        // Calculate starting index
+        const start_idx = if (num_entries >= self.history_count) 0 else self.history_count - num_entries;
+
+        // Print history with line numbers
+        var idx = start_idx;
+        while (idx < self.history_count) : (idx += 1) {
+            if (self.history[idx]) |entry| {
+                try IO.print("{d:5}  {s}\n", .{ idx + 1, entry });
+            }
+        }
+    }
+
+    /// Builtin: complete - show completions for a prefix
+    fn builtinComplete(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: complete: usage: complete [-c|-f] <prefix>\n", .{});
+            return;
+        }
+
+        var completion = Completion.init(self.allocator);
+        var prefix: []const u8 = undefined;
+        var is_command = false;
+        var is_file = false;
+
+        // Parse flags
+        var arg_idx: usize = 0;
+        if (cmd.args.len >= 2) {
+            if (std.mem.eql(u8, cmd.args[0], "-c")) {
+                is_command = true;
+                prefix = cmd.args[1];
+                arg_idx = 2;
+            } else if (std.mem.eql(u8, cmd.args[0], "-f")) {
+                is_file = true;
+                prefix = cmd.args[1];
+                arg_idx = 2;
+            } else {
+                prefix = cmd.args[0];
+            }
+        } else {
+            prefix = cmd.args[0];
+        }
+
+        // If no flag specified, try both
+        if (!is_command and !is_file) {
+            // Try command completion first
+            const cmd_matches = try completion.completeCommand(prefix);
+            defer {
+                for (cmd_matches) |match| {
+                    self.allocator.free(match);
+                }
+                self.allocator.free(cmd_matches);
+            }
+
+            if (cmd_matches.len > 0) {
+                try IO.print("Commands:\n", .{});
+                for (cmd_matches) |match| {
+                    try IO.print("  {s}\n", .{match});
+                }
+            }
+
+            // Try file completion
+            const file_matches = try completion.completeFile(prefix);
+            defer {
+                for (file_matches) |match| {
+                    self.allocator.free(match);
+                }
+                self.allocator.free(file_matches);
+            }
+
+            if (file_matches.len > 0) {
+                if (cmd_matches.len > 0) {
+                    try IO.print("\n", .{});
+                }
+                try IO.print("Files:\n", .{});
+                for (file_matches) |match| {
+                    try IO.print("  {s}\n", .{match});
+                }
+            }
+
+            if (cmd_matches.len == 0 and file_matches.len == 0) {
+                try IO.print("No completions found.\n", .{});
+            }
+        } else if (is_command) {
+            const matches = try completion.completeCommand(prefix);
+            defer {
+                for (matches) |match| {
+                    self.allocator.free(match);
+                }
+                self.allocator.free(matches);
+            }
+
+            if (matches.len == 0) {
+                try IO.print("No command completions found.\n", .{});
+            } else {
+                for (matches) |match| {
+                    try IO.print("{s}\n", .{match});
+                }
+            }
+        } else if (is_file) {
+            const matches = try completion.completeFile(prefix);
+            defer {
+                for (matches) |match| {
+                    self.allocator.free(match);
+                }
+                self.allocator.free(matches);
+            }
+
+            if (matches.len == 0) {
+                try IO.print("No file completions found.\n", .{});
+            } else {
+                for (matches) |match| {
+                    try IO.print("{s}\n", .{match});
+                }
+            }
+        }
     }
 };
 
