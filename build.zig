@@ -308,6 +308,96 @@ pub fn build(b: *std.Build) void {
     const test_utils_test_step = b.step("test-utils", "Run test utilities tests");
     test_utils_test_step.dependOn(&run_test_utils_tests.step);
 
+    // Expansion tests
+    const expansion_test_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/test_expansion.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const expansion_tests = b.addTest(.{
+        .root_module = expansion_test_module,
+    });
+
+    const run_expansion_tests = b.addRunArtifact(expansion_tests);
+    const expansion_test_step = b.step("test-expansion", "Run expansion tests");
+    expansion_test_step.dependOn(&run_expansion_tests.step);
+
+    // Regression tests
+    const regression_test_module = b.createModule(.{
+        .root_source_file = b.path("src/parser/test_regression.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const regression_tests = b.addTest(.{
+        .root_module = regression_test_module,
+    });
+
+    const run_regression_tests = b.addRunArtifact(regression_tests);
+    const regression_test_step = b.step("test-regression", "Run regression tests");
+    regression_test_step.dependOn(&run_regression_tests.step);
+
+    // Fuzzing tests
+    const fuzz_test_module = b.createModule(.{
+        .root_source_file = b.path("src/parser/test_fuzz_simple.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const fuzz_tests = b.addTest(.{
+        .root_module = fuzz_test_module,
+    });
+
+    const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
+    const fuzz_test_step = b.step("test-fuzz", "Run fuzzing tests");
+    fuzz_test_step.dependOn(&run_fuzz_tests.step);
+
+    // Integration tests
+    const integration_e2e_test_module = b.createModule(.{
+        .root_source_file = b.path("src/test_integration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const integration_e2e_tests = b.addTest(.{
+        .root_module = integration_e2e_test_module,
+    });
+
+    const run_integration_e2e_tests = b.addRunArtifact(integration_e2e_tests);
+    const integration_e2e_test_step = b.step("test-integration-e2e", "Run integration tests");
+    integration_e2e_test_step.dependOn(&run_integration_e2e_tests.step);
+
+    // E2E tests
+    const e2e_test_module = b.createModule(.{
+        .root_source_file = b.path("src/test_e2e.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const e2e_tests = b.addTest(.{
+        .root_module = e2e_test_module,
+    });
+
+    const run_e2e_tests = b.addRunArtifact(e2e_tests);
+    const e2e_test_step = b.step("test-e2e", "Run end-to-end tests");
+    e2e_test_step.dependOn(&run_e2e_tests.step);
+
+    // CLI tests
+    const cli_test_module = b.createModule(.{
+        .root_source_file = b.path("src/test_cli.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const cli_tests = b.addTest(.{
+        .root_module = cli_test_module,
+    });
+
+    const run_cli_tests = b.addRunArtifact(cli_tests);
+    const cli_test_step = b.step("test-cli", "Run CLI tests");
+    cli_test_step.dependOn(&run_cli_tests.step);
+
     // All tests combined (main test suite)
     const all_tests_step = b.step("test-all", "Run all test suites");
     all_tests_step.dependOn(&run_unit_tests.step);
@@ -324,4 +414,10 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_tokenizer_tests.step);
     all_tests_step.dependOn(&run_test_utils_tests.step);
     all_tests_step.dependOn(&run_system_module_tests.step);
+    all_tests_step.dependOn(&run_expansion_tests.step);
+    all_tests_step.dependOn(&run_regression_tests.step);
+    all_tests_step.dependOn(&run_fuzz_tests.step);
+    all_tests_step.dependOn(&run_integration_e2e_tests.step);
+    all_tests_step.dependOn(&run_e2e_tests.step);
+    all_tests_step.dependOn(&run_cli_tests.step);
 }

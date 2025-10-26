@@ -77,7 +77,11 @@ pub const Executor = struct {
                     },
                     .semicolon, .background => {
                         // ; and & - always execute next command
-                        // TODO: background should spawn and continue immediately
+                        // TODO(executor): Implement proper background process handling
+                        // Issue: Background processes currently block instead of running async
+                        // Solution: Spawn process without waiting, add to job control
+                        // Related: Phase 11 - Job Control (see ROADMAP.md)
+                        // Priority: Medium - needed for full POSIX compliance
                     },
                 }
             }
@@ -285,11 +289,20 @@ pub const Executor = struct {
                     std.posix.close(fd);
                 },
                 .heredoc, .herestring => {
-                    // TODO: Implement heredoc/herestring
+                    // TODO(executor): Implement heredoc/herestring support
+                    // Issue: Here-documents and here-strings not yet supported
+                    // Solution: Parse heredoc delimiter, collect lines until delimiter
+                    //           For herestring, expand string and pass as stdin
+                    // Related: Phase 7.3 - Heredoc/Herestring (see ROADMAP.md)
+                    // Priority: Medium - common shell feature
                     try IO.eprint("den: heredoc/herestring not yet implemented\n", .{});
                 },
                 .fd_duplicate, .fd_close => {
-                    // TODO: Implement fd duplication and closing
+                    // TODO(executor): Implement file descriptor duplication and closing
+                    // Issue: Advanced fd operations (>&3, <&4, etc.) not supported
+                    // Solution: Implement dup2 for custom fd numbers, track open fds
+                    // Related: Phase 7.4 - Advanced Redirections (see ROADMAP.md)
+                    // Priority: Low - advanced feature, rarely used
                     try IO.eprint("den: fd duplication/closing not yet implemented\n", .{});
                 },
             }
