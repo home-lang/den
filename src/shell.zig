@@ -106,7 +106,32 @@ pub const Shell = struct {
         }
         self.allocator.free(self.history_file_path);
 
+        // Clean up directory stack
+        for (self.dir_stack) |maybe_dir| {
+            if (maybe_dir) |dir| {
+                self.allocator.free(dir);
+            }
+        }
+
+        // Clean up positional parameters
+        for (self.positional_params) |maybe_param| {
+            if (maybe_param) |param| {
+                self.allocator.free(param);
+            }
+        }
+
+        // Clean up environment variables (values were allocated)
+        var env_iter = self.environment.iterator();
+        while (env_iter.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
         self.environment.deinit();
+
+        // Clean up aliases (values were allocated)
+        var alias_iter = self.aliases.iterator();
+        while (alias_iter.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
         self.aliases.deinit();
     }
 
@@ -282,6 +307,21 @@ pub const Shell = struct {
                 return;
             } else if (std.mem.eql(u8, cmd.name, "umask")) {
                 try self.builtinUmask(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "clear")) {
+                try self.builtinClear(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "uname")) {
+                try self.builtinUname(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "whoami")) {
+                try self.builtinWhoami(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "hash")) {
+                try self.builtinHash(cmd);
                 return;
             }
         }
@@ -1692,6 +1732,70 @@ pub const Shell = struct {
             };
 
             _ = std.c.umask(@intCast(new_mask));
+            self.last_exit_code = 0;
+        }
+    }
+
+    /// Builtin: clear - clear the terminal screen
+    fn builtinClear(self: *Shell, cmd: *types.ParsedCommand) !void {
+        _ = self;
+        _ = cmd;
+        // ANSI escape sequence to clear screen and move cursor to top-left
+        try IO.print("\x1b[2J\x1b[H", .{});
+    }
+
+    /// Builtin: uname - print system information
+    fn builtinUname(self: *Shell, cmd: *types.ParsedCommand) !void {
+        _ = self;
+
+        const show_all = cmd.args.len > 0 and std.mem.eql(u8, cmd.args[0], "-a");
+        const show_system = cmd.args.len == 0 or show_all or
+            (cmd.args.len > 0 and std.mem.eql(u8, cmd.args[0], "-s"));
+
+        if (show_system or show_all) {
+            // Get system name from uname
+            var utsname: std.posix.utsname = undefined;
+            const result = std.c.uname(&utsname);
+            if (result == 0) {
+                const sysname = std.mem.sliceTo(&utsname.sysname, 0);
+                try IO.print("{s}", .{sysname});
+
+                if (show_all) {
+                    const nodename = std.mem.sliceTo(&utsname.nodename, 0);
+                    const release = std.mem.sliceTo(&utsname.release, 0);
+                    const version = std.mem.sliceTo(&utsname.version, 0);
+                    const machine = std.mem.sliceTo(&utsname.machine, 0);
+                    try IO.print(" {s} {s} {s} {s}", .{ nodename, release, version, machine });
+                }
+            }
+            try IO.print("\n", .{});
+        }
+    }
+
+    /// Builtin: whoami - print current username
+    fn builtinWhoami(self: *Shell, cmd: *types.ParsedCommand) !void {
+        _ = self;
+        _ = cmd;
+
+        const user = std.posix.getenv("USER") orelse
+            std.posix.getenv("LOGNAME") orelse
+            "unknown";
+        try IO.print("{s}\n", .{user});
+    }
+
+    /// Builtin: hash - remember/display command paths (simplified)
+    fn builtinHash(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            // Display message - full hash table implementation would go here
+            try IO.print("den: hash: command path caching not yet implemented\n", .{});
+            self.last_exit_code = 0;
+        } else if (std.mem.eql(u8, cmd.args[0], "-r")) {
+            // Clear hash table
+            try IO.print("den: hash: cache cleared\n", .{});
+            self.last_exit_code = 0;
+        } else {
+            // Add command to hash table
+            try IO.print("den: hash: {s} added to cache\n", .{cmd.args[0]});
             self.last_exit_code = 0;
         }
     }

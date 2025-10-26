@@ -42,11 +42,16 @@ pub const ParsedCommand = struct {
     type: CommandType = .external,
 
     pub fn deinit(self: *ParsedCommand, allocator: std.mem.Allocator) void {
+        // Free command name (allocated during parsing/expansion)
+        allocator.free(self.name);
+
+        // Free arguments
         for (self.args) |arg| {
             allocator.free(arg);
         }
         allocator.free(self.args);
 
+        // Free redirections
         for (self.redirections) |redir| {
             allocator.free(redir.target);
         }
