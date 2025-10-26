@@ -37,6 +37,8 @@ pub const Shell = struct {
     history_file_path: []const u8,
     dir_stack: [32]?[]const u8,
     dir_stack_count: usize,
+    positional_params: [64]?[]const u8,
+    positional_params_count: usize,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         const config = types.DenConfig{};
@@ -71,6 +73,8 @@ pub const Shell = struct {
             .history_file_path = history_path_owned,
             .dir_stack = [_]?[]const u8{null} ** 32,
             .dir_stack_count = 0,
+            .positional_params = [_]?[]const u8{null} ** 64,
+            .positional_params_count = 0,
         };
 
         // Load history from file
@@ -269,6 +273,15 @@ pub const Shell = struct {
                 return;
             } else if (std.mem.eql(u8, cmd.name, "eval")) {
                 try self.builtinEval(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "shift")) {
+                try self.builtinShift(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "time")) {
+                try self.builtinTime(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "umask")) {
+                try self.builtinUmask(cmd);
                 return;
             }
         }
@@ -1553,6 +1566,134 @@ pub const Shell = struct {
         };
 
         self.last_exit_code = exit_code;
+    }
+
+    /// Builtin: shift - shift positional parameters
+    fn builtinShift(self: *Shell, cmd: *types.ParsedCommand) !void {
+        // Parse shift count (default 1)
+        const n: usize = if (cmd.args.len > 0)
+            std.fmt.parseInt(usize, cmd.args[0], 10) catch 1
+        else
+            1;
+
+        if (n > self.positional_params_count) {
+            try IO.eprint("den: shift: shift count too large\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Shift parameters by freeing first n and moving rest
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            if (self.positional_params[i]) |param| {
+                self.allocator.free(param);
+                self.positional_params[i] = null;
+            }
+        }
+
+        // Move remaining parameters down
+        var dest: usize = 0;
+        var src: usize = n;
+        while (src < self.positional_params.len) : (src += 1) {
+            self.positional_params[dest] = self.positional_params[src];
+            if (dest != src) {
+                self.positional_params[src] = null;
+            }
+            dest += 1;
+        }
+
+        self.positional_params_count -= n;
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: time - time command execution
+    fn builtinTime(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: time: missing command\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Join arguments to form command
+        var cmd_buf: [4096]u8 = undefined;
+        var cmd_len: usize = 0;
+
+        for (cmd.args, 0..) |arg, i| {
+            if (i > 0 and cmd_len < cmd_buf.len) {
+                cmd_buf[cmd_len] = ' ';
+                cmd_len += 1;
+            }
+
+            const copy_len = @min(arg.len, cmd_buf.len - cmd_len);
+            @memcpy(cmd_buf[cmd_len .. cmd_len + copy_len], arg[0..copy_len]);
+            cmd_len += copy_len;
+
+            if (cmd_len >= cmd_buf.len) break;
+        }
+
+        const command_str = cmd_buf[0..cmd_len];
+
+        // Get start time
+        const start_time = std.time.nanoTimestamp();
+
+        // Execute command
+        var tokenizer = parser_mod.Tokenizer.init(self.allocator, command_str);
+        const tokens = tokenizer.tokenize() catch |err| {
+            try IO.eprint("den: time: parse error: {}\n", .{err});
+            self.last_exit_code = 1;
+            return;
+        };
+        defer self.allocator.free(tokens);
+
+        var parser = parser_mod.Parser.init(self.allocator, tokens);
+        var chain = parser.parse() catch |err| {
+            try IO.eprint("den: time: parse error: {}\n", .{err});
+            self.last_exit_code = 1;
+            return;
+        };
+        defer chain.deinit(self.allocator);
+
+        try self.expandCommandChain(&chain);
+        try self.expandAliases(&chain);
+
+        var executor = executor_mod.Executor.init(self.allocator, &self.environment);
+        const exit_code = executor.executeChain(&chain) catch |err| {
+            try IO.eprint("den: time: execution error: {}\n", .{err});
+            self.last_exit_code = 1;
+            return;
+        };
+
+        // Get end time and calculate duration
+        const end_time = std.time.nanoTimestamp();
+        const duration_ns = end_time - start_time;
+        const duration_ms = @divFloor(duration_ns, 1_000_000);
+        const duration_s = @divFloor(duration_ms, 1000);
+        const remaining_ms = @mod(duration_ms, 1000);
+
+        try IO.eprint("\nreal\t{d}.{d:0>3}s\n", .{ duration_s, remaining_ms });
+
+        self.last_exit_code = exit_code;
+    }
+
+    /// Builtin: umask - set file creation mask
+    fn builtinUmask(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            // Display current umask
+            const current = std.c.umask(0);
+            _ = std.c.umask(current); // Restore it
+            try IO.print("{o:0>4}\n", .{current});
+            self.last_exit_code = 0;
+        } else {
+            // Set new umask
+            const new_mask = std.fmt.parseInt(u32, cmd.args[0], 8) catch {
+                try IO.eprint("den: umask: invalid octal number: {s}\n", .{cmd.args[0]});
+                self.last_exit_code = 1;
+                return;
+            };
+
+            _ = std.c.umask(@intCast(new_mask));
+            self.last_exit_code = 0;
+        }
     }
 };
 
