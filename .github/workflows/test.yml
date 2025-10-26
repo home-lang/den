@@ -1,0 +1,136 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        zig-version: ['0.15.1']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ matrix.zig-version }}
+
+      - name: Cache Zig artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/zig
+            .zig-cache
+          key: ${{ runner.os }}-zig-${{ matrix.zig-version }}-${{ hashFiles('build.zig') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-${{ matrix.zig-version }}-
+
+      - name: Build
+        run: zig build
+
+      - name: Run tokenizer tests
+        run: zig build test-tokenizer
+
+      - name: Run parser tests
+        run: zig build test-parser
+
+      - name: Run expander tests
+        run: zig build test-expander
+
+      - name: Run executor tests
+        run: zig build test-executor
+
+      - name: Run plugin tests
+        run: zig build test-all-plugins
+
+      - name: Run hook tests
+        run: zig build test-all-hooks
+
+      - name: Run theme tests
+        run: zig build test-theme
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            zig-out/test/
+            .zig-cache/
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.1'
+
+      - name: Generate coverage
+        run: |
+          zig build test -Dtest-coverage=true || true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.txt
+          flags: unittests
+          name: codecov-umbrella
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.1'
+
+      - name: Check formatting
+        run: zig fmt --check .
+
+  build-release:
+    name: Build Release
+    runs-on: ${{ matrix.os }}
+    needs: [test, lint]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.1'
+
+      - name: Build release
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: den-${{ matrix.os }}
+          path: zig-out/bin/den

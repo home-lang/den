@@ -19,6 +19,29 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     b.installArtifact(exe);
 
+    // Test runner executable
+    const test_runner_module = b.createModule(.{
+        .root_source_file = b.path("src/test_framework/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const test_runner_exe = b.addExecutable(.{
+        .name = "den-test",
+        .root_module = test_runner_module,
+    });
+    b.installArtifact(test_runner_exe);
+
+    const test_runner_cmd = b.addRunArtifact(test_runner_exe);
+    test_runner_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        test_runner_cmd.addArgs(args);
+    }
+
+    const test_runner_step = b.step("test-runner", "Run the test runner");
+    test_runner_step.dependOn(&test_runner_cmd.step);
+
     // Run step
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -239,4 +262,17 @@ pub fn build(b: *std.Build) void {
     const run_system_module_tests = b.addRunArtifact(system_module_tests);
     const system_module_test_step = b.step("test-system-modules", "Run system module tests");
     system_module_test_step.dependOn(&run_system_module_tests.step);
+
+    // All tests combined (main test suite)
+    const all_tests_step = b.step("test-all", "Run all test suites");
+    all_tests_step.dependOn(&run_unit_tests.step);
+    all_tests_step.dependOn(&run_plugin_tests.step);
+    all_tests_step.dependOn(&run_interface_tests.step);
+    all_tests_step.dependOn(&run_builtin_plugin_tests.step);
+    all_tests_step.dependOn(&run_integration_tests.step);
+    all_tests_step.dependOn(&run_discovery_tests.step);
+    all_tests_step.dependOn(&run_api_tests.step);
+    all_tests_step.dependOn(&run_hook_manager_tests.step);
+    all_tests_step.dependOn(&run_builtin_hooks_tests.step);
+    all_tests_step.dependOn(&run_theme_tests.step);
 }
