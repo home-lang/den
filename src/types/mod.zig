@@ -14,6 +14,7 @@ pub const ParsedCommand = command.ParsedCommand;
 pub const CommandType = command.CommandType;
 pub const Operator = command.Operator;
 pub const Redirection = command.Redirection;
+pub const CommandChain = command.CommandChain;
 
 test {
     std.testing.refAllDecls(@This());
