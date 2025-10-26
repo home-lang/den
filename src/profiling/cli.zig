@@ -38,9 +38,14 @@ pub fn main() !void {
 }
 
 fn printHelp() !void {
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.fs.File{
+        .handle = std.posix.STDOUT_FILENO,
+    };
+    var buffer: [4096]u8 = undefined;
+    var writer = stdout_file.writer(&buffer);
+    defer writer.interface.flush() catch {};
 
-    try stdout.writeAll(
+    try writer.interface.writeAll(
         \\Den Shell Profiling Tool
         \\
         \\Usage: den-profile COMMAND [OPTIONS]
@@ -74,9 +79,14 @@ fn printHelp() !void {
 }
 
 fn listBenchmarks() !void {
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.fs.File{
+        .handle = std.posix.STDOUT_FILENO,
+    };
+    var buffer: [4096]u8 = undefined;
+    var writer = stdout_file.writer(&buffer);
+    defer writer.interface.flush() catch {};
 
-    try stdout.writeAll(
+    try writer.interface.writeAll(
         \\Available Benchmarks:
         \\
         \\  startup      - Shell startup time benchmarks
@@ -105,9 +115,14 @@ fn listBenchmarks() !void {
 }
 
 fn runBenchmark(allocator: std.mem.Allocator, name: []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.fs.File{
+        .handle = std.posix.STDOUT_FILENO,
+    };
+    var buffer: [4096]u8 = undefined;
+    var writer = stdout_file.writer(&buffer);
+    defer writer.interface.flush() catch {};
 
-    try stdout.print("Running {s} benchmark...\n\n", .{name});
+    try writer.interface.print("Running {s} benchmark...\n\n", .{name});
 
     if (std.mem.eql(u8, name, "startup")) {
         try runExternalBenchmark(allocator, "startup_bench");

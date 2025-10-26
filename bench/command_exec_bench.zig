@@ -41,25 +41,25 @@ fn benchmarkVariableExpansion(allocator: std.mem.Allocator) !void {
 
 fn benchmarkGlobExpansion(allocator: std.mem.Allocator) !void {
     // Simulate glob pattern expansion
-    var matches = std.ArrayList([]const u8).init(allocator);
+    var matches = std.ArrayList([]const u8){ };
     defer {
         for (matches.items) |match| {
             allocator.free(match);
         }
-        matches.deinit();
+        matches.deinit(allocator);
     }
 
     // Simulate finding 10 matches
     var i: usize = 0;
     while (i < 10) : (i += 1) {
         const match = try std.fmt.allocPrint(allocator, "file{d}.txt", .{i});
-        try matches.append(match);
+        try matches.append(allocator, match);
     }
 }
 
 fn benchmarkProcessSpawn(_: std.mem.Allocator) !void {
     // Simulate process spawn overhead
-    std.time.sleep(50_000); // 0.05ms
+    std.posix.nanosleep(0, 50_000); // 0.05ms
 }
 
 fn benchmarkPipeSetup(allocator: std.mem.Allocator) !void {
@@ -90,9 +90,13 @@ pub fn main() !void {
     var suite = BenchmarkSuite.init(allocator, "Command Execution");
     defer suite.deinit();
 
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.fs.File{
+        .handle = std.posix.STDOUT_FILENO,
+    };
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = stdout_file.writer(&stdout_buffer);
 
-    try stdout.writeAll("Running command execution benchmarks...\n\n");
+    try stdout_writer.interface.writeAll("Running command execution benchmarks...\n\n");
 
     // Simple parsing
     {
@@ -143,5 +147,6 @@ pub fn main() !void {
         try suite.addResult(result);
     }
 
-    try suite.printSummary(stdout);
+    try suite.printSummary(&stdout_writer.interface);
+    try stdout_writer.interface.flush();
 }

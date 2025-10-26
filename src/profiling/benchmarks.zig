@@ -80,11 +80,12 @@ pub const Benchmark = struct {
             const start = std.time.nanoTimestamp();
             _ = try @call(.auto, func, args);
             const duration = std.time.nanoTimestamp() - start;
+            const duration_i64 = @as(i64, @intCast(duration));
 
-            timings[i] = duration;
-            total_ns += duration;
-            min_ns = @min(min_ns, duration);
-            max_ns = @max(max_ns, duration);
+            timings[i] = duration_i64;
+            total_ns += duration_i64;
+            min_ns = @min(min_ns, duration_i64);
+            max_ns = @max(max_ns, duration_i64);
         }
 
         // Calculate statistics
@@ -134,13 +135,13 @@ pub const BenchmarkSuite = struct {
         return .{
             .allocator = allocator,
             .name = name,
-            .results = std.ArrayList(BenchmarkResult).initCapacity(allocator, 0) catch std.ArrayList(BenchmarkResult){ .items = &[_]BenchmarkResult{}, .capacity = 0, .allocator = allocator },
+            .results = .{},
             .profiler = null,
         };
     }
 
     pub fn deinit(self: *BenchmarkSuite) void {
-        self.results.deinit();
+        self.results.deinit(self.allocator);
     }
 
     pub fn setProfiler(self: *BenchmarkSuite, profiler: *Profiler) void {
@@ -148,7 +149,7 @@ pub const BenchmarkSuite = struct {
     }
 
     pub fn addResult(self: *BenchmarkSuite, result: BenchmarkResult) !void {
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
     }
 
     pub fn printSummary(self: *BenchmarkSuite, writer: anytype) !void {
@@ -205,10 +206,13 @@ test "BenchmarkSuite usage" {
 
     try suite.addResult(result);
 
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
+    var buffer: std.ArrayList(u8) = .{};
+    defer buffer.deinit(allocator);
 
-    try suite.printSummary(buffer.writer());
+    var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &buffer);
+    defer buffer = aw.toArrayList();
+
+    try suite.printSummary(&aw.writer);
 
     const output = buffer.items;
     try std.testing.expect(std.mem.indexOf(u8, output, "Test Suite") != null);

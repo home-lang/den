@@ -15,32 +15,32 @@ fn benchmarkSimplePromptRender(allocator: std.mem.Allocator) !void {
 
 fn benchmarkComplexPromptRender(allocator: std.mem.Allocator) !void {
     // Simulate rendering complex prompt: user@host:path (git-branch) $
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
+    var buffer = std.ArrayList(u8){ };
+    defer buffer.deinit(allocator);
 
-    try buffer.appendSlice("user@host:");
-    try buffer.appendSlice("/home/user/project");
-    try buffer.appendSlice(" (main)");
-    try buffer.appendSlice(" $ ");
+    try buffer.appendSlice(allocator, "user@host:");
+    try buffer.appendSlice(allocator, "/home/user/project");
+    try buffer.appendSlice(allocator, " (main)");
+    try buffer.appendSlice(allocator, " $ ");
 }
 
 fn benchmarkGitStatusQuery(_: std.mem.Allocator) !void {
     // Simulate querying git status
-    std.time.sleep(100_000); // 0.1ms - simulating git command
+    std.posix.nanosleep(0, 100_000); // 0.1ms - simulating git command
 }
 
 fn benchmarkColorFormatting(allocator: std.mem.Allocator) !void {
     // Simulate applying color codes
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
+    var buffer = std.ArrayList(u8){ };
+    defer buffer.deinit(allocator);
 
     const text = "colored text";
     const color_start = "\x1b[32m"; // Green
     const color_end = "\x1b[0m"; // Reset
 
-    try buffer.appendSlice(color_start);
-    try buffer.appendSlice(text);
-    try buffer.appendSlice(color_end);
+    try buffer.appendSlice(allocator, color_start);
+    try buffer.appendSlice(allocator, text);
+    try buffer.appendSlice(allocator, color_end);
 }
 
 fn benchmarkPathShortening(allocator: std.mem.Allocator) !void {
@@ -48,22 +48,22 @@ fn benchmarkPathShortening(allocator: std.mem.Allocator) !void {
     const path = "/home/user/very/long/path/to/current/directory";
 
     var parts = std.mem.splitScalar(u8, path, '/');
-    var shortened = std.ArrayList(u8).init(allocator);
-    defer shortened.deinit();
+    var shortened = std.ArrayList(u8){ };
+    defer shortened.deinit(allocator);
 
     var count: usize = 0;
     while (parts.next()) |part| {
         if (part.len == 0) continue;
 
         if (count > 0) {
-            try shortened.append('/');
+            try shortened.append(allocator, '/');
         }
 
         // Shorten all but last component
         if (parts.peek() != null) {
-            try shortened.append(part[0]);
+            try shortened.append(allocator, part[0]);
         } else {
-            try shortened.appendSlice(part);
+            try shortened.appendSlice(allocator, part);
         }
 
         count += 1;
@@ -86,8 +86,8 @@ fn benchmarkVariableExpansion(allocator: std.mem.Allocator) !void {
     // Simulate expanding prompt variables
     const template = "{user}@{host}:{cwd} $ ";
 
-    var expanded = std.ArrayList(u8).init(allocator);
-    defer expanded.deinit();
+    var expanded = std.ArrayList(u8){ };
+    defer expanded.deinit(allocator);
 
     var i: usize = 0;
     while (i < template.len) : (i += 1) {
@@ -96,16 +96,16 @@ fn benchmarkVariableExpansion(allocator: std.mem.Allocator) !void {
             const var_name = template[i + 1 .. end];
 
             if (std.mem.eql(u8, var_name, "user")) {
-                try expanded.appendSlice("testuser");
+                try expanded.appendSlice(allocator, "testuser");
             } else if (std.mem.eql(u8, var_name, "host")) {
-                try expanded.appendSlice("testhost");
+                try expanded.appendSlice(allocator, "testhost");
             } else if (std.mem.eql(u8, var_name, "cwd")) {
-                try expanded.appendSlice("/home/user");
+                try expanded.appendSlice(allocator, "/home/user");
             }
 
             i = end;
         } else {
-            try expanded.append(template[i]);
+            try expanded.append(allocator, template[i]);
         }
     }
 }
@@ -118,12 +118,12 @@ fn benchmarkRightPromptRender(allocator: std.mem.Allocator) !void {
 
     const spaces_needed = terminal_width - left_prompt.len - right_prompt.len;
 
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
+    var buffer = std.ArrayList(u8){ };
+    defer buffer.deinit(allocator);
 
-    try buffer.appendSlice(left_prompt);
-    try buffer.appendNTimes(' ', spaces_needed);
-    try buffer.appendSlice(right_prompt);
+    try buffer.appendSlice(allocator, left_prompt);
+    try buffer.appendNTimes(allocator, ' ', spaces_needed);
+    try buffer.appendSlice(allocator, right_prompt);
 }
 
 fn benchmarkTransientPrompt(allocator: std.mem.Allocator) !void {
@@ -136,16 +136,16 @@ fn benchmarkModuleDetection(allocator: std.mem.Allocator) !void {
     // Simulate detecting which modules to show
     const files = [_][]const u8{ "package.json", "Cargo.toml", ".python-version" };
 
-    var modules = std.ArrayList([]const u8).init(allocator);
-    defer modules.deinit();
+    var modules = std.ArrayList([]const u8){ };
+    defer modules.deinit(allocator);
 
     for (files) |file| {
         if (std.mem.eql(u8, file, "package.json")) {
-            try modules.append("node");
+            try modules.append(allocator, "node");
         } else if (std.mem.eql(u8, file, "Cargo.toml")) {
-            try modules.append("rust");
+            try modules.append(allocator, "rust");
         } else if (std.mem.eql(u8, file, ".python-version")) {
-            try modules.append("python");
+            try modules.append(allocator, "python");
         }
     }
 }
@@ -158,9 +158,13 @@ pub fn main() !void {
     var suite = BenchmarkSuite.init(allocator, "Prompt Rendering");
     defer suite.deinit();
 
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.fs.File{
+        .handle = std.posix.STDOUT_FILENO,
+    };
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = stdout_file.writer(&stdout_buffer);
 
-    try stdout.writeAll("Running prompt rendering benchmarks...\n\n");
+    try stdout_writer.interface.writeAll("Running prompt rendering benchmarks...\n\n");
 
     // Simple prompt
     {
@@ -239,5 +243,6 @@ pub fn main() !void {
         try suite.addResult(result);
     }
 
-    try suite.printSummary(stdout);
+    try suite.printSummary(&stdout_writer.interface);
+    try stdout_writer.interface.flush();
 }

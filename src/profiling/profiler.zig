@@ -127,11 +127,11 @@ pub const Profiler = struct {
             .name = name,
             .category = category,
             .duration_ns = duration_ns,
-            .timestamp = std.time.nanoTimestamp() - self.start_time,
+            .timestamp = @as(i64, @intCast(std.time.nanoTimestamp() - self.start_time)),
             .thread_id = std.Thread.getCurrentId(),
         };
 
-        try self.events.append(event);
+        try self.events.append(self.allocator, event);
     }
 
     pub fn beginZone(self: *Profiler, name: []const u8) ProfileZone {

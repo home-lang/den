@@ -7,7 +7,7 @@ const BenchmarkSuite = profiling.BenchmarkSuite;
 // Mock shell startup components for benchmarking
 fn benchmarkMinimalStartup(_: std.mem.Allocator) !void {
     // Simulate minimal startup (no config, no plugins)
-    std.time.sleep(100_000); // 0.1ms
+    std.posix.nanosleep(0, 100_000); // 0.1ms
 }
 
 fn benchmarkConfigLoad(allocator: std.mem.Allocator) !void {
@@ -19,13 +19,13 @@ fn benchmarkConfigLoad(allocator: std.mem.Allocator) !void {
 
 fn benchmarkHistoryLoad(allocator: std.mem.Allocator) !void {
     // Simulate loading 1000 history entries
-    var list = std.ArrayList([]const u8).init(allocator);
-    defer list.deinit();
+    var list = std.ArrayList([]const u8){ };
+    defer list.deinit(allocator);
 
     var i: usize = 0;
     while (i < 1000) : (i += 1) {
         const entry = try allocator.dupe(u8, "echo hello");
-        try list.append(entry);
+        try list.append(allocator, entry);
     }
 
     for (list.items) |entry| {
@@ -35,7 +35,7 @@ fn benchmarkHistoryLoad(allocator: std.mem.Allocator) !void {
 
 fn benchmarkPluginDiscovery(_: std.mem.Allocator) !void {
     // Simulate plugin discovery
-    std.time.sleep(500_000); // 0.5ms
+    std.posix.nanosleep(0, 500_000); // 0.5ms
 }
 
 fn benchmarkPromptInit(allocator: std.mem.Allocator) !void {
@@ -53,9 +53,14 @@ pub fn main() !void {
     var suite = BenchmarkSuite.init(allocator, "Startup Time");
     defer suite.deinit();
 
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.fs.File{
+        .handle = std.posix.STDOUT_FILENO,
+    };
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = stdout_file.writer(&stdout_buffer);
 
-    try stdout.writeAll("Running startup benchmarks...\n\n");
+    try stdout_writer.interface.writeAll("Running startup benchmarks...\n\n");
+    try stdout_writer.interface.flush();
 
     // Minimal startup
     {
@@ -92,5 +97,6 @@ pub fn main() !void {
         try suite.addResult(result);
     }
 
-    try suite.printSummary(stdout);
+    try suite.printSummary(&stdout_writer.interface);
+    try stdout_writer.interface.flush();
 }

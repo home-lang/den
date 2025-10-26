@@ -7,12 +7,12 @@ const BenchmarkSuite = profiling.BenchmarkSuite;
 // Mock completion generation
 fn benchmarkCommandCompletion(allocator: std.mem.Allocator) !void {
     // Simulate completing from 100 available commands
-    var completions = std.ArrayList([]const u8).init(allocator);
+    var completions = std.ArrayList([]const u8){ };
     defer {
         for (completions.items) |completion| {
             allocator.free(completion);
         }
-        completions.deinit();
+        completions.deinit(allocator);
     }
 
     const prefix = "ec";
@@ -21,19 +21,19 @@ fn benchmarkCommandCompletion(allocator: std.mem.Allocator) !void {
     for (commands) |cmd| {
         if (std.mem.startsWith(u8, cmd, prefix)) {
             const completion = try allocator.dupe(u8, cmd);
-            try completions.append(completion);
+            try completions.append(allocator, completion);
         }
     }
 }
 
 fn benchmarkFileCompletion(allocator: std.mem.Allocator) !void {
     // Simulate file path completion with 50 files
-    var completions = std.ArrayList([]const u8).init(allocator);
+    var completions = std.ArrayList([]const u8){ };
     defer {
         for (completions.items) |completion| {
             allocator.free(completion);
         }
-        completions.deinit();
+        completions.deinit(allocator);
     }
 
     const prefix = "test";
@@ -41,7 +41,7 @@ fn benchmarkFileCompletion(allocator: std.mem.Allocator) !void {
     while (i < 50) : (i += 1) {
         const filename = try std.fmt.allocPrint(allocator, "testfile{d}.txt", .{i});
         if (std.mem.startsWith(u8, filename, prefix)) {
-            try completions.append(filename);
+            try completions.append(allocator, filename);
         } else {
             allocator.free(filename);
         }
@@ -50,12 +50,12 @@ fn benchmarkFileCompletion(allocator: std.mem.Allocator) !void {
 
 fn benchmarkPathSearch(allocator: std.mem.Allocator) !void {
     // Simulate PATH search for executables
-    var executables = std.ArrayList([]const u8).init(allocator);
+    var executables = std.ArrayList([]const u8){ };
     defer {
         for (executables.items) |exe| {
             allocator.free(exe);
         }
-        executables.deinit();
+        executables.deinit(allocator);
     }
 
     // Simulate scanning 10 PATH directories with 50 executables each
@@ -64,7 +64,7 @@ fn benchmarkPathSearch(allocator: std.mem.Allocator) !void {
         var file: usize = 0;
         while (file < 50) : (file += 1) {
             const exe = try std.fmt.allocPrint(allocator, "cmd{d}", .{file});
-            try executables.append(exe);
+            try executables.append(allocator, exe);
         }
     }
 }
@@ -80,12 +80,12 @@ fn benchmarkFuzzyMatch(allocator: std.mem.Allocator) !void {
         "grep-color",
     };
 
-    var matches = std.ArrayList([]const u8).init(allocator);
+    var matches = std.ArrayList([]const u8){ };
     defer {
         for (matches.items) |match| {
             allocator.free(match);
         }
-        matches.deinit();
+        matches.deinit(allocator);
     }
 
     for (candidates) |candidate| {
@@ -100,7 +100,7 @@ fn benchmarkFuzzyMatch(allocator: std.mem.Allocator) !void {
 
         if (input_idx == input.len) {
             const match = try allocator.dupe(u8, candidate);
-            try matches.append(match);
+            try matches.append(allocator, match);
         }
     }
 }
@@ -112,13 +112,13 @@ fn benchmarkCompletionRanking(allocator: std.mem.Allocator) !void {
         score: i32,
     };
 
-    var completions = std.ArrayList(Completion).init(allocator);
-    defer completions.deinit();
+    var completions: std.ArrayList(Completion) = .{};
+    defer completions.deinit(allocator);
 
     // Add 100 completions with random scores
     var i: usize = 0;
     while (i < 100) : (i += 1) {
-        try completions.append(.{
+        try completions.append(allocator, .{
             .text = "completion",
             .score = @as(i32, @intCast(i % 50)),
         });
@@ -155,9 +155,13 @@ pub fn main() !void {
     var suite = BenchmarkSuite.init(allocator, "Completion Generation");
     defer suite.deinit();
 
-    const stdout = std.io.getStdOut().writer();
+    const stdout_file = std.fs.File{
+        .handle = std.posix.STDOUT_FILENO,
+    };
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = stdout_file.writer(&stdout_buffer);
 
-    try stdout.writeAll("Running completion generation benchmarks...\n\n");
+    try stdout_writer.interface.writeAll("Running completion generation benchmarks...\n\n");
 
     // Command completion
     {
@@ -201,5 +205,6 @@ pub fn main() !void {
         try suite.addResult(result);
     }
 
-    try suite.printSummary(stdout);
+    try suite.printSummary(&stdout_writer.interface);
+    try stdout_writer.interface.flush();
 }
