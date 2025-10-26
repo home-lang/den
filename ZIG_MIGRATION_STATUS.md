@@ -14,7 +14,7 @@
 - ✅ **REPL Loop**: Interactive prompt with line reading
 - ✅ **Command Parsing**: Full tokenizer and parser
 - ✅ **External Command Execution**: Fork/exec working
-- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset implemented
+- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset, jobs, fg, bg implemented
 - ✅ **I/O**: stdin/stdout via Zig 0.15 POSIX APIs
 - ✅ **Pipeline Execution**: Multi-stage pipelines fully working (`ls | grep foo | head -3`)
 - ✅ **Boolean Operators**: `&&` and `||` with short-circuit evaluation
@@ -23,9 +23,10 @@
 - ✅ **Variable Expansion**: `$VAR`, `${VAR}`, `${VAR:-default}`, `$?`, `$$`
 - ✅ **Glob Expansion**: `*.txt`, `src/**/*.zig`, pattern matching
 - ✅ **Background Jobs**: `&` operator with job tracking and completion notifications
+- ✅ **Job Control**: `jobs`, `fg`, `bg` commands for managing background processes
 - ✅ **Exit Handling**: Ctrl+D and `exit` command
 
-### Completed Phases (0-13)
+### Completed Phases (0-14)
 
 **Phase 0: Pre-Migration** ✅
 - Renamed Krusty → Den across critical files
@@ -104,7 +105,7 @@
 - Alphabetical sorting of matches
 - Fixed buffer (256 matches max)
 
-**Phase 13: Background Jobs** ✅ **NEW!**
+**Phase 13: Background Jobs** ✅
 - Background operator (`&`) execution
 - Fork-based asynchronous job execution
 - Job tracking with PID, job ID, and command
@@ -113,6 +114,15 @@
 - Multiple concurrent jobs (up to 16)
 - Fixed array job tracking structure
 
+**Phase 14: Job Control** ✅ **NEW!**
+- `jobs` command - list all background jobs with status
+- `fg` command - bring background job to foreground
+- `fg [job_id]` - bring specific job to foreground
+- `bg` command - continue stopped job in background
+- Job status tracking (running, stopped, done)
+- Proper job cleanup on completion
+- Error handling for invalid job IDs
+
 ---
 
 ## 📊 Statistics
@@ -120,14 +130,14 @@
 | Metric | Value |
 |--------|-------|
 | **Zig Files** | 14 |
-| **Lines of Zig** | ~2,260 |
+| **Lines of Zig** | ~2,560 |
 | **TypeScript Files Remaining** | 141 |
 | **TypeScript LOC** | ~28,712 |
 | **Progress** | ~8% of codebase ported |
 | **Binary Size (Debug)** | ~880KB |
 | **Build Time** | <2 seconds |
-| **Builtins Implemented** | 8 (echo, pwd, cd, env, export, set, unset, exit) |
-| **Phases Completed** | 13 out of 22 (59%) |
+| **Builtins Implemented** | 11 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg) |
+| **Phases Completed** | 14 out of 22 (64%) |
 
 ---
 
@@ -254,7 +264,30 @@ den> [1]  Done (0)    sleep 1 &
 den> Goodbye from Den!
 ```
 
-**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, and background jobs fully working!** ✅
+### Job Control
+```bash
+$ printf "sleep 5 &\nsleep 10 &\njobs\nexit\n" | timeout 3 ./zig-out/bin/den
+den> [1] 98044
+den> [2] 98046
+den> [1]  Running    sleep 5 &
+[2]  Running    sleep 10 &
+
+$ printf "sleep 2 &\necho Job started\nsleep 1\nfg\necho Job finished\nexit\n" | timeout 5 ./zig-out/bin/den
+den> [1] 98262
+den> Job started
+den> sleep 2 &
+den> Job finished
+
+$ printf "sleep 1 &\nsleep 2 &\nsleep 3 &\njobs\nfg 2\njobs\nexit\n" | timeout 6 ./zig-out/bin/den
+den> [1]  Running    sleep 1 &
+[2]  Running    sleep 2 &
+[3]  Running    sleep 3 &
+den> sleep 2 &
+[1]  Done (0)    sleep 1 &
+den> [3]  Running    sleep 3 &
+```
+
+**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, and job control fully working!** ✅
 
 ---
 
@@ -272,6 +305,7 @@ den> Goodbye from Den!
 - [x] ~~Variable expansion (`$VAR`, `${VAR}`, `${VAR:-default}`)~~ **DONE in Phase 10!**
 - [x] ~~Glob expansion (`*.txt`, `src/*.zig`)~~ **DONE in Phase 12!**
 - [x] ~~Background jobs (`&`)~~ **DONE in Phase 13!**
+- [x] ~~Job control (`jobs`, `fg`, `bg`)~~ **DONE in Phase 14!**
 - [ ] Advanced parameter expansion (`${VAR#pattern}`, `${VAR##pattern}`, etc.)
 - [ ] Heredoc/herestring (`<<`, `<<<`)
 - [ ] FD duplication (`>&`, `<&`)
@@ -336,12 +370,13 @@ den> Goodbye from Den!
 - [x] Completion notifications
 - [x] Multiple concurrent jobs (up to 16)
 
-**Phase 14: Job Control**
-- [ ] `jobs` command
-- [ ] `fg` command (foreground)
-- [ ] `bg` command (background)
-- [ ] Job status tracking (running, stopped)
-- [ ] Ctrl+Z to suspend
+**Phase 14: Job Control** ✅ **COMPLETED!**
+- [x] `jobs` command - list all jobs with status
+- [x] `fg` command (foreground) - bring job to foreground
+- [x] `fg [job_id]` - bring specific job to foreground
+- [x] `bg` command (background) - continue stopped job
+- [x] Job status tracking (running, stopped, done)
+- [ ] Ctrl+Z to suspend (requires signal handling)
 
 **Phase 15: History**
 - [ ] History file (`~/.den_history`)

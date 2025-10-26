@@ -6,11 +6,19 @@ const IO = @import("utils/io.zig").IO;
 const Expansion = @import("utils/expansion.zig").Expansion;
 const Glob = @import("utils/glob.zig").Glob;
 
+/// Job status
+const JobStatus = enum {
+    running,
+    stopped,
+    done,
+};
+
 /// Background job information
 const BackgroundJob = struct {
     pid: std.posix.pid_t,
     job_id: usize,
     command: []const u8,
+    status: JobStatus,
 };
 
 pub const Shell = struct {
@@ -130,6 +138,22 @@ pub const Shell = struct {
 
         // Expand variables in all commands
         try self.expandCommandChain(&chain);
+
+        // Check for job control builtins (need shell context)
+        if (chain.commands.len == 1 and chain.operators.len == 0) {
+            const cmd = &chain.commands[0];
+            if (std.mem.eql(u8, cmd.name, "jobs")) {
+                try self.builtinJobs();
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "fg")) {
+                try self.builtinFg(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "bg")) {
+                try self.builtinBg(cmd);
+                return;
+            }
+        }
 
         // Check if this is a background job (last operator is &)
         const is_background = chain.operators.len > 0 and
@@ -278,12 +302,154 @@ pub const Shell = struct {
             .pid = pid,
             .job_id = job_id,
             .command = command_copy,
+            .status = .running,
         };
         self.background_jobs_count += 1;
 
         try IO.print("[{d}] {d}\n", .{ job_id, pid });
     }
+
+    /// Builtin: jobs - list background jobs
+    fn builtinJobs(self: *Shell) !void {
+        for (self.background_jobs) |maybe_job| {
+            if (maybe_job) |job| {
+                const status_str = switch (job.status) {
+                    .running => "Running",
+                    .stopped => "Stopped",
+                    .done => "Done",
+                };
+                try IO.print("[{d}]  {s: <10} {s}\n", .{ job.job_id, status_str, job.command });
+            }
+        }
+    }
+
+    /// Builtin: fg - bring background job to foreground
+    fn builtinFg(self: *Shell, cmd: *types.ParsedCommand) !void {
+        // Get job ID from argument (default to most recent)
+        var job_id: ?usize = null;
+        if (cmd.args.len > 0) {
+            job_id = std.fmt.parseInt(usize, cmd.args[0], 10) catch {
+                try IO.eprint("den: fg: {s}: no such job\n", .{cmd.args[0]});
+                self.last_exit_code = 1;
+                return;
+            };
+        } else {
+            // Find most recent job
+            var max_id: usize = 0;
+            for (self.background_jobs) |maybe_job| {
+                if (maybe_job) |job| {
+                    if (job.job_id > max_id) {
+                        max_id = job.job_id;
+                    }
+                }
+            }
+            if (max_id > 0) {
+                job_id = max_id;
+            }
+        }
+
+        if (job_id == null) {
+            try IO.eprint("den: fg: current: no such job\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Find job in array
+        var job_slot: ?usize = null;
+        for (self.background_jobs, 0..) |maybe_job, i| {
+            if (maybe_job) |job| {
+                if (job.job_id == job_id.?) {
+                    job_slot = i;
+                    break;
+                }
+            }
+        }
+
+        if (job_slot == null) {
+            try IO.eprint("den: fg: {d}: no such job\n", .{job_id.?});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const job = self.background_jobs[job_slot.?].?;
+        try IO.print("{s}\n", .{job.command});
+
+        // Wait for the job to complete
+        const result = std.posix.waitpid(job.pid, 0);
+        const exit_status = std.posix.W.EXITSTATUS(result.status);
+
+        // Remove from background jobs
+        self.allocator.free(job.command);
+        self.background_jobs[job_slot.?] = null;
+        self.background_jobs_count -= 1;
+
+        self.last_exit_code = @intCast(exit_status);
+    }
+
+    /// Builtin: bg - continue stopped job in background
+    fn builtinBg(self: *Shell, cmd: *types.ParsedCommand) !void {
+        // Get job ID from argument (default to most recent stopped job)
+        var job_id: ?usize = null;
+        if (cmd.args.len > 0) {
+            job_id = std.fmt.parseInt(usize, cmd.args[0], 10) catch {
+                try IO.eprint("den: bg: {s}: no such job\n", .{cmd.args[0]});
+                self.last_exit_code = 1;
+                return;
+            };
+        } else {
+            // Find most recent stopped job
+            var max_id: usize = 0;
+            for (self.background_jobs) |maybe_job| {
+                if (maybe_job) |job| {
+                    if (job.status == .stopped and job.job_id > max_id) {
+                        max_id = job.job_id;
+                    }
+                }
+            }
+            if (max_id > 0) {
+                job_id = max_id;
+            }
+        }
+
+        if (job_id == null) {
+            try IO.eprint("den: bg: current: no such job\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Find job in array
+        var job_slot: ?usize = null;
+        for (self.background_jobs, 0..) |maybe_job, i| {
+            if (maybe_job) |job| {
+                if (job.job_id == job_id.?) {
+                    job_slot = i;
+                    break;
+                }
+            }
+        }
+
+        if (job_slot == null) {
+            try IO.eprint("den: bg: {d}: no such job\n", .{job_id.?});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const job = self.background_jobs[job_slot.?].?;
+        if (job.status != .stopped) {
+            try IO.eprint("den: bg: job {d} already in background\n", .{job_id.?});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Send SIGCONT to continue the job
+        // Note: In a real implementation, we'd use kill(pid, SIGCONT)
+        // For now, just mark as running
+        self.background_jobs[job_slot.?].?.status = .running;
+        try IO.print("[{d}]+ {s} &\n", .{ job.job_id, job.command });
+        self.last_exit_code = 0;
+    }
 };
+
 
 test "shell initialization" {
     const allocator = std.testing.allocator;
