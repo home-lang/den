@@ -14,7 +14,7 @@
 - ✅ **REPL Loop**: Interactive prompt with line reading
 - ✅ **Command Parsing**: Full tokenizer and parser
 - ✅ **External Command Execution**: Fork/exec working
-- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete, alias, unalias, type, which, source, read, test implemented
+- ✅ **Builtin Commands**: 33 builtins - echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete, alias, unalias, type, which, source, read, test, pushd, popd, dirs, printf, true, false, sleep, help, basename, dirname, realpath, command, eval, exit
 - ✅ **I/O**: stdin/stdout via Zig 0.15 POSIX APIs
 - ✅ **Pipeline Execution**: Multi-stage pipelines fully working (`ls | grep foo | head -3`)
 - ✅ **Boolean Operators**: `&&` and `||` with short-circuit evaluation
@@ -31,9 +31,14 @@
 - ✅ **Script Execution**: `source` command for running shell scripts
 - ✅ **Conditional Testing**: `test`/`[` commands with file, string, and numeric tests
 - ✅ **User Input**: `read` command for reading stdin into variables
+- ✅ **Directory Stack**: `pushd`, `popd`, `dirs` for directory navigation
+- ✅ **Formatted Output**: `printf` with escape sequences and format specifiers
+- ✅ **Utility Builtins**: `true`, `false`, `sleep`, `help`
+- ✅ **Path Manipulation**: `basename`, `dirname`, `realpath`
+- ✅ **Command Execution**: `command`, `eval` for advanced scripting
 - ✅ **Exit Handling**: Ctrl+D and `exit` command
 
-### Completed Phases (0-18)
+### Completed Phases (0-20)
 
 **Phase 0: Pre-Migration** ✅
 - Renamed Krusty → Den across critical files
@@ -161,7 +166,7 @@
 - Alias expansion in command execution
 - Quote handling in alias definitions
 
-**Phase 18: Advanced Builtins** ✅ **NEW!**
+**Phase 18: Advanced Builtins** ✅
 - `source`/`.` - execute commands from file
 - Script execution with variable/alias expansion
 - Comment skipping in source files
@@ -175,6 +180,35 @@
 - Both `test` and `[` syntax supported
 - Proper exit codes for test results
 
+**Phase 19: Additional Essential Builtins** ✅
+- `pushd [dir]` - push directory onto stack and cd
+- `popd` - pop directory from stack and cd
+- `dirs` - display directory stack
+- Directory stack implementation (32-level deep)
+- Swap top two directories with `pushd` (no args)
+- `printf format args...` - formatted output
+- Escape sequences: `\n`, `\t`, `\r`, `\\`
+- Format specifiers: `%s` (string), `%d` (number), `%%` (literal %)
+- `true` - return success (exit code 0)
+- `false` - return failure (exit code 1)
+- `sleep n` - pause execution for n seconds
+- `help` - comprehensive builtin command reference
+- Categorized help output (Core, File System, Environment, etc.)
+
+**Phase 20: Path Manipulation & Advanced Execution** ✅ **NEW!**
+- `basename path [suffix]` - extract filename from path
+- Optional suffix removal from basename
+- `dirname path` - extract directory from path
+- Returns "." for paths without directory component
+- `realpath path` - resolve absolute canonical path
+- Follows symlinks and resolves relative paths
+- `command cmd args...` - execute command bypassing aliases/functions
+- Useful for calling external commands when alias exists
+- `eval args...` - execute arguments as shell command
+- Full tokenization, parsing, and execution
+- Variable and alias expansion within eval
+- Enables dynamic command construction
+
 ---
 
 ## 📊 Statistics
@@ -182,14 +216,14 @@
 | Metric | Value |
 |--------|-------|
 | **Zig Files** | 15 |
-| **Lines of Zig** | ~3,376 |
+| **Lines of Zig** | ~3,843 |
 | **TypeScript Files Remaining** | 141 |
 | **TypeScript LOC** | ~28,712 |
-| **Progress** | ~10% of codebase ported |
+| **Progress** | ~12% of codebase ported |
 | **Binary Size (Debug)** | ~880KB |
 | **Build Time** | <2 seconds |
-| **Builtins Implemented** | 20 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg, history, complete, alias, unalias, type, which, source, read, test) |
-| **Phases Completed** | 18 out of 22 (82%) |
+| **Builtins Implemented** | 33 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg, history, complete, alias, unalias, type, which, source, read, test, pushd, popd, dirs, printf, true, false, sleep, help, basename, dirname, realpath, command, eval) |
+| **Phases Completed** | 20 out of 22 (91%) |
 
 ---
 
@@ -459,7 +493,42 @@ $ printf "[ 10 -eq 10 ] && echo \"Equal!\"\nexit\n" | ./zig-out/bin/den
 den> "Equal!"
 ```
 
-**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, history, tab completion, aliases, script execution, and conditionals fully working!** ✅
+### Directory Stack and Utilities
+```bash
+# pushd/popd/dirs - directory navigation
+$ printf "pushd /tmp\npwd\ndirs\npopd\npwd\nexit\n" | ./zig-out/bin/den
+den> /private/tmp
+den> /private/tmp /Users/chrisbreuer/Code/den
+den> /Users/chrisbreuer/Code/den
+
+# printf - formatted output
+$ printf "printf \"Hello %%s\\\\n\" World\nprintf \"Number: %%d\\\\n\" 42\nexit\n" | ./zig-out/bin/den
+den> Hello World
+den> Number: 42
+
+# true/false - exit code control
+$ printf "true && echo \"success\"\nfalse || echo \"failure\"\nexit\n" | ./zig-out/bin/den
+den> "success"
+den> "failure"
+
+# help - builtin reference
+$ printf "help\nexit\n" | ./zig-out/bin/den | head -20
+Den Shell - Built-in Commands
+
+Core Commands:
+  exit              Exit the shell
+  help              Show this help message
+  history [n]       Show command history
+
+File System:
+  cd [dir]          Change directory
+  pwd               Print working directory
+  pushd [dir]       Push directory to stack and cd
+  popd              Pop directory from stack and cd
+  dirs              Show directory stack
+```
+
+**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, history, tab completion, aliases, script execution, conditionals, directory stack, and formatted output fully working!** ✅
 
 ---
 

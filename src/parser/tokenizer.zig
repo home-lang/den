@@ -19,6 +19,20 @@ pub const TokenType = enum {
     rparen, // )
     newline,
     eof,
+    // Control flow keywords
+    kw_if,
+    kw_then,
+    kw_else,
+    kw_elif,
+    kw_fi,
+    kw_for,
+    kw_while,
+    kw_do,
+    kw_done,
+    kw_case,
+    kw_esac,
+    kw_in,
+    kw_function,
 };
 
 pub const Token = struct {
@@ -233,6 +247,24 @@ pub const Tokenizer = struct {
         }
     }
 
+    fn getKeywordType(self: *Tokenizer, word: []const u8) TokenType {
+        _ = self;
+        if (std.mem.eql(u8, word, "if")) return .kw_if;
+        if (std.mem.eql(u8, word, "then")) return .kw_then;
+        if (std.mem.eql(u8, word, "else")) return .kw_else;
+        if (std.mem.eql(u8, word, "elif")) return .kw_elif;
+        if (std.mem.eql(u8, word, "fi")) return .kw_fi;
+        if (std.mem.eql(u8, word, "for")) return .kw_for;
+        if (std.mem.eql(u8, word, "while")) return .kw_while;
+        if (std.mem.eql(u8, word, "do")) return .kw_do;
+        if (std.mem.eql(u8, word, "done")) return .kw_done;
+        if (std.mem.eql(u8, word, "case")) return .kw_case;
+        if (std.mem.eql(u8, word, "esac")) return .kw_esac;
+        if (std.mem.eql(u8, word, "in")) return .kw_in;
+        if (std.mem.eql(u8, word, "function")) return .kw_function;
+        return .word;
+    }
+
     fn parseWord(self: *Tokenizer, start_line: usize, start_col: usize) !Token {
         const start_pos = self.pos;
         var in_single_quote = false;
@@ -272,8 +304,14 @@ pub const Tokenizer = struct {
 
         const word = self.input[start_pos..self.pos];
 
+        // Check for keywords (only if not quoted)
+        const token_type = if (in_single_quote or in_double_quote)
+            TokenType.word
+        else
+            self.getKeywordType(word);
+
         return Token{
-            .type = .word,
+            .type = token_type,
             .value = word,
             .line = start_line,
             .column = start_col,

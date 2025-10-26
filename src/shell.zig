@@ -35,6 +35,8 @@ pub const Shell = struct {
     history: [1000]?[]const u8,
     history_count: usize,
     history_file_path: []const u8,
+    dir_stack: [32]?[]const u8,
+    dir_stack_count: usize,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         const config = types.DenConfig{};
@@ -67,6 +69,8 @@ pub const Shell = struct {
             .history = [_]?[]const u8{null} ** 1000,
             .history_count = 0,
             .history_file_path = history_path_owned,
+            .dir_stack = [_]?[]const u8{null} ** 32,
+            .dir_stack_count = 0,
         };
 
         // Load history from file
@@ -223,6 +227,48 @@ pub const Shell = struct {
                 return;
             } else if (std.mem.eql(u8, cmd.name, "test") or std.mem.eql(u8, cmd.name, "[")) {
                 try self.builtinTest(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "pushd")) {
+                try self.builtinPushd(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "popd")) {
+                try self.builtinPopd(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "dirs")) {
+                try self.builtinDirs(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "printf")) {
+                try self.builtinPrintf(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "true")) {
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "false")) {
+                self.last_exit_code = 1;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "sleep")) {
+                try self.builtinSleep(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "help")) {
+                try self.builtinHelp(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "basename")) {
+                try self.builtinBasename(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "dirname")) {
+                try self.builtinDirname(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "realpath")) {
+                try self.builtinRealpath(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "command")) {
+                try self.builtinCommand(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "eval")) {
+                try self.builtinEval(cmd);
                 return;
             }
         }
@@ -1124,6 +1170,389 @@ pub const Shell = struct {
         // Unknown test
         try IO.eprint("den: test: unknown condition\n", .{});
         self.last_exit_code = 2;
+    }
+
+    /// Builtin: pushd - push directory onto stack and cd
+    fn builtinPushd(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            // pushd with no args: swap top two directories
+            if (self.dir_stack_count < 1) {
+                try IO.eprint("den: pushd: directory stack empty\n", .{});
+                self.last_exit_code = 1;
+                return;
+            }
+
+            // Get current directory
+            var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const cwd = try std.posix.getcwd(&cwd_buf);
+            const cwd_copy = try self.allocator.dupe(u8, cwd);
+
+            // Pop top of stack and cd to it
+            const top_dir = self.dir_stack[self.dir_stack_count - 1].?;
+            std.posix.chdir(top_dir) catch |err| {
+                try IO.eprint("den: pushd: {s}: {}\n", .{ top_dir, err });
+                self.allocator.free(cwd_copy);
+                self.last_exit_code = 1;
+                return;
+            };
+
+            // Push old cwd onto stack
+            self.dir_stack[self.dir_stack_count - 1] = cwd_copy;
+            self.last_exit_code = 0;
+        } else {
+            const target_dir = cmd.args[0];
+
+            // Get current directory before changing
+            var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const cwd = try std.posix.getcwd(&cwd_buf);
+
+            // Try to change to target directory
+            std.posix.chdir(target_dir) catch |err| {
+                try IO.eprint("den: pushd: {s}: {}\n", .{ target_dir, err });
+                self.last_exit_code = 1;
+                return;
+            };
+
+            // Push old cwd onto stack
+            if (self.dir_stack_count >= self.dir_stack.len) {
+                try IO.eprint("den: pushd: directory stack full\n", .{});
+                self.last_exit_code = 1;
+                return;
+            }
+
+            self.dir_stack[self.dir_stack_count] = try self.allocator.dupe(u8, cwd);
+            self.dir_stack_count += 1;
+            self.last_exit_code = 0;
+        }
+    }
+
+    /// Builtin: popd - pop directory from stack and cd
+    fn builtinPopd(self: *Shell, cmd: *types.ParsedCommand) !void {
+        _ = cmd;
+
+        if (self.dir_stack_count == 0) {
+            try IO.eprint("den: popd: directory stack empty\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Pop directory from stack
+        self.dir_stack_count -= 1;
+        const dir = self.dir_stack[self.dir_stack_count].?;
+        defer self.allocator.free(dir);
+        self.dir_stack[self.dir_stack_count] = null;
+
+        // Change to that directory
+        std.posix.chdir(dir) catch |err| {
+            try IO.eprint("den: popd: {s}: {}\n", .{ dir, err });
+            self.last_exit_code = 1;
+            return;
+        };
+
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: dirs - show directory stack
+    fn builtinDirs(self: *Shell, cmd: *types.ParsedCommand) !void {
+        _ = cmd;
+
+        // Show current directory first
+        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cwd = try std.posix.getcwd(&cwd_buf);
+        try IO.print("{s}", .{cwd});
+
+        // Show stack from top to bottom
+        if (self.dir_stack_count > 0) {
+            var i: usize = self.dir_stack_count;
+            while (i > 0) {
+                i -= 1;
+                if (self.dir_stack[i]) |dir| {
+                    try IO.print(" {s}", .{dir});
+                }
+            }
+        }
+
+        try IO.print("\n", .{});
+    }
+
+    /// Builtin: printf - formatted output (basic implementation)
+    fn builtinPrintf(self: *Shell, cmd: *types.ParsedCommand) !void {
+        _ = self;
+
+        if (cmd.args.len == 0) {
+            return;
+        }
+
+        const format_str = cmd.args[0];
+        var arg_idx: usize = 1;
+
+        var i: usize = 0;
+        while (i < format_str.len) {
+            if (format_str[i] == '\\' and i + 1 < format_str.len) {
+                // Handle escape sequences
+                i += 1;
+                switch (format_str[i]) {
+                    'n' => try IO.print("\n", .{}),
+                    't' => try IO.print("\t", .{}),
+                    'r' => try IO.print("\r", .{}),
+                    '\\' => try IO.print("\\", .{}),
+                    else => {
+                        try IO.print("\\{c}", .{format_str[i]});
+                    },
+                }
+                i += 1;
+            } else if (format_str[i] == '%' and i + 1 < format_str.len) {
+                // Handle format specifiers
+                i += 1;
+                switch (format_str[i]) {
+                    's' => {
+                        if (arg_idx < cmd.args.len) {
+                            try IO.print("{s}", .{cmd.args[arg_idx]});
+                            arg_idx += 1;
+                        }
+                    },
+                    'd' => {
+                        if (arg_idx < cmd.args.len) {
+                            const num = std.fmt.parseInt(i32, cmd.args[arg_idx], 10) catch 0;
+                            try IO.print("{d}", .{num});
+                            arg_idx += 1;
+                        }
+                    },
+                    '%' => try IO.print("%", .{}),
+                    else => {
+                        try IO.print("%{c}", .{format_str[i]});
+                    },
+                }
+                i += 1;
+            } else {
+                try IO.print("{c}", .{format_str[i]});
+                i += 1;
+            }
+        }
+    }
+
+    /// Builtin: sleep - pause for specified seconds
+    fn builtinSleep(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: sleep: missing operand\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const seconds = std.fmt.parseInt(u32, cmd.args[0], 10) catch {
+            try IO.eprint("den: sleep: invalid time interval '{s}'\n", .{cmd.args[0]});
+            self.last_exit_code = 1;
+            return;
+        };
+
+        std.posix.nanosleep(seconds, 0);
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: help - show available builtins
+    fn builtinHelp(self: *Shell, cmd: *types.ParsedCommand) !void {
+        _ = self;
+        _ = cmd;
+
+        try IO.print("Den Shell - Built-in Commands\n\n", .{});
+        try IO.print("Core Commands:\n", .{});
+        try IO.print("  exit              Exit the shell\n", .{});
+        try IO.print("  help              Show this help message\n", .{});
+        try IO.print("  history [n]       Show command history\n", .{});
+        try IO.print("\nFile System:\n", .{});
+        try IO.print("  cd [dir]          Change directory\n", .{});
+        try IO.print("  pwd               Print working directory\n", .{});
+        try IO.print("  pushd [dir]       Push directory to stack and cd\n", .{});
+        try IO.print("  popd              Pop directory from stack and cd\n", .{});
+        try IO.print("  dirs              Show directory stack\n", .{});
+        try IO.print("\nEnvironment:\n", .{});
+        try IO.print("  env               Show environment variables\n", .{});
+        try IO.print("  export VAR=val    Set and export variable\n", .{});
+        try IO.print("  set VAR=val       Set shell variable\n", .{});
+        try IO.print("  unset VAR         Unset variable\n", .{});
+        try IO.print("\nAliases:\n", .{});
+        try IO.print("  alias [name=val]  Define or list aliases\n", .{});
+        try IO.print("  unalias name      Remove alias\n", .{});
+        try IO.print("\nIntrospection:\n", .{});
+        try IO.print("  type name         Identify command type\n", .{});
+        try IO.print("  which name        Locate command in PATH\n", .{});
+        try IO.print("  complete [-c|-f] prefix  Show completions\n", .{});
+        try IO.print("\nJob Control:\n", .{});
+        try IO.print("  jobs              List background jobs\n", .{});
+        try IO.print("  fg [job_id]       Bring job to foreground\n", .{});
+        try IO.print("  bg [job_id]       Continue job in background\n", .{});
+        try IO.print("\nScripting:\n", .{});
+        try IO.print("  source file       Execute commands from file\n", .{});
+        try IO.print("  read var          Read line into variable\n", .{});
+        try IO.print("  test expr         Evaluate conditional\n", .{});
+        try IO.print("  [ expr ]          Evaluate conditional\n", .{});
+        try IO.print("  true              Return success (exit code 0)\n", .{});
+        try IO.print("  false             Return failure (exit code 1)\n", .{});
+        try IO.print("  sleep n           Pause for n seconds\n", .{});
+        try IO.print("\nOutput:\n", .{});
+        try IO.print("  echo [args...]    Print arguments\n", .{});
+        try IO.print("  printf fmt args   Formatted output\n", .{});
+        try IO.print("\nFor more help, use 'man bash' or visit docs.den.sh\n", .{});
+    }
+
+    /// Builtin: basename - extract filename from path
+    fn builtinBasename(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: basename: missing operand\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const path = cmd.args[0];
+        const base = std.fs.path.basename(path);
+
+        // Handle optional suffix removal
+        if (cmd.args.len > 1) {
+            const suffix = cmd.args[1];
+            if (std.mem.endsWith(u8, base, suffix)) {
+                const trimmed = base[0 .. base.len - suffix.len];
+                try IO.print("{s}\n", .{trimmed});
+            } else {
+                try IO.print("{s}\n", .{base});
+            }
+        } else {
+            try IO.print("{s}\n", .{base});
+        }
+
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: dirname - extract directory from path
+    fn builtinDirname(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: dirname: missing operand\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const path = cmd.args[0];
+        const dir = std.fs.path.dirname(path) orelse ".";
+        try IO.print("{s}\n", .{dir});
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: realpath - resolve absolute path
+    fn builtinRealpath(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: realpath: missing operand\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const path = cmd.args[0];
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        const real = std.fs.cwd().realpath(path, &buf) catch |err| {
+            try IO.eprint("den: realpath: {s}: {}\n", .{ path, err });
+            self.last_exit_code = 1;
+            return;
+        };
+
+        try IO.print("{s}\n", .{real});
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: command - run command bypassing aliases/builtins
+    fn builtinCommand(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: command: missing command argument\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Simplified: execute as a single-command chain
+        const single_cmd = types.ParsedCommand{
+            .name = cmd.args[0],
+            .args = if (cmd.args.len > 1) cmd.args[1..] else &[_][]const u8{},
+            .redirections = &[_]types.Redirection{},
+            .type = .external,
+        };
+
+        const cmds = [_]types.ParsedCommand{single_cmd};
+        const ops: []types.Operator = &[_]types.Operator{};
+
+        var chain = types.CommandChain{
+            .commands = @constCast(&cmds),
+            .operators = ops,
+        };
+
+        var executor = executor_mod.Executor.init(self.allocator, &self.environment);
+        const exit_code = executor.executeChain(&chain) catch |err| {
+            try IO.eprint("den: command: {}\n", .{err});
+            self.last_exit_code = 127;
+            return;
+        };
+
+        self.last_exit_code = exit_code;
+    }
+
+    /// Builtin: eval - execute arguments as shell command
+    fn builtinEval(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Join all arguments into a single command string
+        var cmd_buf: [4096]u8 = undefined;
+        var cmd_len: usize = 0;
+
+        for (cmd.args, 0..) |arg, i| {
+            if (i > 0 and cmd_len < cmd_buf.len) {
+                cmd_buf[cmd_len] = ' ';
+                cmd_len += 1;
+            }
+
+            const copy_len = @min(arg.len, cmd_buf.len - cmd_len);
+            @memcpy(cmd_buf[cmd_len .. cmd_len + copy_len], arg[0..copy_len]);
+            cmd_len += copy_len;
+
+            if (cmd_len >= cmd_buf.len) break;
+        }
+
+        const command_str = cmd_buf[0..cmd_len];
+
+        // Execute as if typed at prompt
+        // Tokenize
+        var tokenizer = parser_mod.Tokenizer.init(self.allocator, command_str);
+        const tokens = tokenizer.tokenize() catch |err| {
+            try IO.eprint("den: eval: parse error: {}\n", .{err});
+            self.last_exit_code = 1;
+            return;
+        };
+        defer self.allocator.free(tokens);
+
+        if (tokens.len == 0) {
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Parse
+        var parser = parser_mod.Parser.init(self.allocator, tokens);
+        var chain = parser.parse() catch |err| {
+            try IO.eprint("den: eval: parse error: {}\n", .{err});
+            self.last_exit_code = 1;
+            return;
+        };
+        defer chain.deinit(self.allocator);
+
+        // Expand variables and aliases
+        try self.expandCommandChain(&chain);
+        try self.expandAliases(&chain);
+
+        // Execute
+        var executor = executor_mod.Executor.init(self.allocator, &self.environment);
+        const exit_code = executor.executeChain(&chain) catch |err| {
+            try IO.eprint("den: eval: execution error: {}\n", .{err});
+            self.last_exit_code = 1;
+            return;
+        };
+
+        self.last_exit_code = exit_code;
     }
 };
 
