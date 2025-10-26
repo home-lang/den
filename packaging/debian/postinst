@@ -1,0 +1,24 @@
+#!/bin/sh
+# Post-installation script for Den Shell
+
+set -e
+
+# Add den to /etc/shells if not already present
+if [ -f /etc/shells ]; then
+    if ! grep -q "^/usr/bin/den$" /etc/shells; then
+        echo "/usr/bin/den" >> /etc/shells
+        echo "Added /usr/bin/den to /etc/shells"
+    fi
+fi
+
+echo ""
+echo "Den Shell has been installed!"
+echo ""
+echo "To use Den as your default shell:"
+echo "  chsh -s /usr/bin/den"
+echo ""
+echo "To start using Den:"
+echo "  den"
+echo ""
+
+exit 0

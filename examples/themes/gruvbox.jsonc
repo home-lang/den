@@ -1,0 +1,168 @@
+// Gruvbox Den Shell Theme
+// Warm retro groove color scheme
+{
+  "theme": {
+    "name": "gruvbox",
+    "colorScheme": "dark",
+    "description": "Gruvbox color scheme - warm retro aesthetic",
+
+    "colors": {
+      // Gruvbox dark base colors
+      "primary": "#83a598",       // Blue
+      "secondary": "#b8bb26",     // Green
+      "background": "#282828",    // Dark background
+      "foreground": "#ebdbb2",    // Light foreground
+
+      "success": "#b8bb26",       // Green
+      "warning": "#fabd2f",       // Yellow
+      "error": "#fb4934",         // Red
+      "info": "#83a598",          // Blue
+      "muted": "#928374",         // Grey
+
+      // Extended Gruvbox colors
+      "orange": "#fe8019",
+      "purple": "#d3869b",
+      "aqua": "#8ec07c",
+      "bg0": "#282828",
+      "bg1": "#3c3836",
+      "bg2": "#504945",
+      "fg0": "#fbf1c7",
+      "fg1": "#ebdbb2",
+      "fg2": "#d5c4a1"
+    },
+
+    "prompt": {
+      "template": "[{user}@{host}] {cwd} {git_branch}{git_status} {symbol} ",
+
+      "symbols": {
+        "success": "$",
+        "error": "✗",
+        "root": "#",
+        "continuation": ">"
+      },
+
+      "colors": {
+        "user": "aqua",
+        "host": "primary",
+        "cwd": "secondary",
+        "bracket": "muted",
+        "symbol": {
+          "success": "foreground",
+          "error": "error",
+          "root": "warning"
+        }
+      }
+    },
+
+    "syntax": {
+      "enabled": true,
+      "colors": {
+        "command": "secondary",
+        "builtin": "aqua",
+        "argument": "foreground",
+        "flag": "primary",
+        "option": "info",
+        "string": "success",
+        "number": "purple",
+        "operator": "orange",
+        "variable": "purple",
+        "comment": "muted",
+        "error": "error",
+        "path": "aqua",
+        "executable": "secondary"
+      }
+    },
+
+    "git": {
+      "colors": {
+        "branch": "aqua",
+        "clean": "success",
+        "dirty": "warning",
+        "conflict": "error",
+        "ahead": "primary",
+        "behind": "orange",
+        "stash": "purple"
+      },
+      "symbols": {
+        "branch": "",
+        "dirty": "✗",
+        "clean": "✓",
+        "ahead": "↑",
+        "behind": "↓",
+        "diverged": "↕",
+        "stash": "⚑",
+        "untracked": "?"
+      }
+    },
+
+    "completion": {
+      "colors": {
+        "selected": {
+          "fg": "bg0",
+          "bg": "warning"
+        },
+        "description": "muted",
+        "file": "foreground",
+        "directory": "primary",
+        "executable": "success",
+        "symlink": "aqua",
+        "alias": "purple"
+      },
+      "border": "bg2"
+    },
+
+    "suggestion": {
+      "color": "muted",
+      "style": "dim"
+    },
+
+    "modules": {
+      "node": {
+        "color": "#b8bb26",
+        "symbol": "⬢"
+      },
+      "python": {
+        "color": "#83a598",
+        "symbol": "🐍"
+      },
+      "rust": {
+        "color": "#fb4934",
+        "symbol": "🦀"
+      },
+      "go": {
+        "color": "#8ec07c",
+        "symbol": "🐹"
+      },
+      "docker": {
+        "color": "#83a598",
+        "symbol": "🐳"
+      },
+      "kubernetes": {
+        "color": "#83a598",
+        "symbol": "☸"
+      },
+      "aws": {
+        "color": "#fe8019",
+        "symbol": "☁"
+      },
+      "battery": {
+        "colors": {
+          "full": "#b8bb26",
+          "medium": "#fabd2f",
+          "low": "#fe8019",
+          "critical": "#fb4934"
+        }
+      }
+    },
+
+    "border": {
+      "style": "solid",
+      "color": "bg2"
+    },
+
+    "selection": {
+      "bg": "#504945",
+      "fg": "foreground"
+    }
+  }
+}

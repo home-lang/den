@@ -1,0 +1,17 @@
+pkgbase = den-shell
+	pkgdesc = Modern, fast, and feature-rich POSIX shell written in Zig
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/stacksjs/den
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	depends = glibc
+	provides = den
+	conflicts = den
+	source_x86_64 = https://github.com/stacksjs/den/releases/download/v0.1.0/den-0.1.0-linux-x64.tar.gz
+	sha256sums_x86_64 = SKIP
+	source_aarch64 = https://github.com/stacksjs/den/releases/download/v0.1.0/den-0.1.0-linux-arm64.tar.gz
+	sha256sums_aarch64 = SKIP
+
+pkgname = den-shell

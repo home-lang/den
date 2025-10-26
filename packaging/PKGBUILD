@@ -1,0 +1,69 @@
+# Maintainer: Stacks.js <support@stacksjs.org>
+# AUR Package for Den Shell
+
+pkgname=den-shell
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Modern, fast, and feature-rich POSIX shell written in Zig"
+arch=('x86_64' 'aarch64')
+url="https://github.com/stacksjs/den"
+license=('MIT')
+depends=('glibc')
+provides=('den')
+conflicts=('den')
+source_x86_64=("https://github.com/stacksjs/den/releases/download/v${pkgver}/den-${pkgver}-linux-x64.tar.gz")
+source_aarch64=("https://github.com/stacksjs/den/releases/download/v${pkgver}/den-${pkgver}-linux-arm64.tar.gz")
+sha256sums_x86_64=('SKIP')  # Update with actual SHA256
+sha256sums_aarch64=('SKIP')  # Update with actual SHA256
+
+package() {
+    cd "$srcdir/den"
+
+    # Install binary
+    install -Dm755 den "$pkgdir/usr/bin/den"
+
+    # Install wrapper script
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/den-wrapper" <<'EOF'
+#!/bin/sh
+export DEN_NONINTERACTIVE=1
+exec /usr/bin/den "$@"
+EOF
+
+    # Install license if available
+    if [ -f LICENSE ]; then
+        install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    fi
+
+    # Install documentation if available
+    if [ -f README.md ]; then
+        install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    fi
+}
+
+post_install() {
+    # Add to /etc/shells
+    if [ -f /etc/shells ]; then
+        if ! grep -q "^/usr/bin/den$" /etc/shells; then
+            echo "/usr/bin/den" >> /etc/shells
+            echo "Added /usr/bin/den to /etc/shells"
+        fi
+    fi
+
+    echo ""
+    echo "Den Shell has been installed!"
+    echo ""
+    echo "To use Den as your default shell:"
+    echo "  chsh -s /usr/bin/den"
+    echo ""
+    echo "To start using Den:"
+    echo "  den"
+    echo ""
+}
+
+post_remove() {
+    # Remove from /etc/shells
+    if [ -f /etc/shells ]; then
+        sed -i.bak '/^\/usr\/bin\/den$/d' /etc/shells
+        rm -f /etc/shells.bak
+    fi
+}

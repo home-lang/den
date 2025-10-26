@@ -1,0 +1,143 @@
+// Ocean Den Shell Theme
+// Cool blue ocean-inspired palette
+{
+  "theme": {
+    "name": "ocean",
+    "colorScheme": "dark",
+    "description": "Cool ocean-inspired blue theme",
+
+    "colors": {
+      "primary": "#88c0d0",       // Light blue
+      "secondary": "#81a1c1",     // Medium blue
+      "background": "#0c2233",    // Deep ocean
+      "foreground": "#d8dee9",    // Light grey
+
+      "success": "#a3be8c",       // Sea green
+      "warning": "#ebcb8b",       // Sand yellow
+      "error": "#bf616a",         // Coral red
+      "info": "#5e81ac",          // Deep blue
+      "muted": "#4c566a",         // Grey blue
+
+      // Ocean-specific accents
+      "wave": "#88c0d0",
+      "foam": "#d8dee9",
+      "deep": "#2e3440",
+      "shell": "#b48ead"
+    },
+
+    "prompt": {
+      "template": "╭─ {user}@{host} {cwd} {git_branch}{git_status}\n╰─{symbol} ",
+
+      "symbols": {
+        "success": "➤",
+        "error": "✗",
+        "root": "⚡",
+        "continuation": "≋",
+        "wave": "≋"
+      },
+
+      "colors": {
+        "user": "wave",
+        "host": "secondary",
+        "cwd": "info",
+        "symbol": {
+          "success": "foam",
+          "error": "error",
+          "root": "warning"
+        }
+      }
+    },
+
+    "syntax": {
+      "enabled": true,
+      "colors": {
+        "command": "primary",
+        "builtin": "secondary",
+        "argument": "foreground",
+        "flag": "info",
+        "option": "wave",
+        "string": "success",
+        "number": "warning",
+        "operator": "muted",
+        "variable": "shell",
+        "comment": "muted",
+        "error": "error",
+        "path": "info",
+        "executable": "wave"
+      }
+    },
+
+    "git": {
+      "colors": {
+        "branch": "wave",
+        "clean": "success",
+        "dirty": "warning",
+        "conflict": "error",
+        "ahead": "info",
+        "behind": "warning",
+        "stash": "shell"
+      },
+      "symbols": {
+        "branch": "≋",
+        "dirty": "~",
+        "clean": "✓",
+        "ahead": "↑",
+        "behind": "↓",
+        "diverged": "⇅",
+        "stash": "⚓"
+      }
+    },
+
+    "completion": {
+      "colors": {
+        "selected": {
+          "fg": "background",
+          "bg": "wave"
+        },
+        "description": "muted",
+        "file": "foreground",
+        "directory": "info",
+        "executable": "success",
+        "alias": "shell"
+      },
+      "border": "wave"
+    },
+
+    "suggestion": {
+      "color": "muted",
+      "style": "dim"
+    },
+
+    "modules": {
+      "node": {
+        "color": "#a3be8c",
+        "symbol": "⬢"
+      },
+      "python": {
+        "color": "#88c0d0",
+        "symbol": "🐍"
+      },
+      "rust": {
+        "color": "#d08770",
+        "symbol": "🦀"
+      },
+      "go": {
+        "color": "#81a1c1",
+        "symbol": "🐹"
+      },
+      "docker": {
+        "color": "#5e81ac",
+        "symbol": "🐳"
+      },
+      "kubernetes": {
+        "color": "#88c0d0",
+        "symbol": "⚓"
+      }
+    },
+
+    "border": {
+      "style": "rounded",
+      "color": "wave"
+    }
+  }
+}

@@ -1,0 +1,150 @@
+// Powerline Den Shell Theme
+// Segment-based design with powerline symbols
+{
+  "theme": {
+    "name": "powerline",
+    "colorScheme": "dark",
+    "description": "Powerline-inspired theme with segment design",
+
+    "colors": {
+      "primary": "#268bd2",
+      "secondary": "#859900",
+      "background": "#002b36",
+      "foreground": "#839496",
+
+      "success": "#859900",
+      "warning": "#b58900",
+      "error": "#dc322f",
+      "info": "#2aa198",
+      "muted": "#586e75",
+
+      // Segment backgrounds
+      "segment1": "#073642",
+      "segment2": "#002b36",
+      "segment3": "#586e75",
+      "segment4": "#268bd2"
+    },
+
+    "prompt": {
+      "template": "┌─{segment:user}{segment:host}{segment:cwd}{segment:git}\n└─{symbol} ",
+      "powerline": true,
+
+      "symbols": {
+        "success": "➜",
+        "error": "✗",
+        "root": "⚡",
+        "continuation": "▶",
+        "separator": "",
+        "separatorThin": ""
+      },
+
+      "segments": {
+        "user": {
+          "template": " {user} ",
+          "bg": "segment1",
+          "fg": "foreground",
+          "separator": "separator"
+        },
+        "host": {
+          "template": " {host} ",
+          "bg": "segment2",
+          "fg": "foreground",
+          "separator": "separator"
+        },
+        "cwd": {
+          "template": " {cwd} ",
+          "bg": "segment3",
+          "fg": "background",
+          "separator": "separator"
+        },
+        "git": {
+          "template": " {git_branch}{git_status} ",
+          "bg": "segment4",
+          "fg": "background",
+          "separator": "separator",
+          "condition": "in_git_repo"
+        }
+      },
+
+      "colors": {
+        "symbol": {
+          "success": "success",
+          "error": "error",
+          "root": "warning"
+        }
+      }
+    },
+
+    "syntax": {
+      "enabled": true,
+      "colors": {
+        "command": "primary",
+        "builtin": "secondary",
+        "argument": "foreground",
+        "flag": "info",
+        "string": "success",
+        "number": "warning",
+        "operator": "muted",
+        "variable": "#6c71c4",
+        "comment": "muted",
+        "error": "error"
+      }
+    },
+
+    "git": {
+      "colors": {
+        "branch": "foreground",
+        "clean": "success",
+        "dirty": "warning",
+        "conflict": "error",
+        "ahead": "info",
+        "behind": "warning"
+      },
+      "symbols": {
+        "branch": "",
+        "dirty": "✗",
+        "clean": "✓",
+        "ahead": "↑",
+        "behind": "↓",
+        "diverged": "⇅",
+        "stash": "⚑"
+      }
+    },
+
+    "completion": {
+      "colors": {
+        "selected": {
+          "fg": "background",
+          "bg": "primary"
+        },
+        "description": "muted",
+        "file": "foreground",
+        "directory": "info",
+        "executable": "success"
+      }
+    },
+
+    "modules": {
+      "node": {
+        "color": "#859900",
+        "symbol": "⬢",
+        "bg": "segment4"
+      },
+      "python": {
+        "color": "#268bd2",
+        "symbol": "🐍",
+        "bg": "segment4"
+      },
+      "rust": {
+        "color": "#dc322f",
+        "symbol": "🦀",
+        "bg": "segment4"
+      },
+      "docker": {
+        "color": "#268bd2",
+        "symbol": "🐳",
+        "bg": "segment4"
+      }
+    }
+  }
+}

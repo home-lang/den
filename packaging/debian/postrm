@@ -1,0 +1,22 @@
+#!/bin/sh
+# Post-removal script for Den Shell
+
+set -e
+
+# Remove den from /etc/shells
+if [ "$1" = "purge" ] || [ "$1" = "remove" ]; then
+    if [ -f /etc/shells ]; then
+        if grep -q "^/usr/bin/den$" /etc/shells; then
+            sed -i.bak '/^\/usr\/bin\/den$/d' /etc/shells
+            rm -f /etc/shells.bak
+            echo "Removed /usr/bin/den from /etc/shells"
+        fi
+    fi
+fi
+
+if [ "$1" = "purge" ]; then
+    # Remove user data on purge
+    echo "To remove user data, run: rm -rf ~/.den_history ~/.config/den"
+fi
+
+exit 0

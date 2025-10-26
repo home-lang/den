@@ -5,48 +5,48 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
-  npm:
-    name: npm
+  build:
+    name: Build Release
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Use cached node_modules
-        uses: actions/cache@v4
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            node-modules-
+          version: 0.15.1
 
-      - name: Install Dependencies
-        run: bun install
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Publish to npm
-        run: bun publish --access public
-        env:
-          BUN_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
+      - name: Build release binaries
+        run: |
+          echo "Building Den Shell v${{ steps.version.outputs.VERSION }}"
+          zig build release
 
-      - name: Create GitHub release
-        run: bunx changelogithub
-        env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      - name: Create release archives
+        run: |
+          chmod +x scripts/release.sh
+          scripts/release.sh ${{ steps.version.outputs.VERSION }}
 
-      - name: Attach Binaries
-        uses: stacksjs/action-releaser@v1.1.0
+      - name: Create GitHub Release
+        uses: stacksjs/action-releaser@v1.2.6
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          changelog: CHANGELOG.md
           files: |
-            bin/krusty-linux-x64.zip
-            bin/krusty-linux-arm64.zip
-            bin/krusty-windows-x64.zip
-            bin/krusty-darwin-x64.zip
-            bin/krusty-darwin-arm64.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            dist/den-*-linux-x64.tar.gz
+            dist/den-*-linux-arm64.tar.gz
+            dist/den-*-darwin-x64.tar.gz
+            dist/den-*-darwin-arm64.tar.gz
+            dist/checksums-*.txt

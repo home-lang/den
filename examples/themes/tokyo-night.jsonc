@@ -1,0 +1,164 @@
+// Tokyo Night Den Shell Theme
+// Popular Tokyo Night color scheme
+{
+  "theme": {
+    "name": "tokyo-night",
+    "colorScheme": "dark",
+    "description": "Tokyo Night color scheme - modern and vibrant",
+
+    "colors": {
+      // Tokyo Night base colors
+      "primary": "#7aa2f7",       // Blue
+      "secondary": "#9ece6a",     // Green
+      "background": "#1a1b26",    // Dark background
+      "foreground": "#c0caf5",    // Light foreground
+
+      "success": "#9ece6a",       // Green
+      "warning": "#e0af68",       // Orange
+      "error": "#f7768e",         // Red
+      "info": "#7dcfff",          // Cyan
+      "muted": "#565f89",         // Comment grey
+
+      // Extended Tokyo Night colors
+      "magenta": "#bb9af7",
+      "purple": "#9d7cd8",
+      "teal": "#1abc9c",
+      "orange": "#ff9e64",
+      "blue0": "#3d59a1",
+      "blue7": "#394b70"
+    },
+
+    "prompt": {
+      "template": " {user}@{host}  {cwd}  {git_branch}{git_status}  {modules} {symbol} ",
+      "modern": true,
+
+      "symbols": {
+        "success": "➜",
+        "error": "✗",
+        "root": "⚡",
+        "continuation": "▶"
+      },
+
+      "colors": {
+        "user": "primary",
+        "host": "info",
+        "cwd": "secondary",
+        "symbol": {
+          "success": "primary",
+          "error": "error",
+          "root": "warning"
+        }
+      }
+    },
+
+    "syntax": {
+      "enabled": true,
+      "colors": {
+        "command": "primary",
+        "builtin": "info",
+        "argument": "foreground",
+        "flag": "orange",
+        "option": "warning",
+        "string": "success",
+        "number": "orange",
+        "operator": "muted",
+        "variable": "magenta",
+        "comment": "muted",
+        "error": "error",
+        "path": "info",
+        "executable": "primary",
+        "keyword": "purple"
+      }
+    },
+
+    "git": {
+      "colors": {
+        "branch": "magenta",
+        "clean": "success",
+        "dirty": "warning",
+        "conflict": "error",
+        "ahead": "info",
+        "behind": "orange",
+        "stash": "purple"
+      },
+      "symbols": {
+        "branch": "",
+        "dirty": "✗",
+        "clean": "✓",
+        "ahead": "⇡",
+        "behind": "⇣",
+        "diverged": "⇕",
+        "stash": "📦",
+        "untracked": "?"
+      }
+    },
+
+    "completion": {
+      "colors": {
+        "selected": {
+          "fg": "background",
+          "bg": "primary"
+        },
+        "description": "muted",
+        "file": "foreground",
+        "directory": "info",
+        "executable": "success",
+        "symlink": "magenta",
+        "alias": "purple"
+      },
+      "border": "blue7"
+    },
+
+    "suggestion": {
+      "color": "muted",
+      "style": "dim"
+    },
+
+    "modules": {
+      "node": {
+        "color": "#9ece6a",
+        "symbol": "⬢"
+      },
+      "python": {
+        "color": "#7aa2f7",
+        "symbol": "🐍"
+      },
+      "rust": {
+        "color": "#f7768e",
+        "symbol": "🦀"
+      },
+      "go": {
+        "color": "#7dcfff",
+        "symbol": "🐹"
+      },
+      "docker": {
+        "color": "#7aa2f7",
+        "symbol": "🐳"
+      },
+      "kubernetes": {
+        "color": "#7aa2f7",
+        "symbol": "☸"
+      },
+      "aws": {
+        "color": "#ff9e64",
+        "symbol": "☁"
+      },
+      "time": {
+        "color": "#565f89"
+      },
+      "duration": {
+        "color": "#565f89"
+      }
+    },
+
+    "border": {
+      "style": "rounded",
+      "color": "blue7"
+    },
+
+    "selection": {
+      "bg": "#283457",
+      "fg": "foreground"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  den:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "0.1.0"
+    image: stacksjs/den:latest
+    container_name: den-shell
+    stdin_open: true
+    tty: true
+    volumes:
+      # Mount home directory for persistent history
+      - den-home:/home/den
+      # Optional: Mount your scripts
+      - ./scripts:/home/den/scripts:ro
+    environment:
+      - DEN_PROMPT="\u@\h:\w\$ "
+      - TERM=xterm-256color
+    restart: unless-stopped
+
+  # Development container with source mounted
+  den-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: stacksjs/den:dev
+    container_name: den-dev
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/workspace
+      - den-dev-home:/home/den
+    working_dir: /workspace
+    environment:
+      - DEN_PROMPT="[dev] \u@\h:\w\$ "
+      - TERM=xterm-256color
+    command: /usr/local/bin/den
+
+volumes:
+  den-home:
+    driver: local
+  den-dev-home:
+    driver: local

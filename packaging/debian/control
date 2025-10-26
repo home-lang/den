@@ -1,0 +1,22 @@
+Package: den
+Version: 0.1.0
+Section: shells
+Priority: optional
+Architecture: amd64
+Maintainer: Stacks.js <support@stacksjs.org>
+Homepage: https://github.com/stacksjs/den
+Vcs-Git: https://github.com/stacksjs/den.git
+Vcs-Browser: https://github.com/stacksjs/den
+Depends: libc6 (>= 2.34)
+Description: Modern, fast, and feature-rich POSIX shell written in Zig
+ Den Shell is a modern shell designed for speed and usability.
+ It features advanced command completion, syntax highlighting,
+ plugin support, and comprehensive scripting capabilities.
+ .
+ Key features:
+  - Fast startup and execution
+  - Advanced tab completion
+  - Plugin system with hook support
+  - Theming and prompt customization
+  - Built-in scripting engine
+  - Job control and process management

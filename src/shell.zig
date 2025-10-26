@@ -74,12 +74,15 @@ pub const Shell = struct {
         // Initialize environment from system
         var env = std.StringHashMap([]const u8).init(allocator);
 
-        // Add some basic environment variables
-        const home = std.posix.getenv("HOME") orelse "/";
-        try env.put("HOME", try allocator.dupe(u8, home));
+        // Add some basic environment variables (cross-platform)
+        const home = std.process.getEnvVarOwned(allocator, "HOME") catch
+            std.process.getEnvVarOwned(allocator, "USERPROFILE") catch
+            try allocator.dupe(u8, "/");
+        try env.put("HOME", home);
 
-        const path = std.posix.getenv("PATH") orelse "/usr/bin:/bin";
-        try env.put("PATH", try allocator.dupe(u8, path));
+        const path = std.process.getEnvVarOwned(allocator, "PATH") catch
+            try allocator.dupe(u8, "/usr/bin:/bin");
+        try env.put("PATH", path);
 
         // Build history file path: ~/.den_history
         var history_path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -96,7 +99,7 @@ pub const Shell = struct {
             .background_jobs = [_]?BackgroundJob{null} ** 16,
             .background_jobs_count = 0,
             .next_job_id = 1,
-            .last_background_pid = 0,
+            .last_background_pid = if (@import("builtin").os.tag == .windows) undefined else 0,
             .history = [_]?[]const u8{null} ** 1000,
             .history_count = 0,
             .history_file_path = history_path_owned,
@@ -625,13 +628,19 @@ pub const Shell = struct {
             }
         }
 
+        // Convert PID to i32 for expansion (0 on Windows where we don't track PIDs)
+        const pid_for_expansion: i32 = if (@import("builtin").os.tag == .windows)
+            0
+        else
+            @intCast(self.last_background_pid);
+
         var expander = Expansion.initWithParams(
             self.allocator,
             &self.environment,
             self.last_exit_code,
             positional_params_slice[0..param_count],
             self.shell_name,
-            self.last_background_pid,
+            pid_for_expansion,
             self.last_arg,
         );
         var glob = Glob.init(self.allocator);

@@ -1,0 +1,144 @@
+// Default Den Shell Theme
+// Balanced, modern theme with One Dark inspired colors
+{
+  "theme": {
+    "name": "default",
+    "colorScheme": "dark",
+    "description": "Balanced default theme with good readability",
+
+    "colors": {
+      // Base colors (One Dark inspired)
+      "primary": "#61afef",      // Blue
+      "secondary": "#98c379",    // Green
+      "background": "#282c34",   // Dark grey
+      "foreground": "#abb2bf",   // Light grey
+
+      // Semantic colors
+      "success": "#98c379",      // Green
+      "warning": "#e5c07b",      // Yellow
+      "error": "#e06c75",        // Red
+      "info": "#56b6c2",         // Cyan
+      "muted": "#5c6370",        // Grey
+
+      // UI elements
+      "prompt": "#61afef",
+      "command": "#abb2bf",
+      "comment": "#5c6370",
+      "selection": "#3e4451",
+      "border": "#3e4451"
+    },
+
+    "prompt": {
+      "template": "{user}@{host}:{cwd} {git_branch}{git_status} {symbol} ",
+      "rightPrompt": "{duration} {time}",
+
+      "symbols": {
+        "success": "➜",
+        "error": "✗",
+        "root": "#",
+        "continuation": "…"
+      },
+
+      "colors": {
+        "user": "primary",
+        "host": "secondary",
+        "cwd": "info",
+        "symbol": {
+          "success": "success",
+          "error": "error",
+          "root": "warning"
+        }
+      }
+    },
+
+    "syntax": {
+      "enabled": true,
+      "colors": {
+        "command": "primary",
+        "builtin": "secondary",
+        "argument": "foreground",
+        "flag": "info",
+        "option": "info",
+        "string": "success",
+        "number": "warning",
+        "operator": "muted",
+        "variable": "#c678dd",    // Purple
+        "comment": "comment",
+        "error": "error",
+        "path": "info",
+        "executable": "primary"
+      }
+    },
+
+    "git": {
+      "colors": {
+        "branch": "secondary",
+        "clean": "success",
+        "dirty": "warning",
+        "conflict": "error",
+        "ahead": "info",
+        "behind": "warning",
+        "stash": "#c678dd"
+      },
+      "symbols": {
+        "branch": "",
+        "dirty": "✗",
+        "clean": "✓",
+        "ahead": "↑",
+        "behind": "↓",
+        "diverged": "↕",
+        "stash": "⚑"
+      }
+    },
+
+    "completion": {
+      "colors": {
+        "selected": {
+          "fg": "background",
+          "bg": "primary"
+        },
+        "description": "muted",
+        "file": "foreground",
+        "directory": "info",
+        "executable": "success",
+        "alias": "#c678dd"
+      }
+    },
+
+    "suggestion": {
+      "color": "muted",
+      "style": "dim"
+    },
+
+    "modules": {
+      "node": {
+        "color": "#98c379",
+        "symbol": "⬢"
+      },
+      "python": {
+        "color": "#61afef",
+        "symbol": "🐍"
+      },
+      "rust": {
+        "color": "#e06c75",
+        "symbol": "🦀"
+      },
+      "go": {
+        "color": "#56b6c2",
+        "symbol": "🐹"
+      },
+      "docker": {
+        "color": "#61afef",
+        "symbol": "🐳"
+      },
+      "kubernetes": {
+        "color": "#61afef",
+        "symbol": "☸"
+      },
+      "aws": {
+        "color": "#e5c07b",
+        "symbol": "☁"
+      }
+    }
+  }
+}

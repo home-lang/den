@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+zig-out/
+zig-cache/
+.zig-cache/
+build/
+dist/
+node_modules/
+
+# Documentation
+*.md
+docs/
+ROADMAP.md
+TODO_STATUS.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+test-artifacts/
+*.log
+
+# Temporary files
+tmp/
+temp/

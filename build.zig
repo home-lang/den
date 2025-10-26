@@ -19,6 +19,60 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     b.installArtifact(exe);
 
+    // Cross-compilation targets for release builds
+    const release_step = b.step("release", "Build release binaries for all platforms");
+
+    const targets = [_]std.Target.Query{
+        // Linux x64
+        .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .musl },
+        // Linux ARM64
+        .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .musl },
+        // macOS x64 (Intel)
+        .{ .cpu_arch = .x86_64, .os_tag = .macos },
+        // macOS ARM64 (Apple Silicon)
+        .{ .cpu_arch = .aarch64, .os_tag = .macos },
+        // Windows support is deferred - requires Windows-specific process management
+        // .{ .cpu_arch = .x86_64, .os_tag = .windows },
+    };
+
+    const target_names = [_][]const u8{
+        "linux-x64",
+        "linux-arm64",
+        "darwin-x64",
+        "darwin-arm64",
+        // "windows-x64",
+    };
+
+    inline for (targets, target_names) |t, name| {
+        const release_target = b.resolveTargetQuery(t);
+
+        const release_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = release_target,
+            .optimize = .ReleaseSafe,
+        });
+
+        const release_exe = b.addExecutable(.{
+            .name = "den",
+            .root_module = release_module,
+        });
+        release_exe.linkLibC();
+
+        const install_exe = b.addInstallArtifact(release_exe, .{
+            .dest_dir = .{
+                .override = .{
+                    .custom = std.fmt.allocPrint(
+                        b.allocator,
+                        "release/{s}",
+                        .{name},
+                    ) catch @panic("OOM"),
+                },
+            },
+        });
+
+        release_step.dependOn(&install_exe.step);
+    }
+
     // Test runner executable
     const test_runner_module = b.createModule(.{
         .root_source_file = b.path("src/test_framework/main.zig"),
@@ -420,4 +474,140 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_integration_e2e_tests.step);
     all_tests_step.dependOn(&run_e2e_tests.step);
     all_tests_step.dependOn(&run_cli_tests.step);
+
+    // ========================================
+    // Profiling and Benchmarks
+    // ========================================
+
+    // Profiling CLI tool
+    const profiling_cli_module = b.createModule(.{
+        .root_source_file = b.path("src/profiling/cli.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const profiling_cli = b.addExecutable(.{
+        .name = "den-profile",
+        .root_module = profiling_cli_module,
+    });
+    b.installArtifact(profiling_cli);
+
+    // Benchmark executables
+    const bench_step = b.step("bench", "Build all benchmarks");
+
+    // Profiling module for benchmarks
+    const profiling_module = b.createModule(.{
+        .root_source_file = b.path("src/profiling.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    // Startup benchmark
+    const startup_bench_module = b.createModule(.{
+        .root_source_file = b.path("bench/startup_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    startup_bench_module.addImport("profiling", profiling_module);
+
+    const startup_bench = b.addExecutable(.{
+        .name = "startup_bench",
+        .root_module = startup_bench_module,
+    });
+    b.installArtifact(startup_bench);
+    bench_step.dependOn(&startup_bench.step);
+
+    // Command execution benchmark
+    const command_bench_module = b.createModule(.{
+        .root_source_file = b.path("bench/command_exec_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    command_bench_module.addImport("profiling", profiling_module);
+
+    const command_bench = b.addExecutable(.{
+        .name = "command_exec_bench",
+        .root_module = command_bench_module,
+    });
+    b.installArtifact(command_bench);
+    bench_step.dependOn(&command_bench.step);
+
+    // Completion benchmark
+    const completion_bench_module = b.createModule(.{
+        .root_source_file = b.path("bench/completion_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    completion_bench_module.addImport("profiling", profiling_module);
+
+    const completion_bench = b.addExecutable(.{
+        .name = "completion_bench",
+        .root_module = completion_bench_module,
+    });
+    b.installArtifact(completion_bench);
+    bench_step.dependOn(&completion_bench.step);
+
+    // History benchmark
+    const history_bench_module = b.createModule(.{
+        .root_source_file = b.path("bench/history_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    history_bench_module.addImport("profiling", profiling_module);
+
+    const history_bench = b.addExecutable(.{
+        .name = "history_bench",
+        .root_module = history_bench_module,
+    });
+    b.installArtifact(history_bench);
+    bench_step.dependOn(&history_bench.step);
+
+    // Prompt rendering benchmark
+    const prompt_bench_module = b.createModule(.{
+        .root_source_file = b.path("bench/prompt_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    prompt_bench_module.addImport("profiling", profiling_module);
+
+    const prompt_bench = b.addExecutable(.{
+        .name = "prompt_bench",
+        .root_module = prompt_bench_module,
+    });
+    b.installArtifact(prompt_bench);
+    bench_step.dependOn(&prompt_bench.step);
+
+    // Profiler tests
+    const profiler_test_module = b.createModule(.{
+        .root_source_file = b.path("src/profiling/profiler.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const profiler_tests = b.addTest(.{
+        .root_module = profiler_test_module,
+    });
+
+    const run_profiler_tests = b.addRunArtifact(profiler_tests);
+    const profiler_test_step = b.step("test-profiler", "Run profiler tests");
+    profiler_test_step.dependOn(&run_profiler_tests.step);
+
+    // Benchmark tests
+    const benchmark_test_module = b.createModule(.{
+        .root_source_file = b.path("src/profiling/benchmarks.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const benchmark_tests = b.addTest(.{
+        .root_module = benchmark_test_module,
+    });
+
+    const run_benchmark_tests = b.addRunArtifact(benchmark_tests);
+    const benchmark_test_step = b.step("test-benchmarks", "Run benchmark framework tests");
+    benchmark_test_step.dependOn(&run_benchmark_tests.step);
+
+    // Add profiler tests to all_tests
+    all_tests_step.dependOn(&run_profiler_tests.step);
+    all_tests_step.dependOn(&run_benchmark_tests.step);
 }

@@ -1,0 +1,121 @@
+// Den Shell Configuration Example
+// Place this file at ~/.config/den/config.jsonc
+{
+  // Shell behavior
+  "shell": {
+    "historySize": 10000,
+    "historyFile": "~/.den_history",
+    "enableAutoSuggestions": true,
+    "enableSyntaxHighlighting": true,
+    "completionStyle": "menu", // "menu" or "inline"
+    "caseSensitiveCompletion": false
+  },
+
+  // Prompt configuration
+  "prompt": {
+    "template": "{user}@{host}:{cwd} {git_branch}{git_status} {symbol} ",
+    "rightPrompt": "{time} {duration}",
+    "transient": false,
+    "simple": false,
+    "symbols": {
+      "success": "❯",
+      "error": "✗",
+      "root": "#"
+    }
+  },
+
+  // Theme settings
+  "theme": {
+    "name": "default",
+    "colorScheme": "auto", // "auto", "dark", or "light"
+    "colors": {
+      "primary": "#5c7e8a",
+      "success": "#52c41a",
+      "warning": "#faad14",
+      "error": "#f5222d",
+      "info": "#1890ff"
+    }
+  },
+
+  // Plugin system
+  "plugins": {
+    "enabled": true,
+    "loadPath": [
+      "~/.config/den/plugins",
+      "~/.local/share/den/plugins"
+    ],
+    "autoload": [
+      "autosuggest",
+      "highlight",
+      "git-prompt"
+    ]
+  },
+
+  // Hooks configuration
+  "hooks": {
+    "preCommand": [],
+    "postCommand": [],
+    "directoryChange": [
+      "ls -la" // Auto-list files on cd
+    ],
+    "shellStart": [
+      "echo 'Welcome to Den Shell!'"
+    ]
+  },
+
+  // Module configuration
+  "modules": {
+    "git": {
+      "enabled": true,
+      "showDirty": true,
+      "showStash": true,
+      "showAhead": true,
+      "showBehind": true
+    },
+    "node": {
+      "enabled": true,
+      "symbol": "⬢",
+      "detectFiles": ["package.json", ".node-version"]
+    },
+    "python": {
+      "enabled": true,
+      "symbol": "🐍",
+      "detectFiles": ["requirements.txt", "pyproject.toml", ".python-version"]
+    },
+    "bun": {
+      "enabled": true,
+      "symbol": "🍞",
+      "detectFiles": ["bun.lockb", "bunfig.toml"]
+    }
+  },
+
+  // Aliases
+  "aliases": {
+    "ll": "ls -lah",
+    "la": "ls -A",
+    "g": "git",
+    "gs": "git status",
+    "ga": "git add",
+    "gc": "git commit",
+    "gp": "git push",
+    "gl": "git log --oneline --graph",
+    "d": "docker",
+    "dc": "docker-compose",
+    "k": "kubectl"
+  },
+
+  // Environment variables
+  "env": {
+    "EDITOR": "vim",
+    "VISUAL": "code",
+    "PAGER": "less",
+    "LESS": "-R"
+  },
+
+  // Performance
+  "performance": {
+    "lazyLoadModules": true,
+    "cacheCompletions": true,
+    "parallelPromptRendering": true
+  }
+}

@@ -1,0 +1,223 @@
+// Power User Den Shell Configuration
+// Maximum features and customization
+{
+  "shell": {
+    "historySize": 50000,
+    "historyFile": "~/.den_history",
+    "enableAutoSuggestions": true,
+    "enableSyntaxHighlighting": true,
+    "completionStyle": "menu",
+    "caseSensitiveCompletion": false,
+    "cdSpellcheck": true,
+    "autocd": true  // Type directory name to cd into it
+  },
+
+  "prompt": {
+    "template": "┌─{user}@{host} {cwd}\n└─{git_branch}{git_status} {modules} {symbol} ",
+    "rightPrompt": "{duration} {time}",
+    "transient": true,  // Use simple prompt for past commands
+    "symbols": {
+      "success": "➜",
+      "error": "✗",
+      "root": "⚡"
+    }
+  },
+
+  "theme": {
+    "name": "poweruser",
+    "colorScheme": "dark",
+    "colors": {
+      "primary": "#61afef",
+      "success": "#98c379",
+      "warning": "#e5c07b",
+      "error": "#e06c75",
+      "info": "#56b6c2",
+      "comment": "#5c6370"
+    },
+    "rainbow": {
+      "enabled": true,
+      "colors": ["#e06c75", "#d19a66", "#e5c07b", "#98c379", "#56b6c2", "#61afef", "#c678dd"]
+    }
+  },
+
+  "plugins": {
+    "enabled": true,
+    "loadPath": [
+      "~/.config/den/plugins",
+      "~/.local/share/den/plugins",
+      "/usr/local/share/den/plugins"
+    ],
+    "autoload": [
+      "autosuggest",
+      "highlight",
+      "git-prompt",
+      "docker-completion",
+      "kubectl-completion",
+      "npm-completion"
+    ]
+  },
+
+  "hooks": {
+    "preCommand": [
+      "# Log commands to audit file",
+      "echo \"$(date): $DEN_COMMAND\" >> ~/.den_audit.log"
+    ],
+    "postCommand": [
+      "# Notify on long-running commands",
+      "if [ $DEN_DURATION -gt 10 ]; then notify-send 'Command completed' \"$DEN_COMMAND\"; fi"
+    ],
+    "directoryChange": [
+      "# Auto-activate virtual environments",
+      "if [ -f .venv/bin/activate ]; then source .venv/bin/activate; fi",
+      "# Auto-load .nvmrc",
+      "if [ -f .nvmrc ] && command -v nvm >/dev/null; then nvm use; fi",
+      "# Show git status in git repos",
+      "if git rev-parse --git-dir > /dev/null 2>&1; then git status -sb; fi"
+    ],
+    "shellStart": [
+      "# Welcome message",
+      "echo \"\\033[1;36mDen Shell v$(den version | cut -d' ' -f3)\\033[0m\"",
+      "echo \"Type 'help' for available commands\""
+    ],
+    "shellExit": [
+      "# Save session info",
+      "echo \"Session ended: $(date)\" >> ~/.den_sessions.log"
+    ]
+  },
+
+  "modules": {
+    "git": {
+      "enabled": true,
+      "showDirty": true,
+      "showStash": true,
+      "showAhead": true,
+      "showBehind": true,
+      "showUntracked": true,
+      "symbol": ""
+    },
+    "node": {
+      "enabled": true,
+      "symbol": "⬢",
+      "format": "{symbol} {version}",
+      "detectFiles": ["package.json", ".node-version", ".nvmrc"]
+    },
+    "python": {
+      "enabled": true,
+      "symbol": "🐍",
+      "format": "{symbol} {version}",
+      "detectFiles": ["requirements.txt", "pyproject.toml", ".python-version", "Pipfile"]
+    },
+    "rust": {
+      "enabled": true,
+      "symbol": "🦀",
+      "detectFiles": ["Cargo.toml"]
+    },
+    "go": {
+      "enabled": true,
+      "symbol": "🐹",
+      "detectFiles": ["go.mod", "go.sum"]
+    },
+    "docker": {
+      "enabled": true,
+      "symbol": "🐳",
+      "onlyInDockerContext": true
+    },
+    "kubernetes": {
+      "enabled": true,
+      "symbol": "☸",
+      "showContext": true,
+      "showNamespace": true
+    },
+    "battery": {
+      "enabled": true,
+      "showPercentage": true,
+      "showCharging": true
+    },
+    "time": {
+      "enabled": true,
+      "format": "%H:%M:%S",
+      "use12Hour": false
+    }
+  },
+
+  "aliases": {
+    // Git aliases
+    "g": "git",
+    "gs": "git status",
+    "ga": "git add",
+    "gap": "git add -p",
+    "gc": "git commit",
+    "gcm": "git commit -m",
+    "gca": "git commit --amend",
+    "gp": "git push",
+    "gpf": "git push --force-with-lease",
+    "gpl": "git pull",
+    "gl": "git log --oneline --graph --decorate",
+    "gd": "git diff",
+    "gds": "git diff --staged",
+    "gco": "git checkout",
+    "gcb": "git checkout -b",
+    "gb": "git branch",
+    "gm": "git merge",
+    "gr": "git rebase",
+    "gri": "git rebase -i",
+    "gst": "git stash",
+    "gstp": "git stash pop",
+
+    // Docker aliases
+    "d": "docker",
+    "dc": "docker-compose",
+    "dps": "docker ps",
+    "dpsa": "docker ps -a",
+    "di": "docker images",
+    "dex": "docker exec -it",
+    "dl": "docker logs -f",
+    "drm": "docker rm",
+    "drmi": "docker rmi",
+    "dprune": "docker system prune -af",
+
+    // Kubernetes aliases
+    "k": "kubectl",
+    "kgp": "kubectl get pods",
+    "kgs": "kubectl get services",
+    "kgd": "kubectl get deployments",
+    "kd": "kubectl describe",
+    "kl": "kubectl logs -f",
+    "kex": "kubectl exec -it",
+    "ka": "kubectl apply -f",
+    "kdel": "kubectl delete",
+
+    // Modern CLI tools
+    "ls": "eza --icons",  // If eza is installed
+    "ll": "eza -lah --icons",
+    "tree": "eza --tree",
+    "cat": "bat",  // If bat is installed
+    "find": "fd",  // If fd is installed
+    "grep": "rg",  // If ripgrep is installed
+
+    // System aliases
+    "update": "sudo apt update && sudo apt upgrade",  // Debian/Ubuntu
+    "ports": "sudo netstat -tulanp",
+    "diskspace": "df -h",
+    "meminfo": "free -h",
+    "psmem": "ps auxf | sort -nr -k 4 | head -10",
+    "pscpu": "ps auxf | sort -nr -k 3 | head -10"
+  },
+
+  "env": {
+    "EDITOR": "nvim",
+    "VISUAL": "code",
+    "PAGER": "bat",
+    "LESS": "-RFX",
+    "BAT_THEME": "OneHalfDark",
+    "FZF_DEFAULT_OPTS": "--height 40% --layout=reverse --border",
+    "RIPGREP_CONFIG_PATH": "~/.ripgreprc"
+  },
+
+  "performance": {
+    "lazyLoadModules": true,
+    "cacheCompletions": true,
+    "parallelPromptRendering": true,
+    "asyncGitStatus": true
+  }
+}

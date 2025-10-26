@@ -1,0 +1,82 @@
+// Minimal Den Shell Theme
+// Clean, distraction-free theme for focus
+{
+  "theme": {
+    "name": "minimal",
+    "colorScheme": "auto",
+    "description": "Minimal theme for distraction-free work",
+
+    "colors": {
+      // Monochrome base
+      "primary": "#ffffff",
+      "secondary": "#cccccc",
+      "background": "#1a1a1a",
+      "foreground": "#e0e0e0",
+
+      // Minimal semantic colors
+      "success": "#a8a8a8",
+      "warning": "#d0d0d0",
+      "error": "#ffffff",
+      "info": "#c0c0c0",
+      "muted": "#808080"
+    },
+
+    "prompt": {
+      "template": "{cwd} {git_branch} {symbol} ",
+      "simple": true,
+
+      "symbols": {
+        "success": "❯",
+        "error": "❯",
+        "root": "#",
+        "continuation": "·"
+      },
+
+      "colors": {
+        "cwd": "foreground",
+        "symbol": {
+          "success": "primary",
+          "error": "error",
+          "root": "warning"
+        }
+      }
+    },
+
+    "syntax": {
+      "enabled": false
+    },
+
+    "git": {
+      "colors": {
+        "branch": "muted",
+        "clean": "muted",
+        "dirty": "foreground",
+        "conflict": "error"
+      },
+      "symbols": {
+        "branch": "",
+        "dirty": "•",
+        "ahead": "↑",
+        "behind": "↓"
+      }
+    },
+
+    "completion": {
+      "colors": {
+        "selected": {
+          "fg": "background",
+          "bg": "foreground"
+        },
+        "description": "muted",
+        "file": "foreground",
+        "directory": "foreground",
+        "executable": "foreground"
+      }
+    },
+
+    "suggestion": {
+      "color": "muted",
+      "style": "dim"
+    }
+  }
+}

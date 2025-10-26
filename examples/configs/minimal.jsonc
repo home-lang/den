@@ -1,0 +1,34 @@
+// Minimal Den Shell Configuration
+// Optimized for speed and simplicity
+{
+  "shell": {
+    "historySize": 1000,
+    "enableAutoSuggestions": false,
+    "enableSyntaxHighlighting": false
+  },
+
+  "prompt": {
+    "template": "{cwd} {symbol} ",
+    "simple": true
+  },
+
+  "theme": {
+    "name": "minimal",
+    "colorScheme": "auto"
+  },
+
+  "plugins": {
+    "enabled": false
+  },
+
+  "modules": {
+    "git": {
+      "enabled": false
+    }
+  },
+
+  "performance": {
+    "lazyLoadModules": true,
+    "cacheCompletions": true
+  }
+}
