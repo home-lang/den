@@ -263,6 +263,51 @@ pub fn build(b: *std.Build) void {
     const system_module_test_step = b.step("test-system-modules", "Run system module tests");
     system_module_test_step.dependOn(&run_system_module_tests.step);
 
+    // Parser tests
+    const parser_test_module = b.createModule(.{
+        .root_source_file = b.path("src/parser/test_parser.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const parser_tests = b.addTest(.{
+        .root_module = parser_test_module,
+    });
+
+    const run_parser_tests = b.addRunArtifact(parser_tests);
+    const parser_test_step = b.step("test-parser", "Run parser tests");
+    parser_test_step.dependOn(&run_parser_tests.step);
+
+    // Tokenizer tests
+    const tokenizer_test_module = b.createModule(.{
+        .root_source_file = b.path("src/parser/test_tokenizer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const tokenizer_tests = b.addTest(.{
+        .root_module = tokenizer_test_module,
+    });
+
+    const run_tokenizer_tests = b.addRunArtifact(tokenizer_tests);
+    const tokenizer_test_step = b.step("test-tokenizer", "Run tokenizer tests");
+    tokenizer_test_step.dependOn(&run_tokenizer_tests.step);
+
+    // Test utilities tests
+    const test_utils_test_module = b.createModule(.{
+        .root_source_file = b.path("src/test_utils.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const test_utils_tests = b.addTest(.{
+        .root_module = test_utils_test_module,
+    });
+
+    const run_test_utils_tests = b.addRunArtifact(test_utils_tests);
+    const test_utils_test_step = b.step("test-utils", "Run test utilities tests");
+    test_utils_test_step.dependOn(&run_test_utils_tests.step);
+
     // All tests combined (main test suite)
     const all_tests_step = b.step("test-all", "Run all test suites");
     all_tests_step.dependOn(&run_unit_tests.step);
@@ -275,4 +320,8 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_hook_manager_tests.step);
     all_tests_step.dependOn(&run_builtin_hooks_tests.step);
     all_tests_step.dependOn(&run_theme_tests.step);
+    all_tests_step.dependOn(&run_parser_tests.step);
+    all_tests_step.dependOn(&run_tokenizer_tests.step);
+    all_tests_step.dependOn(&run_test_utils_tests.step);
+    all_tests_step.dependOn(&run_system_module_tests.step);
 }
