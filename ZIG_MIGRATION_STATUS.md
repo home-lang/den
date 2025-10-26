@@ -345,7 +345,33 @@ den>     1  echo same
     2  history
 ```
 
-**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, and history fully working!** ✅
+### Tab Completion
+```bash
+# Command completion
+$ printf "complete -c zi\nexit\n" | ./zig-out/bin/den
+den> zic
+zip
+zig
+
+# File completion
+$ printf "complete -f src/\nexit\n" | ./zig-out/bin/den
+den> src/
+src-ts/
+
+# Combined completion (both commands and files)
+$ printf "complete bu\nexit\n" | ./zig-out/bin/den
+den> Commands:
+  bunzip2
+Files:
+  build.ts
+  build.zig
+
+# Specific file completion
+$ printf "complete -f src/shell\nexit\n" | ./zig-out/bin/den
+den> src/shell.zig
+```
+
+**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, history, and tab completion fully working!** ✅
 
 ---
 
@@ -365,11 +391,12 @@ den>     1  echo same
 - [x] ~~Background jobs (`&`)~~ **DONE in Phase 13!**
 - [x] ~~Job control (`jobs`, `fg`, `bg`)~~ **DONE in Phase 14!**
 - [x] ~~Command history with file persistence~~ **DONE in Phase 15!**
+- [x] ~~Tab completion~~ **DONE in Phase 16!**
 - [ ] Advanced parameter expansion (`${VAR#pattern}`, `${VAR##pattern}`, etc.)
 - [ ] Heredoc/herestring (`<<`, `<<<`)
 - [ ] FD duplication (`>&`, `<&`)
 - [ ] History navigation (up/down arrows)
-- [ ] Tab completion
+- [ ] Interactive tab completion (requires raw terminal mode)
 - [ ] Line editing (arrows, Ctrl+A/E)
 - [ ] Remaining 60+ builtins
 
@@ -449,11 +476,18 @@ den>     1  echo same
 - [ ] Ctrl+R reverse search (requires terminal raw mode)
 - [ ] History expansion (`!!`, `!$`)
 
-**Phase 16: Completion**
-- [ ] Tab completion framework
-- [ ] Command completion (PATH)
-- [ ] File completion
-- [ ] Git completion
+**Phase 16: Tab Completion** ✅ **COMPLETED!**
+- [x] Completion framework (Completion utility)
+- [x] Command completion from PATH
+- [x] File/directory completion
+- [x] `complete <prefix>` builtin
+- [x] `complete -c <prefix>` for commands only
+- [x] `complete -f <prefix>` for files only
+- [x] Executable detection (mode & 0o111)
+- [x] Duplicate filtering
+- [x] Alphabetical sorting
+- [ ] Interactive Tab key support (requires raw terminal mode)
+- [ ] Context-aware completion (git, npm, etc.)
 
 ---
 
