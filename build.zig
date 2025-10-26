@@ -209,4 +209,34 @@ pub fn build(b: *std.Build) void {
     const run_prompt_tests = b.addRunArtifact(prompt_tests);
     const prompt_test_step = b.step("test-prompt", "Run prompt tests");
     prompt_test_step.dependOn(&run_prompt_tests.step);
+
+    // Module tests
+    const module_test_module = b.createModule(.{
+        .root_source_file = b.path("src/modules/test_modules.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const module_tests = b.addTest(.{
+        .root_module = module_test_module,
+    });
+
+    const run_module_tests = b.addRunArtifact(module_tests);
+    const module_test_step = b.step("test-modules", "Run module tests");
+    module_test_step.dependOn(&run_module_tests.step);
+
+    // System module tests
+    const system_module_test_module = b.createModule(.{
+        .root_source_file = b.path("src/modules/test_system.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const system_module_tests = b.addTest(.{
+        .root_module = system_module_test_module,
+    });
+
+    const run_system_module_tests = b.addRunArtifact(system_module_tests);
+    const system_module_test_step = b.step("test-system-modules", "Run system module tests");
+    system_module_test_step.dependOn(&run_system_module_tests.step);
 }

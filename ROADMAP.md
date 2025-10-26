@@ -63,6 +63,26 @@
   - System info provider (path operations, runtime detection)
   - Right-aligned prompts, transient mode, simple mode
   - 27 comprehensive tests
+- ✅ **Phase 18**: Module system (complete)
+  - **18.1-18.3**: Language and cloud modules
+    - Module registry with caching (60s TTL)
+    - 9 language detectors (Bun, Node, Python, Go, Zig, Rust, Java, Ruby, PHP)
+    - 3 cloud providers (AWS, Azure, GCP)
+    - Smart file detection (only run commands when project files exist)
+    - Config file parsing (INI, JSON)
+  - **18.4**: System modules
+    - Battery (macOS/Linux), Memory (macOS/Linux), OS, Time
+    - Environment detection (Nix-shell, Docker, Kubernetes)
+    - Platform-specific implementations
+  - **18.5**: Custom modules
+    - User-defined module registration
+    - Command execution and output capture
+    - Conditional display based on file patterns
+  - **18.6**: Module configuration
+    - Format strings with placeholders ({symbol}, {version}, {name})
+    - Per-module customization (icons, colors, format)
+    - Enable/disable per module
+  - 29 comprehensive tests
 
 **Pending** (Optional Features):
 - ⏸️ **Phase 3**: Configuration system (not critical for core shell)
@@ -70,7 +90,6 @@
 - ⏸️ **Phase 9**: Advanced REPL (syntax highlighting, auto-suggestions)
 - ⏸️ **Phase 13**: Extended builtins (productivity tools, dev helpers)
 - ⏸️ **Phase 16**: Custom hooks (git, docker, npm)
-- ⏸️ **Phase 18**: Module system
 - ⏸️ **Phases 19-22**: Full test port, packaging, docs, optimization
 
 **Current State**: Fully functional POSIX shell suitable for daily use, interactive sessions, and basic scripting.
@@ -1629,50 +1648,179 @@ den/
 
 ## Phase 18: Module System
 
-### 18.1 Module Registry (from `src/modules/registry.ts`)
-- [ ] Implement module registration
-- [ ] Implement module caching
-- [ ] Implement module rendering
-- [ ] Implement module enable/disable
-- [ ] Implement module configuration
+### 18.1 Module Registry ✅ **COMPLETE**
+- [x] Implement module registration
+- [x] Implement module caching
+- [x] Implement module rendering
+- [x] Implement module enable/disable
+- [x] Implement module configuration
 
-### 18.2 Language Modules (from `src/modules/languages.ts`)
-- [ ] Bun module - Detect Bun version
-- [ ] Node.js module - Detect Node version
-- [ ] Python module - Detect Python version
-- [ ] Go module - Detect Go version
-- [ ] Zig module - Detect Zig version
-- [ ] Rust module - Detect Rust version
-- [ ] Java module - Detect Java version
-- [ ] Ruby module - Detect Ruby version
-- [ ] PHP module - Detect PHP version
-- [ ] Implement version parsing from `<cmd> --version`
+**Implementation**: `src/modules/registry.zig` (241 lines)
+- **ModuleRegistry**: Central module management with caching
+  - Detector registration system with function pointers
+  - Module configuration (enable/disable, custom icons/colors)
+  - Time-based caching (60s TTL)
+  - Cache management (clear all, clear by module)
+  - Batch detection and rendering
+- **Module rendering**: Icon + version formatting
+- **Performance**: Cached results avoid repeated command execution
 
-### 18.3 Cloud Modules (from `src/modules/cloud.ts`)
-- [ ] AWS module - Detect AWS profile/region
-- [ ] Azure module - Detect Azure subscription
-- [ ] GCP module - Detect GCP project
-- [ ] Implement config file parsing
+### 18.2 Language Modules ✅ **COMPLETE**
+- [x] Bun module - Detect Bun version
+- [x] Node.js module - Detect Node version
+- [x] Python module - Detect Python version
+- [x] Go module - Detect Go version
+- [x] Zig module - Detect Zig version
+- [x] Rust module - Detect Rust version
+- [x] Java module - Detect Java version
+- [x] Ruby module - Detect Ruby version
+- [x] PHP module - Detect PHP version
+- [x] Implement version parsing from `<cmd> --version`
 
-### 18.4 System Modules (from `src/modules/system.ts`)
-- [ ] Battery module - Battery percentage/status
-- [ ] Memory module - Memory usage
-- [ ] OS module - OS name/version
-- [ ] Time module - Current time
-- [ ] Nix-shell module - Nix environment detection
-- [ ] Docker module - Docker context
-- [ ] Kubernetes module - K8s context/namespace
+**Implementation**: `src/modules/languages.zig` (256 lines)
+- **9 language detectors**: Bun, Node, Python, Go, Zig, Rust, Java, Ruby, PHP
+- **Smart file detection**: Only run commands if project files exist
+  - Node: package.json, .nvmrc, .node-version
+  - Bun: bun.lockb, bunfig.toml
+  - Python: requirements.txt, setup.py, pyproject.toml, .python-version, Pipfile
+  - Go: go.mod, go.sum
+  - Zig: build.zig, build.zig.zon
+  - Rust: Cargo.toml, Cargo.lock
+  - Java: pom.xml, build.gradle, build.gradle.kts, .java-version
+  - Ruby: Gemfile, .ruby-version
+  - PHP: composer.json, .php-version
+- **Version parsing**: Extracts version from various command output formats
+  - Handles "v1.2.3", "node v18.17.0", "go version go1.21.0 darwin/arm64"
+  - Supports both stdout and stderr output
+- **Language icons**: 🥟 Bun, ⬢ Node, 🐍 Python, 🐹 Go, ⚡ Zig, 🦀 Rust, ☕ Java, 💎 Ruby, 🐘 PHP
 
-### 18.5 Custom Modules (from `src/modules/custom.ts`)
-- [ ] Implement custom module registration
-- [ ] Implement custom module rendering
-- [ ] Support user-defined modules
+### 18.3 Cloud Modules ✅ **COMPLETE**
+- [x] AWS module - Detect AWS profile/region
+- [x] Azure module - Detect Azure subscription
+- [x] GCP module - Detect GCP project
+- [x] Implement config file parsing
 
-### 18.6 Module Configuration
-- [ ] Implement module format string (`via {symbol} {version}`)
-- [ ] Implement module symbol customization
-- [ ] Implement module enable/disable per module
-- [ ] Implement module caching with TTL
+**Implementation**: `src/modules/cloud.zig` (211 lines)
+- **CloudContext**: Provider, profile, region, project tracking
+- **3 cloud provider detectors**: AWS, Azure, GCP
+- **AWS detection**:
+  - Environment: AWS_PROFILE, AWS_REGION, AWS_DEFAULT_REGION
+  - Config: ~/.aws/config, ~/.aws/credentials
+  - INI file parsing for default profile and region
+- **Azure detection**:
+  - Environment: AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID
+  - Config: ~/.azure/azureProfile.json
+  - JSON parsing for default subscription
+- **GCP detection**:
+  - Environment: GOOGLE_CLOUD_PROJECT, GCP_PROJECT, GCLOUD_PROJECT
+  - Config: ~/.config/gcloud/configurations/config_default
+  - Region/zone extraction from gcloud config
+- **Rendering**: Icon + provider:profile@region format
+- **Cloud icons**: ☁️ AWS, 󰠅 Azure, 󱇶 GCP
+
+**Data structures**: `src/modules/types.zig` (196 lines)
+- **ModuleInfo**: Name, version, icon, color, enabled state
+- **ModuleConfig**: Enable/disable, icon/color override, show version
+- **LanguageModule**: Metadata for 9 languages (command, flags, patterns, icons, colors)
+- **CloudProvider**: Metadata for 3 providers (env vars, config paths, icons)
+- **CloudContext**: Active cloud provider information
+
+**Test Coverage**: `src/modules/test_modules.zig` (203 lines)
+- 15 comprehensive tests covering:
+  - ModuleInfo initialization and cleanup
+  - ModuleRegistry registration and configuration
+  - Module detection with caching
+  - Cache management (clear, TTL)
+  - Module rendering
+  - Enable/disable functionality
+  - Version parsing for various formats
+  - Language module constants
+  - Cloud provider constants
+
+### 18.4 System Modules ✅ **COMPLETE**
+- [x] Battery module - Battery percentage/status
+- [x] Memory module - Memory usage
+- [x] OS module - OS name/version
+- [x] Time module - Current time
+- [x] Nix-shell module - Nix environment detection
+- [x] Docker module - Docker context
+- [x] Kubernetes module - K8s context/namespace
+
+**Implementation**: `src/modules/system.zig` (343 lines)
+- **Battery detection**: macOS (pmset) and Linux (/sys/class/power_supply)
+  - Percentage and charging status
+  - Dynamic icons: 🔌 (charging), 🔋 (high), 🪫 (low)
+  - Color coding based on battery level
+- **Memory detection**: macOS (vm_stat) and Linux (/proc/meminfo)
+  - Used/total bytes with percentage
+  - Formatted as GB or MB
+  - Icon: 🧠 with color based on usage
+- **OS detection**: Platform identification with icons
+  - macOS , Linux 🐧, Windows 🪟, BSD 😈
+  - Built on Zig's builtin.os.tag
+- **Time module**: Current time in HH:MM:SS format
+  - Icon: 🕐
+  - Real-time timestamp conversion
+- **Nix-shell detection**: IN_NIX_SHELL environment variable
+  - Detects pure/impure modes
+  - Icon: ❄️ (snowflake)
+- **Docker context**: DOCKER_CONTEXT env or `docker context show`
+  - Shows non-default contexts
+  - Icon: 🐳
+- **Kubernetes context**: `kubectl config current-context`
+  - Shows active K8s context
+  - Icon: ☸️
+
+### 18.5 Custom Modules ✅ **COMPLETE**
+- [x] Implement custom module registration
+- [x] Implement custom module rendering
+- [x] Support user-defined modules
+
+**Implementation**: `src/modules/custom.zig` (197 lines)
+- **CustomModule**: User-defined module support
+  - Command execution with output capture
+  - Conditional display (file pattern matching)
+  - Custom icons, colors, and format strings
+  - Execute arbitrary shell commands
+- **FormatString**: Template rendering engine
+  - Placeholder support: {symbol}, {version}, {name}
+  - Custom format strings per module
+  - Flexible rendering pipeline
+- **CustomModuleRegistry**: Module management
+  - Register custom modules
+  - Detect based on conditions
+  - Execute and cache results
+
+### 18.6 Module Configuration ✅ **COMPLETE**
+- [x] Implement module format string (`via {symbol} {version}`)
+- [x] Implement module symbol customization
+- [x] Implement module enable/disable per module
+- [x] Implement module caching with TTL
+
+**Implementation**: Enhanced `src/modules/types.zig` and `src/modules/registry.zig`
+- **ModuleConfig enhancements**:
+  - `format` field for custom format strings
+  - `withFormat()` constructor
+  - Per-module icon/color override
+  - Enable/disable toggle
+- **Registry format rendering**:
+  - `renderWithFormat()` method
+  - Placeholder expansion: {symbol}, {version}, {name}
+  - Fallback to default rendering
+  - Format string validation
+- **Examples**:
+  - Default: "🐹 1.21.0"
+  - Custom: "via 🐹 1.21.0"
+  - Name format: "[go] 1.21.0"
+
+**Test Coverage**: `src/modules/test_system.zig` (145 lines)
+- 14 comprehensive tests covering:
+  - BatteryInfo and MemoryInfo structures
+  - OS and time module detection
+  - CustomModule initialization and execution
+  - FormatString rendering with various placeholders
+  - Module configuration with format strings
+  - Missing placeholder handling
 
 ---
 
