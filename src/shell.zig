@@ -214,6 +214,16 @@ pub const Shell = struct {
                 try self.builtinWhich(cmd);
                 self.last_exit_code = 0;
                 return;
+            } else if (std.mem.eql(u8, cmd.name, "source") or std.mem.eql(u8, cmd.name, ".")) {
+                try self.builtinSource(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "read")) {
+                try self.builtinRead(cmd);
+                self.last_exit_code = 0;
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "test") or std.mem.eql(u8, cmd.name, "[")) {
+                try self.builtinTest(cmd);
+                return;
             }
         }
 
@@ -888,6 +898,232 @@ pub const Shell = struct {
                 try IO.eprint("den: which: {s}: not found\n", .{name});
             }
         }
+    }
+
+    /// Builtin: source - execute commands from file
+    fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: source: usage: source filename\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const filename = cmd.args[0];
+
+        // Read file contents
+        const file = std.fs.cwd().openFile(filename, .{}) catch |err| {
+            try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
+            self.last_exit_code = 1;
+            return;
+        };
+        defer file.close();
+
+        const max_size = 1024 * 1024; // 1MB max
+        const content = file.readToEndAlloc(self.allocator, max_size) catch |err| {
+            try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
+            self.last_exit_code = 1;
+            return;
+        };
+        defer self.allocator.free(content);
+
+        // Execute each line by tokenizing and executing directly
+        var lines = std.mem.splitScalar(u8, content, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+            if (trimmed.len == 0) continue;
+            if (trimmed[0] == '#') continue; // Skip comments
+
+            // Tokenize the line
+            var tokenizer = parser_mod.Tokenizer.init(self.allocator, trimmed);
+            const tokens = tokenizer.tokenize() catch |err| {
+                try IO.eprint("den: source: parse error: {}\n", .{err});
+                self.last_exit_code = 1;
+                continue; // Continue with next line instead of returning
+            };
+            defer self.allocator.free(tokens);
+
+            // Parse tokens
+            var p = parser_mod.Parser.init(self.allocator, tokens);
+            var chain = p.parse() catch |err| {
+                try IO.eprint("den: source: parse error: {}\n", .{err});
+                self.last_exit_code = 1;
+                continue;
+            };
+            defer chain.deinit(self.allocator);
+
+            // Expand variables and aliases
+            try self.expandCommandChain(&chain);
+            try self.expandAliases(&chain);
+
+            // Execute the command chain
+            var executor = executor_mod.Executor.init(self.allocator, &self.environment);
+            const exit_code = executor.executeChain(&chain) catch |err| {
+                try IO.eprint("den: source: execution error: {}\n", .{err});
+                self.last_exit_code = 1;
+                continue;
+            };
+            self.last_exit_code = exit_code;
+        }
+    }
+
+    /// Builtin: read - read line from stdin into variable
+    fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: read: usage: read varname\n", .{});
+            return;
+        }
+
+        const varname = cmd.args[0];
+
+        // Read line from stdin
+        const line = try IO.readLine(self.allocator);
+        if (line) |value| {
+            defer self.allocator.free(value);
+
+            // Store in environment
+            const value_copy = try self.allocator.dupe(u8, value);
+            try self.environment.put(varname, value_copy);
+        }
+    }
+
+    /// Builtin: test/[ - evaluate conditional expressions
+    fn builtinTest(self: *Shell, cmd: *types.ParsedCommand) !void {
+        // Simple test implementation supporting basic conditions
+        if (cmd.args.len == 0) {
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Handle [ command - must end with ]
+        var args = cmd.args;
+        if (std.mem.eql(u8, cmd.name, "[")) {
+            if (args.len == 0 or !std.mem.eql(u8, args[args.len - 1], "]")) {
+                try IO.eprint("den: [: missing ]\n", .{});
+                self.last_exit_code = 2;
+                return;
+            }
+            args = args[0 .. args.len - 1]; // Remove trailing ]
+        }
+
+        if (args.len == 0) {
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Unary operators
+        if (args.len == 2) {
+            const op = args[0];
+            const arg = args[1];
+
+            if (std.mem.eql(u8, op, "-z")) {
+                // String is empty
+                self.last_exit_code = if (arg.len == 0) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-n")) {
+                // String is not empty
+                self.last_exit_code = if (arg.len > 0) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-f")) {
+                // File exists and is regular file
+                const stat = std.fs.cwd().statFile(arg) catch {
+                    self.last_exit_code = 1;
+                    return;
+                };
+                self.last_exit_code = if (stat.kind == .file) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-d")) {
+                // Directory exists
+                const stat = std.fs.cwd().statFile(arg) catch {
+                    self.last_exit_code = 1;
+                    return;
+                };
+                self.last_exit_code = if (stat.kind == .directory) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-e")) {
+                // File exists
+                std.fs.cwd().access(arg, .{}) catch {
+                    self.last_exit_code = 1;
+                    return;
+                };
+                self.last_exit_code = 0;
+                return;
+            }
+        }
+
+        // Binary operators
+        if (args.len == 3) {
+            const left = args[0];
+            const op = args[1];
+            const right = args[2];
+
+            if (std.mem.eql(u8, op, "=") or std.mem.eql(u8, op, "==")) {
+                // String equality
+                self.last_exit_code = if (std.mem.eql(u8, left, right)) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "!=")) {
+                // String inequality
+                self.last_exit_code = if (!std.mem.eql(u8, left, right)) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-eq")) {
+                // Numeric equality
+                const left_num = std.fmt.parseInt(i32, left, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                const right_num = std.fmt.parseInt(i32, right, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                self.last_exit_code = if (left_num == right_num) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-ne")) {
+                // Numeric inequality
+                const left_num = std.fmt.parseInt(i32, left, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                const right_num = std.fmt.parseInt(i32, right, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                self.last_exit_code = if (left_num != right_num) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-lt")) {
+                // Less than
+                const left_num = std.fmt.parseInt(i32, left, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                const right_num = std.fmt.parseInt(i32, right, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                self.last_exit_code = if (left_num < right_num) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-gt")) {
+                // Greater than
+                const left_num = std.fmt.parseInt(i32, left, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                const right_num = std.fmt.parseInt(i32, right, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                self.last_exit_code = if (left_num > right_num) 0 else 1;
+                return;
+            }
+        }
+
+        // Default: non-empty string test
+        if (args.len == 1) {
+            self.last_exit_code = if (args[0].len > 0) 0 else 1;
+            return;
+        }
+
+        // Unknown test
+        try IO.eprint("den: test: unknown condition\n", .{});
+        self.last_exit_code = 2;
     }
 };
 

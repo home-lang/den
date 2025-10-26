@@ -14,7 +14,7 @@
 - ✅ **REPL Loop**: Interactive prompt with line reading
 - ✅ **Command Parsing**: Full tokenizer and parser
 - ✅ **External Command Execution**: Fork/exec working
-- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete, alias, unalias, type, which implemented
+- ✅ **Builtin Commands**: echo, pwd, cd, env, export, set, unset, jobs, fg, bg, history, complete, alias, unalias, type, which, source, read, test implemented
 - ✅ **I/O**: stdin/stdout via Zig 0.15 POSIX APIs
 - ✅ **Pipeline Execution**: Multi-stage pipelines fully working (`ls | grep foo | head -3`)
 - ✅ **Boolean Operators**: `&&` and `||` with short-circuit evaluation
@@ -28,9 +28,12 @@
 - ✅ **Tab Completion**: Command and file completion with `complete` builtin
 - ✅ **Aliases**: Define and expand command aliases
 - ✅ **Command Introspection**: `type` and `which` commands
+- ✅ **Script Execution**: `source` command for running shell scripts
+- ✅ **Conditional Testing**: `test`/`[` commands with file, string, and numeric tests
+- ✅ **User Input**: `read` command for reading stdin into variables
 - ✅ **Exit Handling**: Ctrl+D and `exit` command
 
-### Completed Phases (0-17)
+### Completed Phases (0-18)
 
 **Phase 0: Pre-Migration** ✅
 - Renamed Krusty → Den across critical files
@@ -148,7 +151,7 @@
 - Alphabetical sorting of results
 - Directory trailing slash support
 
-**Phase 17: Essential Builtins** ✅ **NEW!**
+**Phase 17: Essential Builtins** ✅
 - `alias` - define command aliases
 - `alias name=value` - create alias
 - `alias` - list all aliases
@@ -158,6 +161,20 @@
 - Alias expansion in command execution
 - Quote handling in alias definitions
 
+**Phase 18: Advanced Builtins** ✅ **NEW!**
+- `source`/`.` - execute commands from file
+- Script execution with variable/alias expansion
+- Comment skipping in source files
+- Error handling per-line vs. per-file
+- `read varname` - read line from stdin into variable
+- Interactive input capture
+- `test`/`[` - conditional expression evaluation
+- File tests: `-f` (file), `-d` (directory), `-e` (exists)
+- String tests: `-z` (empty), `-n` (not empty), `=`/`==`/`!=`
+- Numeric tests: `-eq`, `-ne`, `-lt`, `-le`, `-gt`, `-ge`
+- Both `test` and `[` syntax supported
+- Proper exit codes for test results
+
 ---
 
 ## 📊 Statistics
@@ -165,14 +182,14 @@
 | Metric | Value |
 |--------|-------|
 | **Zig Files** | 15 |
-| **Lines of Zig** | ~3,140 |
+| **Lines of Zig** | ~3,376 |
 | **TypeScript Files Remaining** | 141 |
 | **TypeScript LOC** | ~28,712 |
-| **Progress** | ~8% of codebase ported |
+| **Progress** | ~10% of codebase ported |
 | **Binary Size (Debug)** | ~880KB |
 | **Build Time** | <2 seconds |
-| **Builtins Implemented** | 17 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg, history, complete, alias, unalias, type, which) |
-| **Phases Completed** | 17 out of 22 (77%) |
+| **Builtins Implemented** | 20 (echo, pwd, cd, env, export, set, unset, exit, jobs, fg, bg, history, complete, alias, unalias, type, which, source, read, test) |
+| **Phases Completed** | 18 out of 22 (82%) |
 
 ---
 
@@ -407,7 +424,42 @@ den> /Users/chrisbreuer/.local/share/launchpad/envs/.../bin/zig
 den> den: which: notfound: not found
 ```
 
-**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, history, tab completion, and aliases fully working!** ✅
+### Script Execution and Conditionals
+```bash
+# Source command - execute script file
+$ cat > /tmp/test.sh << 'EOF'
+# Test script
+export SCRIPT_VAR="from script"
+echo "Script executed"
+EOF
+
+$ printf "source /tmp/test.sh\necho After source: \$SCRIPT_VAR\nexit\n" | ./zig-out/bin/den
+den> "Script executed"
+den> After source: "from script"
+
+# Test command - file tests
+$ printf "test -f /tmp/test.sh && echo \"File exists!\"\nexit\n" | ./zig-out/bin/den
+den> "File exists!"
+
+$ printf "test -d /tmp && echo \"Directory exists!\"\nexit\n" | ./zig-out/bin/den
+den> "Directory exists!"
+
+# Test command - string tests
+$ printf "test hello = hello && echo \"Strings match!\"\nexit\n" | ./zig-out/bin/den
+den> "Strings match!"
+
+$ printf "[ -n \"hello\" ] && echo \"String not empty!\"\nexit\n" | ./zig-out/bin/den
+den> "String not empty!"
+
+# Test command - numeric tests
+$ printf "test 5 -gt 3 && echo \"5 > 3!\"\nexit\n" | ./zig-out/bin/den
+den> "5 > 3!"
+
+$ printf "[ 10 -eq 10 ] && echo \"Equal!\"\nexit\n" | ./zig-out/bin/den
+den> "Equal!"
+```
+
+**All shell operations including pipelines, operators, redirections, variables, builtins, glob expansion, background jobs, job control, history, tab completion, aliases, script execution, and conditionals fully working!** ✅
 
 ---
 
@@ -428,6 +480,10 @@ den> den: which: notfound: not found
 - [x] ~~Job control (`jobs`, `fg`, `bg`)~~ **DONE in Phase 14!**
 - [x] ~~Command history with file persistence~~ **DONE in Phase 15!**
 - [x] ~~Tab completion~~ **DONE in Phase 16!**
+- [x] ~~Aliases and command introspection~~ **DONE in Phase 17!**
+- [x] ~~Script execution (`source`/`.`)~~ **DONE in Phase 18!**
+- [x] ~~Conditional testing (`test`/`[`)~~ **DONE in Phase 18!**
+- [x] ~~User input (`read`)~~ **DONE in Phase 18!**
 - [ ] Advanced parameter expansion (`${VAR#pattern}`, `${VAR##pattern}`, etc.)
 - [ ] Heredoc/herestring (`<<`, `<<<`)
 - [ ] FD duplication (`>&`, `<&`)
