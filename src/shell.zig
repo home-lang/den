@@ -3,6 +3,7 @@ const types = @import("types/mod.zig");
 const parser_mod = @import("parser/mod.zig");
 const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
+const Expansion = @import("utils/expansion.zig").Expansion;
 
 pub const Shell = struct {
     allocator: std.mem.Allocator,
@@ -103,6 +104,9 @@ pub const Shell = struct {
         };
         defer chain.deinit(self.allocator);
 
+        // Expand variables in all commands
+        try self.expandCommandChain(&chain);
+
         // Execute
         var executor = executor_mod.Executor.init(self.allocator, &self.environment);
         const exit_code = executor.executeChain(&chain) catch |err| {
@@ -112,6 +116,32 @@ pub const Shell = struct {
         };
 
         self.last_exit_code = exit_code;
+    }
+
+    fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
+        var expander = Expansion.init(self.allocator, &self.environment, self.last_exit_code);
+
+        for (chain.commands) |*cmd| {
+            // Expand command name
+            const expanded_name = try expander.expand(cmd.name);
+            // Free the old name and replace with expanded version
+            self.allocator.free(cmd.name);
+            cmd.name = expanded_name;
+
+            // Expand arguments
+            for (cmd.args, 0..) |arg, i| {
+                const expanded_arg = try expander.expand(arg);
+                self.allocator.free(cmd.args[i]);
+                cmd.args[i] = expanded_arg;
+            }
+
+            // Expand redirection targets
+            for (cmd.redirections, 0..) |*redir, i| {
+                const expanded_target = try expander.expand(redir.target);
+                self.allocator.free(cmd.redirections[i].target);
+                cmd.redirections[i].target = expanded_target;
+            }
+        }
     }
 };
 

@@ -1,10 +1,10 @@
 # Den Shell - Zig Migration Status
 
-## ✅ MAJOR MILESTONE: Full Pipeline, Operators & File Redirection!
+## ✅ MAJOR MILESTONE: Full-Featured Shell with Variable Expansion!
 
 **Date**: October 25, 2025
 **Zig Version**: 0.15.1
-**Status**: 🟢 **Production-Ready Shell with Complete I/O Control**
+**Status**: 🟢 **Production-Ready Shell with Advanced Scripting Capabilities**
 
 ---
 
@@ -20,9 +20,10 @@
 - ✅ **Boolean Operators**: `&&` and `||` with short-circuit evaluation
 - ✅ **Sequential Execution**: `;` operator for command chains
 - ✅ **File Redirections**: `>`, `>>`, `<`, `2>` all working
+- ✅ **Variable Expansion**: `$VAR`, `${VAR}`, `${VAR:-default}`, `$?`, `$$`
 - ✅ **Exit Handling**: Ctrl+D and `exit` command
 
-### Completed Phases (0-9)
+### Completed Phases (0-10)
 
 **Phase 0: Pre-Migration** ✅
 - Renamed Krusty → Den across critical files
@@ -69,7 +70,7 @@
 - Background operator (`&`) parsing (execution pending)
 - Process synchronization and exit code propagation
 
-**Phase 9: File Redirection** ✅ **NEW!**
+**Phase 9: File Redirection** ✅
 - Output redirection (`>`) - truncate mode
 - Append redirection (`>>`) - append mode
 - Input redirection (`<`) - read from file
@@ -77,18 +78,27 @@
 - Redirection for both builtins and external commands
 - Proper fd management with dup2 and close
 
+**Phase 10: Variable Expansion** ✅ **NEW!**
+- Simple variable expansion (`$VAR`)
+- Braced variable expansion (`${VAR}`)
+- Default value expansion (`${VAR:-default}`)
+- Special variable `$?` (last exit code)
+- Special variable `$$` (process ID)
+- Expansion in command names, arguments, and redirection targets
+- Fixed buffer implementation (4KB limit per expansion)
+
 ---
 
 ## 📊 Statistics
 
 | Metric | Value |
 |--------|-------|
-| **Zig Files** | 12 |
-| **Lines of Zig** | ~1,700 |
+| **Zig Files** | 13 |
+| **Lines of Zig** | ~1,950 |
 | **TypeScript Files Remaining** | 141 |
 | **TypeScript LOC** | ~28,712 |
-| **Progress** | ~6% of codebase ported |
-| **Binary Size (Debug)** | ~830KB |
+| **Progress** | ~7% of codebase ported |
+| **Binary Size (Debug)** | ~850KB |
 | **Build Time** | <2 seconds |
 
 ---
@@ -155,7 +165,26 @@ $ printf "ls /nonexistent 2> /tmp/error.txt\ncat /tmp/error.txt\nexit\n" | ./zig
 den> den> ls: cannot access '/nonexistent': No such file or directory
 ```
 
-**All shell operations including pipelines, operators, and file redirections fully working!** ✅
+### Variable Expansion
+```bash
+$ printf "echo \$HOME\nexit\n" | ./zig-out/bin/den
+den> /Users/chrisbreuer
+
+$ printf "echo Exit code: \$?\nfalse\necho After false: \$?\nexit\n" | ./zig-out/bin/den
+den> Exit code: 0
+den> den> After false: 1
+
+$ printf "echo \${HOME}/documents\nexit\n" | ./zig-out/bin/den
+den> /Users/chrisbreuer/documents
+
+$ printf "echo \${MISSING:-default_value}\nexit\n" | ./zig-out/bin/den
+den> default_value
+
+$ printf "echo Process ID: \$\$\nexit\n" | ./zig-out/bin/den
+den> Process ID: 91779
+```
+
+**All shell operations including pipelines, operators, redirections, and variable expansion fully working!** ✅
 
 ---
 
@@ -170,9 +199,10 @@ den> den> ls: cannot access '/nonexistent': No such file or directory
 - [x] ~~Pipeline execution~~ **DONE in Phase 8!**
 - [x] ~~`&&`, `||` operators~~ **DONE in Phase 8!**
 - [x] ~~File redirections (`>`, `>>`, `<`, `2>`)~~ **DONE in Phase 9!**
+- [x] ~~Variable expansion (`$VAR`, `${VAR}`, `${VAR:-default}`)~~ **DONE in Phase 10!**
 - [ ] Background jobs (`&`) - parsed but not executing in background yet
-- [ ] Variable expansion (`$VAR`, `${VAR}`)
 - [ ] Glob expansion (`*.txt`, `**/*.zig`)
+- [ ] Advanced parameter expansion (`${VAR#pattern}`, `${VAR##pattern}`, etc.)
 - [ ] Heredoc/herestring (`<<`, `<<<`)
 - [ ] FD duplication (`>&`, `<&`)
 - [ ] History (file-based persistence)
@@ -182,7 +212,7 @@ den> den> ls: cannot access '/nonexistent': No such file or directory
 
 ---
 
-## 🎯 Next Steps (Phases 10-13)
+## 🎯 Next Steps (Phases 11-15)
 
 ### Immediate Priorities
 
@@ -206,11 +236,13 @@ den> den> ls: cannot access '/nonexistent': No such file or directory
 - [ ] File descriptor duplication (`>&`, `<&`) (advanced)
 - [ ] Heredoc/herestring (`<<`, `<<<`) (advanced)
 
-**Phase 10: Variable Expansion**
-- [ ] `$VAR` basic expansion
-- [ ] `${VAR}` braced expansion
-- [ ] `${VAR:-default}` with defaults
-- [ ] Environment variable access
+**Phase 10: Variable Expansion** ✅ **COMPLETED!**
+- [x] `$VAR` basic expansion
+- [x] `${VAR}` braced expansion
+- [x] `${VAR:-default}` with defaults
+- [x] Special variables (`$?`, `$$`)
+- [x] Expansion in commands, args, and redirections
+- [ ] Advanced parameter expansion (`${VAR#pattern}`, etc.) (advanced)
 
 **Phase 11: More Builtins**
 - [ ] `set` (shell options)
@@ -357,17 +389,18 @@ The shell is now in active development with pipelines fully working! Priority ar
 
 - [x] **2025-10-25 Morning**: Working REPL with command execution
 - [x] **2025-10-25 Early Afternoon**: Pipeline execution + boolean operators ✨
-- [x] **2025-10-25 Late Afternoon**: File redirections (>, >>, <, 2>) ✨✨
-- [ ] **Week 2**: Variable expansion + glob expansion
-- [ ] **Week 3**: More builtins (20+) + background jobs
+- [x] **2025-10-25 Mid Afternoon**: File redirections (>, >>, <, 2>) ✨✨
+- [x] **2025-10-25 Late Afternoon**: Variable expansion ($VAR, ${VAR}, $?, $$) ✨✨✨
+- [ ] **Week 2**: Glob expansion + more builtins (export, set, alias)
+- [ ] **Week 3**: Background jobs + job control
 - [ ] **Week 4**: History + tab completion
-- [ ] **Month 2**: Job control + scripting engine
+- [ ] **Month 2**: Line editing + scripting engine
 - [ ] **Month 3**: Plugin system + full feature parity
 
 ---
 
-**Last Updated**: 2025-10-25 19:15 PST
+**Last Updated**: 2025-10-25 20:00 PST
 **Zig Version**: 0.15.1
-**Status**: 🟢 **Active Development - Feature-Complete Shell Core**
+**Status**: 🟢 **Active Development - Advanced Scripting Shell**
 
-🎉 **Den is now a feature-complete shell with pipelines, operators, and file I/O written in Zig!**
+🎉 **Den is now a full-featured shell with scripting capabilities written in Zig!**
