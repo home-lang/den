@@ -50,6 +50,19 @@
   - Hook data structures for all contexts
   - Hook enable/disable and configuration
   - 36 comprehensive tests
+- ✅ **Phase 17.1-17.2**: Theme system (complete)
+  - Complete theme manager with color rendering (8-bit, 24-bit RGB)
+  - Terminal capability detection (TTY, color support, Unicode, size)
+  - Color scheme auto-detection (dark/light, macOS integration)
+  - Adaptive rendering with fallbacks for unsupported terminals
+  - 37 comprehensive tests
+- ✅ **Phase 17.3-17.6**: Prompt rendering and Git integration (complete)
+  - Starship-like prompt template parsing with placeholder expansion
+  - 10 standard placeholders (path, git, user, host, symbol, time, duration, exitcode, modules, custom)
+  - Complete Git integration (branch, status, ahead/behind, stash, commits)
+  - System info provider (path operations, runtime detection)
+  - Right-aligned prompts, transient mode, simple mode
+  - 27 comprehensive tests
 
 **Pending** (Optional Features):
 - ⏸️ **Phase 3**: Configuration system (not critical for core shell)
@@ -57,7 +70,7 @@
 - ⏸️ **Phase 9**: Advanced REPL (syntax highlighting, auto-suggestions)
 - ⏸️ **Phase 13**: Extended builtins (productivity tools, dev helpers)
 - ⏸️ **Phase 16**: Custom hooks (git, docker, npm)
-- ⏸️ **Phases 17-18**: Themes and modules
+- ⏸️ **Phase 18**: Module system
 - ⏸️ **Phases 19-22**: Full test port, packaging, docs, optimization
 
 **Current State**: Fully functional POSIX shell suitable for daily use, interactive sessions, and basic scripting.
@@ -1416,55 +1429,201 @@ den/
 
 ## Phase 17: Theme & Prompt System
 
-### 17.1 Theme Manager (from `src/theme/theme-manager.ts`)
-- [ ] Implement theme struct (colors, symbols, fonts)
-- [ ] Implement theme loading from config
-- [ ] Implement color rendering (8-bit, 24-bit RGB)
-- [ ] Implement color scheme auto-detection
-- [ ] Implement terminal capability detection
-- [ ] Implement fallback for unsupported terminals
+### 17.1 Theme Manager ✅ **COMPLETE**
+- [x] Implement theme struct (colors, symbols, fonts)
+- [x] Implement theme loading from config
+- [x] Implement color rendering (8-bit, 24-bit RGB)
+- [x] Implement color scheme auto-detection
+- [x] Implement terminal capability detection
+- [x] Implement fallback for unsupported terminals
 
-### 17.2 Theme Types (from `src/theme/types.ts`)
-- [ ] Port `ThemeConfig` interface
-- [ ] Port `ColorConfig` interface
-- [ ] Port `SymbolConfig` interface
-- [ ] Port `GitStatusConfig` interface
-- [ ] Port `FontConfig` interface
+**Implementation**: Multiple files (4 modules, 717 lines)
 
-### 17.3 Prompt Rendering (from `src/prompt.ts`)
-- [ ] Implement prompt template parsing
-- [ ] Implement placeholder expansion (`{path}`, `{git}`, `{modules}`, etc.)
-- [ ] Implement prompt segment rendering
-- [ ] Implement right-aligned prompt
-- [ ] Implement transient prompt
-- [ ] Implement simple prompt mode (non-TTY, NO_COLOR)
+**`src/theme/types.zig`** (217 lines):
+- **RGB**: RGB color representation with hex conversion
+- **Color**: Union type supporting none, ANSI (8-bit), and RGB (24-bit)
+- **ColorConfig**: Complete color palette for UI elements
+  - Basic colors (foreground, background)
+  - Status colors (success, err, warning, info)
+  - Prompt colors (symbol, path, git)
+  - Syntax colors (command, argument, option, string, number, operator, comment)
+- **SymbolConfig**: Unicode and ASCII fallback symbols
+  - Prompt symbols (success ❯, error ✗, root #)
+  - Git symbols (branch , clean ✓, dirty ✗, staged ●, untracked ?)
+  - Separators
+- **FontConfig**: Typography features (bold, italic, underline, dim)
+- **GitStatusConfig**: Git display options
+- **ThemeConfig**: Complete theme with all configs
 
-### 17.4 Prompt Placeholders
-- [ ] `{path}` - Current working directory
-- [ ] `{git}` - Git branch/status
-- [ ] `{modules}` - Runtime modules (Bun, Node, etc.)
-- [ ] `{symbol}` - Prompt symbol (❯, $, #)
-- [ ] `{time}` - Current time
-- [ ] `{duration}` - Last command duration
-- [ ] `{exitcode}` - Last exit code
-- [ ] `{user}` - Current user
-- [ ] `{host}` - Hostname
-- [ ] Custom placeholders
+**`src/theme/color.zig`** (225 lines):
+- **ColorSupport enum**: none, basic (16), extended (256), truecolor (16M)
+- **ColorRenderer**: Adaptive color rendering
+  - Render foreground/background with ANSI codes
+  - Auto-downgrade colors based on terminal capability
+  - RGB to 256-color conversion
+  - RGB to 16-color conversion
+  - Styled text (bold, dim, italic, underline)
+  - Enable/disable color output
+- **Utility functions**:
+  - stripAnsi: Remove ANSI codes
+  - visibleWidth: Calculate display width without codes
 
-### 17.5 Git Integration (from `src/modules/git.ts`)
-- [ ] Implement Git repository detection
-- [ ] Implement Git branch detection
-- [ ] Implement Git status parsing (staged, unstaged, untracked)
-- [ ] Implement Git ahead/behind detection
-- [ ] Implement Git commit hash retrieval
-- [ ] Implement Git stash detection
-- [ ] Implement async Git info fetching
+**`src/theme/terminal.zig`** (194 lines):
+- **TerminalCapabilities**: Complete terminal detection
+  - TTY detection
+  - Color support level (NO_COLOR, COLORTERM, TERM parsing)
+  - Terminal size (ioctl, environment variables)
+  - Unicode support (LANG, LC_ALL detection)
+  - Emoji support
+  - Terminal emulator detection
+  - Multiplexer detection (tmux, screen)
+- **Helper functions**:
+  - isTTY(): POSIX isatty check
+  - detectColorSupport(): Multi-source color detection
+  - getTerminalSize(): Size with fallback
+  - detectUnicodeSupport(): UTF-8 encoding detection
 
-### 17.6 System Info Provider (from `src/prompt.ts`)
-- [ ] Implement current path retrieval
-- [ ] Implement home directory abbreviation (`~`)
-- [ ] Implement repository root detection
-- [ ] Implement path truncation
+**`src/theme/manager.zig`** (81 lines):
+- **ColorScheme**: dark, light, auto with detection
+  - COLORFGBG parsing
+  - macOS dark mode detection (defaults command)
+- **ThemeManager**: Central theme management
+  - Auto-detect terminal capabilities
+  - Load themes (default or fallback)
+  - Apply color schemes
+  - Get renderer with correct settings
+  - Symbol selection based on Unicode support
+  - Enable/disable colors
+  - Reload capabilities
+  - Terminal dimensions
+
+**Test Coverage**:
+- 37 comprehensive tests
+- All color rendering modes tested
+- Terminal detection tested
+- Theme loading tested
+- No memory leaks
+
+### 17.2 Theme Types ✅ **COMPLETE**
+- [x] Port `ThemeConfig` interface
+- [x] Port `ColorConfig` interface
+- [x] Port `SymbolConfig` interface
+- [x] Port `GitStatusConfig` interface
+- [x] Port `FontConfig` interface
+
+(Implemented in `src/theme/types.zig` as part of 17.1)
+
+### 17.3 Prompt Rendering ✅ **COMPLETE**
+- [x] Implement prompt template parsing
+- [x] Implement placeholder expansion (`{path}`, `{git}`, `{modules}`, etc.)
+- [x] Implement prompt segment rendering
+- [x] Implement right-aligned prompt
+- [x] Implement transient prompt
+- [x] Implement simple prompt mode (non-TTY, NO_COLOR)
+
+**Implementation**: `src/prompt/renderer.zig` (187 lines)
+- **PromptRenderer**: Core rendering engine
+  - Template parsing with `{placeholder}` syntax
+  - Placeholder expansion via registry
+  - Right-aligned prompt with terminal width calculation
+  - Transient and simple modes
+  - ANSI-aware visible width calculation
+- **expandTemplate**: Parses template strings and expands placeholders
+- **renderWithRight**: Renders left/right prompts with proper spacing
+- **visibleWidth**: Calculate display width without ANSI codes
+
+### 17.4 Prompt Placeholders ✅ **COMPLETE**
+- [x] `{path}` - Current working directory
+- [x] `{git}` - Git branch/status
+- [x] `{modules}` - Runtime modules (Bun, Node, etc.)
+- [x] `{symbol}` - Prompt symbol (❯, $, #)
+- [x] `{time}` - Current time
+- [x] `{duration}` - Last command duration
+- [x] `{exitcode}` - Last exit code
+- [x] `{user}` - Current user
+- [x] `{host}` - Hostname
+- [x] Custom placeholders
+
+**Implementation**: `src/prompt/placeholders.zig` (199 lines)
+- **PlaceholderRegistry**: Extensible placeholder system
+  - String-based placeholder lookup
+  - Function pointers for expanders
+  - Standard placeholders registered
+- **Standard expanders**:
+  - expandPath: CWD with home abbreviation
+  - expandGit: Branch, dirty state, ahead/behind
+  - expandModules: Node/Bun/Deno versions with icons
+  - expandSymbol: ❯ (success), ✗ (error), # (root)
+  - expandTime: HH:MM:SS format
+  - expandDuration: Smart formatting (ms/s/m)
+  - expandExitCode: Show on error only
+  - expandUser: Current username
+  - expandHost: Hostname
+
+**Data structures**: `src/prompt/types.zig` (156 lines)
+- **PromptContext**: All prompt data (path, git, user, runtime, custom)
+- **PromptTemplate**: Left/right/transient formats
+- **Segment**: Styled prompt segments
+- **SegmentStyle**: Foreground, background, bold, italic, underline
+
+### 17.5 Git Integration ✅ **COMPLETE**
+- [x] Implement Git repository detection
+- [x] Implement Git branch detection
+- [x] Implement Git status parsing (staged, unstaged, untracked)
+- [x] Implement Git ahead/behind detection
+- [x] Implement Git commit hash retrieval
+- [x] Implement Git stash detection
+- [x] Implement async Git info fetching
+
+**Implementation**: `src/prompt/git.zig` (216 lines)
+- **GitModule**: Complete Git integration
+  - isGitRepository: .git detection
+  - getBranch: Current branch/tag/commit
+  - getStatus: Parse git status --porcelain
+  - getAheadBehind: Parse ahead/behind counts
+  - getCommitHash: Short hash
+  - getStashCount: Stash entries
+  - parseStatus: Status parsing with counters
+- **GitInfo**: Git repository information
+  - Branch name
+  - Commit hash
+  - Dirty state and counts (staged/unstaged/untracked)
+  - Ahead/behind tracking
+  - Stash count
+
+### 17.6 System Info Provider ✅ **COMPLETE**
+- [x] Implement current path retrieval
+- [x] Implement home directory abbreviation (`~`)
+- [x] Implement repository root detection
+- [x] Implement path truncation
+
+**Implementation**: `src/prompt/sysinfo.zig` (216 lines)
+- **SystemInfo**: System information provider
+  - getCurrentDir: CWD retrieval
+  - getHomeDir: Home directory from $HOME
+  - getUsername: From $USER or $USERNAME
+  - getHostname: From $HOSTNAME or /etc/hostname
+  - isRoot: Check euid == 0
+  - abbreviatePath: Replace home with ~
+  - truncatePath: Limit path components with ellipsis
+  - basename: Get last path component
+  - dirname: Get parent directory
+  - detectRuntimeModules: Node/Bun/Deno version detection
+- **RuntimeModules**: Runtime version tracking
+  - Node.js version
+  - Bun version
+  - Deno version
+
+**Test Coverage**: `src/prompt/test_prompt.zig` (352 lines)
+- 27 comprehensive tests covering:
+  - PromptContext initialization and custom data
+  - PlaceholderRegistry expansion for all placeholders
+  - Symbol rendering (success/error/root)
+  - Git information rendering
+  - Duration and exitcode formatting
+  - Template parsing and rendering
+  - Right-aligned prompts
+  - SystemInfo operations
 
 ---
 

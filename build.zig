@@ -178,4 +178,35 @@ pub fn build(b: *std.Build) void {
     const all_hook_test_step = b.step("test-all-hooks", "Run all hook tests");
     all_hook_test_step.dependOn(&run_hook_manager_tests.step);
     all_hook_test_step.dependOn(&run_builtin_hooks_tests.step);
+
+    // Theme tests
+    const theme_test_module = b.createModule(.{
+        .root_source_file = b.path("src/theme/test_theme.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const theme_tests = b.addTest(.{
+        .root_module = theme_test_module,
+    });
+    theme_tests.linkLibC();
+
+    const run_theme_tests = b.addRunArtifact(theme_tests);
+    const theme_test_step = b.step("test-theme", "Run theme tests");
+    theme_test_step.dependOn(&run_theme_tests.step);
+
+    // Prompt tests
+    const prompt_test_module = b.createModule(.{
+        .root_source_file = b.path("src/prompt/test_prompt.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const prompt_tests = b.addTest(.{
+        .root_module = prompt_test_module,
+    });
+
+    const run_prompt_tests = b.addRunArtifact(prompt_tests);
+    const prompt_test_step = b.step("test-prompt", "Run prompt tests");
+    prompt_test_step.dependOn(&run_prompt_tests.step);
 }
