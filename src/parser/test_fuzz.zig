@@ -41,7 +41,7 @@ fn generateRandomToken(allocator: std.mem.Allocator, rng: std.Random) ![]u8 {
 
 /// Generate random command line
 fn generateRandomCommand(allocator: std.mem.Allocator, rng: std.Random) ![]u8 {
-    var cmd = std.ArrayList(u8).init(allocator);
+    var cmd = std.ArrayList(u8){};
     errdefer cmd.deinit();
 
     // Generate 1-4 words
@@ -133,7 +133,7 @@ test "Fuzz: tokenizer handles random special characters" {
     // Test 50 random combinations
     var i: usize = 0;
     while (i < 50) : (i += 1) {
-        var cmd = std.ArrayList(u8).init(allocator);
+        var cmd = std.ArrayList(u8){};
         defer cmd.deinit();
 
         try cmd.appendSlice("echo ");
@@ -167,7 +167,7 @@ test "Fuzz: tokenizer handles random whitespace" {
     // Test 50 commands with random whitespace
     var i: usize = 0;
     while (i < 50) : (i += 1) {
-        var cmd = std.ArrayList(u8).init(allocator);
+        var cmd = std.ArrayList(u8){};
         defer cmd.deinit();
 
         try cmd.appendSlice("echo");
@@ -203,7 +203,7 @@ test "Fuzz: tokenizer handles random operators" {
     // Test 50 commands with random operators
     var i: usize = 0;
     while (i < 50) : (i += 1) {
-        var cmd = std.ArrayList(u8).init(allocator);
+        var cmd = std.ArrayList(u8){};
         defer cmd.deinit();
 
         try cmd.appendSlice("cmd1");
@@ -239,7 +239,7 @@ test "Fuzz: tokenizer handles random lengths" {
     while (i < 20) : (i += 1) {
         const len = rng.intRangeAtMost(usize, 0, 1000);
 
-        var cmd = std.ArrayList(u8).init(allocator);
+        var cmd = std.ArrayList(u8){};
         defer cmd.deinit();
 
         var j: usize = 0;
@@ -276,7 +276,7 @@ test "Fuzz: tokenizer idempotent on re-tokenization" {
         defer allocator.free(tokens1);
 
         // Reconstruct and re-tokenize
-        var reconstructed = std.ArrayList(u8).init(allocator);
+        var reconstructed = std.ArrayList(u8){};
         defer reconstructed.deinit();
 
         for (tokens1, 0..) |token, idx| {
@@ -307,7 +307,7 @@ test "Fuzz: tokenizer handles random argument counts" {
     while (i < 20) : (i += 1) {
         const arg_count = rng.intRangeAtMost(usize, 0, 50);
 
-        var cmd = std.ArrayList(u8).init(allocator);
+        var cmd = std.ArrayList(u8){};
         defer cmd.deinit();
 
         try cmd.appendSlice("echo");
@@ -351,7 +351,7 @@ test "Fuzz: tokenizer handles mixed content" {
     // Test 50 random combinations
     var i: usize = 0;
     while (i < 50) : (i += 1) {
-        var cmd = std.ArrayList(u8).init(allocator);
+        var cmd = std.ArrayList(u8){};
         defer cmd.deinit();
 
         const component_count = rng.intRangeAtMost(usize, 1, 10);

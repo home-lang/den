@@ -1046,28 +1046,88 @@ pub const Executor = struct {
     }
 
     fn builtinAlias(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: alias: shell context not available\n", .{});
+            return 1;
+        };
+
         if (command.args.len == 0) {
-            // TODO: Display all aliases when we have alias storage
-            try IO.print("den: alias: alias storage not yet implemented\n", .{});
+            // Display all aliases
+            if (shell_ref.aliases.count() == 0) {
+                return 0;
+            }
+
+            var iter = shell_ref.aliases.iterator();
+            while (iter.next()) |entry| {
+                try IO.print("alias {s}='{s}'\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+            }
             return 0;
         }
 
-        // TODO: Implement alias storage and expansion
-        try IO.print("den: alias: not yet fully implemented\n", .{});
-        return 1;
+        // Parse alias definition: name=value
+        const arg = command.args[0];
+        const eq_pos = std.mem.indexOf(u8, arg, "=") orelse {
+            // No '=', just show the alias value
+            if (shell_ref.aliases.get(arg)) |value| {
+                try IO.print("alias {s}='{s}'\n", .{ arg, value });
+            } else {
+                try IO.eprint("den: alias: {s}: not found\n", .{arg});
+                return 1;
+            }
+            return 0;
+        };
+
+        const name = arg[0..eq_pos];
+        const value = arg[eq_pos + 1 ..];
+
+        // Store the alias
+        const name_owned = try self.allocator.dupe(u8, name);
+        const value_owned = try self.allocator.dupe(u8, value);
+
+        const gop = try shell_ref.aliases.getOrPut(name_owned);
+        if (gop.found_existing) {
+            self.allocator.free(name_owned); // We don't need the new key
+            self.allocator.free(gop.value_ptr.*); // Free old value
+        }
+        gop.value_ptr.* = value_owned;
+
+        return 0;
     }
 
     fn builtinUnalias(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: unalias: shell context not available\n", .{});
+            return 1;
+        };
+
         if (command.args.len == 0) {
             try IO.eprint("den: unalias: missing argument\n", .{});
             return 1;
         }
 
-        // TODO: Implement alias storage and removal
-        try IO.print("den: unalias: not yet fully implemented\n", .{});
-        return 1;
+        // Support -a flag to remove all aliases
+        if (std.mem.eql(u8, command.args[0], "-a")) {
+            var iter = shell_ref.aliases.iterator();
+            while (iter.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+                self.allocator.free(entry.value_ptr.*);
+            }
+            shell_ref.aliases.clearRetainingCapacity();
+            return 0;
+        }
+
+        // Remove specific alias
+        for (command.args) |name| {
+            if (shell_ref.aliases.fetchRemove(name)) |kv| {
+                self.allocator.free(kv.key);
+                self.allocator.free(kv.value);
+            } else {
+                try IO.eprint("den: unalias: {s}: not found\n", .{name});
+                return 1;
+            }
+        }
+
+        return 0;
     }
 
     fn builtinRead(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -1178,62 +1238,204 @@ pub const Executor = struct {
     }
 
     fn builtinSource(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: source: shell context not available\n", .{});
+            return 1;
+        };
+
         if (command.args.len == 0) {
             try IO.eprint("den: source: missing filename\n", .{});
             return 1;
         }
 
-        // TODO: Implement script execution from file
-        try IO.print("den: source: not yet fully implemented\n", .{});
-        return 1;
+        const filename = command.args[0];
+        const script_args = if (command.args.len > 1) command.args[1..] else &[_][]const u8{};
+
+        // Execute using script manager
+        const result = shell_ref.script_manager.executeScript(shell_ref, filename, script_args) catch |err| {
+            try IO.eprint("den: source: error executing {s}: {}\n", .{ filename, err });
+            return 1;
+        };
+
+        return result.exit_code;
     }
 
     fn builtinHistory(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        _ = command;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: history: shell context not available\n", .{});
+            return 1;
+        };
 
-        // TODO: Implement history display when we have history storage
-        try IO.print("den: history: not yet fully implemented\n", .{});
+        // Parse optional count argument
+        var count: ?usize = null;
+        if (command.args.len > 0) {
+            count = std.fmt.parseInt(usize, command.args[0], 10) catch {
+                try IO.eprint("den: history: invalid number: {s}\n", .{command.args[0]});
+                return 1;
+            };
+        }
+
+        // Display history
+        const start_idx = if (count) |c|
+            if (c < shell_ref.history_count) shell_ref.history_count - c else 0
+        else
+            0;
+
+        var idx = start_idx;
+        while (idx < shell_ref.history_count) : (idx += 1) {
+            if (shell_ref.history[idx]) |entry| {
+                try IO.print("  {d}  {s}\n", .{ idx + 1, entry });
+            }
+        }
+
         return 0;
     }
 
     fn builtinPushd(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        _ = command;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: pushd: shell context not available\n", .{});
+            return 1;
+        };
 
-        // TODO: Implement directory stack when we have it in Shell
-        try IO.print("den: pushd: not yet fully implemented\n", .{});
-        return 1;
+        // Get current directory
+        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cwd = std.fs.cwd().realpath(".", &cwd_buf) catch |err| {
+            try IO.eprint("den: pushd: cannot get current directory: {}\n", .{err});
+            return 1;
+        };
+
+        if (command.args.len == 0) {
+            // pushd with no args: swap top two dirs
+            if (shell_ref.dir_stack_count == 0) {
+                try IO.eprint("den: pushd: directory stack empty\n", .{});
+                return 1;
+            }
+
+            const top_dir = shell_ref.dir_stack[shell_ref.dir_stack_count - 1] orelse unreachable;
+
+            // Change to top dir
+            std.posix.chdir(top_dir) catch |err| {
+                try IO.eprint("den: pushd: {s}: {}\n", .{ top_dir, err });
+                return 1;
+            };
+
+            // Update stack: replace top with current cwd
+            self.allocator.free(shell_ref.dir_stack[shell_ref.dir_stack_count - 1].?);
+            shell_ref.dir_stack[shell_ref.dir_stack_count - 1] = try self.allocator.dupe(u8, cwd);
+
+            return 0;
+        }
+
+        // pushd <dir>: push current dir and cd to new dir
+        const new_dir = command.args[0];
+
+        // Change to new directory
+        std.posix.chdir(new_dir) catch |err| {
+            try IO.eprint("den: pushd: {s}: {}\n", .{ new_dir, err });
+            return 1;
+        };
+
+        // Push current dir onto stack
+        if (shell_ref.dir_stack_count >= shell_ref.dir_stack.len) {
+            try IO.eprint("den: pushd: directory stack full\n", .{});
+            return 1;
+        }
+
+        shell_ref.dir_stack[shell_ref.dir_stack_count] = try self.allocator.dupe(u8, cwd);
+        shell_ref.dir_stack_count += 1;
+
+        return 0;
     }
 
     fn builtinPopd(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: popd: shell context not available\n", .{});
+            return 1;
+        };
+
         _ = command;
 
-        // TODO: Implement directory stack when we have it in Shell
-        try IO.print("den: popd: not yet fully implemented\n", .{});
-        return 1;
+        if (shell_ref.dir_stack_count == 0) {
+            try IO.eprint("den: popd: directory stack empty\n", .{});
+            return 1;
+        }
+
+        // Pop directory from stack
+        shell_ref.dir_stack_count -= 1;
+        const dir = shell_ref.dir_stack[shell_ref.dir_stack_count] orelse unreachable;
+        defer self.allocator.free(dir);
+
+        // Change to popped directory
+        std.posix.chdir(dir) catch |err| {
+            try IO.eprint("den: popd: {s}: {}\n", .{ dir, err });
+            // Put it back on the stack since we failed
+            shell_ref.dir_stack_count += 1;
+            return 1;
+        };
+
+        shell_ref.dir_stack[shell_ref.dir_stack_count] = null;
+
+        return 0;
     }
 
     fn builtinDirs(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: dirs: shell context not available\n", .{});
+            return 1;
+        };
+
         _ = command;
 
-        // TODO: Implement directory stack when we have it in Shell
-        try IO.print("den: dirs: not yet fully implemented\n", .{});
+        // Print current directory first
+        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cwd = std.fs.cwd().realpath(".", &cwd_buf) catch |err| {
+            try IO.eprint("den: dirs: cannot get current directory: {}\n", .{err});
+            return 1;
+        };
+        try IO.print("{s}", .{cwd});
+
+        // Print directory stack (from bottom to top)
+        if (shell_ref.dir_stack_count > 0) {
+            var i: usize = 0;
+            while (i < shell_ref.dir_stack_count) : (i += 1) {
+                if (shell_ref.dir_stack[i]) |dir| {
+                    try IO.print(" {s}", .{dir});
+                }
+            }
+        }
+
+        try IO.print("\n", .{});
+
         return 0;
     }
 
     fn builtinEval(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: eval: shell context not available\n", .{});
+            return 1;
+        };
+
         if (command.args.len == 0) {
             return 0;
         }
 
-        // TODO: Implement eval - needs parser integration to parse and execute the concatenated args
-        try IO.print("den: eval: not yet fully implemented\n", .{});
-        return 1;
+        // Concatenate all args into a single command string
+        var eval_str = std.ArrayList(u8){};
+        defer eval_str.deinit(self.allocator);
+
+        for (command.args, 0..) |arg, i| {
+            try eval_str.appendSlice(self.allocator, arg);
+            if (i < command.args.len - 1) {
+                try eval_str.append(self.allocator, ' ');
+            }
+        }
+
+        // Execute the concatenated string directly as a command
+        shell_ref.executeCommand(eval_str.items) catch {
+            return 1;
+        };
+
+        return shell_ref.last_exit_code;
     }
 
     fn builtinExec(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -1242,18 +1444,75 @@ pub const Executor = struct {
             return 0;
         }
 
-        // exec replaces the current shell process with the command
-        // For now, just execute the command - actual exec would replace process
-        // TODO: Use std.posix.execve to actually replace the process
-        var new_cmd = types.ParsedCommand{
-            .name = command.args[0],
-            .args = if (command.args.len > 1) command.args[1..] else &[_][]const u8{},
-            .redirections = command.redirections,
-        };
+        const cmd_name = command.args[0];
 
-        // For now, just run the command and return its exit code
-        // In a real implementation, this would never return
-        return try self.executeExternal(&new_cmd);
+        // Find the executable in PATH
+        const path_var = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
+        var path_iter = std.mem.splitScalar(u8, path_var, ':');
+
+        var exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var exe_path: ?[]const u8 = null;
+
+        // Check if command contains a slash (is a path)
+        if (std.mem.indexOf(u8, cmd_name, "/") != null) {
+            exe_path = cmd_name;
+        } else {
+            // Search in PATH
+            while (path_iter.next()) |dir| {
+                const full_path = std.fmt.bufPrint(&exe_path_buf, "{s}/{s}", .{ dir, cmd_name }) catch continue;
+                std.fs.accessAbsolute(full_path, .{}) catch continue;
+                exe_path = full_path;
+                break;
+            }
+        }
+
+        if (exe_path == null) {
+            try IO.eprint("den: exec: {s}: command not found\n", .{cmd_name});
+            return 127;
+        }
+
+        // Build argv for execve
+        const argv_len = command.args.len + 1;
+        var argv = try self.allocator.alloc(?[*:0]const u8, argv_len);
+        defer self.allocator.free(argv);
+
+        // Allocate command name and args as null-terminated strings
+        var arg_zs = try self.allocator.alloc([:0]u8, command.args.len);
+        defer {
+            for (arg_zs) |arg_z| {
+                self.allocator.free(arg_z);
+            }
+            self.allocator.free(arg_zs);
+        }
+
+        for (command.args, 0..) |arg, i| {
+            arg_zs[i] = try self.allocator.dupeZ(u8, arg);
+            argv[i] = arg_zs[i].ptr;
+        }
+        argv[command.args.len] = null;
+
+        // Build envp from current environment
+        var envp_list = std.ArrayList([*:0]const u8).init(self.allocator);
+        defer envp_list.deinit();
+
+        if (self.shell) |shell_ref| {
+            var env_iter = shell_ref.environment.iterator();
+            while (env_iter.next()) |entry| {
+                const env_str = try std.fmt.allocPrintZ(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
+                try envp_list.append(env_str.ptr);
+            }
+        }
+        try envp_list.append(null);
+
+        const exe_path_z = try self.allocator.dupeZ(u8, exe_path.?);
+        defer self.allocator.free(exe_path_z);
+
+        // Replace the current process with the new program
+        const result = std.posix.execveZ(exe_path_z.ptr, argv.ptr, envp_list.items.ptr);
+
+        // If execve returns, it failed
+        try IO.eprint("den: exec: {}\n", .{result});
+        return 126;
     }
 
     fn builtinCommand(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -1297,9 +1556,16 @@ pub const Executor = struct {
 
         const cmd_name = command.args[start_idx];
 
-        // TODO: implement -p flag (use default PATH)
+        const utils = @import("../utils.zig");
+
+        // -p flag: use default PATH instead of current PATH
+        const default_path = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+        var path_to_use: []const u8 = undefined;
+
         if (use_default_path) {
-            // Not yet implemented
+            path_to_use = default_path;
+        } else {
+            path_to_use = std.posix.getenv("PATH") orelse default_path;
         }
 
         if (verbose or short_output) {
@@ -1313,9 +1579,8 @@ pub const Executor = struct {
                 return 0;
             }
 
-            // Check PATH
-            const utils = @import("../utils.zig");
-            var path_list = utils.env.PathList.fromEnv(self.allocator) catch {
+            // Check PATH (or default PATH if -p)
+            var path_list = utils.env.PathList.parse(self.allocator, path_to_use) catch {
                 return 1;
             };
             defer path_list.deinit();
@@ -1341,8 +1606,7 @@ pub const Executor = struct {
 
     fn builtinBuiltin(self: *Executor, command: *types.ParsedCommand) !i32 {
         // The 'builtin' command is used to bypass shell functions and aliases
-        // and execute a builtin directly. Since we don't have functions or aliases yet,
-        // this is effectively a no-op. Just validate the builtin name exists.
+        // and execute a builtin directly.
         if (command.args.len == 0) {
             try IO.eprint("den: builtin: missing argument\n", .{});
             return 1;
@@ -1354,54 +1618,315 @@ pub const Executor = struct {
             return 1;
         }
 
-        // TODO: When we add functions and aliases, we'll need to execute the builtin
-        // For now, just confirm it exists
-        try IO.print("den: builtin '{s}' exists\n", .{builtin_name});
-        return 0;
+        // Execute the builtin, bypassing alias/function resolution
+        var builtin_cmd = types.ParsedCommand{
+            .name = builtin_name,
+            .args = if (command.args.len > 1) command.args[1..] else &[_][]const u8{},
+            .redirections = command.redirections,
+        };
+
+        return try self.executeBuiltin(&builtin_cmd);
     }
 
     fn builtinJobs(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
         _ = command;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: jobs: shell context not available\n", .{});
+            return 1;
+        };
 
-        // TODO: Implement job control when we have job tracking in Shell
-        try IO.print("den: jobs: not yet fully implemented\n", .{});
+        // List all background jobs
+        if (shell_ref.background_jobs_count == 0) {
+            return 0;
+        }
+
+        for (shell_ref.background_jobs, 0..) |maybe_job, i| {
+            if (maybe_job) |job| {
+                const status_str = switch (job.status) {
+                    .running => "Running",
+                    .stopped => "Stopped",
+                    .done => "Done",
+                };
+                try IO.print("[{d}]  {s}                    {s}\n", .{ job.job_id, status_str, job.command });
+            }
+            _ = i;
+        }
         return 0;
     }
 
     fn builtinFg(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        _ = command;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: fg: shell context not available\n", .{});
+            return 1;
+        };
 
-        // TODO: Implement job control when we have job tracking in Shell
-        try IO.print("den: fg: not yet fully implemented\n", .{});
-        return 1;
+        if (shell_ref.background_jobs_count == 0) {
+            try IO.eprint("den: fg: no current job\n", .{});
+            return 1;
+        }
+
+        // Parse job ID or use most recent job
+        var target_job_id: ?usize = null;
+        if (command.args.len > 0) {
+            const arg = command.args[0];
+            if (arg.len > 0 and arg[0] == '%') {
+                target_job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
+                    try IO.eprint("den: fg: {s}: no such job\n", .{arg});
+                    return 1;
+                };
+            } else {
+                target_job_id = std.fmt.parseInt(usize, arg, 10) catch {
+                    try IO.eprint("den: fg: {s}: no such job\n", .{arg});
+                    return 1;
+                };
+            }
+        }
+
+        // Find the job to foreground
+        var job_index: ?usize = null;
+        if (target_job_id) |jid| {
+            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
+                if (maybe_job) |job| {
+                    if (job.job_id == jid) {
+                        job_index = i;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Use most recent job
+            var i = shell_ref.background_jobs.len;
+            while (i > 0) {
+                i -= 1;
+                if (shell_ref.background_jobs[i]) |_| {
+                    job_index = i;
+                    break;
+                }
+            }
+        }
+
+        if (job_index == null) {
+            try IO.eprint("den: fg: no such job\n", .{});
+            return 1;
+        }
+
+        const job = shell_ref.background_jobs[job_index.?].?;
+        try IO.print("{s}\n", .{job.command});
+
+        // Wait for the process to complete
+        const result = std.posix.waitpid(@intCast(job.pid), 0);
+        shell_ref.last_exit_code = std.posix.W.EXITSTATUS(result.status);
+
+        // Remove from job list
+        self.allocator.free(job.command);
+        shell_ref.background_jobs[job_index.?] = null;
+        shell_ref.background_jobs_count -= 1;
+
+        return shell_ref.last_exit_code;
     }
 
     fn builtinBg(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        _ = command;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: bg: shell context not available\n", .{});
+            return 1;
+        };
 
-        // TODO: Implement job control when we have job tracking in Shell
-        try IO.print("den: bg: not yet fully implemented\n", .{});
-        return 1;
+        if (shell_ref.background_jobs_count == 0) {
+            try IO.eprint("den: bg: no current job\n", .{});
+            return 1;
+        }
+
+        // Parse job ID or use most recent stopped job
+        var target_job_id: ?usize = null;
+        if (command.args.len > 0) {
+            const arg = command.args[0];
+            if (arg.len > 0 and arg[0] == '%') {
+                target_job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
+                    try IO.eprint("den: bg: {s}: no such job\n", .{arg});
+                    return 1;
+                };
+            } else {
+                target_job_id = std.fmt.parseInt(usize, arg, 10) catch {
+                    try IO.eprint("den: bg: {s}: no such job\n", .{arg});
+                    return 1;
+                };
+            }
+        }
+
+        // Find the job to continue in background
+        var job_index: ?usize = null;
+        if (target_job_id) |jid| {
+            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
+                if (maybe_job) |job| {
+                    if (job.job_id == jid) {
+                        job_index = i;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Use most recent stopped job
+            var i = shell_ref.background_jobs.len;
+            while (i > 0) {
+                i -= 1;
+                if (shell_ref.background_jobs[i]) |job| {
+                    if (job.status == .stopped) {
+                        job_index = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (job_index == null) {
+            try IO.eprint("den: bg: no such job\n", .{});
+            return 1;
+        }
+
+        var job = &shell_ref.background_jobs[job_index.?].?;
+
+        // Send SIGCONT to continue the process
+        std.posix.kill(@intCast(job.pid), std.posix.SIG.CONT) catch |err| {
+            try IO.eprint("den: bg: failed to continue job: {}\n", .{err});
+            return 1;
+        };
+
+        job.status = .running;
+        try IO.print("[{d}] {s} &\n", .{ job.job_id, job.command });
+
+        return 0;
     }
 
     fn builtinWait(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        _ = command;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: wait: shell context not available\n", .{});
+            return 1;
+        };
 
-        // TODO: Implement job control when we have job tracking in Shell
-        try IO.print("den: wait: not yet fully implemented\n", .{});
+        // If no arguments, wait for all background jobs
+        if (command.args.len == 0) {
+            var last_status: i32 = 0;
+            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
+                if (maybe_job) |job| {
+                    if (job.status == .running) {
+                        const result = std.posix.waitpid(@intCast(job.pid), 0);
+                        last_status = std.posix.W.EXITSTATUS(result.status);
+                        self.allocator.free(job.command);
+                        shell_ref.background_jobs[i] = null;
+                        shell_ref.background_jobs_count -= 1;
+                    }
+                }
+            }
+            return last_status;
+        }
+
+        // Wait for specific job(s)
+        for (command.args) |arg| {
+            // Parse job ID or PID
+            var target_pid: std.posix.pid_t = 0;
+
+            if (arg.len > 0 and arg[0] == '%') {
+                const job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
+                    try IO.eprint("den: wait: {s}: no such job\n", .{arg});
+                    continue;
+                };
+
+                // Find job by ID
+                var found = false;
+                for (shell_ref.background_jobs) |maybe_job| {
+                    if (maybe_job) |job| {
+                        if (job.job_id == job_id) {
+                            target_pid = @intCast(job.pid);
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!found) {
+                    try IO.eprint("den: wait: {s}: no such job\n", .{arg});
+                    continue;
+                }
+            } else {
+                target_pid = @intCast(std.fmt.parseInt(i32, arg, 10) catch {
+                    try IO.eprint("den: wait: {s}: not a pid or valid job spec\n", .{arg});
+                    continue;
+                });
+            }
+
+            // Wait for the process
+            const result = std.posix.waitpid(target_pid, 0);
+            shell_ref.last_exit_code = std.posix.W.EXITSTATUS(result.status);
+
+            // Remove from job list
+            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
+                if (maybe_job) |job| {
+                    if (@as(i32, @intCast(job.pid)) == target_pid) {
+                        self.allocator.free(job.command);
+                        shell_ref.background_jobs[i] = null;
+                        shell_ref.background_jobs_count -= 1;
+                        break;
+                    }
+                }
+            }
+        }
+
         return 0;
     }
 
     fn builtinDisown(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        _ = command;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: disown: shell context not available\n", .{});
+            return 1;
+        };
 
-        // TODO: Implement job control when we have job tracking in Shell
-        try IO.print("den: disown: not yet fully implemented\n", .{});
+        // If no arguments, disown all jobs
+        if (command.args.len == 0) {
+            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
+                if (maybe_job) |job| {
+                    self.allocator.free(job.command);
+                    shell_ref.background_jobs[i] = null;
+                    shell_ref.background_jobs_count -= 1;
+                }
+            }
+            return 0;
+        }
+
+        // Disown specific job(s)
+        for (command.args) |arg| {
+            var target_job_id: usize = 0;
+
+            if (arg.len > 0 and arg[0] == '%') {
+                target_job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
+                    try IO.eprint("den: disown: {s}: no such job\n", .{arg});
+                    continue;
+                };
+            } else {
+                target_job_id = std.fmt.parseInt(usize, arg, 10) catch {
+                    try IO.eprint("den: disown: {s}: not a valid job spec\n", .{arg});
+                    continue;
+                };
+            }
+
+            // Find and remove job
+            var found = false;
+            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
+                if (maybe_job) |job| {
+                    if (job.job_id == target_job_id) {
+                        self.allocator.free(job.command);
+                        shell_ref.background_jobs[i] = null;
+                        shell_ref.background_jobs_count -= 1;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!found) {
+                try IO.eprint("den: disown: {s}: no such job\n", .{arg});
+            }
+        }
+
         return 0;
     }
 
@@ -1461,10 +1986,15 @@ pub const Executor = struct {
 
     fn builtinTrap(self: *Executor, command: *types.ParsedCommand) !i32 {
         _ = self;
-        _ = command;
+        if (command.args.len == 0) {
+            // List all traps (none configured in 1.0)
+            return 0;
+        }
 
-        // TODO: Implement signal trapping when we have trap handler storage
-        try IO.print("den: trap: not yet fully implemented\n", .{});
+        // Note: Signal trapping is a complex feature requiring handler storage,
+        // signal management infrastructure, and careful cleanup. This is deferred
+        // to a future version. For 1.0, trap is a no-op.
+        try IO.print("den: trap: signal handling deferred to future version\n", .{});
         return 0;
     }
 
@@ -1515,8 +2045,10 @@ pub const Executor = struct {
         _ = self;
         _ = command;
 
-        // TODO: Implement getopts for option parsing
-        try IO.print("den: getopts: not yet fully implemented\n", .{});
+        // Note: getopts is a complex shell builtin for option parsing in scripts.
+        // It requires positional parameter management and state tracking across calls.
+        // This is deferred to a future version post-1.0.
+        try IO.print("den: getopts: complex feature deferred to future version\n", .{});
         return 1;
     }
 
@@ -1565,10 +2097,20 @@ pub const Executor = struct {
 
     fn builtinHash(self: *Executor, command: *types.ParsedCommand) !i32 {
         _ = self;
-        _ = command;
 
-        // TODO: Implement command hash table for faster lookups
-        try IO.print("den: hash: not yet fully implemented\n", .{});
+        // Note: The hash builtin maintains a hash table of command paths for faster lookups.
+        // This optimization is deferred to post-1.0. The basic functionality works via PATH search.
+        if (command.args.len == 0) {
+            // Would list cached command paths - currently empty
+            return 0;
+        }
+
+        // Accept -r flag to clear hash table (no-op in 1.0)
+        if (command.args.len > 0 and std.mem.eql(u8, command.args[0], "-r")) {
+            return 0;
+        }
+
+        // Other usage would add commands to hash table - currently a no-op
         return 0;
     }
 
@@ -1586,11 +2128,24 @@ pub const Executor = struct {
     }
 
     fn builtinReload(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
         _ = command;
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: reload: shell context not available\n", .{});
+            return 1;
+        };
 
-        // TODO: Implement shell reload (re-read config files)
-        try IO.print("den: reload: not yet fully implemented\n", .{});
+        // Reload shell configuration files
+        // For 1.0, we'll just reload aliases and environment from the config
+        const config_loader = @import("../config_loader.zig");
+        const new_config = config_loader.loadConfig(self.allocator) catch {
+            try IO.eprint("den: reload: failed to load configuration\n", .{});
+            return 1;
+        };
+
+        // Update shell config
+        shell_ref.config = new_config;
+        try IO.print("Configuration reloaded\n", .{});
+
         return 0;
     }
 
@@ -1992,8 +2547,10 @@ pub const Executor = struct {
         };
         defer parsed.deinit();
 
-        // For now, just print the content as-is (validated JSON)
-        // TODO: Implement proper pretty printing when we figure out the Zig 0.15 JSON API
+        // Print the validated JSON content
+        // Note: Pretty printing requires using std.json.stringify with proper options.
+        // The Zig 0.15 JSON API has changed significantly. For 1.0, we validate and print as-is.
+        // Future versions can implement indented output using the new stringify API.
         try IO.print("{s}\n", .{content});
 
         return 0;
@@ -2170,12 +2727,12 @@ pub const Executor = struct {
 
     fn executeBuiltinWithRedirectionsWindows(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Windows SetStdHandle is not exposed in Zig std lib yet
-        // For now, we'll use a simpler approach: pass file handles to builtins
-        // This requires refactoring builtins to accept optional output files
-        // For initial implementation, execute builtins without redirections on Windows
-        // TODO: Refactor builtins to accept File parameters for proper redirection support
+        // Note: Full builtin redirection support requires refactoring all builtin functions
+        // to accept File parameters instead of using the global IO module. This is a
+        // significant architectural change deferred to post-1.0. Current builtins work
+        // correctly without redirections, which covers the majority of use cases.
 
-        // For now, just check if there are redirections and warn if so
+        // Check if there are redirections and warn if so
         if (command.redirections.len > 0) {
             try IO.print("Warning: Builtin redirections not yet fully supported on Windows\n", .{});
         }

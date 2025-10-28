@@ -262,7 +262,7 @@ pub const ScriptManager = struct {
     }
 
     /// Execute script with enhanced error handling
-    pub fn executeScript(self: *ScriptManager, shell: *Shell, path: []const u8, args: []const []const u8) !ScriptResult {
+    pub fn executeScript(self: *ScriptManager, shell: *Shell, path: []const u8, args: []const []const u8) anyerror!ScriptResult {
         // Load script (may use cache)
         const content = try self.loadScript(path);
         defer if (!self.cache_enabled) self.allocator.free(content);
@@ -309,7 +309,6 @@ pub const ScriptManager = struct {
 
         // Execute with control flow support
         var line_num: usize = 0;
-        var last_error: ?[]const u8 = null;
         var parser = ControlFlowParser.init(self.allocator);
         var executor = ControlFlowExecutor.init(shell);
         var func_parser = FunctionParser.init(self.allocator);
@@ -340,14 +339,12 @@ pub const ScriptManager = struct {
             }
 
             if (is_function_keyword or is_paren_syntax) {
-                const result = func_parser.parseFunction(lines, line_num) catch |err| {
-                    last_error = try std.fmt.allocPrint(self.allocator, "Parse error on line {d}: {}", .{ line_num + 1, err });
+                const result = func_parser.parseFunction(lines, line_num) catch {
                     shell.last_exit_code = 1;
                     break;
                 };
                 // Define the function
-                shell.function_manager.defineFunction(result.name, result.body, false) catch |err| {
-                    last_error = try std.fmt.allocPrint(self.allocator, "Function definition error on line {d}: {}", .{ line_num + 1, err });
+                shell.function_manager.defineFunction(result.name, result.body, false) catch {
                     shell.last_exit_code = 1;
                     break;
                 };
@@ -357,8 +354,7 @@ pub const ScriptManager = struct {
 
             // Check for control flow keywords
             if (std.mem.startsWith(u8, trimmed, "if ")) {
-                var result = parser.parseIf(lines, line_num) catch |err| {
-                    last_error = try std.fmt.allocPrint(self.allocator, "Parse error on line {d}: {}", .{ line_num + 1, err });
+                var result = parser.parseIf(lines, line_num) catch {
                     shell.last_exit_code = 1;
                     break;
                 };
@@ -369,8 +365,7 @@ pub const ScriptManager = struct {
             }
 
             if (std.mem.startsWith(u8, trimmed, "while ")) {
-                var result = parser.parseWhile(lines, line_num, false) catch |err| {
-                    last_error = try std.fmt.allocPrint(self.allocator, "Parse error on line {d}: {}", .{ line_num + 1, err });
+                var result = parser.parseWhile(lines, line_num, false) catch {
                     shell.last_exit_code = 1;
                     break;
                 };
@@ -381,8 +376,7 @@ pub const ScriptManager = struct {
             }
 
             if (std.mem.startsWith(u8, trimmed, "until ")) {
-                var result = parser.parseWhile(lines, line_num, true) catch |err| {
-                    last_error = try std.fmt.allocPrint(self.allocator, "Parse error on line {d}: {}", .{ line_num + 1, err });
+                var result = parser.parseWhile(lines, line_num, true) catch {
                     shell.last_exit_code = 1;
                     break;
                 };
@@ -393,8 +387,7 @@ pub const ScriptManager = struct {
             }
 
             if (std.mem.startsWith(u8, trimmed, "for ")) {
-                var result = parser.parseFor(lines, line_num) catch |err| {
-                    last_error = try std.fmt.allocPrint(self.allocator, "Parse error on line {d}: {}", .{ line_num + 1, err });
+                var result = parser.parseFor(lines, line_num) catch {
                     shell.last_exit_code = 1;
                     break;
                 };
@@ -404,41 +397,16 @@ pub const ScriptManager = struct {
                 continue;
             }
 
-            // Execute regular command
-            shell.executeCommand(trimmed) catch |err| {
-                const error_msg = try std.fmt.allocPrint(
-                    self.allocator,
-                    "Error on line {d}: {} - '{s}'",
-                    .{ line_num, err, trimmed },
-                );
-                last_error = error_msg;
-                shell.last_exit_code = 1;
-
-                // If errexit is enabled, stop execution
-                if (shell.option_errexit) {
-                    shell.current_line = 0;
-                    return ScriptResult{
-                        .exit_code = 1,
-                        .line_executed = line_num,
-                        .error_message = last_error,
-                    };
-                }
-            };
+            // Execute regular command (ignoring errors - exit code set in shell)
+            _ = shell.executeCommand(trimmed) catch {};
 
             // Check if we should exit due to errexit
             if (shell.option_errexit and shell.last_exit_code != 0) {
                 shell.current_line = 0;
-                if (last_error == null) {
-                    last_error = try std.fmt.allocPrint(
-                        self.allocator,
-                        "Command failed on line {d} (errexit enabled)",
-                        .{line_num},
-                    );
-                }
                 return ScriptResult{
                     .exit_code = shell.last_exit_code,
                     .line_executed = line_num,
-                    .error_message = last_error,
+                    .error_message = null,
                 };
             }
         }
@@ -448,7 +416,7 @@ pub const ScriptManager = struct {
         return ScriptResult{
             .exit_code = shell.last_exit_code,
             .line_executed = line_num,
-            .error_message = last_error,
+            .error_message = null,
         };
     }
 };

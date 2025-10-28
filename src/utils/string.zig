@@ -84,7 +84,7 @@ pub const String = struct {
 
     /// Replace all occurrences
     pub fn replaceAll(allocator: std.mem.Allocator, str: []const u8, old: []const u8, new: []const u8) ![]u8 {
-        var result = std.ArrayList(u8).init(allocator);
+        var result = std.ArrayList(u8){};
         errdefer result.deinit();
 
         var remaining = str;

@@ -179,24 +179,24 @@ pub const ControlFlowExecutor = struct {
     /// Execute if statement
     pub fn executeIf(self: *ControlFlowExecutor, stmt: *IfStatement) !i32 {
         // Evaluate main condition
-        const condition_result = try self.evaluateCondition(stmt.condition);
+        const condition_result = self.evaluateCondition(stmt.condition);
 
         if (condition_result) {
             // Execute then body
-            return try self.executeBody(stmt.then_body);
+            return self.executeBody(stmt.then_body);
         }
 
         // Check elif clauses
         for (stmt.elif_clauses) |elif| {
-            const elif_result = try self.evaluateCondition(elif.condition);
+            const elif_result = self.evaluateCondition(elif.condition);
             if (elif_result) {
-                return try self.executeBody(elif.body);
+                return self.executeBody(elif.body);
             }
         }
 
         // Execute else body if present
         if (stmt.else_body) |else_body| {
-            return try self.executeBody(else_body);
+            return self.executeBody(else_body);
         }
 
         return 0;
@@ -207,14 +207,14 @@ pub const ControlFlowExecutor = struct {
         var last_exit: i32 = 0;
 
         while (true) {
-            const condition_result = try self.evaluateCondition(loop.condition);
+            const condition_result = self.evaluateCondition(loop.condition);
 
             // For while: continue if true, for until: continue if false
             const should_continue = if (loop.is_until) !condition_result else condition_result;
 
             if (!should_continue) break;
 
-            last_exit = try self.executeBody(loop.body);
+            last_exit = self.executeBody(loop.body);
 
             // Check for break
             if (self.break_requested) {
@@ -258,7 +258,7 @@ pub const ControlFlowExecutor = struct {
                 gop.value_ptr.* = value;
             }
 
-            last_exit = try self.executeBody(loop.body);
+            last_exit = self.executeBody(loop.body);
 
             // Check for break
             if (self.break_requested) {
@@ -299,7 +299,7 @@ pub const ControlFlowExecutor = struct {
             }
 
             // Execute body
-            last_exit = try self.executeBody(loop.body);
+            last_exit = self.executeBody(loop.body);
 
             // Check for break
             if (self.break_requested) {
@@ -396,7 +396,7 @@ pub const ControlFlowExecutor = struct {
             }
 
             // Execute body
-            last_exit = try self.executeBody(menu.body);
+            last_exit = self.executeBody(menu.body);
 
             // Check for break
             if (self.break_requested) {
@@ -428,7 +428,7 @@ pub const ControlFlowExecutor = struct {
         for (stmt.cases) |case_clause| {
             for (case_clause.patterns) |pattern| {
                 if (try self.matchPattern(expanded_value, pattern)) {
-                    return try self.executeBody(case_clause.body);
+                    return self.executeBody(case_clause.body);
                 }
             }
         }
@@ -437,7 +437,7 @@ pub const ControlFlowExecutor = struct {
     }
 
     /// Evaluate a condition (runs command and checks exit code)
-    fn evaluateCondition(self: *ControlFlowExecutor, condition: []const u8) !bool {
+    fn evaluateCondition(self: *ControlFlowExecutor, condition: []const u8) bool {
         // Execute condition command
         self.shell.executeCommand(condition) catch {
             return false;
@@ -448,7 +448,7 @@ pub const ControlFlowExecutor = struct {
     }
 
     /// Execute a body of commands
-    fn executeBody(self: *ControlFlowExecutor, body: [][]const u8) !i32 {
+    fn executeBody(self: *ControlFlowExecutor, body: [][]const u8) i32 {
         var last_exit: i32 = 0;
 
         for (body) |line| {
@@ -468,8 +468,7 @@ pub const ControlFlowExecutor = struct {
             }
 
             // Execute command
-            self.shell.executeCommand(trimmed) catch |err| {
-                std.debug.print("Error in control flow body: {}\n", .{err});
+            self.shell.executeCommand(trimmed) catch {
                 last_exit = 1;
             };
 
