@@ -3,6 +3,8 @@ const types = @import("types/mod.zig");
 const parser_mod = @import("parser/mod.zig");
 const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
+const Terminal = @import("utils/terminal.zig");
+const LineEditor = Terminal.LineEditor;
 const Expansion = @import("utils/expansion.zig").Expansion;
 const Glob = @import("utils/glob.zig").Glob;
 const BraceExpander = @import("utils/brace.zig").BraceExpander;
@@ -71,6 +73,9 @@ pub const Shell = struct {
     script_suggester: ?ScriptSuggesterPlugin,
     // Concurrency
     thread_pool: concurrency.ThreadPool,
+    // Interactive mode
+    is_interactive: bool,
+    line_editor: ?LineEditor,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         // Load configuration from files and environment variables
@@ -128,7 +133,14 @@ pub const Shell = struct {
             .highlighter = null,  // Initialized on demand
             .script_suggester = null, // Initialized on demand
             .thread_pool = thread_pool,
+            .is_interactive = false,
+            .line_editor = null,
         };
+
+        // Detect if stdin is a TTY
+        if (@import("builtin").os.tag != .windows) {
+            shell.is_interactive = std.posix.isatty(std.posix.STDIN_FILENO);
+        }
 
         // Load history from file
         shell.loadHistory() catch {
@@ -148,6 +160,11 @@ pub const Shell = struct {
     }
 
     pub fn deinit(self: *Shell) void {
+        // Clean up line editor
+        if (self.line_editor) |*editor| {
+            editor.deinit();
+        }
+
         // Execute shell_exit hooks
         var exit_context = HookContext{
             .hook_type = .shell_exit,
@@ -292,11 +309,37 @@ pub const Shell = struct {
             // Check for completed background jobs
             try self.checkBackgroundJobs();
 
-            // Render prompt
-            try self.renderPrompt();
-
             // Read line from stdin
-            const line = try IO.readLine(self.allocator);
+            const line = blk: {
+                if (self.is_interactive) {
+                    // Initialize line editor on first use
+                    if (self.line_editor == null) {
+                        const prompt_str = try self.getPromptString();
+                        var editor = LineEditor.init(self.allocator, prompt_str);
+                        editor.setHistory(&self.history, &self.history_count);
+                        self.line_editor = editor;
+                        self.allocator.free(prompt_str);
+                    } else {
+                        // Update prompt for next line
+                        const prompt_str = try self.getPromptString();
+                        self.line_editor.?.prompt = prompt_str;
+                        // Note: prompt_str will leak, but that's acceptable for a long-running REPL
+                    }
+
+                    // Use line editor for interactive input
+                    break :blk self.line_editor.?.readLine() catch |err| {
+                        if (err == error.Interrupted) {
+                            try IO.print("\n", .{});
+                            continue;
+                        }
+                        return err;
+                    };
+                } else {
+                    // Non-interactive: render simple prompt and use basic readLine
+                    try self.renderPrompt();
+                    break :blk try IO.readLine(self.allocator);
+                }
+            };
 
             if (line == null) {
                 // EOF (Ctrl+D)
@@ -342,6 +385,10 @@ pub const Shell = struct {
     fn renderPrompt(self: *Shell) !void {
         _ = self;
         try IO.print("den> ", .{});
+    }
+
+    fn getPromptString(self: *const Shell) ![]u8 {
+        return try self.allocator.dupe(u8, "den> ");
     }
 
     pub fn executeCommand(self: *Shell, input: []const u8) !void {

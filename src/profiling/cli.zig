@@ -163,6 +163,6 @@ fn runAllBenchmarks(allocator: std.mem.Allocator) !void {
 
     for (benchmarks) |bench_name| {
         try runBenchmark(allocator, bench_name);
-        std.debug.print("\n{'=':<80}\n\n", .{});
+        std.debug.print("\n{s}\n\n", .{"=" ** 80});
     }
 }
