@@ -85,6 +85,10 @@ pub const Shell = struct {
     script_manager: ScriptManager,
     // Function management
     function_manager: FunctionManager,
+    // Signal handling
+    signal_handlers: std.StringHashMap([]const u8),
+    // Command path cache (for hash builtin)
+    command_cache: std.StringHashMap([]const u8),
     // Plugin system
     plugin_registry: PluginRegistry,
     plugin_manager: PluginManager,
@@ -148,6 +152,8 @@ pub const Shell = struct {
             .current_line = 0,
             .script_manager = ScriptManager.init(allocator),
             .function_manager = FunctionManager.init(allocator),
+            .signal_handlers = std.StringHashMap([]const u8).init(allocator),
+            .command_cache = std.StringHashMap([]const u8).init(allocator),
             .plugin_registry = PluginRegistry.init(allocator),
             .plugin_manager = PluginManager.init(allocator),
             .auto_suggest = null, // Initialized on demand
@@ -214,6 +220,22 @@ pub const Shell = struct {
 
         // Clean up function manager
         self.function_manager.deinit();
+
+        // Clean up signal handlers
+        var sig_iter = self.signal_handlers.iterator();
+        while (sig_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.signal_handlers.deinit();
+
+        // Clean up command cache
+        var cache_iter = self.command_cache.iterator();
+        while (cache_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.command_cache.deinit();
 
         // Clean up background jobs
         for (self.background_jobs) |maybe_job| {

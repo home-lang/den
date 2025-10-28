@@ -44,7 +44,7 @@ pub fn formatError(
     use_color: bool,
 ) ![]const u8 {
     var buf = std.ArrayList(u8){};
-    const writer = buf.writer();
+    const writer = buf.writer(allocator);
 
     // Error header
     if (use_color) {
@@ -86,7 +86,7 @@ pub fn formatError(
         }
     }
 
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Format an error chain (multiple errors in sequence)
@@ -97,7 +97,7 @@ pub fn formatErrorChain(
     use_color: bool,
 ) ![]const u8 {
     var buf = std.ArrayList(u8){};
-    const writer = buf.writer();
+    const writer = buf.writer(allocator);
 
     if (use_color) {
         try writer.print("{s}{s}error chain:{s}\n", .{ Color.bold, Color.red, Color.reset });
@@ -138,7 +138,7 @@ pub fn formatErrorChain(
         }
     }
 
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Print a formatted error to stderr

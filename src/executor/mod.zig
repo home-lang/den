@@ -1409,7 +1409,7 @@ pub const Executor = struct {
         return 0;
     }
 
-    fn builtinEval(self: *Executor, command: *types.ParsedCommand) !i32 {
+    fn builtinEval(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
         const shell_ref = self.shell orelse {
             try IO.eprint("den: eval: shell context not available\n", .{});
             return 1;
@@ -1431,9 +1431,7 @@ pub const Executor = struct {
         }
 
         // Execute the concatenated string directly as a command
-        shell_ref.executeCommand(eval_str.items) catch {
-            return 1;
-        };
+        _ = shell_ref.executeCommand(eval_str.items) catch {};
 
         return shell_ref.last_exit_code;
     }
@@ -1492,23 +1490,44 @@ pub const Executor = struct {
         argv[command.args.len] = null;
 
         // Build envp from current environment
-        var envp_list = std.ArrayList([*:0]const u8).init(self.allocator);
-        defer envp_list.deinit();
+        var env_count: usize = 0;
+        if (self.shell) |shell_ref| {
+            env_count = shell_ref.environment.count();
+        }
 
+        // Allocate envp array (+1 for null terminator)
+        const envp_len = env_count + 1;
+        var envp = try self.allocator.alloc(?[*:0]const u8, envp_len);
+        defer self.allocator.free(envp);
+
+        // Allocate storage for the environment strings
+        var env_strings = try self.allocator.alloc([:0]u8, env_count);
+        defer {
+            for (env_strings) |env_str| {
+                self.allocator.free(env_str);
+            }
+            self.allocator.free(env_strings);
+        }
+
+        // Build the environment strings
         if (self.shell) |shell_ref| {
             var env_iter = shell_ref.environment.iterator();
+            var i: usize = 0;
             while (env_iter.next()) |entry| {
-                const env_str = try std.fmt.allocPrintZ(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
-                try envp_list.append(env_str.ptr);
+                const env_formatted = try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
+                defer self.allocator.free(env_formatted);
+                env_strings[i] = try self.allocator.dupeZ(u8, env_formatted);
+                envp[i] = env_strings[i].ptr;
+                i += 1;
             }
         }
-        try envp_list.append(null);
+        envp[env_count] = null;
 
         const exe_path_z = try self.allocator.dupeZ(u8, exe_path.?);
         defer self.allocator.free(exe_path_z);
 
         // Replace the current process with the new program
-        const result = std.posix.execveZ(exe_path_z.ptr, argv.ptr, envp_list.items.ptr);
+        const result = std.posix.execveZ(exe_path_z.ptr, @ptrCast(argv.ptr), @ptrCast(envp.ptr));
 
         // If execve returns, it failed
         try IO.eprint("den: exec: {}\n", .{result});
@@ -1604,7 +1623,7 @@ pub const Executor = struct {
         return try self.executeExternal(&new_cmd);
     }
 
-    fn builtinBuiltin(self: *Executor, command: *types.ParsedCommand) !i32 {
+    fn builtinBuiltin(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
         // The 'builtin' command is used to bypass shell functions and aliases
         // and execute a builtin directly.
         if (command.args.len == 0) {
@@ -1984,17 +2003,118 @@ pub const Executor = struct {
         return 0;
     }
 
-    fn builtinTrap(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
+    fn builtinTrap(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: trap: shell context not available\n", .{});
+            return 1;
+        };
+
+        // If no arguments, list all traps
         if (command.args.len == 0) {
-            // List all traps (none configured in 1.0)
+            var iter = shell_ref.signal_handlers.iterator();
+            while (iter.next()) |entry| {
+                const signal = entry.key_ptr.*;
+                const action = entry.value_ptr.*;
+                if (action.len > 0) {
+                    try IO.print("trap -- '{s}' {s}\n", .{ action, signal });
+                } else {
+                    try IO.print("trap -- '' {s}\n", .{signal});
+                }
+            }
             return 0;
         }
 
-        // Note: Signal trapping is a complex feature requiring handler storage,
-        // signal management infrastructure, and careful cleanup. This is deferred
-        // to a future version. For 1.0, trap is a no-op.
-        try IO.print("den: trap: signal handling deferred to future version\n", .{});
+        var start_idx: usize = 0;
+
+        // Skip '--' if present (POSIX compatibility)
+        if (std.mem.eql(u8, command.args[0], "--")) {
+            start_idx = 1;
+            if (command.args.len == 1) {
+                try IO.eprint("den: trap: usage: trap [-lp] [[arg] signal_spec ...]\n", .{});
+                return 1;
+            }
+        }
+
+        // Handle -l flag (list signal names)
+        if (std.mem.eql(u8, command.args[start_idx], "-l") or std.mem.eql(u8, command.args[start_idx], "--list")) {
+            const signal_names = [_][]const u8{
+                "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE",
+                "KILL", "USR1", "SEGV", "USR2", "PIPE", "ALRM", "TERM",
+                "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG",
+                "XCPU", "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "SYS",
+            };
+            for (signal_names, 0..) |sig, i| {
+                try IO.print("{d}) {s}\n", .{ i + 1, sig });
+            }
+            return 0;
+        }
+
+        // Handle -p flag (print trap commands)
+        if (std.mem.eql(u8, command.args[start_idx], "-p") or std.mem.eql(u8, command.args[start_idx], "--print")) {
+            if (command.args.len <= start_idx + 1) {
+                return 0;
+            }
+            for (command.args[start_idx + 1 ..]) |signal| {
+                if (shell_ref.signal_handlers.get(signal)) |action| {
+                    try IO.print("trap -- '{s}' {s}\n", .{ action, signal });
+                }
+            }
+            return 0;
+        }
+
+        // Need at least 2 args: action and signal
+        if (command.args.len < start_idx + 2) {
+            try IO.eprint("den: trap: usage: trap [-lp] [[arg] signal_spec ...]\n", .{});
+            return 1;
+        }
+
+        const action = command.args[start_idx];
+        const signals = command.args[start_idx + 1 ..];
+
+        // Handle empty string action - remove the trap
+        if (action.len == 0) {
+            for (signals) |signal| {
+                if (shell_ref.signal_handlers.fetchRemove(signal)) |kv| {
+                    self.allocator.free(kv.key);
+                    self.allocator.free(kv.value);
+                }
+            }
+            return 0;
+        }
+
+        // Handle '-' action - reset to default handler
+        if (std.mem.eql(u8, action, "-")) {
+            for (signals) |signal| {
+                const sig_key = try self.allocator.dupe(u8, signal);
+                errdefer self.allocator.free(sig_key);
+                const sig_value = try self.allocator.dupe(u8, "");
+
+                // Remove existing handler if present
+                if (shell_ref.signal_handlers.fetchRemove(signal)) |kv| {
+                    self.allocator.free(kv.key);
+                    self.allocator.free(kv.value);
+                }
+
+                try shell_ref.signal_handlers.put(sig_key, sig_value);
+            }
+            return 0;
+        }
+
+        // Set up the trap
+        for (signals) |signal| {
+            const sig_key = try self.allocator.dupe(u8, signal);
+            errdefer self.allocator.free(sig_key);
+            const sig_value = try self.allocator.dupe(u8, action);
+
+            // Remove existing handler if present
+            if (shell_ref.signal_handlers.fetchRemove(signal)) |kv| {
+                self.allocator.free(kv.key);
+                self.allocator.free(kv.value);
+            }
+
+            try shell_ref.signal_handlers.put(sig_key, sig_value);
+        }
+
         return 0;
     }
 
@@ -2041,15 +2161,81 @@ pub const Executor = struct {
         return 0;
     }
 
-    fn builtinGetopts(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        _ = command;
+    fn builtinGetopts(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: getopts: shell context not available\n", .{});
+            return 1;
+        };
 
-        // Note: getopts is a complex shell builtin for option parsing in scripts.
-        // It requires positional parameter management and state tracking across calls.
-        // This is deferred to a future version post-1.0.
-        try IO.print("den: getopts: complex feature deferred to future version\n", .{});
-        return 1;
+        // getopts optstring name [args...]
+        if (command.args.len < 2) {
+            try IO.eprint("den: getopts: usage: getopts optstring name [args]\n", .{});
+            return 2;
+        }
+
+        const optstring = command.args[0];
+        const var_name = command.args[1];
+        const params = if (command.args.len > 2) command.args[2..] else &[_][]const u8{};
+
+        // Get OPTIND from environment (defaults to 1)
+        const optind_str = shell_ref.environment.get("OPTIND") orelse "1";
+        const optind = std.fmt.parseInt(usize, optind_str, 10) catch 1;
+
+        // Check if we're past the end of params
+        if (optind > params.len) {
+            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
+            return 1;
+        }
+
+        const current = params[optind - 1];
+
+        // Check if current param doesn't start with '-' or is just '-'
+        if (current.len == 0 or current[0] != '-' or std.mem.eql(u8, current, "-")) {
+            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
+            return 1;
+        }
+
+        // Handle '--' (end of options)
+        if (std.mem.eql(u8, current, "--")) {
+            const new_optind = try std.fmt.allocPrint(self.allocator, "{d}", .{optind + 1});
+            try shell_ref.environment.put("OPTIND", new_optind);
+            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
+            return 1;
+        }
+
+        // Extract the flag (first character after '-')
+        if (current.len < 2) {
+            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
+            return 1;
+        }
+
+        const flag = current[1..2];
+
+        // Check if this flag expects an argument (has ':' after it in optstring)
+        var expects_arg = false;
+        for (optstring, 0..) |c, i| {
+            if (c == flag[0] and i + 1 < optstring.len and optstring[i + 1] == ':') {
+                expects_arg = true;
+                break;
+            }
+        }
+
+        // Set the variable to the flag character
+        try shell_ref.environment.put(var_name, try self.allocator.dupe(u8, flag));
+
+        // Handle argument if needed
+        if (expects_arg) {
+            const arg_value = if (optind < params.len) params[optind] else "";
+            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, arg_value));
+            const new_optind = try std.fmt.allocPrint(self.allocator, "{d}", .{optind + 2});
+            try shell_ref.environment.put("OPTIND", new_optind);
+        } else {
+            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
+            const new_optind = try std.fmt.allocPrint(self.allocator, "{d}", .{optind + 1});
+            try shell_ref.environment.put("OPTIND", new_optind);
+        }
+
+        return 0;
     }
 
     fn builtinClear(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -2095,22 +2281,59 @@ pub const Executor = struct {
         return exit_code;
     }
 
-    fn builtinHash(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
+    fn builtinHash(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
+        const shell_ref = self.shell orelse {
+            try IO.eprint("den: hash: shell context not available\n", .{});
+            return 1;
+        };
 
-        // Note: The hash builtin maintains a hash table of command paths for faster lookups.
-        // This optimization is deferred to post-1.0. The basic functionality works via PATH search.
+        const utils = @import("../utils.zig");
+
+        // hash with no args - list all cached paths
         if (command.args.len == 0) {
-            // Would list cached command paths - currently empty
+            var iter = shell_ref.command_cache.iterator();
+            while (iter.next()) |entry| {
+                try IO.print("{s}\t{s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+            }
             return 0;
         }
 
-        // Accept -r flag to clear hash table (no-op in 1.0)
-        if (command.args.len > 0 and std.mem.eql(u8, command.args[0], "-r")) {
+        // hash -r - clear hash table
+        if (std.mem.eql(u8, command.args[0], "-r")) {
+            var iter = shell_ref.command_cache.iterator();
+            while (iter.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+                self.allocator.free(entry.value_ptr.*);
+            }
+            shell_ref.command_cache.clearRetainingCapacity();
             return 0;
         }
 
-        // Other usage would add commands to hash table - currently a no-op
+        // hash command [command...] - add commands to hash table
+        const path_var = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
+        var path_list = utils.env.PathList.parse(self.allocator, path_var) catch {
+            return 1;
+        };
+        defer path_list.deinit();
+
+        for (command.args) |cmd_name| {
+            if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
+                // Remove old entry if exists
+                if (shell_ref.command_cache.fetchRemove(cmd_name)) |kv| {
+                    self.allocator.free(kv.key);
+                    self.allocator.free(kv.value);
+                }
+
+                // Add new entry
+                const key = try self.allocator.dupe(u8, cmd_name);
+                errdefer self.allocator.free(key);
+                try shell_ref.command_cache.put(key, exec_path);
+            } else {
+                try IO.eprint("den: hash: {s}: not found\n", .{cmd_name});
+                return 1;
+            }
+        }
+
         return 0;
     }
 
