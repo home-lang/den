@@ -502,7 +502,9 @@ pub const Executor = struct {
             "cd", "pwd", "echo", "exit", "env", "export", "set", "unset",
             "true", "false", "test", "[", "alias", "unalias", "which",
             "type", "help", "read", "printf", "source", ".", "history",
-            "pushd", "popd", "dirs"
+            "pushd", "popd", "dirs", "eval", "exec", "command", "builtin",
+            "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
+            "umask", "getopts", "clear", "time", "hash", "yes", "reload"
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -555,6 +557,44 @@ pub const Executor = struct {
             return try self.builtinPopd(command);
         } else if (std.mem.eql(u8, command.name, "dirs")) {
             return try self.builtinDirs(command);
+        } else if (std.mem.eql(u8, command.name, "eval")) {
+            return try self.builtinEval(command);
+        } else if (std.mem.eql(u8, command.name, "exec")) {
+            return try self.builtinExec(command);
+        } else if (std.mem.eql(u8, command.name, "command")) {
+            return try self.builtinCommand(command);
+        } else if (std.mem.eql(u8, command.name, "builtin")) {
+            return try self.builtinBuiltin(command);
+        } else if (std.mem.eql(u8, command.name, "jobs")) {
+            return try self.builtinJobs(command);
+        } else if (std.mem.eql(u8, command.name, "fg")) {
+            return try self.builtinFg(command);
+        } else if (std.mem.eql(u8, command.name, "bg")) {
+            return try self.builtinBg(command);
+        } else if (std.mem.eql(u8, command.name, "wait")) {
+            return try self.builtinWait(command);
+        } else if (std.mem.eql(u8, command.name, "disown")) {
+            return try self.builtinDisown(command);
+        } else if (std.mem.eql(u8, command.name, "kill")) {
+            return try self.builtinKill(command);
+        } else if (std.mem.eql(u8, command.name, "trap")) {
+            return try self.builtinTrap(command);
+        } else if (std.mem.eql(u8, command.name, "times")) {
+            return try self.builtinTimes(command);
+        } else if (std.mem.eql(u8, command.name, "umask")) {
+            return try self.builtinUmask(command);
+        } else if (std.mem.eql(u8, command.name, "getopts")) {
+            return try self.builtinGetopts(command);
+        } else if (std.mem.eql(u8, command.name, "clear")) {
+            return try self.builtinClear(command);
+        } else if (std.mem.eql(u8, command.name, "time")) {
+            return try self.builtinTime(command);
+        } else if (std.mem.eql(u8, command.name, "hash")) {
+            return try self.builtinHash(command);
+        } else if (std.mem.eql(u8, command.name, "yes")) {
+            return try self.builtinYes(command);
+        } else if (std.mem.eql(u8, command.name, "reload")) {
+            return try self.builtinReload(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -938,6 +978,7 @@ pub const Executor = struct {
         _ = command;
 
         try IO.print("Den Shell - Built-in Commands:\n\n", .{});
+        try IO.print("Core:\n", .{});
         try IO.print("  cd [dir]          Change directory\n", .{});
         try IO.print("  pwd               Print working directory\n", .{});
         try IO.print("  echo [args...]    Print arguments\n", .{});
@@ -946,21 +987,47 @@ pub const Executor = struct {
         try IO.print("  export VAR=val    Export environment variable\n", .{});
         try IO.print("  set [opts]        Set shell options or variables\n", .{});
         try IO.print("  unset VAR         Unset environment variable\n", .{});
+        try IO.print("\nControl:\n", .{});
         try IO.print("  true              Return success (0)\n", .{});
         try IO.print("  false             Return failure (1)\n", .{});
         try IO.print("  test / [          Evaluate conditional expression\n", .{});
+        try IO.print("  eval CMD          Evaluate and execute command string\n", .{});
+        try IO.print("  exec CMD          Replace shell with command\n", .{});
+        try IO.print("\nInformation:\n", .{});
         try IO.print("  which CMD         Locate a command\n", .{});
         try IO.print("  type CMD          Display command type\n", .{});
+        try IO.print("  command [-pVv]    Run command with options\n", .{});
+        try IO.print("  builtin CMD       Run builtin command\n", .{});
         try IO.print("  help              Display this help message\n", .{});
-        try IO.print("  alias [name=val]  Create or display aliases\n", .{});
-        try IO.print("  unalias name      Remove alias\n", .{});
+        try IO.print("  hash              Command hash table\n", .{});
+        try IO.print("\nI/O:\n", .{});
         try IO.print("  read VAR          Read line into variable\n", .{});
         try IO.print("  printf fmt [args] Formatted print\n", .{});
-        try IO.print("  source / . file   Execute commands from file\n", .{});
-        try IO.print("  history           Display command history\n", .{});
+        try IO.print("  clear             Clear the screen\n", .{});
+        try IO.print("\nJob Control:\n", .{});
+        try IO.print("  jobs              List active jobs\n", .{});
+        try IO.print("  fg [job]          Foreground a job\n", .{});
+        try IO.print("  bg [job]          Background a job\n", .{});
+        try IO.print("  wait [pid]        Wait for process completion\n", .{});
+        try IO.print("  disown [job]      Remove job from table\n", .{});
+        try IO.print("  kill [-sig] pid   Send signal to process\n", .{});
+        try IO.print("\nDirectory Stack:\n", .{});
         try IO.print("  pushd [dir]       Push directory onto stack\n", .{});
         try IO.print("  popd              Pop directory from stack\n", .{});
         try IO.print("  dirs              Display directory stack\n", .{});
+        try IO.print("\nAdvanced:\n", .{});
+        try IO.print("  alias [name=val]  Create or display aliases\n", .{});
+        try IO.print("  unalias name      Remove alias\n", .{});
+        try IO.print("  source / . file   Execute commands from file\n", .{});
+        try IO.print("  history           Display command history\n", .{});
+        try IO.print("  time CMD          Time command execution\n", .{});
+        try IO.print("  times             Print process times\n", .{});
+        try IO.print("  trap              Set signal handlers\n", .{});
+        try IO.print("  umask [mask]      Set file creation mask\n", .{});
+        try IO.print("  getopts           Parse command options\n", .{});
+        try IO.print("\nUtility:\n", .{});
+        try IO.print("  yes [str]         Repeatedly output string\n", .{});
+        try IO.print("  reload            Reload shell configuration\n", .{});
 
         return 0;
     }
@@ -1142,6 +1209,375 @@ pub const Executor = struct {
 
         // TODO: Implement directory stack when we have it in Shell
         try IO.print("den: dirs: not yet fully implemented\n", .{});
+        return 0;
+    }
+
+    fn builtinEval(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        if (command.args.len == 0) {
+            return 0;
+        }
+
+        // TODO: Implement eval - needs parser integration to parse and execute the concatenated args
+        try IO.print("den: eval: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinExec(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (command.args.len == 0) {
+            // exec with no args - do nothing
+            return 0;
+        }
+
+        // exec replaces the current shell process with the command
+        // For now, just execute the command - actual exec would replace process
+        // TODO: Use std.posix.execve to actually replace the process
+        var new_cmd = types.ParsedCommand{
+            .name = command.args[0],
+            .args = if (command.args.len > 1) command.args[1..] else &[_][]const u8{},
+            .redirections = command.redirections,
+        };
+
+        // For now, just run the command and return its exit code
+        // In a real implementation, this would never return
+        return try self.executeExternal(&new_cmd);
+    }
+
+    fn builtinCommand(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // command [-pVv] command_name [args...]
+        // -p: use default PATH
+        // -V: verbose output (like type)
+        // -v: short output (like which)
+
+        if (command.args.len == 0) {
+            try IO.eprint("den: command: missing argument\n", .{});
+            return 1;
+        }
+
+        var verbose = false;
+        var short_output = false;
+        var use_default_path = false;
+        var start_idx: usize = 0;
+
+        // Parse flags
+        for (command.args, 0..) |arg, i| {
+            if (arg.len > 0 and arg[0] == '-') {
+                for (arg[1..]) |c| {
+                    if (c == 'V') verbose = true
+                    else if (c == 'v') short_output = true
+                    else if (c == 'p') use_default_path = true
+                    else {
+                        try IO.eprint("den: command: invalid option: -{c}\n", .{c});
+                        return 1;
+                    }
+                }
+                start_idx = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        if (start_idx >= command.args.len) {
+            try IO.eprint("den: command: missing command name\n", .{});
+            return 1;
+        }
+
+        const cmd_name = command.args[start_idx];
+
+        // TODO: implement -p flag (use default PATH)
+        if (use_default_path) {
+            // Not yet implemented
+        }
+
+        if (verbose or short_output) {
+            // Act like type/which
+            if (self.isBuiltin(cmd_name)) {
+                if (verbose) {
+                    try IO.print("{s} is a shell builtin\n", .{cmd_name});
+                } else {
+                    try IO.print("{s}\n", .{cmd_name});
+                }
+                return 0;
+            }
+
+            // Check PATH
+            const utils = @import("../utils.zig");
+            var path_list = utils.env.PathList.fromEnv(self.allocator) catch {
+                return 1;
+            };
+            defer path_list.deinit();
+
+            if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
+                defer self.allocator.free(exec_path);
+                try IO.print("{s}\n", .{exec_path});
+                return 0;
+            }
+
+            return 1;
+        }
+
+        // Execute the command, skipping builtins
+        var new_cmd = types.ParsedCommand{
+            .name = cmd_name,
+            .args = if (start_idx + 1 < command.args.len) command.args[start_idx + 1..] else &[_][]const u8{},
+            .redirections = command.redirections,
+        };
+
+        return try self.executeExternal(&new_cmd);
+    }
+
+    fn builtinBuiltin(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // The 'builtin' command is used to bypass shell functions and aliases
+        // and execute a builtin directly. Since we don't have functions or aliases yet,
+        // this is effectively a no-op. Just validate the builtin name exists.
+        if (command.args.len == 0) {
+            try IO.eprint("den: builtin: missing argument\n", .{});
+            return 1;
+        }
+
+        const builtin_name = command.args[0];
+        if (!self.isBuiltin(builtin_name)) {
+            try IO.eprint("den: builtin: {s}: not a shell builtin\n", .{builtin_name});
+            return 1;
+        }
+
+        // TODO: When we add functions and aliases, we'll need to execute the builtin
+        // For now, just confirm it exists
+        try IO.print("den: builtin '{s}' exists\n", .{builtin_name});
+        return 0;
+    }
+
+    fn builtinJobs(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement job control when we have job tracking in Shell
+        try IO.print("den: jobs: not yet fully implemented\n", .{});
+        return 0;
+    }
+
+    fn builtinFg(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement job control when we have job tracking in Shell
+        try IO.print("den: fg: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinBg(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement job control when we have job tracking in Shell
+        try IO.print("den: bg: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinWait(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement job control when we have job tracking in Shell
+        try IO.print("den: wait: not yet fully implemented\n", .{});
+        return 0;
+    }
+
+    fn builtinDisown(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement job control when we have job tracking in Shell
+        try IO.print("den: disown: not yet fully implemented\n", .{});
+        return 0;
+    }
+
+    fn builtinKill(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        if (command.args.len == 0) {
+            try IO.eprint("den: kill: missing argument\n", .{});
+            return 1;
+        }
+
+        var signal: u8 = std.posix.SIG.TERM;
+        var start_idx: usize = 0;
+
+        // Parse signal if provided
+        if (command.args[0].len > 0 and command.args[0][0] == '-') {
+            const sig_str = command.args[0][1..];
+            if (sig_str.len > 0) {
+                // Try to parse as number
+                signal = std.fmt.parseInt(u8, sig_str, 10) catch blk: {
+                    // Try to parse as signal name
+                    if (std.mem.eql(u8, sig_str, "HUP")) break :blk std.posix.SIG.HUP
+                    else if (std.mem.eql(u8, sig_str, "INT")) break :blk std.posix.SIG.INT
+                    else if (std.mem.eql(u8, sig_str, "QUIT")) break :blk std.posix.SIG.QUIT
+                    else if (std.mem.eql(u8, sig_str, "KILL")) break :blk std.posix.SIG.KILL
+                    else if (std.mem.eql(u8, sig_str, "TERM")) break :blk std.posix.SIG.TERM
+                    else if (std.mem.eql(u8, sig_str, "STOP")) break :blk std.posix.SIG.STOP
+                    else if (std.mem.eql(u8, sig_str, "CONT")) break :blk std.posix.SIG.CONT
+                    else {
+                        try IO.eprint("den: kill: invalid signal: {s}\n", .{sig_str});
+                        return 1;
+                    }
+                };
+            }
+            start_idx = 1;
+        }
+
+        if (start_idx >= command.args.len) {
+            try IO.eprint("den: kill: missing process ID\n", .{});
+            return 1;
+        }
+
+        // Send signal to each PID
+        for (command.args[start_idx..]) |pid_str| {
+            const pid = std.fmt.parseInt(std.posix.pid_t, pid_str, 10) catch {
+                try IO.eprint("den: kill: invalid process ID: {s}\n", .{pid_str});
+                continue;
+            };
+
+            std.posix.kill(pid, signal) catch |err| {
+                try IO.eprint("den: kill: ({d}): {}\n", .{ pid, err });
+                return 1;
+            };
+        }
+
+        return 0;
+    }
+
+    fn builtinTrap(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement signal trapping when we have trap handler storage
+        try IO.print("den: trap: not yet fully implemented\n", .{});
+        return 0;
+    }
+
+    fn builtinTimes(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // Print shell and children process times
+        // For now, just print placeholder
+        try IO.print("0m0.000s 0m0.000s\n", .{});
+        try IO.print("0m0.000s 0m0.000s\n", .{});
+        return 0;
+    }
+
+    fn builtinUmask(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        if (command.args.len == 0) {
+            // Print current umask
+            if (builtin.os.tag == .windows) {
+                try IO.print("den: umask: not supported on Windows\n", .{});
+                return 1;
+            }
+
+            const current = std.c.umask(0);
+            _ = std.c.umask(current);
+            try IO.print("{o:0>4}\n", .{current});
+            return 0;
+        }
+
+        // Set umask
+        const mask_str = command.args[0];
+        const mask = std.fmt.parseInt(std.c.mode_t, mask_str, 8) catch {
+            try IO.eprint("den: umask: invalid mask: {s}\n", .{mask_str});
+            return 1;
+        };
+
+        if (builtin.os.tag == .windows) {
+            try IO.print("den: umask: not supported on Windows\n", .{});
+            return 1;
+        }
+
+        _ = std.c.umask(mask);
+        return 0;
+    }
+
+    fn builtinGetopts(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement getopts for option parsing
+        try IO.print("den: getopts: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinClear(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        const utils = @import("../utils.zig");
+
+        // Use ANSI escape sequences to clear screen
+        try IO.print("{s}", .{utils.ansi.Sequences.clear_screen});
+        try IO.print("{s}", .{utils.ansi.Sequences.cursor_home});
+
+        return 0;
+    }
+
+    fn builtinTime(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (command.args.len == 0) {
+            try IO.eprint("den: time: missing command\n", .{});
+            return 1;
+        }
+
+        // Time the execution of an external command
+        // For now, we only support timing external commands to avoid circular dependencies
+        const start_time = std.time.nanoTimestamp();
+
+        var new_cmd = types.ParsedCommand{
+            .name = command.args[0],
+            .args = if (command.args.len > 1) command.args[1..] else &[_][]const u8{},
+            .redirections = command.redirections,
+        };
+
+        // Execute as external command to avoid recursive error set inference
+        const exit_code = try self.executeExternal(&new_cmd);
+
+        const end_time = std.time.nanoTimestamp();
+        const elapsed_ns = end_time - start_time;
+        const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000_000.0;
+
+        try IO.eprint("\nreal\t{d:.3}s\n", .{elapsed_s});
+        try IO.eprint("user\t0.000s\n", .{});
+        try IO.eprint("sys\t0.000s\n", .{});
+
+        return exit_code;
+    }
+
+    fn builtinHash(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement command hash table for faster lookups
+        try IO.print("den: hash: not yet fully implemented\n", .{});
+        return 0;
+    }
+
+    fn builtinYes(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        const output = if (command.args.len > 0) command.args[0] else "y";
+
+        // Print the string repeatedly until interrupted
+        while (true) {
+            try IO.print("{s}\n", .{output});
+        }
+
+        return 0;
+    }
+
+    fn builtinReload(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement shell reload (re-read config files)
+        try IO.print("den: reload: not yet fully implemented\n", .{});
         return 0;
     }
 
