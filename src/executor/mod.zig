@@ -504,7 +504,8 @@ pub const Executor = struct {
             "type", "help", "read", "printf", "source", ".", "history",
             "pushd", "popd", "dirs", "eval", "exec", "command", "builtin",
             "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
-            "umask", "getopts", "clear", "time", "hash", "yes", "reload"
+            "umask", "getopts", "clear", "time", "hash", "yes", "reload",
+            "watch", "tree", "grep", "find", "calc", "json"
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -595,6 +596,18 @@ pub const Executor = struct {
             return try self.builtinYes(command);
         } else if (std.mem.eql(u8, command.name, "reload")) {
             return try self.builtinReload(command);
+        } else if (std.mem.eql(u8, command.name, "watch")) {
+            return try self.builtinWatch(command);
+        } else if (std.mem.eql(u8, command.name, "tree")) {
+            return try self.builtinTree(command);
+        } else if (std.mem.eql(u8, command.name, "grep")) {
+            return try self.builtinGrep(command);
+        } else if (std.mem.eql(u8, command.name, "find")) {
+            return try self.builtinFind(command);
+        } else if (std.mem.eql(u8, command.name, "calc")) {
+            return try self.builtinCalc(command);
+        } else if (std.mem.eql(u8, command.name, "json")) {
+            return try self.builtinJson(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -1578,6 +1591,411 @@ pub const Executor = struct {
 
         // TODO: Implement shell reload (re-read config files)
         try IO.print("den: reload: not yet fully implemented\n", .{});
+        return 0;
+    }
+
+    fn builtinWatch(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // watch [-n seconds] command [args...]
+        // Repeatedly execute a command and display output
+
+        if (command.args.len == 0) {
+            try IO.eprint("den: watch: missing command\n", .{});
+            try IO.eprint("Usage: watch [-n seconds] command [args...]\n", .{});
+            return 1;
+        }
+
+        var interval_seconds: u64 = 2; // default 2 seconds
+        var cmd_start: usize = 0;
+
+        // Parse -n flag if present
+        if (command.args.len >= 2 and std.mem.eql(u8, command.args[0], "-n")) {
+            interval_seconds = std.fmt.parseInt(u64, command.args[1], 10) catch {
+                try IO.eprint("den: watch: invalid interval: {s}\n", .{command.args[1]});
+                return 1;
+            };
+            cmd_start = 2;
+        }
+
+        if (cmd_start >= command.args.len) {
+            try IO.eprint("den: watch: missing command\n", .{});
+            return 1;
+        }
+
+        const interval_ns = interval_seconds * std.time.ns_per_s;
+
+        // Repeatedly execute the command
+        while (true) {
+            // Clear screen and show header
+            const utils = @import("../utils.zig");
+            try IO.print("{s}", .{utils.ansi.Sequences.clear_screen});
+            try IO.print("{s}", .{utils.ansi.Sequences.cursor_home});
+            try IO.print("Every {d}s: {s}", .{ interval_seconds, command.args[cmd_start] });
+            for (command.args[cmd_start + 1 ..]) |arg| {
+                try IO.print(" {s}", .{arg});
+            }
+            try IO.print("\n\n", .{});
+
+            // Execute the command
+            var new_cmd = types.ParsedCommand{
+                .name = command.args[cmd_start],
+                .args = if (cmd_start + 1 < command.args.len) command.args[cmd_start + 1 ..] else &[_][]const u8{},
+                .redirections = command.redirections,
+            };
+
+            // Execute as external command to avoid issues
+            _ = self.executeExternal(&new_cmd) catch |err| {
+                try IO.eprint("Error executing command: {}\n", .{err});
+            };
+
+            // Sleep for the interval
+            std.Thread.sleep(interval_ns);
+        }
+
+        return 0;
+    }
+
+    fn builtinTree(self: *Executor, command: *types.ParsedCommand) !i32 {
+        const path = if (command.args.len > 0) command.args[0] else ".";
+
+        // Simple tree implementation
+        try IO.print("{s}\n", .{path});
+        try self.printTree(path, "");
+
+        return 0;
+    }
+
+    fn printTree(self: *Executor, dir_path: []const u8, prefix: []const u8) !void {
+
+        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+            try IO.eprint("den: tree: cannot open {s}: {}\n", .{ dir_path, err });
+            return;
+        };
+        defer dir.close();
+
+        var iter = dir.iterate();
+        var entries: std.ArrayList(std.fs.Dir.Entry) = .{};
+        defer entries.deinit(self.allocator);
+
+        // Collect all entries
+        while (try iter.next()) |entry| {
+            try entries.append(self.allocator, entry);
+        }
+
+        // Print each entry
+        for (entries.items, 0..) |entry, i| {
+            const is_last_entry = i == entries.items.len - 1;
+            const connector = if (is_last_entry) "└── " else "├── ";
+
+            try IO.print("{s}{s}{s}\n", .{ prefix, connector, entry.name });
+
+            // Recurse into directories
+            if (entry.kind == .directory) {
+                const new_prefix_buf = try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s}{s}",
+                    .{ prefix, if (is_last_entry) "    " else "│   " },
+                );
+                defer self.allocator.free(new_prefix_buf);
+
+                const sub_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dir_path, entry.name });
+                defer self.allocator.free(sub_path);
+
+                try self.printTree(sub_path, new_prefix_buf);
+            }
+        }
+    }
+
+    fn builtinGrep(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // grep [options] pattern [file...]
+        if (command.args.len == 0) {
+            try IO.eprint("den: grep: missing pattern\n", .{});
+            try IO.eprint("Usage: grep [-i] [-n] [-v] pattern [file...]\n", .{});
+            return 1;
+        }
+
+        var case_insensitive = false;
+        var show_line_numbers = false;
+        var invert_match = false;
+        var pattern_idx: usize = 0;
+
+        // Parse flags
+        for (command.args, 0..) |arg, i| {
+            if (arg.len > 0 and arg[0] == '-') {
+                for (arg[1..]) |c| {
+                    if (c == 'i') case_insensitive = true
+                    else if (c == 'n') show_line_numbers = true
+                    else if (c == 'v') invert_match = true
+                    else {
+                        try IO.eprint("den: grep: invalid option: -{c}\n", .{c});
+                        return 1;
+                    }
+                }
+                pattern_idx = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        if (pattern_idx >= command.args.len) {
+            try IO.eprint("den: grep: missing pattern\n", .{});
+            return 1;
+        }
+
+        const pattern = command.args[pattern_idx];
+        const files = if (pattern_idx + 1 < command.args.len) command.args[pattern_idx + 1 ..] else &[_][]const u8{};
+
+        // If no files, read from stdin
+        if (files.len == 0) {
+            try IO.print("den: grep: reading from stdin not yet implemented\n", .{});
+            return 1;
+        }
+
+        // Search each file
+        for (files) |file_path| {
+            const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+                try IO.eprint("den: grep: {s}: {}\n", .{ file_path, err });
+                continue;
+            };
+            defer file.close();
+
+            const content = file.readToEndAlloc(self.allocator, 10 * 1024 * 1024) catch |err| {
+                try IO.eprint("den: grep: error reading {s}: {}\n", .{ file_path, err });
+                continue;
+            };
+            defer self.allocator.free(content);
+
+            var line_iter = std.mem.splitScalar(u8, content, '\n');
+            var line_num: usize = 1;
+
+            while (line_iter.next()) |line| {
+                var matches = false;
+
+                if (case_insensitive) {
+                    // Simple case-insensitive search
+                    var i: usize = 0;
+                    while (i + pattern.len <= line.len) : (i += 1) {
+                        if (std.ascii.eqlIgnoreCase(line[i .. i + pattern.len], pattern)) {
+                            matches = true;
+                            break;
+                        }
+                    }
+                } else {
+                    matches = std.mem.indexOf(u8, line, pattern) != null;
+                }
+
+                if (invert_match) matches = !matches;
+
+                if (matches) {
+                    if (show_line_numbers) {
+                        try IO.print("{d}:{s}\n", .{ line_num, line });
+                    } else {
+                        try IO.print("{s}\n", .{line});
+                    }
+                }
+
+                line_num += 1;
+            }
+        }
+
+        return 0;
+    }
+
+    fn builtinFind(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // find [path] [-name pattern] [-type f|d]
+        const start_path = if (command.args.len > 0 and command.args[0][0] != '-') command.args[0] else ".";
+
+        var name_pattern: ?[]const u8 = null;
+        var type_filter: ?u8 = null; // 'f' for file, 'd' for directory
+
+        // Parse options
+        var i: usize = if (std.mem.eql(u8, start_path, ".")) 0 else 1;
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+            if (std.mem.eql(u8, arg, "-name") and i + 1 < command.args.len) {
+                name_pattern = command.args[i + 1];
+                i += 1;
+            } else if (std.mem.eql(u8, arg, "-type") and i + 1 < command.args.len) {
+                const type_str = command.args[i + 1];
+                if (type_str.len == 1) {
+                    type_filter = type_str[0];
+                }
+                i += 1;
+            }
+        }
+
+        try self.findRecursive(start_path, name_pattern, type_filter);
+        return 0;
+    }
+
+    fn findRecursive(self: *Executor, dir_path: []const u8, name_pattern: ?[]const u8, type_filter: ?u8) !void {
+        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+            try IO.eprint("den: find: cannot open {s}: {}\n", .{ dir_path, err });
+            return;
+        };
+        defer dir.close();
+
+        var iter = dir.iterate();
+
+        while (try iter.next()) |entry| {
+            // Skip . and ..
+            if (std.mem.eql(u8, entry.name, ".") or std.mem.eql(u8, entry.name, "..")) {
+                continue;
+            }
+
+            const full_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dir_path, entry.name });
+            defer self.allocator.free(full_path);
+
+            // Check type filter
+            if (type_filter) |filter| {
+                if (filter == 'f' and entry.kind != .file) continue;
+                if (filter == 'd' and entry.kind != .directory) continue;
+            }
+
+            // Check name pattern (simple wildcard support)
+            if (name_pattern) |pattern| {
+                if (!matchPattern(entry.name, pattern)) {
+                    if (entry.kind == .directory) {
+                        try self.findRecursive(full_path, name_pattern, type_filter);
+                    }
+                    continue;
+                }
+            }
+
+            try IO.print("{s}\n", .{full_path});
+
+            // Recurse into directories
+            if (entry.kind == .directory) {
+                try self.findRecursive(full_path, name_pattern, type_filter);
+            }
+        }
+    }
+
+    fn matchPattern(name: []const u8, pattern: []const u8) bool {
+        // Simple wildcard matching: * matches any sequence
+        if (std.mem.indexOf(u8, pattern, "*")) |star_pos| {
+            const prefix = pattern[0..star_pos];
+            const suffix = pattern[star_pos + 1 ..];
+
+            if (prefix.len > 0 and !std.mem.startsWith(u8, name, prefix)) {
+                return false;
+            }
+
+            if (suffix.len > 0 and !std.mem.endsWith(u8, name, suffix)) {
+                return false;
+            }
+
+            return true;
+        } else {
+            // Exact match
+            return std.mem.eql(u8, name, pattern);
+        }
+    }
+
+    fn builtinCalc(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        if (command.args.len == 0) {
+            try IO.eprint("den: calc: missing expression\n", .{});
+            try IO.eprint("Usage: calc <expression>\n", .{});
+            try IO.eprint("Examples: calc 2 + 2, calc 10 * 5, calc 100 / 4\n", .{});
+            return 1;
+        }
+
+        // Join all args into a single expression
+        var expr_buf: [1024]u8 = undefined;
+        var expr_len: usize = 0;
+
+        for (command.args, 0..) |arg, i| {
+            if (i > 0 and expr_len < expr_buf.len) {
+                expr_buf[expr_len] = ' ';
+                expr_len += 1;
+            }
+
+            const copy_len = @min(arg.len, expr_buf.len - expr_len);
+            @memcpy(expr_buf[expr_len .. expr_len + copy_len], arg[0..copy_len]);
+            expr_len += copy_len;
+        }
+
+        const expr = expr_buf[0..expr_len];
+
+        // Simple calculator: evaluate basic arithmetic
+        const result = evaluateExpression(expr) catch |err| {
+            try IO.eprint("den: calc: invalid expression: {}\n", .{err});
+            return 1;
+        };
+
+        try IO.print("{d}\n", .{result});
+        return 0;
+    }
+
+    fn evaluateExpression(expr: []const u8) !f64 {
+        // Very simple evaluator: split by operators and evaluate left to right
+        // This is not a proper expression parser, but works for simple cases
+
+        var trimmed = std.mem.trim(u8, expr, " \t");
+
+        // Try to find operators in order of precedence (low to high)
+        // + and -
+        var i: usize = trimmed.len;
+        while (i > 0) {
+            i -= 1;
+            const c = trimmed[i];
+            if (c == '+' or c == '-') {
+                if (i == 0) continue; // Skip leading sign
+                const left = try evaluateExpression(trimmed[0..i]);
+                const right = try evaluateExpression(trimmed[i + 1 ..]);
+                return if (c == '+') left + right else left - right;
+            }
+        }
+
+        // * and /
+        i = trimmed.len;
+        while (i > 0) {
+            i -= 1;
+            const c = trimmed[i];
+            if (c == '*' or c == '/') {
+                const left = try evaluateExpression(trimmed[0..i]);
+                const right = try evaluateExpression(trimmed[i + 1 ..]);
+                return if (c == '*') left * right else left / right;
+            }
+        }
+
+        // No operators found, parse as number
+        return std.fmt.parseFloat(f64, trimmed);
+    }
+
+    fn builtinJson(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // json [file] - pretty print JSON
+        if (command.args.len == 0) {
+            try IO.eprint("den: json: missing file argument\n", .{});
+            try IO.eprint("Usage: json <file>\n", .{});
+            return 1;
+        }
+
+        const file_path = command.args[0];
+        const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+            try IO.eprint("den: json: cannot open {s}: {}\n", .{ file_path, err });
+            return 1;
+        };
+        defer file.close();
+
+        const content = file.readToEndAlloc(self.allocator, 10 * 1024 * 1024) catch |err| {
+            try IO.eprint("den: json: error reading {s}: {}\n", .{ file_path, err });
+            return 1;
+        };
+        defer self.allocator.free(content);
+
+        // Parse JSON to validate it
+        var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, content, .{}) catch |err| {
+            try IO.eprint("den: json: invalid JSON: {}\n", .{err});
+            return 1;
+        };
+        defer parsed.deinit();
+
+        // For now, just print the content as-is (validated JSON)
+        // TODO: Implement proper pretty printing when we figure out the Zig 0.15 JSON API
+        try IO.print("{s}\n", .{content});
+
         return 0;
     }
 
