@@ -1,0 +1,77 @@
+{
+  // Den Shell Configuration
+  // This file can be placed in:
+  // - ./den.jsonc (project local)
+  // - ./config/den.jsonc
+  // - ./.config/den.jsonc
+  // - ~/.config/den.jsonc (user home)
+
+  // General settings
+  "verbose": false,
+  "stream_output": null,
+
+  // Prompt configuration
+  "prompt": {
+    "format": "{path}{git} {modules} \n{symbol} ",
+    "show_git": true,
+    "show_time": false,
+    "show_user": false,
+    "show_host": false,
+    "show_path": true,
+    "show_exit_code": true,
+    "right_prompt": null,
+    "transient": false,
+    "simple_when_not_tty": true
+  },
+
+  // History configuration
+  "history": {
+    "max_entries": 50000,
+    "file": "~/.den_history",
+    "ignore_duplicates": true,
+    "ignore_space": true,
+    "search_mode": "fuzzy",
+    "search_limit": null
+  },
+
+  // Completion configuration
+  "completion": {
+    "enabled": true,
+    "case_sensitive": false,
+    "show_descriptions": true,
+    "max_suggestions": 15,
+    "cache": {
+      "enabled": true,
+      "ttl": 3600000,
+      "max_entries": 1000
+    }
+  },
+
+  // Theme configuration
+  "theme": {
+    "name": "default",
+    "auto_detect_color_scheme": true,
+    "enable_right_prompt": true,
+    "colors": {
+      "primary": "#00D9FF",
+      "secondary": "#FF6B9D",
+      "success": "#00FF88",
+      "warning": "#FFD700",
+      "err": "#FF4757",
+      "info": "#74B9FF"
+    },
+    "symbols": {
+      "prompt": "❯",
+      "continuation": "…"
+    }
+  },
+
+  // Expansion configuration
+  "expansion": {
+    "cache_limits": {
+      "arg": 200,
+      "exec": 500,
+      "arithmetic": 500
+    }
+  }
+}

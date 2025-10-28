@@ -26,12 +26,12 @@ pub const PromptConfig = struct {
 };
 
 pub const HistoryConfig = struct {
-    max_entries: usize = 50000,
+    max_entries: u32 = 50000,
     file: []const u8 = "~/.den_history",
     ignore_duplicates: bool = true,
     ignore_space: bool = true,
     search_mode: SearchMode = .fuzzy,
-    search_limit: ?usize = null,
+    search_limit: ?u32 = null,
 
     pub const SearchMode = enum {
         fuzzy,
@@ -45,14 +45,14 @@ pub const CompletionConfig = struct {
     enabled: bool = true,
     case_sensitive: bool = false,
     show_descriptions: bool = true,
-    max_suggestions: usize = 15,
+    max_suggestions: u32 = 15,
     cache: CompletionCacheConfig = .{},
 };
 
 pub const CompletionCacheConfig = struct {
     enabled: bool = true,
-    ttl: u64 = 3600000, // 1 hour in milliseconds
-    max_entries: usize = 1000,
+    ttl: u32 = 3600000, // 1 hour in milliseconds
+    max_entries: u32 = 1000,
 };
 
 pub const ThemeConfig = struct {
@@ -81,9 +81,9 @@ pub const ExpansionConfig = struct {
     cache_limits: CacheLimits = .{},
 
     pub const CacheLimits = struct {
-        arg: usize = 200,
-        exec: usize = 500,
-        arithmetic: usize = 500,
+        arg: u32 = 200,
+        exec: u32 = 500,
+        arithmetic: u32 = 500,
     };
 };
 

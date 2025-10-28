@@ -4,12 +4,19 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Add zig-config as a module
+    const zig_config = b.addModule("zig-config", .{
+        .root_source_file = b.path("lib/zig-config/src/zig-config.zig"),
+        .target = target,
+    });
+
     // Create a module for our source with target
     const den_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+    den_module.addImport("zig-config", zig_config);
 
     // Den shell executable
     const exe = b.addExecutable(.{

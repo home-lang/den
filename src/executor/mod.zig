@@ -549,10 +549,20 @@ pub const Executor = struct {
                 const var_name = arg[0..eq_pos];
                 const var_value = arg[eq_pos + 1 ..];
 
-                const key = try self.allocator.dupe(u8, var_name);
                 const value = try self.allocator.dupe(u8, var_value);
 
-                try self.environment.put(key, value);
+                // Get or put entry to avoid memory leak
+                const gop = try self.environment.getOrPut(var_name);
+                if (gop.found_existing) {
+                    // Free old value and update
+                    self.allocator.free(gop.value_ptr.*);
+                    gop.value_ptr.* = value;
+                } else {
+                    // New key - duplicate it
+                    const key = try self.allocator.dupe(u8, var_name);
+                    gop.key_ptr.* = key;
+                    gop.value_ptr.* = value;
+                }
             } else {
                 try IO.eprint("den: set: {s}: not a valid identifier\n", .{arg});
                 return 1;

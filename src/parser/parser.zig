@@ -162,6 +162,36 @@ pub const Parser = struct {
                     redir_count += 1;
                     self.pos += 1;
                 },
+                .heredoc => {
+                    self.pos += 1;
+                    if (self.pos >= self.tokens.len or self.tokens[self.pos].type != .word) {
+                        return error.RedirectionMissingTarget;
+                    }
+                    const delimiter = try self.allocator.dupe(u8, self.tokens[self.pos].value);
+                    if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
+                    redir_buffer[redir_count] = .{
+                        .kind = .heredoc,
+                        .fd = 0,
+                        .target = delimiter,
+                    };
+                    redir_count += 1;
+                    self.pos += 1;
+                },
+                .herestring => {
+                    self.pos += 1;
+                    if (self.pos >= self.tokens.len or self.tokens[self.pos].type != .word) {
+                        return error.RedirectionMissingTarget;
+                    }
+                    const content = try self.allocator.dupe(u8, self.tokens[self.pos].value);
+                    if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
+                    redir_buffer[redir_count] = .{
+                        .kind = .herestring,
+                        .fd = 0,
+                        .target = content,
+                    };
+                    redir_count += 1;
+                    self.pos += 1;
+                },
                 else => break, // Stop at operators or other non-command tokens
             }
         }

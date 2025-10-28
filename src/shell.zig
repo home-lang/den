@@ -17,6 +17,7 @@ const AutoSuggestPlugin = @import("plugins/builtin_plugins_advanced.zig").AutoSu
 const HighlightPlugin = @import("plugins/builtin_plugins_advanced.zig").HighlightPlugin;
 const ScriptSuggesterPlugin = @import("plugins/builtin_plugins_advanced.zig").ScriptSuggesterPlugin;
 const concurrency = @import("utils/concurrency.zig");
+const config_loader = @import("config_loader.zig");
 
 /// Job status
 const JobStatus = enum {
@@ -72,7 +73,8 @@ pub const Shell = struct {
     thread_pool: concurrency.ThreadPool,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
-        const config = types.DenConfig{};
+        // Load configuration from files and environment variables
+        const config = config_loader.loadConfig(allocator) catch types.DenConfig{};
 
         // Initialize environment from system
         var env = std.StringHashMap([]const u8).init(allocator);
@@ -1385,7 +1387,19 @@ pub const Shell = struct {
 
             // Store in environment
             const value_copy = try self.allocator.dupe(u8, value);
-            try self.environment.put(varname, value_copy);
+
+            // Get or put entry to avoid memory leak
+            const gop = try self.environment.getOrPut(varname);
+            if (gop.found_existing) {
+                // Free old value and update
+                self.allocator.free(gop.value_ptr.*);
+                gop.value_ptr.* = value_copy;
+            } else {
+                // New key - duplicate it
+                const key = try self.allocator.dupe(u8, varname);
+                gop.key_ptr.* = key;
+                gop.value_ptr.* = value_copy;
+            }
         }
     }
 

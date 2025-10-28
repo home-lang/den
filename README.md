@@ -225,13 +225,14 @@ Contributions are welcome! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md)
 - Script management (caching, reloading, validation, enhanced error reporting)
 - Control flow (if/elif/else/fi, while, until, for loops with break/continue support)
 
-**🔮 Future Enhancements** (Optional):
-- Additional control flow (select menus, C-style for loops)
-- Plugin system for extensibility
-- Theme and prompt customization
-- Syntax highlighting and auto-suggestions
-- Configuration file support (JSONC)
-- Additional productivity builtins
+**✨ Enhanced Features**:
+- ✅ Configuration file support (JSONC via zig-config)
+- ✅ C-style for loops (`for ((i=0; i<10; i++))`)
+- ✅ Select menus for interactive selection
+- 🔧 Plugin system for extensibility (infrastructure complete)
+- 🔧 Theme and prompt customization (configuration complete)
+- 🔧 Syntax highlighting and auto-suggestions (plugins exist)
+- 📋 Additional productivity builtins (planned)
 
 See [ROADMAP.md](ROADMAP.md) for detailed phase breakdown.
 

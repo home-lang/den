@@ -312,6 +312,35 @@ pub const Expansion = struct {
             return ExpansionResult{ .value = result, .consumed = end + 1 };
         }
 
+        // Check for parameter expansion patterns
+        // ${VAR#pattern} - remove shortest prefix match
+        if (std.mem.indexOf(u8, content, "#")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 1) {
+                const var_name = content[0..sep_pos];
+                const pattern = content[sep_pos + 1 ..];
+
+                if (self.environment.get(var_name)) |value| {
+                    const result = try self.removePrefix(value, pattern, false);
+                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1 };
+            }
+        }
+
+        // ${VAR%pattern} - remove shortest suffix match
+        if (std.mem.indexOf(u8, content, "%")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 1) {
+                const var_name = content[0..sep_pos];
+                const pattern = content[sep_pos + 1 ..];
+
+                if (self.environment.get(var_name)) |value| {
+                    const result = try self.removeSuffix(value, pattern, false);
+                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1 };
+            }
+        }
+
         // Simple braced variable
         if (self.environment.get(content)) |value| {
             const result = try self.allocator.dupe(u8, value);
@@ -320,6 +349,32 @@ pub const Expansion = struct {
 
         // Variable not found - return empty string
         return ExpansionResult{ .value = "", .consumed = end + 1 };
+    }
+
+    /// Remove prefix pattern from string
+    fn removePrefix(self: *Expansion, value: []const u8, pattern: []const u8, greedy: bool) ![]u8 {
+        _ = greedy; // TODO: implement greedy/non-greedy matching
+
+        // Simple implementation: exact prefix match
+        if (std.mem.startsWith(u8, value, pattern)) {
+            return try self.allocator.dupe(u8, value[pattern.len..]);
+        }
+
+        // Pattern not found, return original value
+        return try self.allocator.dupe(u8, value);
+    }
+
+    /// Remove suffix pattern from string
+    fn removeSuffix(self: *Expansion, value: []const u8, pattern: []const u8, greedy: bool) ![]u8 {
+        _ = greedy; // TODO: implement greedy/non-greedy matching
+
+        // Simple implementation: exact suffix match
+        if (std.mem.endsWith(u8, value, pattern)) {
+            return try self.allocator.dupe(u8, value[0 .. value.len - pattern.len]);
+        }
+
+        // Pattern not found, return original value
+        return try self.allocator.dupe(u8, value);
     }
 
     /// Expand $VAR form (unbraced)
