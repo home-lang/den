@@ -760,4 +760,30 @@ pub fn build(b: *std.Build) void {
 
     // Add to all tests
     all_tests_step.dependOn(&run_concurrency_tests.step);
+
+    // ==================== Examples ====================
+
+    // Create utils module for examples
+    const utils_module = b.createModule(.{
+        .root_source_file = b.path("src/utils.zig"),
+        .target = target,
+    });
+
+    // Logging example
+    const logging_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/logging_example.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    logging_example_module.addImport("utils", utils_module);
+
+    const logging_example = b.addExecutable(.{
+        .name = "logging_example",
+        .root_module = logging_example_module,
+    });
+    b.installArtifact(logging_example);
+
+    const run_logging_example = b.addRunArtifact(logging_example);
+    const logging_example_step = b.step("example-logging", "Run logging example");
+    logging_example_step.dependOn(&run_logging_example.step);
 }
