@@ -1,4 +1,5 @@
 const std = @import("std");
+const env_utils = @import("env.zig");
 
 /// Tab completion utilities
 pub const Completion = struct {
@@ -14,7 +15,7 @@ pub const Completion = struct {
         var match_count: usize = 0;
 
         // Get PATH environment variable
-        const path = std.posix.getenv("PATH") orelse return &[_][]const u8{};
+        const path = env_utils.getEnv("PATH") orelse return &[_][]const u8{};
 
         // Split PATH by ':'
         var path_iter = std.mem.splitScalar(u8, path, ':');

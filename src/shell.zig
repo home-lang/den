@@ -20,6 +20,24 @@ const HighlightPlugin = @import("plugins/builtin_plugins_advanced.zig").Highligh
 const ScriptSuggesterPlugin = @import("plugins/builtin_plugins_advanced.zig").ScriptSuggesterPlugin;
 const concurrency = @import("utils/concurrency.zig");
 const config_loader = @import("config_loader.zig");
+const builtin = @import("builtin");
+const env_utils = @import("utils/env.zig");
+
+/// Extract exit status from wait status (cross-platform)
+fn getExitStatus(status: u32) i32 {
+    if (builtin.os.tag == .windows) {
+        // Windows uses the status directly
+        return @intCast(status);
+    } else {
+        // POSIX systems use WEXITSTATUS macro
+        return std.posix.W.EXITSTATUS(status);
+    }
+}
+
+/// Cross-platform getenv wrapper
+fn getenv(key: []const u8) ?[]const u8 {
+    return env_utils.getEnv(key);
+}
 
 /// Job status
 const JobStatus = enum {
@@ -28,9 +46,12 @@ const JobStatus = enum {
     done,
 };
 
+/// Cross-platform process ID type
+const ProcessId = if (builtin.os.tag == .windows) std.os.windows.HANDLE else std.posix.pid_t;
+
 /// Background job information
 const BackgroundJob = struct {
-    pid: std.posix.pid_t,
+    pid: ProcessId,
     job_id: usize,
     command: []const u8,
     status: JobStatus,
@@ -663,6 +684,13 @@ pub const Shell = struct {
     }
 
     fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_input: []const u8) !void {
+        if (builtin.os.tag == .windows) {
+            // Windows: background jobs not yet fully implemented
+            try IO.print("background jobs: not fully implemented on Windows\n", .{});
+            self.last_exit_code = 0;
+            return;
+        }
+
         // Fork the process
         const pid = try std.posix.fork();
 
@@ -774,6 +802,12 @@ pub const Shell = struct {
     }
 
     fn checkBackgroundJobs(self: *Shell) !void {
+        if (builtin.os.tag == .windows) {
+            // Windows: background jobs not fully implemented
+            // Would need to use WaitForSingleObject with WAIT_TIMEOUT
+            return;
+        }
+
         var i: usize = 0;
         while (i < self.background_jobs.len) {
             if (self.background_jobs[i]) |job| {
@@ -782,7 +816,7 @@ pub const Shell = struct {
 
                 if (result.pid == job.pid) {
                     // Job completed
-                    const exit_status = std.posix.W.EXITSTATUS(result.status);
+                    const exit_status = getExitStatus(result.status);
                     try IO.print("[{d}]  Done ({d})    {s}\n", .{ job.job_id, exit_status, job.command });
 
                     // Free command string and remove from array
@@ -801,7 +835,7 @@ pub const Shell = struct {
         }
     }
 
-    pub fn addBackgroundJob(self: *Shell, pid: std.posix.pid_t, command: []const u8) !void {
+    pub fn addBackgroundJob(self: *Shell, pid: ProcessId, command: []const u8) !void {
         // Find first empty slot
         var slot_index: ?usize = null;
         for (self.background_jobs, 0..) |maybe_job, i| {
@@ -901,7 +935,7 @@ pub const Shell = struct {
 
         // Wait for the job to complete
         const result = std.posix.waitpid(job.pid, 0);
-        const exit_status = std.posix.W.EXITSTATUS(result.status);
+        const exit_status = getExitStatus(result.status);
 
         // Remove from background jobs
         self.allocator.free(job.command);
@@ -1275,8 +1309,8 @@ pub const Shell = struct {
 
             // Check if it's a builtin
             var is_builtin = false;
-            for (builtins) |builtin| {
-                if (std.mem.eql(u8, name, builtin)) {
+            for (builtins) |builtin_name| {
+                if (std.mem.eql(u8, name, builtin_name)) {
                     try IO.print("{s} is a shell builtin\n", .{name});
                     is_builtin = true;
                     break;
@@ -1299,7 +1333,7 @@ pub const Shell = struct {
                 for (matches) |match| {
                     if (std.mem.eql(u8, match, name)) {
                         // Find full path
-                        const path = std.posix.getenv("PATH") orelse "";
+                        const path = getenv("PATH") orelse "";
                         var path_iter = std.mem.splitScalar(u8, path, ':');
                         while (path_iter.next()) |dir_path| {
                             var path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -1328,7 +1362,7 @@ pub const Shell = struct {
         }
 
         for (cmd.args) |name| {
-            const path = std.posix.getenv("PATH") orelse "";
+            const path = getenv("PATH") orelse "";
             var path_iter = std.mem.splitScalar(u8, path, ':');
             var found = false;
 
@@ -2153,19 +2187,28 @@ pub const Shell = struct {
             (cmd.args.len > 0 and std.mem.eql(u8, cmd.args[0], "-s"));
 
         if (show_system or show_all) {
-            // Get system name from uname
-            var utsname: std.posix.utsname = undefined;
-            const result = std.c.uname(&utsname);
-            if (result == 0) {
-                const sysname = std.mem.sliceTo(&utsname.sysname, 0);
-                try IO.print("{s}", .{sysname});
-
+            if (builtin.os.tag == .windows) {
+                // Windows: simple system identification
+                try IO.print("Windows", .{});
                 if (show_all) {
-                    const nodename = std.mem.sliceTo(&utsname.nodename, 0);
-                    const release = std.mem.sliceTo(&utsname.release, 0);
-                    const version = std.mem.sliceTo(&utsname.version, 0);
-                    const machine = std.mem.sliceTo(&utsname.machine, 0);
-                    try IO.print(" {s} {s} {s} {s}", .{ nodename, release, version, machine });
+                    const machine = if (builtin.cpu.arch == .x86_64) "x86_64" else if (builtin.cpu.arch == .aarch64) "ARM64" else "unknown";
+                    try IO.print(" {s} {s} {s} {s}", .{ "localhost", "NT", "10.0", machine });
+                }
+            } else {
+                // POSIX: Get system name from uname
+                var utsname: std.posix.utsname = undefined;
+                const result = std.c.uname(&utsname);
+                if (result == 0) {
+                    const sysname = std.mem.sliceTo(&utsname.sysname, 0);
+                    try IO.print("{s}", .{sysname});
+
+                    if (show_all) {
+                        const nodename = std.mem.sliceTo(&utsname.nodename, 0);
+                        const release = std.mem.sliceTo(&utsname.release, 0);
+                        const version = std.mem.sliceTo(&utsname.version, 0);
+                        const machine = std.mem.sliceTo(&utsname.machine, 0);
+                        try IO.print(" {s} {s} {s} {s}", .{ nodename, release, version, machine });
+                    }
                 }
             }
             try IO.print("\n", .{});
@@ -2177,8 +2220,8 @@ pub const Shell = struct {
         _ = self;
         _ = cmd;
 
-        const user = std.posix.getenv("USER") orelse
-            std.posix.getenv("LOGNAME") orelse
+        const user = getenv("USER") orelse
+            getenv("LOGNAME") orelse
             "unknown";
         try IO.print("{s}\n", .{user});
     }
@@ -2352,7 +2395,14 @@ pub const Shell = struct {
     /// Builtin: wait - wait for job completion
     fn builtinWait(self: *Shell, cmd: *types.ParsedCommand) !void {
         if (cmd.args.len == 0) {
-            // Wait for all background jobs
+            if (builtin.os.tag == .windows) {
+                // Windows: wait command not yet fully implemented
+                try IO.print("wait: not fully implemented on Windows\n", .{});
+                self.last_exit_code = 0;
+                return;
+            }
+
+            // POSIX: Wait for all background jobs
             var waited = false;
             for (&self.background_jobs) |*maybe_job| {
                 if (maybe_job.*) |*job| {
@@ -2369,6 +2419,13 @@ pub const Shell = struct {
         }
 
         // Wait for specific job(s)
+        if (builtin.os.tag == .windows) {
+            // Windows: wait command not yet fully implemented
+            try IO.print("wait: not fully implemented on Windows\n", .{});
+            self.last_exit_code = 0;
+            return;
+        }
+
         for (cmd.args) |arg| {
             if (arg[0] == '%') {
                 const job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
@@ -2403,6 +2460,13 @@ pub const Shell = struct {
 
     /// Builtin: kill - send signal to job or process
     fn builtinKill(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (builtin.os.tag == .windows) {
+            // Windows: kill command not yet fully implemented
+            try IO.print("kill: not fully implemented on Windows\n", .{});
+            self.last_exit_code = 0;
+            return;
+        }
+
         if (cmd.args.len == 0) {
             try IO.eprint("den: kill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ...\n", .{});
             self.last_exit_code = 1;

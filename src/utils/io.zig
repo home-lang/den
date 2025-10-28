@@ -20,17 +20,42 @@ pub const IO = struct {
     /// Returns null on EOF
     /// Caller owns returned memory
     pub fn readLine(allocator: std.mem.Allocator) !?[]u8 {
-        if (builtin.os.tag == .windows) {
-            // Use std.io on Windows
-            var stdin = std.io.getStdIn();
-            const reader = stdin.reader();
-            return reader.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096);
-        }
-
-        // Unix-like systems: use posix.read
         var buffer: [4096]u8 = undefined;
         var pos: usize = 0;
 
+        if (builtin.os.tag == .windows) {
+            // Use Windows stdin handle with read loop (similar to POSIX path)
+            const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.NoStdIn;
+            const stdin = std.fs.File{ .handle = handle };
+
+            while (pos < buffer.len) {
+                var char_buf: [1]u8 = undefined;
+
+                const bytes_read = stdin.read(&char_buf) catch {
+                    if (pos == 0) return null;
+                    return try allocator.dupe(u8, buffer[0..pos]);
+                };
+
+                if (bytes_read == 0) {
+                    // EOF
+                    if (pos == 0) return null;
+                    return try allocator.dupe(u8, buffer[0..pos]);
+                }
+
+                const char = char_buf[0];
+
+                if (char == '\n') {
+                    return try allocator.dupe(u8, buffer[0..pos]);
+                }
+
+                buffer[pos] = char;
+                pos += 1;
+            }
+
+            return try allocator.dupe(u8, buffer[0..pos]);
+        }
+
+        // Unix-like systems: use posix.read
         while (pos < buffer.len) {
             var char_buf: [1]u8 = undefined;
 

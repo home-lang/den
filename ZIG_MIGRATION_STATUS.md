@@ -24,6 +24,18 @@
   - Auto-completes with space when single match found
 - ✅ **Interactive Detection**: Automatically detects TTY vs piped input
 - ✅ **Code Quality**: Fixed variable shadowing and improved memory management
+- ✅ **Build System Enhancements**: Complete build system with advanced options
+  - Cross-compilation for Linux x64/ARM64, macOS x64/ARM64, Windows x64
+  - Build options: `-Dstatic` for static linking, `-Dstrip` for debug symbol stripping, `-Dlink-libc` to control libc linking
+  - Release builds with `zig build release` for all platforms
+  - Benchmark builds with `zig build bench` (8 benchmarks: startup, command_exec, completion, history, prompt, memory, cpu, concurrency)
+  - Optimization modes (Debug, ReleaseSafe, ReleaseFast, ReleaseSmall)
+  - Smart static linking: works on Linux with musl, disabled on macOS when linking libc
+- ⚠️ **Windows Support (Partial)**: Cross-compilation target added, runtime not yet fully functional
+  - Windows terminal raw mode implemented (console API)
+  - Cross-platform environment variable wrapper
+  - Executor needs Windows process API (no fork/exec on Windows)
+  - Many POSIX-specific features need Windows alternatives
 
 ---
 

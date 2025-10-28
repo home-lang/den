@@ -1,5 +1,6 @@
 // Command execution benchmarks for Den Shell
 const std = @import("std");
+const builtin = @import("builtin");
 const profiling = @import("profiling");
 const Benchmark = profiling.Benchmark;
 const BenchmarkSuite = profiling.BenchmarkSuite;
@@ -64,12 +65,22 @@ fn benchmarkProcessSpawn(_: std.mem.Allocator) !void {
 
 fn benchmarkPipeSetup(allocator: std.mem.Allocator) !void {
     // Simulate pipe setup
-    const pipes = try allocator.alloc([2]std.posix.fd_t, 2);
-    defer allocator.free(pipes);
-
-    var i: usize = 0;
-    while (i < 2) : (i += 1) {
-        pipes[i] = .{ 0, 1 };
+    if (builtin.os.tag == .windows) {
+        // Windows: just allocate placeholder
+        const pipes = try allocator.alloc([2]usize, 2);
+        defer allocator.free(pipes);
+        var i: usize = 0;
+        while (i < 2) : (i += 1) {
+            pipes[i] = .{ 0, 1 };
+        }
+    } else {
+        // POSIX: use fd_t
+        const pipes = try allocator.alloc([2]std.posix.fd_t, 2);
+        defer allocator.free(pipes);
+        var i: usize = 0;
+        while (i < 2) : (i += 1) {
+            pipes[i] = .{ 0, 1 };
+        }
     }
 }
 
@@ -90,9 +101,10 @@ pub fn main() !void {
     var suite = BenchmarkSuite.init(allocator, "Command Execution");
     defer suite.deinit();
 
-    const stdout_file = std.fs.File{
-        .handle = std.posix.STDOUT_FILENO,
-    };
+    const stdout_file = if (builtin.os.tag == .windows) blk: {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
+        break :blk std.fs.File{ .handle = handle };
+    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = stdout_file.writer(&stdout_buffer);
 

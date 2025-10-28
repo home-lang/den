@@ -1,5 +1,6 @@
 const std = @import("std");
 const Arithmetic = @import("arithmetic.zig").Arithmetic;
+const env_utils = @import("env.zig");
 
 /// Variable expansion utilities
 pub const Expansion = struct {
@@ -719,7 +720,7 @@ pub const Expansion = struct {
             // ~ alone - expand to current user's home
             if (self.environment.get("HOME")) |home| {
                 break :blk try self.allocator.dupe(u8, home);
-            } else if (std.posix.getenv("HOME")) |home| {
+            } else if (env_utils.getEnv("HOME")) |home| {
                 break :blk try self.allocator.dupe(u8, home);
             } else {
                 // Fallback - return tilde unchanged

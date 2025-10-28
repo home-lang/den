@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("types.zig");
 
 const TestResult = types.TestResult;
@@ -37,7 +38,13 @@ pub const TestReporter = struct {
 
     fn writeAll(self: *const TestReporter, bytes: []const u8) !void {
         _ = self;
-        _ = try std.posix.write(std.posix.STDOUT_FILENO, bytes);
+        if (builtin.os.tag == .windows) {
+            const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.NoStdOut;
+            const stdout = std.fs.File{ .handle = handle };
+            _ = try stdout.write(bytes);
+        } else {
+            _ = try std.posix.write(std.posix.STDOUT_FILENO, bytes);
+        }
     }
 
     fn writeByte(self: *const TestReporter, byte: u8) !void {

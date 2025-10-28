@@ -1,6 +1,7 @@
 const std = @import("std");
 const shell = @import("shell.zig");
 const Completion = @import("utils/completion.zig").Completion;
+const env_utils = @import("utils/env.zig");
 
 /// Den Shell CLI
 /// Provides command-line interface and subcommand handling
@@ -230,7 +231,7 @@ fn devSetup(_: std.mem.Allocator) !void {
     const exe_path = try std.fs.selfExePath(&exe_path_buf);
 
     // Create shim in ~/.local/bin/den
-    const home = std.posix.getenv("HOME") orelse {
+    const home = env_utils.getEnv("HOME") orelse {
         std.debug.print("Error: HOME environment variable not set\n", .{});
         return error.NoHomeDir;
     };
@@ -275,7 +276,7 @@ fn setup(_: std.mem.Allocator) !void {
     var exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const exe_path = try std.fs.selfExePath(&exe_path_buf);
 
-    const home = std.posix.getenv("HOME") orelse {
+    const home = env_utils.getEnv("HOME") orelse {
         std.debug.print("Error: HOME environment variable not set\n", .{});
         return error.NoHomeDir;
     };
@@ -316,7 +317,7 @@ fn setShell(_: std.mem.Allocator) !void {
 
     std.debug.print("Setting Den as default shell...\n", .{});
 
-    const home = std.posix.getenv("HOME") orelse {
+    const home = env_utils.getEnv("HOME") orelse {
         std.debug.print("Error: HOME environment variable not set\n", .{});
         return error.NoHomeDir;
     };
@@ -342,7 +343,7 @@ fn uninstall(_: std.mem.Allocator) !void {
 
     std.debug.print("Uninstalling Den shell wrapper...\n", .{});
 
-    const home = std.posix.getenv("HOME") orelse {
+    const home = env_utils.getEnv("HOME") orelse {
         std.debug.print("Error: HOME environment variable not set\n", .{});
         return error.NoHomeDir;
     };

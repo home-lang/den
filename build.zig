@@ -4,6 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Build options
+    const static_build = b.option(bool, "static", "Build statically linked binary") orelse false;
+    const strip = b.option(bool, "strip", "Strip debug symbols") orelse false;
+    const link_libc = b.option(bool, "link-libc", "Link against libc") orelse true;
+
     // Add zig-config as a module
     const zig_config = b.addModule("zig-config", .{
         .root_source_file = b.path("lib/zig-config/src/zig-config.zig"),
@@ -15,6 +20,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = strip,
     });
     den_module.addImport("zig-config", zig_config);
 
@@ -23,7 +29,18 @@ pub fn build(b: *std.Build) void {
         .name = "den",
         .root_module = den_module,
     });
-    exe.linkLibC();
+
+    // Static linking requires not linking libc (or using musl on Linux)
+    if (static_build) {
+        exe.linkage = .static;
+        // Only link libc if we're not doing static build, or if target supports it
+        if (target.result.os.tag == .linux) {
+            exe.linkLibC(); // musl on Linux supports static
+        }
+    } else {
+        exe.linkage = .dynamic;
+        if (link_libc) exe.linkLibC();
+    }
     b.installArtifact(exe);
 
     // Cross-compilation targets for release builds
@@ -38,8 +55,8 @@ pub fn build(b: *std.Build) void {
         .{ .cpu_arch = .x86_64, .os_tag = .macos },
         // macOS ARM64 (Apple Silicon)
         .{ .cpu_arch = .aarch64, .os_tag = .macos },
-        // Windows support is deferred - requires Windows-specific process management
-        // .{ .cpu_arch = .x86_64, .os_tag = .windows },
+        // Windows x64
+        .{ .cpu_arch = .x86_64, .os_tag = .windows },
     };
 
     const target_names = [_][]const u8{
@@ -47,7 +64,7 @@ pub fn build(b: *std.Build) void {
         "linux-arm64",
         "darwin-x64",
         "darwin-arm64",
-        // "windows-x64",
+        "windows-x64",
     };
 
     inline for (targets, target_names) |t, name| {
@@ -57,13 +74,25 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = release_target,
             .optimize = .ReleaseSafe,
+            .strip = strip,
         });
+        release_module.addImport("zig-config", zig_config);
 
         const release_exe = b.addExecutable(.{
             .name = "den",
             .root_module = release_module,
         });
-        release_exe.linkLibC();
+
+        // Static linking requires not linking libc (or using musl on Linux)
+        if (static_build) {
+            release_exe.linkage = .static;
+            if (release_target.result.os.tag == .linux) {
+                release_exe.linkLibC(); // musl on Linux supports static
+            }
+        } else {
+            release_exe.linkage = .dynamic;
+            release_exe.linkLibC();
+        }
 
         const install_exe = b.addInstallArtifact(release_exe, .{
             .dest_dir = .{

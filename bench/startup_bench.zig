@@ -1,5 +1,6 @@
 // Startup time benchmarks for Den Shell
 const std = @import("std");
+const builtin = @import("builtin");
 const profiling = @import("profiling");
 const Benchmark = profiling.Benchmark;
 const BenchmarkSuite = profiling.BenchmarkSuite;
@@ -53,9 +54,10 @@ pub fn main() !void {
     var suite = BenchmarkSuite.init(allocator, "Startup Time");
     defer suite.deinit();
 
-    const stdout_file = std.fs.File{
-        .handle = std.posix.STDOUT_FILENO,
-    };
+    const stdout_file = if (builtin.os.tag == .windows) blk: {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
+        break :blk std.fs.File{ .handle = handle };
+    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = stdout_file.writer(&stdout_buffer);
 

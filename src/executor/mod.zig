@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 const Expansion = @import("../utils/expansion.zig").Expansion;
+const builtin = @import("builtin");
 
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
@@ -138,6 +139,110 @@ pub const Executor = struct {
         if (commands.len == 0) return 0;
         if (commands.len == 1) return try self.executeCommand(&commands[0]);
 
+        if (builtin.os.tag == .windows) {
+            return try self.executePipelineWindows(commands);
+        }
+        return try self.executePipelinePosix(commands);
+    }
+
+    fn executePipelineWindows(self: *Executor, commands: []types.ParsedCommand) !i32 {
+        // Windows implementation using std.process.Child with pipes
+        const num_pipes = commands.len - 1;
+        if (num_pipes > 16) return error.TooManyPipes;
+
+        // Spawn all commands as Child processes with pipe behavior
+        var children_buffer: [17]std.process.Child = undefined;
+        var argv_lists: [17]std.ArrayList([]const u8) = undefined;
+
+        // Initialize argv lists
+        for (0..commands.len) |i| {
+            argv_lists[i] = .{};
+        }
+        defer {
+            for (0..commands.len) |i| {
+                argv_lists[i].deinit(self.allocator);
+            }
+        }
+
+        // Build argv and spawn children
+        for (commands, 0..) |*cmd, i| {
+            // Build argv list
+            try argv_lists[i].append(self.allocator, cmd.name);
+            for (cmd.args) |arg| {
+                try argv_lists[i].append(self.allocator, arg);
+            }
+
+            children_buffer[i] = std.process.Child.init(argv_lists[i].items, self.allocator);
+
+            // Set up stdin from previous command's stdout pipe
+            if (i > 0) {
+                children_buffer[i].stdin_behavior = .Pipe;
+                // After spawning previous child, we'll connect the pipes
+            } else {
+                children_buffer[i].stdin_behavior = .Inherit;
+            }
+
+            // Set up stdout to pipe to next command
+            if (i < num_pipes) {
+                children_buffer[i].stdout_behavior = .Pipe;
+            } else {
+                children_buffer[i].stdout_behavior = .Inherit;
+            }
+
+            children_buffer[i].stderr_behavior = .Inherit;
+
+            // Handle explicit redirections
+            for (cmd.redirections) |redir| {
+                switch (redir.kind) {
+                    .output_truncate, .output_append => {
+                        const file = try std.fs.cwd().createFile(redir.target, .{
+                            .truncate = (redir.kind == .output_truncate),
+                        });
+                        if (redir.fd == 1) {
+                            children_buffer[i].stdout_behavior = .Ignore;
+                            children_buffer[i].stdout = file;
+                        } else if (redir.fd == 2) {
+                            children_buffer[i].stderr_behavior = .Ignore;
+                            children_buffer[i].stderr = file;
+                        }
+                    },
+                    .input => {
+                        const file = try std.fs.cwd().openFile(redir.target, .{});
+                        children_buffer[i].stdin_behavior = .Ignore;
+                        children_buffer[i].stdin = file;
+                    },
+                    .fd_duplicate => {
+                        // Handle 2>&1 (stderr to stdout)
+                        if (redir.fd == 2 and std.mem.eql(u8, redir.target, "1")) {
+                            children_buffer[i].stderr_behavior = .Inherit; // Will inherit stdout's destination
+                        }
+                    },
+                    else => {},
+                }
+            }
+
+            try children_buffer[i].spawn();
+
+            // Connect pipes between processes
+            if (i > 0 and children_buffer[i - 1].stdout != null) {
+                children_buffer[i].stdin = children_buffer[i - 1].stdout.?;
+            }
+        }
+
+        // Wait for all children
+        var last_status: i32 = 0;
+        for (0..commands.len) |i| {
+            const term = try children_buffer[i].wait();
+            last_status = switch (term) {
+                .Exited => |code| code,
+                else => 1,
+            };
+        }
+
+        return last_status;
+    }
+
+    fn executePipelinePosix(self: *Executor, commands: []types.ParsedCommand) !i32 {
         // Create pipes for communication
         var pipes_buffer: [16][2]std.posix.fd_t = undefined;
         const num_pipes = commands.len - 1;
@@ -363,8 +468,13 @@ pub const Executor = struct {
     pub fn executeCommand(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Check if it's a builtin
         if (self.isBuiltin(command.name)) {
-            // If builtin has redirections, fork to avoid affecting parent shell
+            // If builtin has redirections, handle appropriately per OS
             if (command.redirections.len > 0) {
+                if (builtin.os.tag == .windows) {
+                    // Windows: save/restore stdout/stderr instead of fork
+                    return try self.executeBuiltinWithRedirectionsWindows(command);
+                }
+
                 const pid = try std.posix.fork();
                 if (pid == 0) {
                     // Child - apply redirections and execute builtin
@@ -389,8 +499,8 @@ pub const Executor = struct {
     fn isBuiltin(self: *Executor, name: []const u8) bool {
         _ = self;
         const builtins = [_][]const u8{ "cd", "pwd", "echo", "exit", "env", "export", "set", "unset" };
-        for (builtins) |builtin| {
-            if (std.mem.eql(u8, name, builtin)) return true;
+        for (builtins) |builtin_name| {
+            if (std.mem.eql(u8, name, builtin_name)) return true;
         }
         return false;
     }
@@ -591,6 +701,69 @@ pub const Executor = struct {
     }
 
     fn executeExternal(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (builtin.os.tag == .windows) {
+            return try self.executeExternalWindows(command);
+        }
+        return try self.executeExternalPosix(command);
+    }
+
+    fn executeExternalWindows(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // Build argv list
+        var argv_list: std.ArrayList([]const u8) = .{};
+        defer argv_list.deinit(self.allocator);
+
+        try argv_list.append(self.allocator, command.name);
+        for (command.args) |arg| {
+            try argv_list.append(self.allocator, arg);
+        }
+
+        // Create child process
+        var child = std.process.Child.init(argv_list.items, self.allocator);
+
+        // Handle redirections (full support including FD duplication)
+        var stdout_file: ?std.fs.File = null;
+        for (command.redirections) |redir| {
+            switch (redir.kind) {
+                .output_truncate, .output_append => {
+                    const file = try std.fs.cwd().createFile(redir.target, .{
+                        .truncate = (redir.kind == .output_truncate),
+                    });
+                    if (redir.fd == 1) {
+                        child.stdout = file;
+                        stdout_file = file;
+                    } else if (redir.fd == 2) {
+                        child.stderr = file;
+                    }
+                },
+                .input => {
+                    const file = try std.fs.cwd().openFile(redir.target, .{});
+                    child.stdin = file;
+                },
+                .fd_duplicate => {
+                    // Handle 2>&1 (redirect stderr to stdout)
+                    if (redir.fd == 2 and std.mem.eql(u8, redir.target, "1")) {
+                        if (stdout_file) |f| {
+                            child.stderr = f;
+                        } else {
+                            // stderr follows stdout (both inherit or both go to same pipe)
+                            child.stderr_behavior = child.stdout_behavior;
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
+
+        try child.spawn();
+        const term = try child.wait();
+
+        return switch (term) {
+            .Exited => |code| code,
+            else => 1,
+        };
+    }
+
+    fn executeExternalPosix(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Build argv (command name + args)
         const argv_len = 1 + command.args.len;
         var argv = try self.allocator.alloc(?[*:0]const u8, argv_len + 1);
@@ -646,6 +819,10 @@ pub const Executor = struct {
             return error.BuiltinBackground;
         }
 
+        if (builtin.os.tag == .windows) {
+            return try self.executeCommandBackgroundWindows(command);
+        }
+
         // Build argv (command name + args)
         const argv_len = 1 + command.args.len;
         var argv = try self.allocator.alloc(?[*:0]const u8, argv_len + 1);
@@ -690,5 +867,72 @@ pub const Executor = struct {
             // Parent process - DON'T wait, just print the PID
             try IO.print("[{d}]\n", .{pid});
         }
+    }
+
+    fn executeBuiltinWithRedirectionsWindows(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // Windows SetStdHandle is not exposed in Zig std lib yet
+        // For now, we'll use a simpler approach: pass file handles to builtins
+        // This requires refactoring builtins to accept optional output files
+        // For initial implementation, execute builtins without redirections on Windows
+        // TODO: Refactor builtins to accept File parameters for proper redirection support
+
+        // For now, just check if there are redirections and warn if so
+        if (command.redirections.len > 0) {
+            try IO.print("Warning: Builtin redirections not yet fully supported on Windows\n", .{});
+        }
+
+        return try self.executeBuiltin(command);
+    }
+
+    fn executeCommandBackgroundWindows(self: *Executor, command: *types.ParsedCommand) !void {
+        // Build argv list
+        var argv_list: std.ArrayList([]const u8) = .{};
+        defer argv_list.deinit(self.allocator);
+
+        try argv_list.append(self.allocator, command.name);
+        for (command.args) |arg| {
+            try argv_list.append(self.allocator, arg);
+        }
+
+        // Create detached child process
+        var child = std.process.Child.init(argv_list.items, self.allocator);
+
+        // Detach from parent - don't wait for it
+        child.stdin_behavior = .Ignore;
+        child.stdout_behavior = .Ignore;
+        child.stderr_behavior = .Ignore;
+
+        // Handle redirections
+        for (command.redirections) |redir| {
+            switch (redir.kind) {
+                .output_truncate, .output_append => {
+                    const file = try std.fs.cwd().createFile(redir.target, .{
+                        .truncate = (redir.kind == .output_truncate),
+                    });
+                    if (redir.fd == 1) {
+                        child.stdout_behavior = .Ignore;
+                        child.stdout = file;
+                    } else if (redir.fd == 2) {
+                        child.stderr_behavior = .Ignore;
+                        child.stderr = file;
+                    }
+                },
+                .input => {
+                    const file = try std.fs.cwd().openFile(redir.target, .{});
+                    child.stdin_behavior = .Ignore;
+                    child.stdin = file;
+                },
+                else => {},
+            }
+        }
+
+        try child.spawn();
+
+        // On Windows, process handle serves as the ID
+        const handle = child.id;
+        try IO.print("[{d}]\n", .{@intFromPtr(handle)});
+
+        // Detach - don't wait for completion
+        // The process will continue running independently
     }
 };

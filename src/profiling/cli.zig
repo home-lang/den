@@ -1,5 +1,6 @@
 // Profiling CLI tool for Den Shell
 const std = @import("std");
+const builtin = @import("builtin");
 const Profiler = @import("profiler.zig").Profiler;
 
 pub fn main() !void {
@@ -38,9 +39,10 @@ pub fn main() !void {
 }
 
 fn printHelp() !void {
-    const stdout_file = std.fs.File{
-        .handle = std.posix.STDOUT_FILENO,
-    };
+    const stdout_file = if (builtin.os.tag == .windows) blk: {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
+        break :blk std.fs.File{ .handle = handle };
+    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     var buffer: [4096]u8 = undefined;
     var writer = stdout_file.writer(&buffer);
     defer writer.interface.flush() catch {};
@@ -79,9 +81,10 @@ fn printHelp() !void {
 }
 
 fn listBenchmarks() !void {
-    const stdout_file = std.fs.File{
-        .handle = std.posix.STDOUT_FILENO,
-    };
+    const stdout_file = if (builtin.os.tag == .windows) blk: {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
+        break :blk std.fs.File{ .handle = handle };
+    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     var buffer: [4096]u8 = undefined;
     var writer = stdout_file.writer(&buffer);
     defer writer.interface.flush() catch {};
@@ -115,9 +118,10 @@ fn listBenchmarks() !void {
 }
 
 fn runBenchmark(allocator: std.mem.Allocator, name: []const u8) !void {
-    const stdout_file = std.fs.File{
-        .handle = std.posix.STDOUT_FILENO,
-    };
+    const stdout_file = if (builtin.os.tag == .windows) blk: {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
+        break :blk std.fs.File{ .handle = handle };
+    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     var buffer: [4096]u8 = undefined;
     var writer = stdout_file.writer(&buffer);
     defer writer.interface.flush() catch {};
