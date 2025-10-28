@@ -786,4 +786,22 @@ pub fn build(b: *std.Build) void {
     const run_logging_example = b.addRunArtifact(logging_example);
     const logging_example_step = b.step("example-logging", "Run logging example");
     logging_example_step.dependOn(&run_logging_example.step);
+
+    // ANSI/Terminal example
+    const ansi_example_module = b.createModule(.{
+        .root_source_file = b.path("examples/ansi_example.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ansi_example_module.addImport("utils", utils_module);
+
+    const ansi_example = b.addExecutable(.{
+        .name = "ansi_example",
+        .root_module = ansi_example_module,
+    });
+    b.installArtifact(ansi_example);
+
+    const run_ansi_example = b.addRunArtifact(ansi_example);
+    const ansi_example_step = b.step("example-ansi", "Run ANSI/Terminal example");
+    ansi_example_step.dependOn(&run_ansi_example.step);
 }

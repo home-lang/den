@@ -8,3 +8,5 @@ pub const error_format = @import("utils/error_format.zig");
 pub const stack_trace = @import("utils/stack_trace.zig");
 pub const assert = @import("utils/assert.zig");
 pub const timer = @import("utils/timer.zig");
+pub const ansi = @import("utils/ansi.zig");
+pub const env = @import("utils/env.zig");

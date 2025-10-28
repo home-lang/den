@@ -366,7 +366,6 @@ den/
 ## Phase 4: Foundation Libraries
 
 ### 4.1 ANSI/Terminal
-- [ ] Port `src/input/ansi.ts` utilities
 - [ ] Implement ANSI escape sequence builder
 - [ ] Implement cursor movement (up, down, left, right, home, end)
 - [ ] Implement cursor save/restore
