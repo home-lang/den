@@ -498,7 +498,12 @@ pub const Executor = struct {
 
     fn isBuiltin(self: *Executor, name: []const u8) bool {
         _ = self;
-        const builtins = [_][]const u8{ "cd", "pwd", "echo", "exit", "env", "export", "set", "unset" };
+        const builtins = [_][]const u8{
+            "cd", "pwd", "echo", "exit", "env", "export", "set", "unset",
+            "true", "false", "test", "[", "alias", "unalias", "which",
+            "type", "help", "read", "printf", "source", ".", "history",
+            "pushd", "popd", "dirs"
+        };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
         }
@@ -520,6 +525,36 @@ pub const Executor = struct {
             return try self.builtinSet(command);
         } else if (std.mem.eql(u8, command.name, "unset")) {
             return try self.builtinUnset(command);
+        } else if (std.mem.eql(u8, command.name, "true")) {
+            return try self.builtinTrue();
+        } else if (std.mem.eql(u8, command.name, "false")) {
+            return try self.builtinFalse();
+        } else if (std.mem.eql(u8, command.name, "test") or std.mem.eql(u8, command.name, "[")) {
+            return try self.builtinTest(command);
+        } else if (std.mem.eql(u8, command.name, "which")) {
+            return try self.builtinWhich(command);
+        } else if (std.mem.eql(u8, command.name, "type")) {
+            return try self.builtinType(command);
+        } else if (std.mem.eql(u8, command.name, "help")) {
+            return try self.builtinHelp(command);
+        } else if (std.mem.eql(u8, command.name, "alias")) {
+            return try self.builtinAlias(command);
+        } else if (std.mem.eql(u8, command.name, "unalias")) {
+            return try self.builtinUnalias(command);
+        } else if (std.mem.eql(u8, command.name, "read")) {
+            return try self.builtinRead(command);
+        } else if (std.mem.eql(u8, command.name, "printf")) {
+            return try self.builtinPrintf(command);
+        } else if (std.mem.eql(u8, command.name, "source") or std.mem.eql(u8, command.name, ".")) {
+            return try self.builtinSource(command);
+        } else if (std.mem.eql(u8, command.name, "history")) {
+            return try self.builtinHistory(command);
+        } else if (std.mem.eql(u8, command.name, "pushd")) {
+            return try self.builtinPushd(command);
+        } else if (std.mem.eql(u8, command.name, "popd")) {
+            return try self.builtinPopd(command);
+        } else if (std.mem.eql(u8, command.name, "dirs")) {
+            return try self.builtinDirs(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -697,6 +732,416 @@ pub const Executor = struct {
             }
         }
 
+        return 0;
+    }
+
+    fn builtinTrue(self: *Executor) !i32 {
+        _ = self;
+        return 0;
+    }
+
+    fn builtinFalse(self: *Executor) !i32 {
+        _ = self;
+        return 1;
+    }
+
+    fn builtinTest(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        // Handle both 'test' and '[' syntax
+        const args = if (std.mem.eql(u8, command.name, "[")) blk: {
+            // For '[', last arg should be ']'
+            if (command.args.len > 0 and std.mem.eql(u8, command.args[command.args.len - 1], "]")) {
+                break :blk command.args[0..command.args.len - 1];
+            }
+            try IO.eprint("den: [: missing ']'\n", .{});
+            return 2;
+        } else command.args;
+
+        if (args.len == 0) return 1; // Empty test is false
+
+        // Single argument - test if non-empty string
+        if (args.len == 1) {
+            return if (args[0].len > 0) 0 else 1;
+        }
+
+        // Two arguments - unary operators
+        if (args.len == 2) {
+            const op = args[0];
+            const arg = args[1];
+
+            if (std.mem.eql(u8, op, "-z")) {
+                // True if string is empty
+                return if (arg.len == 0) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-n")) {
+                // True if string is non-empty
+                return if (arg.len > 0) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-f")) {
+                // True if file exists and is regular file
+                const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
+                defer file.close();
+                const stat = file.stat() catch return 1;
+                return if (stat.kind == .file) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-d")) {
+                // True if file exists and is directory
+                var dir = std.fs.cwd().openDir(arg, .{}) catch return 1;
+                dir.close();
+                return 0;
+            } else if (std.mem.eql(u8, op, "-e")) {
+                // True if file exists
+                std.fs.cwd().access(arg, .{}) catch return 1;
+                return 0;
+            } else if (std.mem.eql(u8, op, "-r")) {
+                // True if file exists and is readable
+                const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
+                file.close();
+                return 0;
+            } else if (std.mem.eql(u8, op, "-w")) {
+                // True if file exists and is writable
+                const file = std.fs.cwd().openFile(arg, .{ .mode = .write_only }) catch return 1;
+                file.close();
+                return 0;
+            } else if (std.mem.eql(u8, op, "-x")) {
+                // True if file exists and is executable
+                if (builtin.os.tag == .windows) {
+                    // On Windows, check if file exists
+                    std.fs.cwd().access(arg, .{}) catch return 1;
+                    return 0;
+                }
+                const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
+                defer file.close();
+                const stat = file.stat() catch return 1;
+                return if (stat.mode & 0o111 != 0) 0 else 1;
+            }
+        }
+
+        // Three arguments - binary operators
+        if (args.len == 3) {
+            const left = args[0];
+            const op = args[1];
+            const right = args[2];
+
+            if (std.mem.eql(u8, op, "=") or std.mem.eql(u8, op, "==")) {
+                // String equality
+                return if (std.mem.eql(u8, left, right)) 0 else 1;
+            } else if (std.mem.eql(u8, op, "!=")) {
+                // String inequality
+                return if (!std.mem.eql(u8, left, right)) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-eq")) {
+                // Numeric equality
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+                return if (left_num == right_num) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-ne")) {
+                // Numeric inequality
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+                return if (left_num != right_num) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-lt")) {
+                // Numeric less than
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+                return if (left_num < right_num) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-le")) {
+                // Numeric less than or equal
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+                return if (left_num <= right_num) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-gt")) {
+                // Numeric greater than
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+                return if (left_num > right_num) 0 else 1;
+            } else if (std.mem.eql(u8, op, "-ge")) {
+                // Numeric greater than or equal
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+                return if (left_num >= right_num) 0 else 1;
+            }
+        }
+
+        try IO.eprint("den: test: unsupported expression\n", .{});
+        return 2;
+    }
+
+    fn builtinWhich(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (command.args.len == 0) {
+            try IO.eprint("den: which: missing argument\n", .{});
+            return 1;
+        }
+
+        const utils = @import("../utils.zig");
+        var found_all = true;
+
+        for (command.args) |cmd_name| {
+            // Check if it's a builtin
+            if (self.isBuiltin(cmd_name)) {
+                try IO.print("{s}: shell builtin command\n", .{cmd_name});
+                continue;
+            }
+
+            // Parse PATH and find executable
+            var path_list = utils.env.PathList.fromEnv(self.allocator) catch {
+                try IO.eprint("den: which: failed to parse PATH\n", .{});
+                return 1;
+            };
+            defer path_list.deinit();
+
+            if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
+                defer self.allocator.free(exec_path);
+                try IO.print("{s}\n", .{exec_path});
+            } else {
+                found_all = false;
+            }
+        }
+
+        return if (found_all) 0 else 1;
+    }
+
+    fn builtinType(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (command.args.len == 0) {
+            try IO.eprint("den: type: missing argument\n", .{});
+            return 1;
+        }
+
+        const utils = @import("../utils.zig");
+        var found_all = true;
+
+        for (command.args) |cmd_name| {
+            // Check if it's a builtin
+            if (self.isBuiltin(cmd_name)) {
+                try IO.print("{s} is a shell builtin\n", .{cmd_name});
+                continue;
+            }
+
+            // Check if it's in PATH
+            var path_list = utils.env.PathList.fromEnv(self.allocator) catch {
+                try IO.eprint("den: type: failed to parse PATH\n", .{});
+                return 1;
+            };
+            defer path_list.deinit();
+
+            if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
+                defer self.allocator.free(exec_path);
+                try IO.print("{s} is {s}\n", .{ cmd_name, exec_path });
+            } else {
+                try IO.print("den: type: {s}: not found\n", .{cmd_name});
+                found_all = false;
+            }
+        }
+
+        return if (found_all) 0 else 1;
+    }
+
+    fn builtinHelp(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        try IO.print("Den Shell - Built-in Commands:\n\n", .{});
+        try IO.print("  cd [dir]          Change directory\n", .{});
+        try IO.print("  pwd               Print working directory\n", .{});
+        try IO.print("  echo [args...]    Print arguments\n", .{});
+        try IO.print("  exit [n]          Exit shell with status n\n", .{});
+        try IO.print("  env               Print environment variables\n", .{});
+        try IO.print("  export VAR=val    Export environment variable\n", .{});
+        try IO.print("  set [opts]        Set shell options or variables\n", .{});
+        try IO.print("  unset VAR         Unset environment variable\n", .{});
+        try IO.print("  true              Return success (0)\n", .{});
+        try IO.print("  false             Return failure (1)\n", .{});
+        try IO.print("  test / [          Evaluate conditional expression\n", .{});
+        try IO.print("  which CMD         Locate a command\n", .{});
+        try IO.print("  type CMD          Display command type\n", .{});
+        try IO.print("  help              Display this help message\n", .{});
+        try IO.print("  alias [name=val]  Create or display aliases\n", .{});
+        try IO.print("  unalias name      Remove alias\n", .{});
+        try IO.print("  read VAR          Read line into variable\n", .{});
+        try IO.print("  printf fmt [args] Formatted print\n", .{});
+        try IO.print("  source / . file   Execute commands from file\n", .{});
+        try IO.print("  history           Display command history\n", .{});
+        try IO.print("  pushd [dir]       Push directory onto stack\n", .{});
+        try IO.print("  popd              Pop directory from stack\n", .{});
+        try IO.print("  dirs              Display directory stack\n", .{});
+
+        return 0;
+    }
+
+    fn builtinAlias(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        if (command.args.len == 0) {
+            // TODO: Display all aliases when we have alias storage
+            try IO.print("den: alias: alias storage not yet implemented\n", .{});
+            return 0;
+        }
+
+        // TODO: Implement alias storage and expansion
+        try IO.print("den: alias: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinUnalias(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        if (command.args.len == 0) {
+            try IO.eprint("den: unalias: missing argument\n", .{});
+            return 1;
+        }
+
+        // TODO: Implement alias storage and removal
+        try IO.print("den: unalias: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinRead(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (command.args.len == 0) {
+            try IO.eprint("den: read: missing variable name\n", .{});
+            return 1;
+        }
+
+        const var_name = command.args[0];
+
+        // Read a line from stdin using IO utility
+        const line_opt = try IO.readLine(self.allocator);
+        if (line_opt) |line| {
+            defer self.allocator.free(line);
+
+            // Store in environment (dupe again since we're freeing line)
+            const value = try self.allocator.dupe(u8, line);
+            const gop = try self.environment.getOrPut(var_name);
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+                gop.value_ptr.* = value;
+            } else {
+                const key = try self.allocator.dupe(u8, var_name);
+                gop.key_ptr.* = key;
+                gop.value_ptr.* = value;
+            }
+        } else {
+            // EOF - set to empty string
+            const value = try self.allocator.dupe(u8, "");
+            const gop = try self.environment.getOrPut(var_name);
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+                gop.value_ptr.* = value;
+            } else {
+                const key = try self.allocator.dupe(u8, var_name);
+                gop.key_ptr.* = key;
+                gop.value_ptr.* = value;
+            }
+        }
+
+        return 0;
+    }
+
+    fn builtinPrintf(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        if (command.args.len == 0) {
+            try IO.eprint("den: printf: missing format string\n", .{});
+            return 1;
+        }
+
+        const format = command.args[0];
+        var arg_idx: usize = 1;
+        var i: usize = 0;
+
+        while (i < format.len) {
+            if (format[i] == '%' and i + 1 < format.len) {
+                const spec = format[i + 1];
+                if (spec == 's') {
+                    // String format
+                    if (arg_idx < command.args.len) {
+                        try IO.print("{s}", .{command.args[arg_idx]});
+                        arg_idx += 1;
+                    }
+                    i += 2;
+                } else if (spec == 'd' or spec == 'i') {
+                    // Integer format
+                    if (arg_idx < command.args.len) {
+                        const num = std.fmt.parseInt(i64, command.args[arg_idx], 10) catch 0;
+                        try IO.print("{d}", .{num});
+                        arg_idx += 1;
+                    }
+                    i += 2;
+                } else if (spec == '%') {
+                    // Escaped %
+                    try IO.print("%", .{});
+                    i += 2;
+                } else if (spec == 'n') {
+                    // Newline
+                    try IO.print("\n", .{});
+                    i += 2;
+                } else {
+                    // Unknown format, just print it
+                    try IO.print("{c}", .{format[i]});
+                    i += 1;
+                }
+            } else if (format[i] == '\\' and i + 1 < format.len) {
+                const esc = format[i + 1];
+                if (esc == 'n') {
+                    try IO.print("\n", .{});
+                    i += 2;
+                } else if (esc == 't') {
+                    try IO.print("\t", .{});
+                    i += 2;
+                } else if (esc == '\\') {
+                    try IO.print("\\", .{});
+                    i += 2;
+                } else {
+                    try IO.print("{c}", .{format[i]});
+                    i += 1;
+                }
+            } else {
+                try IO.print("{c}", .{format[i]});
+                i += 1;
+            }
+        }
+
+        return 0;
+    }
+
+    fn builtinSource(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        if (command.args.len == 0) {
+            try IO.eprint("den: source: missing filename\n", .{});
+            return 1;
+        }
+
+        // TODO: Implement script execution from file
+        try IO.print("den: source: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinHistory(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement history display when we have history storage
+        try IO.print("den: history: not yet fully implemented\n", .{});
+        return 0;
+    }
+
+    fn builtinPushd(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement directory stack when we have it in Shell
+        try IO.print("den: pushd: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinPopd(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement directory stack when we have it in Shell
+        try IO.print("den: popd: not yet fully implemented\n", .{});
+        return 1;
+    }
+
+    fn builtinDirs(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // TODO: Implement directory stack when we have it in Shell
+        try IO.print("den: dirs: not yet fully implemented\n", .{});
         return 0;
     }
 

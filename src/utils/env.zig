@@ -188,7 +188,7 @@ pub const PathList = struct {
     pub fn fromEnv(allocator: std.mem.Allocator) !PathList {
         const path_str = std.posix.getenv("PATH") orelse return PathList{
             .allocator = allocator,
-            .paths = std.ArrayList([]const u8).init(allocator),
+            .paths = std.ArrayList([]const u8){},
         };
 
         return try parse(allocator, path_str);
@@ -196,8 +196,8 @@ pub const PathList = struct {
 
     /// Parse PATH string
     pub fn parse(allocator: std.mem.Allocator, path_str: []const u8) !PathList {
-        var paths = std.ArrayList([]const u8).init(allocator);
-        errdefer paths.deinit();
+        var paths = std.ArrayList([]const u8){};
+        errdefer paths.deinit(allocator);
 
         const separator = if (builtin.os.tag == .windows) ';' else ':';
         var iter = std.mem.splitScalar(u8, path_str, separator);
@@ -205,7 +205,7 @@ pub const PathList = struct {
         while (iter.next()) |path| {
             if (path.len > 0) {
                 const owned = try allocator.dupe(u8, path);
-                try paths.append(owned);
+                try paths.append(allocator, owned);
             }
         }
 
@@ -219,7 +219,7 @@ pub const PathList = struct {
         for (self.paths.items) |path| {
             self.allocator.free(path);
         }
-        self.paths.deinit();
+        self.paths.deinit(self.allocator);
     }
 
     /// Get number of paths
@@ -286,7 +286,7 @@ pub const PathList = struct {
     /// Add path to the list
     pub fn add(self: *PathList, path: []const u8) !void {
         const owned = try self.allocator.dupe(u8, path);
-        try self.paths.append(owned);
+        try self.paths.append(self.allocator, owned);
     }
 
     /// Remove path at index
