@@ -36,7 +36,7 @@ pub const TestRunner = struct {
             for (modules.items) |*module| {
                 module.deinit();
             }
-            modules.deinit();
+            modules.deinit(self.allocator);
         }
 
         var stats = TestStats.init();
@@ -68,16 +68,16 @@ pub const TestRunner = struct {
         const start_time = std.time.nanoTimestamp();
 
         // Build test command
-        var cmd_args = std.ArrayList([]const u8).init(self.allocator);
-        defer cmd_args.deinit();
+        var cmd_args = std.ArrayList([]const u8){};
+        defer cmd_args.deinit(self.allocator);
 
-        try cmd_args.append("zig");
-        try cmd_args.append("build");
+        try cmd_args.append(self.allocator, "zig");
+        try cmd_args.append(self.allocator, "build");
 
         // Construct test step name
         const test_step = try self.getTestStepName(module_name);
         defer self.allocator.free(test_step);
-        try cmd_args.append(test_step);
+        try cmd_args.append(self.allocator, test_step);
 
         // Execute test
         var child = std.process.Child.init(cmd_args.items, self.allocator);
@@ -168,7 +168,7 @@ pub const TestRunner = struct {
             for (modules.items) |*module| {
                 module.deinit();
             }
-            modules.deinit();
+            modules.deinit(self.allocator);
         }
 
         var stats = TestStats.init();

@@ -313,6 +313,20 @@ pub const Expansion = struct {
         }
 
         // Check for parameter expansion patterns
+        // ${VAR##pattern} - remove longest prefix match (greedy)
+        if (std.mem.indexOf(u8, content, "##")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 2) {
+                const var_name = content[0..sep_pos];
+                const pattern = content[sep_pos + 2 ..];
+
+                if (self.environment.get(var_name)) |value| {
+                    const result = try self.removePrefix(value, pattern, true);
+                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1 };
+            }
+        }
+
         // ${VAR#pattern} - remove shortest prefix match
         if (std.mem.indexOf(u8, content, "#")) |sep_pos| {
             if (sep_pos > 0 and sep_pos < content.len - 1) {
@@ -321,6 +335,20 @@ pub const Expansion = struct {
 
                 if (self.environment.get(var_name)) |value| {
                     const result = try self.removePrefix(value, pattern, false);
+                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1 };
+            }
+        }
+
+        // ${VAR%%pattern} - remove longest suffix match (greedy)
+        if (std.mem.indexOf(u8, content, "%%")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 2) {
+                const var_name = content[0..sep_pos];
+                const pattern = content[sep_pos + 2 ..];
+
+                if (self.environment.get(var_name)) |value| {
+                    const result = try self.removeSuffix(value, pattern, true);
                     return ExpansionResult{ .value = result, .consumed = end + 1 };
                 }
                 return ExpansionResult{ .value = "", .consumed = end + 1 };
@@ -353,11 +381,27 @@ pub const Expansion = struct {
 
     /// Remove prefix pattern from string
     fn removePrefix(self: *Expansion, value: []const u8, pattern: []const u8, greedy: bool) ![]u8 {
-        _ = greedy; // TODO: implement greedy/non-greedy matching
-
-        // Simple implementation: exact prefix match
-        if (std.mem.startsWith(u8, value, pattern)) {
-            return try self.allocator.dupe(u8, value[pattern.len..]);
+        // For greedy (##), find longest match; for non-greedy (#), find shortest
+        if (greedy) {
+            // Find longest prefix match
+            var longest_match: usize = 0;
+            var i: usize = 0;
+            while (i <= value.len) : (i += 1) {
+                if (matchPattern(pattern, value[0..i])) {
+                    longest_match = i;
+                }
+            }
+            if (longest_match > 0) {
+                return try self.allocator.dupe(u8, value[longest_match..]);
+            }
+        } else {
+            // Find shortest prefix match
+            var i: usize = 0;
+            while (i <= value.len) : (i += 1) {
+                if (matchPattern(pattern, value[0..i])) {
+                    return try self.allocator.dupe(u8, value[i..]);
+                }
+            }
         }
 
         // Pattern not found, return original value
@@ -366,15 +410,120 @@ pub const Expansion = struct {
 
     /// Remove suffix pattern from string
     fn removeSuffix(self: *Expansion, value: []const u8, pattern: []const u8, greedy: bool) ![]u8 {
-        _ = greedy; // TODO: implement greedy/non-greedy matching
-
-        // Simple implementation: exact suffix match
-        if (std.mem.endsWith(u8, value, pattern)) {
-            return try self.allocator.dupe(u8, value[0 .. value.len - pattern.len]);
+        // For greedy (%%), find longest match; for non-greedy (%), find shortest
+        if (greedy) {
+            // Find longest suffix match
+            var longest_match: usize = 0;
+            var i: usize = 0;
+            while (i <= value.len) : (i += 1) {
+                const start = value.len - i;
+                if (matchPattern(pattern, value[start..])) {
+                    longest_match = i;
+                }
+            }
+            if (longest_match > 0) {
+                return try self.allocator.dupe(u8, value[0 .. value.len - longest_match]);
+            }
+        } else {
+            // Find shortest suffix match
+            var i: usize = 0;
+            while (i <= value.len) : (i += 1) {
+                const start = value.len - i;
+                if (matchPattern(pattern, value[start..])) {
+                    return try self.allocator.dupe(u8, value[0..start]);
+                }
+            }
         }
 
         // Pattern not found, return original value
         return try self.allocator.dupe(u8, value);
+    }
+
+    /// Match a shell glob pattern against a string
+    /// Supports: * (any chars), ? (one char), [abc] (char class)
+    fn matchPattern(pattern: []const u8, str: []const u8) bool {
+        var p_idx: usize = 0;
+        var s_idx: usize = 0;
+
+        while (p_idx < pattern.len and s_idx < str.len) {
+            const p_char = pattern[p_idx];
+
+            if (p_char == '*') {
+                // Skip consecutive stars
+                while (p_idx < pattern.len and pattern[p_idx] == '*') {
+                    p_idx += 1;
+                }
+
+                // Star at end matches rest of string
+                if (p_idx == pattern.len) return true;
+
+                // Try matching rest of pattern at each position
+                while (s_idx <= str.len) {
+                    if (matchPattern(pattern[p_idx..], str[s_idx..])) {
+                        return true;
+                    }
+                    s_idx += 1;
+                }
+                return false;
+            } else if (p_char == '?') {
+                // ? matches any single character
+                p_idx += 1;
+                s_idx += 1;
+            } else if (p_char == '[') {
+                // Character class [abc] or [a-z]
+                p_idx += 1;
+                if (p_idx >= pattern.len) return false;
+
+                var matched = false;
+                var negate = false;
+
+                // Check for negation [!abc]
+                if (pattern[p_idx] == '!') {
+                    negate = true;
+                    p_idx += 1;
+                }
+
+                while (p_idx < pattern.len and pattern[p_idx] != ']') {
+                    if (p_idx + 2 < pattern.len and pattern[p_idx + 1] == '-') {
+                        // Range: a-z
+                        const range_start = pattern[p_idx];
+                        const range_end = pattern[p_idx + 2];
+                        if (str[s_idx] >= range_start and str[s_idx] <= range_end) {
+                            matched = true;
+                        }
+                        p_idx += 3;
+                    } else {
+                        // Single character
+                        if (str[s_idx] == pattern[p_idx]) {
+                            matched = true;
+                        }
+                        p_idx += 1;
+                    }
+                }
+
+                if (negate) matched = !matched;
+                if (!matched) return false;
+
+                // Skip closing ]
+                if (p_idx < pattern.len and pattern[p_idx] == ']') {
+                    p_idx += 1;
+                }
+                s_idx += 1;
+            } else {
+                // Exact character match
+                if (p_char != str[s_idx]) return false;
+                p_idx += 1;
+                s_idx += 1;
+            }
+        }
+
+        // Check if we consumed both pattern and string
+        // Account for trailing stars
+        while (p_idx < pattern.len and pattern[p_idx] == '*') {
+            p_idx += 1;
+        }
+
+        return p_idx == pattern.len and s_idx == str.len;
     }
 
     /// Expand $VAR form (unbraced)

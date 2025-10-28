@@ -5,10 +5,10 @@ const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
 const Terminal = @import("utils/terminal.zig");
 const LineEditor = Terminal.LineEditor;
+const Completion = @import("utils/completion.zig").Completion;
 const Expansion = @import("utils/expansion.zig").Expansion;
 const Glob = @import("utils/glob.zig").Glob;
 const BraceExpander = @import("utils/brace.zig").BraceExpander;
-const Completion = @import("utils/completion.zig").Completion;
 const ScriptManager = @import("scripting/script_manager.zig").ScriptManager;
 const FunctionManager = @import("scripting/functions.zig").FunctionManager;
 const PluginRegistry = @import("plugins/interface.zig").PluginRegistry;
@@ -317,6 +317,7 @@ pub const Shell = struct {
                         const prompt_str = try self.getPromptString();
                         var editor = LineEditor.init(self.allocator, prompt_str);
                         editor.setHistory(&self.history, &self.history_count);
+                        editor.setCompletionFn(tabCompletionFn);
                         self.line_editor = editor;
                         self.allocator.free(prompt_str);
                     } else {
@@ -2587,6 +2588,28 @@ pub const Shell = struct {
     }
 };
 
+
+/// Tab completion function for line editor
+fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
+    var completion = Completion.init(allocator);
+
+    // Find the last word in the input
+    var word_start: usize = 0;
+    for (input, 0..) |c, i| {
+        if (c == ' ' or c == '\t' or c == '|' or c == '&' or c == ';') {
+            word_start = i + 1;
+        }
+    }
+    const prefix = input[word_start..];
+
+    // If first word, try command completion
+    if (word_start == 0) {
+        return completion.completeCommand(prefix);
+    }
+
+    // Otherwise, try file completion
+    return completion.completeFile(prefix);
+}
 
 test "shell initialization" {
     const allocator = std.testing.allocator;

@@ -13,6 +13,7 @@ pub const TokenType = enum {
     redirect_in, // <
     redirect_err, // 2>
     redirect_both, // &>
+    redirect_fd_dup, // N>&M or N<&M for FD duplication
     heredoc, // <<
     herestring, // <<<
     lparen, // (
@@ -84,6 +85,46 @@ pub const Tokenizer = struct {
         const start_col = self.column;
 
         const char = self.input[self.pos];
+
+        // Check for FD duplication patterns (N>&M or N<&M)
+        if (std.ascii.isDigit(char)) {
+            var lookahead = self.pos + 1;
+            // Skip digits to get the FD number
+            while (lookahead < self.input.len and std.ascii.isDigit(self.input[lookahead])) {
+                lookahead += 1;
+            }
+            // Check if followed by >& or <&
+            if (lookahead + 1 < self.input.len) {
+                const op = self.input[lookahead .. lookahead + 2];
+                if (std.mem.eql(u8, op, ">&") or std.mem.eql(u8, op, "<&")) {
+                    // Look for target FD or dash
+                    const target_start = lookahead + 2;
+                    var target_end = target_start;
+                    if (target_start < self.input.len) {
+                        if (self.input[target_start] == '-') {
+                            target_end = target_start + 1;
+                        } else {
+                            while (target_end < self.input.len and std.ascii.isDigit(self.input[target_end])) {
+                                target_end += 1;
+                            }
+                        }
+                    }
+                    // If we found a valid target, create the token
+                    if (target_end > target_start) {
+                        const token_value = self.input[self.pos..target_end];
+                        const len = target_end - self.pos;
+                        self.pos = target_end;
+                        self.column += len;
+                        return Token{
+                            .type = .redirect_fd_dup,
+                            .value = token_value,
+                            .line = start_line,
+                            .column = start_col,
+                        };
+                    }
+                }
+            }
+        }
 
         // Check for operators (multi-character first)
         if (self.pos + 1 < self.input.len) {

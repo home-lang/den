@@ -134,6 +134,10 @@ pub const EscapeSequence = enum {
     }
 };
 
+/// Completion callback function type
+/// Takes the current input and returns a list of completions
+pub const CompletionFn = *const fn (input: []const u8, allocator: std.mem.Allocator) anyerror![][]const u8;
+
 /// Line editor with history support
 pub const LineEditor = struct {
     allocator: std.mem.Allocator,
@@ -146,6 +150,7 @@ pub const LineEditor = struct {
     history_count: ?*usize = null,
     history_index: ?usize = null,
     saved_line: ?[]const u8 = null, // Save current line when browsing history
+    completion_fn: ?CompletionFn = null, // Callback for tab completion
 
     pub fn init(allocator: std.mem.Allocator, prompt: []const u8) LineEditor {
         return .{
@@ -157,6 +162,10 @@ pub const LineEditor = struct {
     pub fn setHistory(self: *LineEditor, history: *[1000]?[]const u8, count: *usize) void {
         self.history = history;
         self.history_count = count;
+    }
+
+    pub fn setCompletionFn(self: *LineEditor, completion_fn: CompletionFn) void {
+        self.completion_fn = completion_fn;
     }
 
     /// Read a line with editing support
@@ -247,9 +256,8 @@ pub const LineEditor = struct {
                 0x15 => try self.killToStart(), // Ctrl+U
                 0x17 => try self.deleteWord(), // Ctrl+W
                 0x09 => {
-                    // Tab - for now, just insert spaces
-                    // Tab completion would be handled here
-                    continue;
+                    // Tab - handle completion
+                    try self.handleTabCompletion();
                 },
                 0x7F, 0x08 => {
                     // Backspace (DEL or BS)
@@ -523,6 +531,96 @@ pub const LineEditor = struct {
     fn writeBytes(self: *LineEditor, bytes: []const u8) !void {
         _ = self;
         _ = try posix.write(posix.STDOUT_FILENO, bytes);
+    }
+
+    /// Handle tab completion
+    fn handleTabCompletion(self: *LineEditor) !void {
+        const completion_fn = self.completion_fn orelse return;
+
+        // Get current line up to cursor
+        const input = self.buffer[0..self.cursor];
+
+        // Get completions
+        const completions = try completion_fn(input, self.allocator);
+        defer {
+            for (completions) |c| {
+                self.allocator.free(c);
+            }
+            self.allocator.free(completions);
+        }
+
+        if (completions.len == 0) {
+            // No completions, beep
+            try self.writeBytes("\x07");
+            return;
+        }
+
+        if (completions.len == 1) {
+            // Single completion - insert it
+            const completion = completions[0];
+
+            // Find the common prefix already typed
+            const word_start = self.findWordStart();
+            const typed_prefix = self.buffer[word_start..self.cursor];
+
+            // Find what we need to add (skip the part already typed)
+            if (completion.len >= typed_prefix.len) {
+                const to_insert = completion[typed_prefix.len..];
+
+                // Insert the remaining part
+                for (to_insert) |c| {
+                    try self.insertChar(c);
+                }
+
+                // Add a space after completion for convenience
+                try self.insertChar(' ');
+            }
+        } else {
+            // Multiple completions - show them
+            try self.writeBytes("\r\n");
+
+            // Display completions in columns
+            var col: usize = 0;
+            const max_cols = 4;
+            for (completions, 0..) |completion, i| {
+                try self.writeBytes(completion);
+                try self.writeBytes("  ");
+                col += 1;
+
+                if (col >= max_cols or i == completions.len - 1) {
+                    try self.writeBytes("\r\n");
+                    col = 0;
+                }
+            }
+
+            // Redisplay prompt and current line
+            try self.displayPrompt();
+            try self.writeBytes(self.buffer[0..self.length]);
+
+            // Move cursor back to correct position
+            if (self.cursor < self.length) {
+                const diff = self.length - self.cursor;
+                for (0..diff) |_| {
+                    try self.writeBytes("\x1b[D");
+                }
+            }
+        }
+    }
+
+    /// Find the start of the current word (for completion)
+    fn findWordStart(self: *LineEditor) usize {
+        if (self.cursor == 0) return 0;
+
+        var pos = self.cursor;
+        while (pos > 0) {
+            pos -= 1;
+            const c = self.buffer[pos];
+            // Break on whitespace or special shell characters
+            if (c == ' ' or c == '\t' or c == '|' or c == '&' or c == ';' or c == '(' or c == ')') {
+                return pos + 1;
+            }
+        }
+        return 0;
     }
 
     pub fn deinit(self: *LineEditor) void {

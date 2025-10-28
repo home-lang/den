@@ -22,23 +22,36 @@ const Color = struct {
 pub const TestReporter = struct {
     allocator: std.mem.Allocator,
     config: ReporterConfig,
-    writer: std.fs.File.Writer,
 
     pub fn init(allocator: std.mem.Allocator, config: ReporterConfig) TestReporter {
         return .{
             .allocator = allocator,
             .config = config,
-            .writer = std.io.getStdOut().writer(),
         };
+    }
+
+    fn print(self: *const TestReporter, comptime fmt: []const u8, args: anytype) !void {
+        _ = self;
+        std.debug.print(fmt, args);
+    }
+
+    fn writeAll(self: *const TestReporter, bytes: []const u8) !void {
+        _ = self;
+        _ = try std.posix.write(std.posix.STDOUT_FILENO, bytes);
+    }
+
+    fn writeByte(self: *const TestReporter, byte: u8) !void {
+        const buf = [_]u8{byte};
+        try self.writeAll(&buf);
     }
 
     /// Report test start
     pub fn reportStart(self: *TestReporter, module_name: []const u8) !void {
         if (self.config.format == .human) {
             if (self.config.color) {
-                try self.writer.print("{s}{s}Running{s} {s}\n", .{ Color.bold, Color.blue, Color.reset, module_name });
+                try self.print("{s}{s}Running{s} {s}\n", .{ Color.bold, Color.blue, Color.reset, module_name });
             } else {
-                try self.writer.print("Running {s}\n", .{module_name});
+                try self.print("Running {s}\n", .{module_name});
             }
         }
     }
@@ -78,80 +91,80 @@ pub const TestReporter = struct {
             .running => "RUN ",
         };
 
-        try self.writer.print("  [{s}] {s} ({d:.2}ms)\n", .{ status_str, result.name, duration_ms });
+        try self.print("  [{s}] {s} ({d:.2}ms)\n", .{ status_str, result.name, duration_ms });
 
         if (result.error_message) |msg| {
             if (self.config.verbose) {
                 const indent = "    ";
                 var lines = std.mem.splitScalar(u8, msg, '\n');
                 while (lines.next()) |line| {
-                    try self.writer.print("{s}{s}\n", .{ indent, line });
+                    try self.print("{s}{s}\n", .{ indent, line });
                 }
             } else {
-                try self.writer.print("    Error: {s}\n", .{msg});
+                try self.print("    Error: {s}\n", .{msg});
             }
         }
     }
 
     /// JSON format
     fn reportJSON(self: *TestReporter, result: *const TestResult) !void {
-        try self.writer.writeAll("{");
-        try self.writer.print("\"name\":\"{s}\",", .{result.name});
-        try self.writer.print("\"status\":\"{s}\",", .{@tagName(result.status)});
-        try self.writer.print("\"duration_ns\":{d}", .{result.duration_ns});
+        try self.writeAll("{");
+        try self.print("\"name\":\"{s}\",", .{result.name});
+        try self.print("\"status\":\"{s}\",", .{@tagName(result.status)});
+        try self.print("\"duration_ns\":{d}", .{result.duration_ns});
 
         if (result.error_message) |msg| {
             // Escape JSON string
-            try self.writer.writeAll(",\"error\":\"");
+            try self.writeAll(",\"error\":\"");
             for (msg) |c| {
                 switch (c) {
-                    '"' => try self.writer.writeAll("\\\""),
-                    '\\' => try self.writer.writeAll("\\\\"),
-                    '\n' => try self.writer.writeAll("\\n"),
-                    '\r' => try self.writer.writeAll("\\r"),
-                    '\t' => try self.writer.writeAll("\\t"),
-                    else => try self.writer.writeByte(c),
+                    '"' => try self.writeAll("\\\""),
+                    '\\' => try self.writeAll("\\\\"),
+                    '\n' => try self.writeAll("\\n"),
+                    '\r' => try self.writeAll("\\r"),
+                    '\t' => try self.writeAll("\\t"),
+                    else => try self.writeByte(c),
                 }
             }
-            try self.writer.writeAll("\"");
+            try self.writeAll("\"");
         }
 
-        try self.writer.writeAll("}\n");
+        try self.writeAll("}\n");
     }
 
     /// JUnit XML format
     fn reportJUnit(self: *TestReporter, result: *const TestResult) !void {
         const duration_s = @as(f64, @floatFromInt(result.duration_ns)) / 1_000_000_000.0;
 
-        try self.writer.print("  <testcase name=\"{s}\" time=\"{d:.3}\"", .{ result.name, duration_s });
+        try self.print("  <testcase name=\"{s}\" time=\"{d:.3}\"", .{ result.name, duration_s });
 
         switch (result.status) {
-            .passed => try self.writer.writeAll(" />\n"),
+            .passed => try self.writeAll(" />\n"),
             .failed => {
-                try self.writer.writeAll(">\n");
-                try self.writer.writeAll("    <failure>");
+                try self.writeAll(">\n");
+                try self.writeAll("    <failure>");
                 if (result.error_message) |msg| {
-                    try self.writer.writeAll(msg);
+                    try self.writeAll(msg);
                 }
-                try self.writer.writeAll("</failure>\n");
-                try self.writer.writeAll("  </testcase>\n");
+                try self.writeAll("</failure>\n");
+                try self.writeAll("  </testcase>\n");
             },
             .skipped => {
-                try self.writer.writeAll(">\n");
-                try self.writer.writeAll("    <skipped />\n");
-                try self.writer.writeAll("  </testcase>\n");
+                try self.writeAll(">\n");
+                try self.writeAll("    <skipped />\n");
+                try self.writeAll("  </testcase>\n");
             },
-            .running => try self.writer.writeAll(" />\n"),
+            .running => try self.writeAll(" />\n"),
         }
     }
 
     /// TAP (Test Anything Protocol) format
     fn reportTAP(self: *TestReporter, result: *const TestResult) !void {
         const status = if (result.status == .passed) "ok" else "not ok";
-        try self.writer.print("{s} - {s}\n", .{ status, result.name });
+        try self.print("{s} - {s}\n", .{ status, result.name });
 
         if (result.error_message) |msg| {
-            try self.writer.print("  # {s}\n", .{msg});
+            try self.print("  # {s}\n", .{msg});
         }
     }
 
@@ -159,17 +172,17 @@ pub const TestReporter = struct {
     fn reportSummaryHuman(self: *TestReporter, stats: *const TestStats) !void {
         const duration_s = @as(f64, @floatFromInt(stats.duration_ns)) / 1_000_000_000.0;
 
-        try self.writer.writeAll("\n");
+        try self.writeAll("\n");
         if (self.config.color) {
-            try self.writer.print("{s}═══════════════════════════════════════{s}\n", .{ Color.bold, Color.reset });
+            try self.print("{s}═══════════════════════════════════════{s}\n", .{ Color.bold, Color.reset });
         } else {
-            try self.writer.writeAll("========================================\n");
+            try self.writeAll("========================================\n");
         }
 
         if (self.config.color) {
-            try self.writer.print("{s}Test Results:{s}\n", .{ Color.bold, Color.reset });
+            try self.print("{s}Test Results:{s}\n", .{ Color.bold, Color.reset });
         } else {
-            try self.writer.writeAll("Test Results:\n");
+            try self.writeAll("Test Results:\n");
         }
 
         const passed_color = if (self.config.color) Color.green else "";
@@ -177,64 +190,64 @@ pub const TestReporter = struct {
         const skipped_color = if (self.config.color) Color.yellow else "";
         const reset = if (self.config.color) Color.reset else "";
 
-        try self.writer.print("  Total:   {d}\n", .{stats.total});
-        try self.writer.print("  {s}Passed:  {d}{s}\n", .{ passed_color, stats.passed, reset });
-        try self.writer.print("  {s}Failed:  {d}{s}\n", .{ failed_color, stats.failed, reset });
-        try self.writer.print("  {s}Skipped: {d}{s}\n", .{ skipped_color, stats.skipped, reset });
-        try self.writer.print("  Duration: {d:.2}s\n", .{duration_s});
+        try self.print("  Total:   {d}\n", .{stats.total});
+        try self.print("  {s}Passed:  {d}{s}\n", .{ passed_color, stats.passed, reset });
+        try self.print("  {s}Failed:  {d}{s}\n", .{ failed_color, stats.failed, reset });
+        try self.print("  {s}Skipped: {d}{s}\n", .{ skipped_color, stats.skipped, reset });
+        try self.print("  Duration: {d:.2}s\n", .{duration_s});
 
         if (self.config.color) {
-            try self.writer.print("{s}═══════════════════════════════════════{s}\n\n", .{ Color.bold, Color.reset });
+            try self.print("{s}═══════════════════════════════════════{s}\n\n", .{ Color.bold, Color.reset });
         } else {
-            try self.writer.writeAll("========================================\n\n");
+            try self.writeAll("========================================\n\n");
         }
 
         // Exit status indicator
         if (stats.failed > 0) {
             if (self.config.color) {
-                try self.writer.print("{s}{s}FAILED{s}\n", .{ Color.bold, Color.red, Color.reset });
+                try self.print("{s}{s}FAILED{s}\n", .{ Color.bold, Color.red, Color.reset });
             } else {
-                try self.writer.writeAll("FAILED\n");
+                try self.writeAll("FAILED\n");
             }
         } else {
             if (self.config.color) {
-                try self.writer.print("{s}{s}PASSED{s}\n", .{ Color.bold, Color.green, Color.reset });
+                try self.print("{s}{s}PASSED{s}\n", .{ Color.bold, Color.green, Color.reset });
             } else {
-                try self.writer.writeAll("PASSED\n");
+                try self.writeAll("PASSED\n");
             }
         }
     }
 
     /// JSON summary
     fn reportSummaryJSON(self: *TestReporter, stats: *const TestStats) !void {
-        try self.writer.writeAll("{");
-        try self.writer.print("\"total\":{d},", .{stats.total});
-        try self.writer.print("\"passed\":{d},", .{stats.passed});
-        try self.writer.print("\"failed\":{d},", .{stats.failed});
-        try self.writer.print("\"skipped\":{d},", .{stats.skipped});
-        try self.writer.print("\"duration_ns\":{d}", .{stats.duration_ns});
-        try self.writer.writeAll("}\n");
+        try self.writeAll("{");
+        try self.print("\"total\":{d},", .{stats.total});
+        try self.print("\"passed\":{d},", .{stats.passed});
+        try self.print("\"failed\":{d},", .{stats.failed});
+        try self.print("\"skipped\":{d},", .{stats.skipped});
+        try self.print("\"duration_ns\":{d}", .{stats.duration_ns});
+        try self.writeAll("}\n");
     }
 
     /// JUnit XML summary
     fn reportSummaryJUnit(self: *TestReporter, stats: *const TestStats) !void {
         const duration_s = @as(f64, @floatFromInt(stats.duration_ns)) / 1_000_000_000.0;
 
-        try self.writer.writeAll("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        try self.writer.print("<testsuite tests=\"{d}\" failures=\"{d}\" skipped=\"{d}\" time=\"{d:.3}\">\n", .{
+        try self.writeAll("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        try self.print("<testsuite tests=\"{d}\" failures=\"{d}\" skipped=\"{d}\" time=\"{d:.3}\">\n", .{
             stats.total,
             stats.failed,
             stats.skipped,
             duration_s,
         });
-        try self.writer.writeAll("</testsuite>\n");
+        try self.writeAll("</testsuite>\n");
     }
 
     /// TAP summary
     fn reportSummaryTAP(self: *TestReporter, stats: *const TestStats) !void {
-        try self.writer.print("1..{d}\n", .{stats.total});
+        try self.print("1..{d}\n", .{stats.total});
         if (stats.failed > 0) {
-            try self.writer.print("# Failed: {d}\n", .{stats.failed});
+            try self.print("# Failed: {d}\n", .{stats.failed});
         }
     }
 };

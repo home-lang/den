@@ -192,6 +192,45 @@ pub const Parser = struct {
                     redir_count += 1;
                     self.pos += 1;
                 },
+                .redirect_fd_dup => {
+                    // Parse token like "2>&1" or "3<&0"
+                    const token_value = self.tokens[self.pos].value;
+
+                    // Find the operator position (>& or <&)
+                    var op_pos: usize = 0;
+                    while (op_pos < token_value.len) : (op_pos += 1) {
+                        if (op_pos + 1 < token_value.len) {
+                            if ((token_value[op_pos] == '>' or token_value[op_pos] == '<') and
+                                token_value[op_pos + 1] == '&') {
+                                break;
+                            }
+                        }
+                    }
+
+                    // Extract source FD
+                    const source_fd_str = token_value[0..op_pos];
+                    const source_fd = std.fmt.parseInt(u32, source_fd_str, 10) catch {
+                        return error.InvalidFileDescriptor;
+                    };
+
+                    // Extract target FD (skip >& or <&)
+                    const target_fd_str = token_value[op_pos + 2 ..];
+                    const target_fd_int = if (std.mem.eql(u8, target_fd_str, "-"))
+                        @as(i32, -1) // Close FD
+                    else
+                        std.fmt.parseInt(i32, target_fd_str, 10) catch {
+                            return error.InvalidFileDescriptor;
+                        };
+
+                    if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
+                    redir_buffer[redir_count] = .{
+                        .kind = .fd_duplicate,
+                        .fd = source_fd,
+                        .target = try std.fmt.allocPrint(self.allocator, "{d}", .{target_fd_int}),
+                    };
+                    redir_count += 1;
+                    self.pos += 1;
+                },
                 else => break, // Stop at operators or other non-command tokens
             }
         }

@@ -36,7 +36,7 @@ pub const TestDiscovery = struct {
 
     /// Discover all test files in the project
     pub fn discoverTests(self: *TestDiscovery) !std.ArrayList(TestModule) {
-        var modules = std.ArrayList(TestModule).init(self.allocator);
+        var modules = std.ArrayList(TestModule){};
 
         for (self.test_dirs) |dir| {
             const full_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.root_dir, dir });
@@ -70,7 +70,7 @@ pub const TestDiscovery = struct {
                     defer self.allocator.free(module_name);
 
                     const module = try TestModule.init(self.allocator, module_name, file_path);
-                    try modules.append(module);
+                    try modules.append(self.allocator, module);
                 }
             }
         }
@@ -115,7 +115,7 @@ pub const TestDiscovery = struct {
 
     /// Get list of known test modules (from build.zig)
     pub fn getKnownTestModules(self: *TestDiscovery) !std.ArrayList(TestModule) {
-        var modules = std.ArrayList(TestModule).init(self.allocator);
+        var modules = std.ArrayList(TestModule){};
 
         // Hardcoded list of test modules we know about
         const known_tests = [_]struct { name: []const u8, path: []const u8 }{
@@ -139,7 +139,7 @@ pub const TestDiscovery = struct {
 
         for (known_tests) |test_info| {
             const module = try TestModule.init(self.allocator, test_info.name, test_info.path);
-            try modules.append(module);
+            try modules.append(self.allocator, module);
         }
 
         return modules;

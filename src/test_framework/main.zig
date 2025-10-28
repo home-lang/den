@@ -71,8 +71,14 @@ fn parseArgs(allocator: std.mem.Allocator) !struct {
 }
 
 fn printHelp() !void {
-    const stdout = std.io.getStdOut().writer();
-    try stdout.writeAll(
+    const stdout_file = std.fs.File{
+        .handle = std.posix.STDOUT_FILENO,
+    };
+    var buffer: [4096]u8 = undefined;
+    var writer = stdout_file.writer(&buffer);
+    defer writer.interface.flush() catch {};
+
+    try writer.interface.writeAll(
         \\Den Test Runner
         \\
         \\Usage: den-test [OPTIONS] [PATTERN]
