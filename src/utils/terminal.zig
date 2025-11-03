@@ -56,7 +56,7 @@ pub const Terminal = struct {
         raw.iflag.INPCK = false;
         raw.iflag.ISTRIP = false;
 
-        // Disable output processing
+        // Disable output processing for raw mode
         raw.oflag.OPOST = false;
 
         // Set character size to 8 bits
@@ -270,7 +270,10 @@ pub const LineEditor = struct {
 
     /// Read a line with editing support
     pub fn readLine(self: *LineEditor) !?[]u8 {
-        // Enable raw mode
+        // Display prompt BEFORE entering raw mode so ANSI codes work
+        try self.displayPrompt();
+
+        // Enable raw mode after displaying prompt
         try self.terminal.enableRawMode();
         errdefer self.terminal.disableRawMode() catch {};
 
@@ -282,9 +285,6 @@ pub const LineEditor = struct {
             self.allocator.free(saved);
             self.saved_line = null;
         }
-
-        // Display prompt
-        try self.displayPrompt();
 
         var escape_buffer: [8]u8 = undefined;
         var escape_len: usize = 0;
@@ -375,7 +375,29 @@ pub const LineEditor = struct {
     }
 
     fn displayPrompt(self: *LineEditor) !void {
+        // Debug logging
+        const log_file = std.fs.cwd().createFile("/tmp/den_debug.log", .{ .truncate = false }) catch return;
+        defer log_file.close();
+        try log_file.seekFromEnd(0);
+
+        var buf: [4096]u8 = undefined;
+        const log_msg = try std.fmt.bufPrint(&buf, "=== displayPrompt called ===\nPrompt string ({d} bytes): ", .{self.prompt.len});
+        _ = try log_file.write(log_msg);
+        _ = try log_file.write(self.prompt);
+        _ = try log_file.write("\nHex dump: ");
+
+        for (self.prompt) |byte| {
+            const hex = try std.fmt.bufPrint(buf[0..3], "{x:0>2} ", .{byte});
+            _ = try log_file.write(hex);
+        }
+        _ = try log_file.write("\n\n");
+
         try self.writeBytes(self.prompt);
+        // Flush stdout to ensure prompt is displayed before entering raw mode
+        if (builtin.os.tag != .windows) {
+            // Force flush by calling fsync on stdout
+            _ = posix.fsync(posix.STDOUT_FILENO) catch {};
+        }
     }
 
     fn insertChar(self: *LineEditor, char: u8) !void {
@@ -630,12 +652,36 @@ pub const LineEditor = struct {
 
     fn writeBytes(self: *LineEditor, bytes: []const u8) !void {
         _ = self;
+
+        // Debug logging
+        const log_file = std.fs.cwd().createFile("/tmp/den_debug.log", .{ .truncate = false }) catch {
+            // Continue even if logging fails
+            if (builtin.os.tag == .windows) {
+                const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.NoStdOut;
+                const stdout = std.fs.File{ .handle = handle };
+                _ = try stdout.write(bytes);
+            } else {
+                _ = try posix.write(posix.STDERR_FILENO, bytes);
+            }
+            return;
+        };
+        defer log_file.close();
+        log_file.seekFromEnd(0) catch {};
+
+        var buf: [256]u8 = undefined;
+        const log_msg = std.fmt.bufPrint(&buf, "writeBytes: {d} bytes to STDERR_FILENO\n", .{bytes.len}) catch return;
+        _ = log_file.write(log_msg) catch {};
+
         if (builtin.os.tag == .windows) {
             const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.NoStdOut;
             const stdout = std.fs.File{ .handle = handle };
-            _ = try stdout.write(bytes);
+            const written = try stdout.write(bytes);
+            const w_msg = std.fmt.bufPrint(&buf, "  -> wrote {d} bytes to Windows stdout\n", .{written}) catch return;
+            _ = log_file.write(w_msg) catch {};
         } else {
-            _ = try posix.write(posix.STDOUT_FILENO, bytes);
+            const written = try posix.write(posix.STDERR_FILENO, bytes);
+            const w_msg = std.fmt.bufPrint(&buf, "  -> wrote {d} bytes to stderr\n", .{written}) catch return;
+            _ = log_file.write(w_msg) catch {};
         }
     }
 

@@ -34,6 +34,12 @@ pub const GitInfo = struct {
     }
 };
 
+/// Ahead/behind counts
+pub const AheadBehind = struct {
+    ahead: usize,
+    behind: usize,
+};
+
 /// Git integration module
 pub const GitModule = struct {
     allocator: std.mem.Allocator,
@@ -78,7 +84,7 @@ pub const GitModule = struct {
         self.parseStatus(status, &info);
 
         // Get ahead/behind counts
-        const ahead_behind = self.getAheadBehind(cwd) catch .{ .ahead = 0, .behind = 0 };
+        const ahead_behind = self.getAheadBehind(cwd) catch AheadBehind{ .ahead = 0, .behind = 0 };
         info.ahead = ahead_behind.ahead;
         info.behind = ahead_behind.behind;
 
@@ -150,7 +156,7 @@ pub const GitModule = struct {
     }
 
     /// Get ahead/behind counts for current branch
-    fn getAheadBehind(self: *GitModule, cwd: []const u8) !struct { ahead: usize, behind: usize } {
+    fn getAheadBehind(self: *GitModule, cwd: []const u8) !AheadBehind {
         const result = try self.runGitCommand(cwd, &[_][]const u8{ "git", "rev-list", "--left-right", "--count", "HEAD...@{upstream}" });
         defer self.allocator.free(result);
 

@@ -71,6 +71,10 @@ pub const PromptContext = struct {
     node_version: ?[]const u8,
     bun_version: ?[]const u8,
     deno_version: ?[]const u8,
+    zig_version: ?[]const u8,
+
+    // Package info
+    package_version: ?[]const u8,
 
     // Time
     current_time: i64,
@@ -96,6 +100,8 @@ pub const PromptContext = struct {
             .node_version = null,
             .bun_version = null,
             .deno_version = null,
+            .zig_version = null,
+            .package_version = null,
             .current_time = std.time.timestamp(),
             .custom_data = std.StringHashMap([]const u8).init(allocator),
             .allocator = allocator,
@@ -130,8 +136,16 @@ pub const PromptTemplate = struct {
     transient_format: ?[]const u8,
 
     pub fn initDefault(allocator: std.mem.Allocator) !PromptTemplate {
+        // Modern detailed prompt format:
+        // ~/Code/den in bold cyan
+        // on 🌱 main in bold purple
+        // [📝] if dirty
+        // 📦 v0.1.0 in bold orange (package version)
+        // via 🐰 v1.3.1 in bold red (bun)
+        // via ↯ v0.15.1 in bold yellow (zig)
+        // > in green/red based on exit code
         return .{
-            .left_format = try allocator.dupe(u8, "{user}@{host} {path} {git}{symbol} "),
+            .left_format = try allocator.dupe(u8, "\x1b[1;96m{path}\x1b[0m{git}{pkg}{bun}{zig}\n{symbol}"),
             .right_format = null,
             .transient_enabled = false,
             .transient_format = null,

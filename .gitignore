@@ -13,3 +13,4 @@ docs/.vitepress/cache
 bin/krusty
 /.zig-cache
 /zig-out
+/pantry_modules

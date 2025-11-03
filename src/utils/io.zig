@@ -6,14 +6,32 @@ const builtin = @import("builtin");
 pub const IO = struct {
     /// Write string to stdout (cross-platform)
     pub fn print(comptime fmt: []const u8, args: anytype) !void {
-        // Use std.debug.print which is cross-platform, or alternatively std.io
-        std.debug.print(fmt, args);
+        // Use File API directly to write to stdout
+        const stdout_file = std.fs.File{ .handle = if (builtin.os.tag == .windows)
+            std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) catch return
+        else
+            posix.STDOUT_FILENO
+        };
+
+        // Format the string
+        var buf: [4096]u8 = undefined;
+        const formatted = try std.fmt.bufPrint(&buf, fmt, args);
+        try stdout_file.writeAll(formatted);
     }
 
     /// Write string to stderr (cross-platform)
     pub fn eprint(comptime fmt: []const u8, args: anytype) !void {
-        // std.debug.print writes to stderr and is cross-platform
-        std.debug.print(fmt, args);
+        // Use File API directly to write to stderr
+        const stderr_file = std.fs.File{ .handle = if (builtin.os.tag == .windows)
+            std.os.windows.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) catch return
+        else
+            posix.STDERR_FILENO
+        };
+
+        // Format the string
+        var buf: [4096]u8 = undefined;
+        const formatted = try std.fmt.bufPrint(&buf, fmt, args);
+        try stderr_file.writeAll(formatted);
     }
 
     /// Read a line from stdin (blocking)

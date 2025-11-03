@@ -48,6 +48,9 @@ pub const PlaceholderRegistry = struct {
         try self.register("duration", expandDuration);
         try self.register("exitcode", expandExitCode);
         try self.register("modules", expandModules);
+        try self.register("pkg", expandPackage);
+        try self.register("bun", expandBun);
+        try self.register("zig", expandZig);
     }
 };
 
@@ -75,16 +78,18 @@ fn expandGit(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u
         };
         defer parts.deinit(allocator);
 
-        // Branch name
-        try parts.appendSlice(allocator, "(");
+        // " on 🌱 main" in bold purple
+        try parts.appendSlice(allocator, " on \xF0\x9F\x8C\xB1 "); // " on 🌱 "
+        try parts.appendSlice(allocator, "\x1b[1;35m"); // Bold magenta
         try parts.appendSlice(allocator, branch);
+        try parts.appendSlice(allocator, "\x1b[0m"); // Reset
 
-        // Dirty indicator
+        // [📝] if dirty
         if (ctx.git_dirty) {
-            try parts.appendSlice(allocator, " *");
+            try parts.appendSlice(allocator, " [\xF0\x9F\x93\x9D]"); // [📝]
         }
 
-        // Ahead/behind
+        // Ahead/behind indicators
         if (ctx.git_ahead > 0) {
             const ahead_str = try std.fmt.allocPrint(allocator, " ↑{d}", .{ctx.git_ahead});
             defer allocator.free(ahead_str);
@@ -95,8 +100,6 @@ fn expandGit(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u
             defer allocator.free(behind_str);
             try parts.appendSlice(allocator, behind_str);
         }
-
-        try parts.appendSlice(allocator, ")");
 
         return try parts.toOwnedSlice(allocator);
     }
@@ -114,14 +117,17 @@ fn expandHost(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const 
 
 fn expandSymbol(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
     if (ctx.is_root) {
-        return try allocator.dupe(u8, "#");
+        // Red # for root
+        return try allocator.dupe(u8, "\x1b[91m#\x1b[0m");
     }
 
     if (ctx.last_exit_code != 0) {
-        return try allocator.dupe(u8, "✗");
+        // Red > for error
+        return try allocator.dupe(u8, "\x1b[91m>\x1b[0m");
     }
 
-    return try allocator.dupe(u8, "❯");
+    // Green > for success
+    return try allocator.dupe(u8, "\x1b[92m>\x1b[0m");
 }
 
 fn expandTime(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
@@ -192,6 +198,60 @@ fn expandModules(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]con
 
     if (has_any) {
         return try modules.toOwnedSlice(allocator);
+    }
+
+    return try allocator.dupe(u8, "");
+}
+
+fn expandPackage(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.package_version) |version| {
+        // 📦 v0.1.0 in bold orange
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
+
+        try result.appendSlice(" \xF0\x9F\x93\xA6 "); // 📦
+        try result.appendSlice("\x1b[1;33m"); // Bold yellow/orange (33 is yellow, closest to orange in basic colors)
+        try result.appendSlice("v");
+        try result.appendSlice(version);
+        try result.appendSlice("\x1b[0m"); // Reset
+
+        return try result.toOwnedSlice();
+    }
+
+    return try allocator.dupe(u8, "");
+}
+
+fn expandBun(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.bun_version) |version| {
+        // via 🐰 v1.3.1 in bold red
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
+
+        try result.appendSlice(" via \xF0\x9F\x90\xB0 "); // 🐰
+        try result.appendSlice("\x1b[1;31m"); // Bold red
+        try result.appendSlice("v");
+        try result.appendSlice(version);
+        try result.appendSlice("\x1b[0m"); // Reset
+
+        return try result.toOwnedSlice();
+    }
+
+    return try allocator.dupe(u8, "");
+}
+
+fn expandZig(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.zig_version) |version| {
+        // via ↯ v0.15.1 in bold yellow
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
+
+        try result.appendSlice(" via \xE2\x86\xAF "); // ↯
+        try result.appendSlice("\x1b[1;93m"); // Bold bright yellow
+        try result.appendSlice("v");
+        try result.appendSlice(version);
+        try result.appendSlice("\x1b[0m"); // Reset
+
+        return try result.toOwnedSlice();
     }
 
     return try allocator.dupe(u8, "");

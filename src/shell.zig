@@ -22,6 +22,12 @@ const concurrency = @import("utils/concurrency.zig");
 const config_loader = @import("config_loader.zig");
 const builtin = @import("builtin");
 const env_utils = @import("utils/env.zig");
+const PromptRenderer = @import("prompt/renderer.zig").PromptRenderer;
+const PromptContext = @import("prompt/types.zig").PromptContext;
+const PromptTemplate = @import("prompt/types.zig").PromptTemplate;
+const SystemInfo = @import("prompt/sysinfo.zig").SystemInfo;
+const GitModule = @import("prompt/git.zig").GitModule;
+const ansi = @import("utils/ansi.zig");
 
 /// Extract exit status from wait status (cross-platform)
 fn getExitStatus(status: u32) i32 {
@@ -101,6 +107,9 @@ pub const Shell = struct {
     // Interactive mode
     is_interactive: bool,
     line_editor: ?LineEditor,
+    // Prompt rendering
+    prompt_renderer: ?PromptRenderer,
+    prompt_context: PromptContext,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         // Load configuration from files and environment variables
@@ -162,6 +171,8 @@ pub const Shell = struct {
             .thread_pool = thread_pool,
             .is_interactive = false,
             .line_editor = null,
+            .prompt_renderer = null,
+            .prompt_context = PromptContext.init(allocator),
         };
 
         // Detect if stdin is a TTY
@@ -187,6 +198,12 @@ pub const Shell = struct {
     }
 
     pub fn deinit(self: *Shell) void {
+        // Clean up prompt renderer
+        if (self.prompt_renderer) |*renderer| {
+            renderer.deinit();
+        }
+        self.prompt_context.deinit();
+
         // Clean up line editor
         if (self.line_editor) |*editor| {
             editor.deinit();
@@ -362,12 +379,14 @@ pub const Shell = struct {
                         editor.setHistory(&self.history, &self.history_count);
                         editor.setCompletionFn(tabCompletionFn);
                         self.line_editor = editor;
-                        self.allocator.free(prompt_str);
+                        // Don't free prompt_str here - LineEditor needs it!
                     } else {
                         // Update prompt for next line
+                        const old_prompt = self.line_editor.?.prompt;
                         const prompt_str = try self.getPromptString();
                         self.line_editor.?.prompt = prompt_str;
-                        // Note: prompt_str will leak, but that's acceptable for a long-running REPL
+                        // Free the old prompt to avoid memory leak
+                        self.allocator.free(old_prompt);
                     }
 
                     // Use line editor for interactive input
@@ -427,12 +446,102 @@ pub const Shell = struct {
     }
 
     fn renderPrompt(self: *Shell) !void {
-        _ = self;
-        try IO.print("den> ", .{});
+        const prompt = try self.getPromptString();
+        defer self.allocator.free(prompt);
+        try IO.print("{s}", .{prompt});
     }
 
-    fn getPromptString(self: *const Shell) ![]u8 {
-        return try self.allocator.dupe(u8, "den> ");
+    fn getPromptString(self: *const Shell) ![]const u8 {
+        // Initialize prompt renderer if not already done
+        var self_mut = @constCast(self);
+        if (self_mut.prompt_renderer == null) {
+            const template = try PromptTemplate.initDefault(self.allocator);
+            self_mut.prompt_renderer = try PromptRenderer.init(self.allocator, template);
+        }
+
+        // Update prompt context with current information
+        try self_mut.updatePromptContext();
+
+        // Render prompt
+        const term_size = ansi.getTerminalSize() catch ansi.TerminalSize{ .rows = 24, .cols = 80 };
+        return try self_mut.prompt_renderer.?.render(&self_mut.prompt_context, term_size.cols);
+    }
+
+    fn updatePromptContext(self: *Shell) !void {
+        var sysinfo = SystemInfo.init(self.allocator);
+        var git_module = GitModule.init(self.allocator);
+
+        // Get current directory
+        const cwd = try sysinfo.getCurrentDir();
+        defer self.allocator.free(cwd);
+
+        // Get home directory
+        const home = try sysinfo.getHomeDir();
+
+        // Get username
+        const username = try sysinfo.getUsername();
+        defer self.allocator.free(username);
+
+        // Get hostname
+        const hostname = try sysinfo.getHostname();
+        defer self.allocator.free(hostname);
+
+        // Update context
+        self.prompt_context.current_dir = try self.allocator.dupe(u8, cwd);
+        if (self.prompt_context.home_dir) |old_home| {
+            self.allocator.free(old_home);
+        }
+        self.prompt_context.home_dir = home;
+
+        // Free old username/hostname if they exist
+        if (self.prompt_context.username.len > 0) {
+            self.allocator.free(self.prompt_context.username);
+        }
+        self.prompt_context.username = try self.allocator.dupe(u8, username);
+
+        if (self.prompt_context.hostname.len > 0) {
+            self.allocator.free(self.prompt_context.hostname);
+        }
+        self.prompt_context.hostname = try self.allocator.dupe(u8, hostname);
+
+        self.prompt_context.is_root = sysinfo.isRoot();
+        self.prompt_context.last_exit_code = self.last_exit_code;
+
+        // Get git info
+        var git_info = try git_module.getInfo(cwd);
+        defer git_info.deinit();
+
+        if (self.prompt_context.git_branch) |old_branch| {
+            self.allocator.free(old_branch);
+        }
+        self.prompt_context.git_branch = if (git_info.branch) |branch|
+            try self.allocator.dupe(u8, branch)
+        else
+            null;
+
+        self.prompt_context.git_dirty = git_info.is_dirty;
+        self.prompt_context.git_ahead = git_info.ahead;
+        self.prompt_context.git_behind = git_info.behind;
+
+        // Detect package version from package.json/package.jsonc/pantry.json/pantry.jsonc
+        if (self.prompt_context.package_version) |old_ver| {
+            self.allocator.free(old_ver);
+        }
+        self.prompt_context.package_version = self.detectPackageVersion(cwd) catch null;
+
+        // Detect bun version
+        if (self.prompt_context.bun_version) |old_ver| {
+            self.allocator.free(old_ver);
+        }
+        self.prompt_context.bun_version = self.detectBunVersion() catch null;
+
+        // Detect zig version
+        if (self.prompt_context.zig_version) |old_ver| {
+            self.allocator.free(old_ver);
+        }
+        self.prompt_context.zig_version = self.detectZigVersion() catch null;
+
+        self.prompt_context.current_time = std.time.timestamp();
     }
 
     pub fn executeCommand(self: *Shell, input: []const u8) !void {
@@ -2672,6 +2781,77 @@ pub const Shell = struct {
         const exit_code = try executor.executeChain(&chain);
         self.last_exit_code = exit_code;
     }
+
+    fn detectPackageVersion(self: *Shell, cwd: []const u8) ![]const u8 {
+        const filenames = [_][]const u8{ "package.json", "package.jsonc", "pantry.json", "pantry.jsonc" };
+
+        for (filenames) |filename| {
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
+
+            const file = std.fs.cwd().openFile(path, .{}) catch continue;
+            defer file.close();
+
+            const content = file.readToEndAlloc(self.allocator, 8192) catch continue;
+            defer self.allocator.free(content);
+
+            var i: usize = 0;
+            while (i < content.len) : (i += 1) {
+                if (std.mem.startsWith(u8, content[i..], "\"version\"")) {
+                    var j = i + 9;
+                    while (j < content.len and (content[j] == ' ' or content[j] == '\t' or content[j] == ':')) : (j += 1) {}
+                    if (j < content.len and content[j] == '"') {
+                        j += 1;
+                        const start = j;
+                        while (j < content.len and content[j] != '"') : (j += 1) {}
+                        if (j > start) {
+                            return self.allocator.dupe(u8, content[start..j]) catch continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectBunVersion(self: *Shell) ![]const u8 {
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "bun", "--version" },
+        }) catch return error.NotFound;
+
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        if (result.term.Exited == 0) {
+            const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+            if (trimmed.len > 0) {
+                return try self.allocator.dupe(u8, trimmed);
+            }
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectZigVersion(self: *Shell) ![]const u8 {
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "zig", "version" },
+        }) catch return error.NotFound;
+
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        if (result.term.Exited == 0) {
+            const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+            if (trimmed.len > 0) {
+                return try self.allocator.dupe(u8, trimmed);
+            }
+        }
+
+        return error.NotFound;
+    }
 };
 
 
@@ -2704,3 +2884,80 @@ test "shell initialization" {
 
     try std.testing.expect(!sh.running);
 }
+
+    fn detectPackageVersion(self: *Shell, cwd: []const u8) ![]const u8 {
+        // Try package.json, package.jsonc, pantry.json, pantry.jsonc
+        const filenames = [_][]const u8{ "package.json", "package.jsonc", "pantry.json", "pantry.jsonc" };
+
+        for (filenames) |filename| {
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
+
+            const file = std.fs.cwd().openFile(path, .{}) catch continue;
+            defer file.close();
+
+            // Read file (limit to 8KB for safety)
+            const content = file.readToEndAlloc(self.allocator, 8192) catch continue;
+            defer self.allocator.free(content);
+
+            // Simple JSON parsing to find "version": "x.y.z"
+            var i: usize = 0;
+            while (i < content.len) : (i += 1) {
+                if (std.mem.startsWith(u8, content[i..], "\"version\"")) {
+                    // Find the value
+                    var j = i + 9; // Skip "version"
+                    while (j < content.len and (content[j] == ' ' or content[j] == '\t' or content[j] == ':')) : (j += 1) {}
+                    if (j < content.len and content[j] == '"') {
+                        j += 1; // Skip opening quote
+                        const start = j;
+                        while (j < content.len and content[j] != '"') : (j += 1) {}
+                        if (j > start) {
+                            return self.allocator.dupe(u8, content[start..j]) catch continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectBunVersion(self: *Shell) ![]const u8 {
+        // Check if bun exists and get version
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "bun", "--version" },
+        }) catch return error.NotFound;
+
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        if (result.term.Exited == 0) {
+            const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+            if (trimmed.len > 0) {
+                return try self.allocator.dupe(u8, trimmed);
+            }
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectZigVersion(self: *Shell) ![]const u8 {
+        // Check if zig exists and get version  
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "zig", "version" },
+        }) catch return error.NotFound;
+
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        if (result.term.Exited == 0) {
+            const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+            if (trimmed.len > 0) {
+                return try self.allocator.dupe(u8, trimmed);
+            }
+        }
+
+        return error.NotFound;
+    }
