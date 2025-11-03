@@ -65,14 +65,17 @@ pub const Completion = struct {
         return result;
     }
 
-    /// Find file/directory completions
-    pub fn completeFile(self: *Completion, prefix: []const u8) ![][]const u8 {
+    /// Find directory-only completions
+    pub fn completeDirectory(self: *Completion, prefix: []const u8) ![][]const u8 {
         var matches_buffer: [256][]const u8 = undefined;
         var match_count: usize = 0;
 
         // Parse directory and filename parts
         const dir_path = std.fs.path.dirname(prefix) orelse ".";
         const file_prefix = std.fs.path.basename(prefix);
+
+        // Should we show hidden files?
+        const show_hidden = file_prefix.len > 0 and file_prefix[0] == '.';
 
         // Open directory
         var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch {
@@ -83,6 +86,61 @@ pub const Completion = struct {
         // Iterate directory
         var iter = dir.iterate();
         while (iter.next() catch null) |entry| {
+            // Only show directories
+            if (entry.kind != .directory) continue;
+
+            // Skip hidden files unless explicitly requested
+            if (!show_hidden and entry.name.len > 0 and entry.name[0] == '.') continue;
+
+            if (std.mem.startsWith(u8, entry.name, file_prefix)) {
+                if (match_count >= matches_buffer.len) break;
+
+                // Build full path with trailing slash
+                var path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+                const full_path = if (std.mem.eql(u8, dir_path, ".")) blk: {
+                    break :blk try std.fmt.bufPrint(&path_buf, "{s}/", .{entry.name});
+                } else blk: {
+                    break :blk try std.fmt.bufPrint(&path_buf, "{s}/{s}/", .{ dir_path, entry.name });
+                };
+
+                matches_buffer[match_count] = try self.allocator.dupe(u8, full_path);
+                match_count += 1;
+            }
+        }
+
+        // Sort matches
+        self.sortMatches(matches_buffer[0..match_count]);
+
+        // Allocate and return results
+        const result = try self.allocator.alloc([]const u8, match_count);
+        @memcpy(result, matches_buffer[0..match_count]);
+        return result;
+    }
+
+    /// Find file/directory completions
+    pub fn completeFile(self: *Completion, prefix: []const u8) ![][]const u8 {
+        var matches_buffer: [256][]const u8 = undefined;
+        var match_count: usize = 0;
+
+        // Parse directory and filename parts
+        const dir_path = std.fs.path.dirname(prefix) orelse ".";
+        const file_prefix = std.fs.path.basename(prefix);
+
+        // Should we show hidden files?
+        const show_hidden = file_prefix.len > 0 and file_prefix[0] == '.';
+
+        // Open directory
+        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch {
+            return &[_][]const u8{};
+        };
+        defer dir.close();
+
+        // Iterate directory
+        var iter = dir.iterate();
+        while (iter.next() catch null) |entry| {
+            // Skip hidden files unless explicitly requested
+            if (!show_hidden and entry.name.len > 0 and entry.name[0] == '.') continue;
+
             if (std.mem.startsWith(u8, entry.name, file_prefix)) {
                 if (match_count >= matches_buffer.len) break;
 

@@ -729,6 +729,35 @@ pub const LineEditor = struct {
             }
         } else {
             // Multiple completions - show them
+
+            // Find common prefix among all completions
+            const word_start = self.findWordStart();
+            const typed_prefix = self.buffer[word_start..self.cursor];
+            var common_len = if (completions.len > 0) completions[0].len else 0;
+
+            for (completions[1..]) |completion| {
+                var i: usize = 0;
+                while (i < common_len and i < completion.len) : (i += 1) {
+                    if (completions[0][i] != completion[i]) {
+                        common_len = i;
+                        break;
+                    }
+                }
+                common_len = @min(common_len, completion.len);
+            }
+
+            // Auto-complete with common prefix if longer than what was typed
+            if (common_len > typed_prefix.len and completions.len > 0) {
+                const to_insert = completions[0][typed_prefix.len..common_len];
+                for (to_insert) |c| {
+                    try self.insertChar(c);
+                }
+            }
+
+            // Save cursor position - we'll restore it after showing completions
+            try self.writeBytes("\x1b[s"); // Save cursor position (ESC 7 alternative: \x1b7)
+
+            // Move to a new line and show completions
             try self.writeBytes("\r\n");
 
             // Display completions in columns
@@ -740,22 +769,15 @@ pub const LineEditor = struct {
                 col += 1;
 
                 if (col >= max_cols or i == completions.len - 1) {
-                    try self.writeBytes("\r\n");
+                    if (i < completions.len - 1) {
+                        try self.writeBytes("\r\n");
+                    }
                     col = 0;
                 }
             }
 
-            // Redisplay prompt and current line
-            try self.displayPrompt();
-            try self.writeBytes(self.buffer[0..self.length]);
-
-            // Move cursor back to correct position
-            if (self.cursor < self.length) {
-                const diff = self.length - self.cursor;
-                for (0..diff) |_| {
-                    try self.writeBytes("\x1b[D");
-                }
-            }
+            // Restore cursor position to where it was before Tab
+            try self.writeBytes("\x1b[u"); // Restore cursor position (ESC 8 alternative: \x1b8)
         }
     }
 

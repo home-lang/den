@@ -3102,7 +3102,13 @@ pub const Shell = struct {
 fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
     var completion = Completion.init(allocator);
 
-    // Find the last word in the input
+    // Find the first word (command) and current word being completed
+    var first_word_end: usize = 0;
+    while (first_word_end < input.len) : (first_word_end += 1) {
+        const c = input[first_word_end];
+        if (c == ' ' or c == '\t') break;
+    }
+
     var word_start: usize = 0;
     for (input, 0..) |c, i| {
         if (c == ' ' or c == '\t' or c == '|' or c == '&' or c == ';') {
@@ -3110,10 +3116,16 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
         }
     }
     const prefix = input[word_start..];
+    const command = input[0..first_word_end];
 
     // If first word, try command completion
     if (word_start == 0) {
         return completion.completeCommand(prefix);
+    }
+
+    // For cd command, only complete directories
+    if (std.mem.eql(u8, command, "cd")) {
+        return completion.completeDirectory(prefix);
     }
 
     // Otherwise, try file completion
