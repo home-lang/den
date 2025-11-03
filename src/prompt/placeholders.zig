@@ -49,7 +49,12 @@ pub const PlaceholderRegistry = struct {
         try self.register("exitcode", expandExitCode);
         try self.register("modules", expandModules);
         try self.register("pkg", expandPackage);
+        try self.register("node", expandNode);
         try self.register("bun", expandBun);
+        try self.register("python", expandPython);
+        try self.register("ruby", expandRuby);
+        try self.register("go", expandGo);
+        try self.register("rust", expandRust);
         try self.register("zig", expandZig);
     }
 };
@@ -118,16 +123,16 @@ fn expandHost(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const 
 fn expandSymbol(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
     if (ctx.is_root) {
         // Red # for root
-        return try allocator.dupe(u8, "\x1b[91m#\x1b[0m");
+        return try allocator.dupe(u8, "\x1b[91m#\x1b[0m ");
     }
 
     if (ctx.last_exit_code != 0) {
-        // Red > for error
-        return try allocator.dupe(u8, "\x1b[91m>\x1b[0m");
+        // Red ❯ for error
+        return try allocator.dupe(u8, "\x1b[91m\xE2\x9D\xAF\x1b[0m ");
     }
 
-    // Green > for success
-    return try allocator.dupe(u8, "\x1b[92m>\x1b[0m");
+    // Green ❯ for success
+    return try allocator.dupe(u8, "\x1b[92m\xE2\x9D\xAF\x1b[0m ");
 }
 
 fn expandTime(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
@@ -206,16 +211,19 @@ fn expandModules(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]con
 fn expandPackage(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
     if (ctx.package_version) |version| {
         // 📦 v0.1.0 in bold orange
-        var result = std.ArrayList(u8).init(allocator);
-        defer result.deinit();
+        var result: std.ArrayList(u8) = .{
+            .items = &[_]u8{},
+            .capacity = 0,
+        };
+        defer result.deinit(allocator);
 
-        try result.appendSlice(" \xF0\x9F\x93\xA6 "); // 📦
-        try result.appendSlice("\x1b[1;33m"); // Bold yellow/orange (33 is yellow, closest to orange in basic colors)
-        try result.appendSlice("v");
-        try result.appendSlice(version);
-        try result.appendSlice("\x1b[0m"); // Reset
+        try result.appendSlice(allocator, " \xF0\x9F\x93\xA6 "); // 📦
+        try result.appendSlice(allocator, "\x1b[1;38;5;208m"); // Bold orange
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
 
-        return try result.toOwnedSlice();
+        return try result.toOwnedSlice(allocator);
     }
 
     return try allocator.dupe(u8, "");
@@ -224,16 +232,124 @@ fn expandPackage(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]con
 fn expandBun(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
     if (ctx.bun_version) |version| {
         // via 🐰 v1.3.1 in bold red
-        var result = std.ArrayList(u8).init(allocator);
-        defer result.deinit();
+        var result: std.ArrayList(u8) = .{
+            .items = &[_]u8{},
+            .capacity = 0,
+        };
+        defer result.deinit(allocator);
 
-        try result.appendSlice(" via \xF0\x9F\x90\xB0 "); // 🐰
-        try result.appendSlice("\x1b[1;31m"); // Bold red
-        try result.appendSlice("v");
-        try result.appendSlice(version);
-        try result.appendSlice("\x1b[0m"); // Reset
+        try result.appendSlice(allocator, " via \xF0\x9F\x90\xB0 "); // 🐰
+        try result.appendSlice(allocator, "\x1b[1;31m"); // Bold red
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
 
-        return try result.toOwnedSlice();
+        return try result.toOwnedSlice(allocator);
+    }
+
+    return try allocator.dupe(u8, "");
+}
+
+fn expandNode(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.node_version) |version| {
+        // via ⬢ v20.0.0 in bold green
+        var result: std.ArrayList(u8) = .{
+            .items = &[_]u8{},
+            .capacity = 0,
+        };
+        defer result.deinit(allocator);
+
+        try result.appendSlice(allocator, " via \xE2\xAC\xA2 "); // ⬢
+        try result.appendSlice(allocator, "\x1b[1;32m"); // Bold green
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+
+        return try result.toOwnedSlice(allocator);
+    }
+
+    return try allocator.dupe(u8, "");
+}
+
+fn expandPython(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.python_version) |version| {
+        // via 🐍 v3.12.0 in bold blue
+        var result: std.ArrayList(u8) = .{
+            .items = &[_]u8{},
+            .capacity = 0,
+        };
+        defer result.deinit(allocator);
+
+        try result.appendSlice(allocator, " via \xF0\x9F\x90\x8D "); // 🐍
+        try result.appendSlice(allocator, "\x1b[1;34m"); // Bold blue
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+
+        return try result.toOwnedSlice(allocator);
+    }
+
+    return try allocator.dupe(u8, "");
+}
+
+fn expandRuby(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.ruby_version) |version| {
+        // via 💎 v3.3.0 in bold red
+        var result: std.ArrayList(u8) = .{
+            .items = &[_]u8{},
+            .capacity = 0,
+        };
+        defer result.deinit(allocator);
+
+        try result.appendSlice(allocator, " via \xF0\x9F\x92\x8E "); // 💎
+        try result.appendSlice(allocator, "\x1b[1;31m"); // Bold red
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+
+        return try result.toOwnedSlice(allocator);
+    }
+
+    return try allocator.dupe(u8, "");
+}
+
+fn expandGo(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.go_version) |version| {
+        // via 🐹 v1.22.0 in bold cyan
+        var result: std.ArrayList(u8) = .{
+            .items = &[_]u8{},
+            .capacity = 0,
+        };
+        defer result.deinit(allocator);
+
+        try result.appendSlice(allocator, " via \xF0\x9F\x90\xB9 "); // 🐹
+        try result.appendSlice(allocator, "\x1b[1;36m"); // Bold cyan
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+
+        return try result.toOwnedSlice(allocator);
+    }
+
+    return try allocator.dupe(u8, "");
+}
+
+fn expandRust(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.rust_version) |version| {
+        // via 🦀 v1.75.0 in bold orange
+        var result: std.ArrayList(u8) = .{
+            .items = &[_]u8{},
+            .capacity = 0,
+        };
+        defer result.deinit(allocator);
+
+        try result.appendSlice(allocator, " via \xF0\x9F\xA6\x80 "); // 🦀
+        try result.appendSlice(allocator, "\x1b[1;33m"); // Bold yellow/orange
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+
+        return try result.toOwnedSlice(allocator);
     }
 
     return try allocator.dupe(u8, "");
@@ -242,16 +358,19 @@ fn expandBun(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u
 fn expandZig(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
     if (ctx.zig_version) |version| {
         // via ↯ v0.15.1 in bold yellow
-        var result = std.ArrayList(u8).init(allocator);
-        defer result.deinit();
+        var result: std.ArrayList(u8) = .{
+            .items = &[_]u8{},
+            .capacity = 0,
+        };
+        defer result.deinit(allocator);
 
-        try result.appendSlice(" via \xE2\x86\xAF "); // ↯
-        try result.appendSlice("\x1b[1;93m"); // Bold bright yellow
-        try result.appendSlice("v");
-        try result.appendSlice(version);
-        try result.appendSlice("\x1b[0m"); // Reset
+        try result.appendSlice(allocator, " via \xE2\x86\xAF "); // ↯
+        try result.appendSlice(allocator, "\x1b[1;93m"); // Bold bright yellow
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
 
-        return try result.toOwnedSlice();
+        return try result.toOwnedSlice(allocator);
     }
 
     return try allocator.dupe(u8, "");

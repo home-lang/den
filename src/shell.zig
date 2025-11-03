@@ -529,11 +529,58 @@ pub const Shell = struct {
         }
         self.prompt_context.package_version = self.detectPackageVersion(cwd) catch null;
 
-        // Detect bun version
-        if (self.prompt_context.bun_version) |old_ver| {
+        // Detect primary package manager (bun takes precedence over node)
+        const has_bun_lock = self.hasBunLock(cwd);
+
+        if (has_bun_lock) {
+            // Bun project - only show bun
+            if (self.prompt_context.bun_version) |old_ver| {
+                self.allocator.free(old_ver);
+            }
+            self.prompt_context.bun_version = self.detectBunVersion() catch null;
+
+            // Clear node version
+            if (self.prompt_context.node_version) |old_ver| {
+                self.allocator.free(old_ver);
+            }
+            self.prompt_context.node_version = null;
+        } else {
+            // Node project or no lock file - show node
+            if (self.prompt_context.node_version) |old_ver| {
+                self.allocator.free(old_ver);
+            }
+            self.prompt_context.node_version = self.detectNodeVersion() catch null;
+
+            // Clear bun version
+            if (self.prompt_context.bun_version) |old_ver| {
+                self.allocator.free(old_ver);
+            }
+            self.prompt_context.bun_version = null;
+        }
+
+        // Detect python version
+        if (self.prompt_context.python_version) |old_ver| {
             self.allocator.free(old_ver);
         }
-        self.prompt_context.bun_version = self.detectBunVersion() catch null;
+        self.prompt_context.python_version = self.detectPythonVersion() catch null;
+
+        // Detect ruby version
+        if (self.prompt_context.ruby_version) |old_ver| {
+            self.allocator.free(old_ver);
+        }
+        self.prompt_context.ruby_version = self.detectRubyVersion() catch null;
+
+        // Detect go version
+        if (self.prompt_context.go_version) |old_ver| {
+            self.allocator.free(old_ver);
+        }
+        self.prompt_context.go_version = self.detectGoVersion() catch null;
+
+        // Detect rust version
+        if (self.prompt_context.rust_version) |old_ver| {
+            self.allocator.free(old_ver);
+        }
+        self.prompt_context.rust_version = self.detectRustVersion() catch null;
 
         // Detect zig version
         if (self.prompt_context.zig_version) |old_ver| {
@@ -2782,6 +2829,23 @@ pub const Shell = struct {
         self.last_exit_code = exit_code;
     }
 
+    fn hasBunLock(self: *Shell, cwd: []const u8) bool {
+        _ = self;
+        const lock_files = [_][]const u8{ "bun.lockb", "bun.lock" };
+
+        for (lock_files) |filename| {
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
+
+            // Just check if file exists
+            const file = std.fs.cwd().openFile(path, .{}) catch continue;
+            file.close();
+            return true;
+        }
+
+        return false;
+    }
+
     fn detectPackageVersion(self: *Shell, cwd: []const u8) ![]const u8 {
         const filenames = [_][]const u8{ "package.json", "package.jsonc", "pantry.json", "pantry.jsonc" };
 
@@ -2824,11 +2888,185 @@ pub const Shell = struct {
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
 
-        if (result.term.Exited == 0) {
-            const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
-            if (trimmed.len > 0) {
-                return try self.allocator.dupe(u8, trimmed);
+        switch (result.term) {
+            .Exited => |code| {
+                if (code == 0) {
+                    const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+                    if (trimmed.len > 0) {
+                        return try self.allocator.dupe(u8, trimmed);
+                    }
+                }
+            },
+            else => {},
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectNodeVersion(self: *Shell) ![]const u8 {
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "node", "--version" },
+        }) catch return error.NotFound;
+
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        switch (result.term) {
+            .Exited => |code| {
+                if (code == 0) {
+                    var trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+                    // Remove leading 'v' if present
+                    if (trimmed.len > 0 and trimmed[0] == 'v') {
+                        trimmed = trimmed[1..];
+                    }
+                    if (trimmed.len > 0) {
+                        return try self.allocator.dupe(u8, trimmed);
+                    }
+                }
+            },
+            else => {},
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectPythonVersion(self: *Shell) ![]const u8 {
+        // Try python3 first, then python
+        const commands = [_][]const []const u8{
+            &[_][]const u8{ "python3", "--version" },
+            &[_][]const u8{ "python", "--version" },
+        };
+
+        for (commands) |cmd| {
+            const result = std.process.Child.run(.{
+                .allocator = self.allocator,
+                .argv = cmd,
+            }) catch continue;
+
+            defer self.allocator.free(result.stdout);
+            defer self.allocator.free(result.stderr);
+
+            switch (result.term) {
+                .Exited => |code| {
+                    if (code == 0) {
+                        // Python --version outputs to stdout: "Python 3.12.0"
+                        const output = if (result.stdout.len > 0) result.stdout else result.stderr;
+                        const trimmed = std.mem.trim(u8, output, &std.ascii.whitespace);
+
+                        // Parse "Python X.Y.Z" to get just "X.Y.Z"
+                        if (std.mem.startsWith(u8, trimmed, "Python ")) {
+                            const version = std.mem.trim(u8, trimmed[7..], &std.ascii.whitespace);
+                            if (version.len > 0) {
+                                return try self.allocator.dupe(u8, version);
+                            }
+                        }
+                    }
+                },
+                else => {},
             }
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectRubyVersion(self: *Shell) ![]const u8 {
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "ruby", "--version" },
+        }) catch return error.NotFound;
+
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        switch (result.term) {
+            .Exited => |code| {
+                if (code == 0) {
+                    const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+
+                    // Parse "ruby 3.3.0p0 (2023-12-25 revision ...)" to get just "3.3.0"
+                    if (std.mem.startsWith(u8, trimmed, "ruby ")) {
+                        const version_start: usize = 5;
+                        var version_end: usize = version_start;
+                        while (version_end < trimmed.len and trimmed[version_end] != ' ' and trimmed[version_end] != 'p') {
+                            version_end += 1;
+                        }
+                        if (version_end > version_start) {
+                            return try self.allocator.dupe(u8, trimmed[version_start..version_end]);
+                        }
+                    }
+                }
+            },
+            else => {},
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectGoVersion(self: *Shell) ![]const u8 {
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "go", "version" },
+        }) catch return error.NotFound;
+
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        switch (result.term) {
+            .Exited => |code| {
+                if (code == 0) {
+                    const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+
+                    // Parse "go version go1.22.0 darwin/arm64" to get just "1.22.0"
+                    if (std.mem.indexOf(u8, trimmed, "go")) |idx| {
+                        const after_go = trimmed[idx + 2..];
+                        if (std.mem.indexOf(u8, after_go, "go")) |version_idx| {
+                            const version_start = version_idx + 2;
+                            var version_end = version_start;
+                            while (version_end < after_go.len and after_go[version_end] != ' ') {
+                                version_end += 1;
+                            }
+                            if (version_end > version_start) {
+                                return try self.allocator.dupe(u8, after_go[version_start..version_end]);
+                            }
+                        }
+                    }
+                }
+            },
+            else => {},
+        }
+
+        return error.NotFound;
+    }
+
+    fn detectRustVersion(self: *Shell) ![]const u8 {
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "rustc", "--version" },
+        }) catch return error.NotFound;
+
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        switch (result.term) {
+            .Exited => |code| {
+                if (code == 0) {
+                    const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+
+                    // Parse "rustc 1.75.0 (82e1608df 2023-12-21)" to get just "1.75.0"
+                    if (std.mem.startsWith(u8, trimmed, "rustc ")) {
+                        const version_start: usize = 6;
+                        var version_end: usize = version_start;
+                        while (version_end < trimmed.len and trimmed[version_end] != ' ') {
+                            version_end += 1;
+                        }
+                        if (version_end > version_start) {
+                            return try self.allocator.dupe(u8, trimmed[version_start..version_end]);
+                        }
+                    }
+                }
+            },
+            else => {},
         }
 
         return error.NotFound;
@@ -2843,11 +3081,16 @@ pub const Shell = struct {
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
 
-        if (result.term.Exited == 0) {
-            const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
-            if (trimmed.len > 0) {
-                return try self.allocator.dupe(u8, trimmed);
-            }
+        switch (result.term) {
+            .Exited => |code| {
+                if (code == 0) {
+                    const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+                    if (trimmed.len > 0) {
+                        return try self.allocator.dupe(u8, trimmed);
+                    }
+                }
+            },
+            else => {},
         }
 
         return error.NotFound;

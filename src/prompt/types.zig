@@ -72,6 +72,10 @@ pub const PromptContext = struct {
     bun_version: ?[]const u8,
     deno_version: ?[]const u8,
     zig_version: ?[]const u8,
+    python_version: ?[]const u8,
+    ruby_version: ?[]const u8,
+    go_version: ?[]const u8,
+    rust_version: ?[]const u8,
 
     // Package info
     package_version: ?[]const u8,
@@ -101,6 +105,10 @@ pub const PromptContext = struct {
             .bun_version = null,
             .deno_version = null,
             .zig_version = null,
+            .python_version = null,
+            .ruby_version = null,
+            .go_version = null,
+            .rust_version = null,
             .package_version = null,
             .current_time = std.time.timestamp(),
             .custom_data = std.StringHashMap([]const u8).init(allocator),
@@ -141,11 +149,16 @@ pub const PromptTemplate = struct {
         // on 🌱 main in bold purple
         // [📝] if dirty
         // 📦 v0.1.0 in bold orange (package version)
+        // via ⬢ v20.0.0 in bold green (node)
         // via 🐰 v1.3.1 in bold red (bun)
+        // via 🐍 v3.12.0 in bold blue (python)
+        // via 💎 v3.3.0 in bold red (ruby)
+        // via 🐹 v1.22.0 in bold cyan (go)
+        // via 🦀 v1.75.0 in bold orange (rust)
         // via ↯ v0.15.1 in bold yellow (zig)
         // > in green/red based on exit code
         return .{
-            .left_format = try allocator.dupe(u8, "\x1b[1;96m{path}\x1b[0m{git}{pkg}{bun}{zig}\n{symbol}"),
+            .left_format = try allocator.dupe(u8, "\x1b[1;96m{path}\x1b[0m{git}{pkg}{node}{bun}{python}{ruby}{go}{rust}{zig}\n{symbol}"),
             .right_format = null,
             .transient_enabled = false,
             .transient_format = null,
