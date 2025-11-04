@@ -385,7 +385,7 @@ pub fn build(b: *std.Build) void {
 
     // Test utilities tests
     const test_utils_test_module = b.createModule(.{
-        .root_source_file = b.path("src/test_utils.zig"),
+        .root_source_file = b.path("tests/test_utils.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -445,7 +445,7 @@ pub fn build(b: *std.Build) void {
 
     // Integration tests
     const integration_e2e_test_module = b.createModule(.{
-        .root_source_file = b.path("src/test_integration.zig"),
+        .root_source_file = b.path("tests/test_integration.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -460,7 +460,7 @@ pub fn build(b: *std.Build) void {
 
     // E2E tests
     const e2e_test_module = b.createModule(.{
-        .root_source_file = b.path("src/test_e2e.zig"),
+        .root_source_file = b.path("tests/test_e2e.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -474,11 +474,18 @@ pub fn build(b: *std.Build) void {
     e2e_test_step.dependOn(&run_e2e_tests.step);
 
     // CLI tests
-    const cli_test_module = b.createModule(.{
-        .root_source_file = b.path("src/test_cli.zig"),
+    const cli_module = b.createModule(.{
+        .root_source_file = b.path("src/cli.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    const cli_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_cli.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cli_test_module.addImport("cli", cli_module);
 
     const cli_tests = b.addTest(.{
         .root_module = cli_test_module,

@@ -289,8 +289,10 @@ test "Integration: glob expansion" {
     defer fixture.deinit();
 
     // Create test files
-    _ = try fixture.temp_dir.createFile("test1.txt", "content1");
-    _ = try fixture.temp_dir.createFile("test2.txt", "content2");
+    const file1 = try fixture.temp_dir.createFile("test1.txt", "content1");
+    defer allocator.free(file1);
+    const file2 = try fixture.temp_dir.createFile("test2.txt", "content2");
+    defer allocator.free(file2);
 
     const cmd = try std.fmt.allocPrint(allocator, "ls {s}/*.txt", .{fixture.temp_dir.path});
     defer allocator.free(cmd);

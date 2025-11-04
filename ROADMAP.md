@@ -1994,12 +1994,12 @@ den/
 - [ ] Add input handling fuzzing
 
 ### 19.7 Test Utilities ✅ **COMPLETE**
-- [x] Port test helpers (from `src/test.ts`) ✅ **`src/test_utils.zig`**
+- [x] Port test helpers (from `src/test.ts`) ✅ **`tests/test_utils.zig`**
 - [x] Create shell mock/fixture utilities
 - [x] Create temp file/directory utilities
 - [x] Create process mock utilities
 
-**Implementation**: `src/test_utils.zig` (400+ lines)
+**Implementation**: `tests/test_utils.zig` (400+ lines)
 - **TempDir**: Temporary directory management with automatic cleanup
   - Unique directory creation
   - File and directory creation helpers
@@ -2066,7 +2066,7 @@ den/
 - Installation and setup commands
 - Full help system with examples
 
-**Testing:** `src/test_cli.zig` (76 lines)
+**Testing:** `tests/test_cli.zig` (76 lines)
 - CLI unit tests integrated into build system
 - All tests passing with `zig build test-cli`
 
@@ -2136,7 +2136,7 @@ All TODO comments in the codebase have been successfully implemented and tested.
    - Implemented `fd_close` using `close()`
    - Error handling for invalid fds
 
-5. **Environment Variable Passing** (`src/test_utils.zig:230`) ✅
+5. **Environment Variable Passing** (`tests/test_utils.zig:230`) ✅
    - Fixed EnvMap lifetime management
    - Proper integration with Child process
    - Re-enabled previously commented test

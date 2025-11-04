@@ -1,5 +1,5 @@
 const std = @import("std");
-const cli = @import("cli.zig");
+const cli = @import("cli");
 
 // CLI Tests
 // Tests for command-line interface argument parsing and subcommand handling
