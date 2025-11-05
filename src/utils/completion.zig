@@ -71,8 +71,21 @@ pub const Completion = struct {
         var match_count: usize = 0;
 
         // Parse directory and filename parts
-        const dir_path = std.fs.path.dirname(prefix) orelse ".";
-        const file_prefix = std.fs.path.basename(prefix);
+        // If prefix ends with '/', we want to list contents of that directory
+        const dir_path = if (prefix.len > 0 and prefix[prefix.len - 1] == '/') blk: {
+            // Remove trailing slash for dirname
+            const without_slash = prefix[0 .. prefix.len - 1];
+            break :blk if (without_slash.len > 0) without_slash else ".";
+        } else blk: {
+            break :blk std.fs.path.dirname(prefix) orelse ".";
+        };
+
+        const file_prefix = if (prefix.len > 0 and prefix[prefix.len - 1] == '/') blk: {
+            // If ends with slash, we're completing everything in that dir
+            break :blk "";
+        } else blk: {
+            break :blk std.fs.path.basename(prefix);
+        };
 
         // Should we show hidden files?
         const show_hidden = file_prefix.len > 0 and file_prefix[0] == '.';
@@ -95,15 +108,11 @@ pub const Completion = struct {
             if (std.mem.startsWith(u8, entry.name, file_prefix)) {
                 if (match_count >= matches_buffer.len) break;
 
-                // Build full path with trailing slash
+                // For display and completion, just use the entry name with trailing slash
                 var path_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-                const full_path = if (std.mem.eql(u8, dir_path, ".")) blk: {
-                    break :blk try std.fmt.bufPrint(&path_buf, "{s}/", .{entry.name});
-                } else blk: {
-                    break :blk try std.fmt.bufPrint(&path_buf, "{s}/{s}/", .{ dir_path, entry.name });
-                };
+                const display_name = try std.fmt.bufPrint(&path_buf, "{s}/", .{entry.name});
 
-                matches_buffer[match_count] = try self.allocator.dupe(u8, full_path);
+                matches_buffer[match_count] = try self.allocator.dupe(u8, display_name);
                 match_count += 1;
             }
         }
