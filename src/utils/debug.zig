@@ -88,29 +88,27 @@ pub fn inspect(comptime name: []const u8, value: anytype) void {
 
     // Print additional type information
     switch (type_info) {
-        .Pointer => |ptr| {
-            print("  -> Pointer (size: {s}, const: {}, volatile: {})", .{
+        .pointer => |ptr| {
+            print("  -> Pointer (size: {s}, is_const: {})", .{
                 @tagName(ptr.size),
                 ptr.is_const,
-                ptr.is_volatile,
             });
         },
-        .Array => |arr| {
+        .array => |arr| {
             print("  -> Array (len: {d}, child: {s})", .{
                 arr.len,
                 @typeName(arr.child),
             });
         },
-        .Struct => |s| {
-            print("  -> Struct (fields: {d}, layout: {s})", .{
+        .@"struct" => |s| {
+            print("  -> Struct (fields: {d})", .{
                 s.fields.len,
-                @tagName(s.layout),
             });
         },
-        .Optional => |opt| {
+        .optional => |opt| {
             print("  -> Optional (child: {s})", .{@typeName(opt.child)});
         },
-        .ErrorUnion => |eu| {
+        .error_union => |eu| {
             print("  -> ErrorUnion (error: {s}, payload: {s})", .{
                 @typeName(eu.error_set),
                 @typeName(eu.payload),
@@ -215,11 +213,12 @@ pub const DebugAllocator = struct {
                 .alloc = alloc,
                 .resize = resize,
                 .free = free,
+                .remap = remap,
             },
         };
     }
 
-    fn alloc(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+    fn alloc(ctx: *anyopaque, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self: *DebugAllocator = @ptrCast(@alignCast(ctx));
         const result = self.parent_allocator.rawAlloc(len, ptr_align, ret_addr);
         if (result) |ptr| {
@@ -231,7 +230,7 @@ pub const DebugAllocator = struct {
         return result;
     }
 
-    fn resize(ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+    fn resize(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
         const self: *DebugAllocator = @ptrCast(@alignCast(ctx));
         const result = self.parent_allocator.rawResize(buf, buf_align, new_len, ret_addr);
         if (result) {
@@ -251,12 +250,17 @@ pub const DebugAllocator = struct {
         return result;
     }
 
-    fn free(ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+    fn free(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
         const self: *DebugAllocator = @ptrCast(@alignCast(ctx));
         self.tracker.track_free(buf.len);
         if (enabled) {
             print("FREE: {d} bytes at 0x{x}", .{ buf.len, @intFromPtr(buf.ptr) });
         }
         self.parent_allocator.rawFree(buf, buf_align, ret_addr);
+    }
+
+    fn remap(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *DebugAllocator = @ptrCast(@alignCast(ctx));
+        return self.parent_allocator.vtable.remap(self.parent_allocator.ptr, buf, buf_align, new_len, ret_addr);
     }
 };

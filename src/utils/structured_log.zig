@@ -14,12 +14,8 @@ pub const Field = union(enum) {
 
     pub fn format(
         self: Field,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        _ = fmt;
-        _ = options;
         switch (self) {
             .string => |s| try writer.print("\"{s}\"", .{s}),
             .int => |i| try writer.print("{d}", .{i}),
@@ -126,7 +122,7 @@ pub const StructuredLogger = struct {
                 if (!first) {
                     writer.writeAll(", ") catch return;
                 }
-                writer.print("{s}={}", .{ entry.key_ptr.*, entry.value_ptr.* }) catch return;
+                writer.print("{s}={f}", .{ entry.key_ptr.*, entry.value_ptr.* }) catch return;
                 first = false;
             }
             writer.writeAll("}") catch return;

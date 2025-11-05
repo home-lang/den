@@ -5,7 +5,7 @@ const stack_trace = @import("stack_trace.zig");
 /// Assertion failure handler
 fn assertionFailed(
     comptime src: std.builtin.SourceLocation,
-    message: []const u8,
+    comptime message: []const u8,
     args: anytype,
 ) noreturn {
     var buf: [4096]u8 = undefined;

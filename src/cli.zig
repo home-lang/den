@@ -1,6 +1,7 @@
 const std = @import("std");
 const shell = @import("shell.zig");
 const Completion = @import("utils/completion.zig").Completion;
+const ShellCompletion = @import("shell_completion.zig").ShellCompletion;
 const env_utils = @import("utils/env.zig");
 
 /// Den Shell CLI
@@ -13,6 +14,7 @@ pub const Command = enum {
     shell, // Explicit: start interactive shell
     exec, // Execute single command
     complete, // Get completions (JSON output)
+    completion, // Generate shell completion script
     dev_setup, // Create development shim
     setup, // Install wrapper script
     set_shell, // Set as default shell
@@ -82,6 +84,12 @@ pub fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
             .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
             .allocator = allocator,
         };
+    } else if (std.mem.eql(u8, first_arg, "completion")) {
+        return CliArgs{
+            .command = .completion,
+            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .allocator = allocator,
+        };
     } else if (std.mem.eql(u8, first_arg, "dev-setup")) {
         return CliArgs{
             .command = .dev_setup,
@@ -134,6 +142,7 @@ pub fn execute(cli_args: CliArgs) !void {
         .interactive, .shell => try runInteractiveShell(cli_args.allocator),
         .exec => try execCommand(cli_args.allocator, cli_args.args),
         .complete => try getCompletions(cli_args.allocator, cli_args.args),
+        .completion => try generateCompletion(cli_args.allocator, cli_args.args),
         .dev_setup => try devSetup(cli_args.allocator),
         .setup => try setup(cli_args.allocator),
         .set_shell => try setShell(cli_args.allocator),
@@ -220,6 +229,36 @@ fn getCompletions(allocator: std.mem.Allocator, args: []const []const u8) !void 
         std.debug.print("\"{s}\"", .{completion});
     }
     std.debug.print("]\n", .{});
+}
+
+/// Generate shell completion script
+fn generateCompletion(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0) {
+        std.debug.print("Error: 'completion' requires shell type argument\n", .{});
+        std.debug.print("Usage: den completion <bash|zsh|fish>\n", .{});
+        std.debug.print("\nExamples:\n", .{});
+        std.debug.print("  den completion bash > ~/.local/share/bash-completion/completions/den\n", .{});
+        std.debug.print("  den completion zsh > ~/.zsh/completions/_den\n", .{});
+        std.debug.print("  den completion fish > ~/.config/fish/completions/den.fish\n", .{});
+        return error.MissingShellType;
+    }
+
+    const shell_type = args[0];
+
+    // Validate shell type
+    if (!std.mem.eql(u8, shell_type, "bash") and
+        !std.mem.eql(u8, shell_type, "zsh") and
+        !std.mem.eql(u8, shell_type, "fish"))
+    {
+        std.debug.print("Error: Unsupported shell type '{s}'\n", .{shell_type});
+        std.debug.print("Supported shells: bash, zsh, fish\n", .{});
+        return error.UnsupportedShell;
+    }
+
+    var comp = ShellCompletion.init(allocator);
+    const script = try comp.generate(shell_type);
+
+    std.debug.print("{s}", .{script});
 }
 
 /// Create development shim
@@ -377,27 +416,34 @@ fn showHelp() !void {
         \\Den Shell - A modern shell written in Zig
         \\
         \\Usage:
-        \\  den                    Start interactive shell (default)
-        \\  den shell              Start interactive shell (explicit)
-        \\  den exec <cmd>         Execute single command
-        \\  den complete <input>   Get completions (JSON output)
-        \\  den dev-setup          Create development shim
-        \\  den setup              Install wrapper script
-        \\  den set-shell          Set as default shell
-        \\  den uninstall          Remove wrapper
-        \\  den version            Show version
-        \\  den help               Show this help
-        \\  den <script>           Execute script file
+        \\  den                       Start interactive shell (default)
+        \\  den shell                 Start interactive shell (explicit)
+        \\  den exec <cmd>            Execute single command
+        \\  den complete <input>      Get completions (JSON output)
+        \\  den completion <shell>    Generate shell completion script
+        \\  den dev-setup             Create development shim
+        \\  den setup                 Install wrapper script
+        \\  den set-shell             Set as default shell
+        \\  den uninstall             Remove wrapper
+        \\  den version               Show version
+        \\  den help                  Show this help
+        \\  den <script>              Execute script file
         \\
         \\Options:
-        \\  -h, --help             Show help
-        \\  -v, --version          Show version
+        \\  -h, --help                Show help
+        \\  -v, --version             Show version
+        \\
+        \\Completion:
+        \\  den completion bash       Generate Bash completion script
+        \\  den completion zsh        Generate Zsh completion script
+        \\  den completion fish       Generate Fish completion script
         \\
         \\Examples:
-        \\  den                              # Start interactive shell
-        \\  den exec echo "Hello, World!"    # Execute command
-        \\  den script.sh                    # Run script file
-        \\  den setup                        # Install Den
+        \\  den                                      # Start interactive shell
+        \\  den exec echo "Hello, World!"            # Execute command
+        \\  den script.sh                            # Run script file
+        \\  den setup                                # Install Den
+        \\  den completion bash > /etc/bash_completion.d/den   # Install Bash completion
         \\
         \\For more information, visit: https://github.com/stackblitz/den
         \\

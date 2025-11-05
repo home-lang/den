@@ -82,14 +82,14 @@ pub fn main() !void {
 
     // Basic timer
     var t = timer.Timer.start("operation");
-    std.time.sleep(10 * std.time.ns_per_ms); // Sleep for 10ms
+    std.Thread.sleep(10 * std.time.ns_per_ms); // Sleep for 10ms
     t.print();
 
     // Scoped timer
     {
         var scoped = timer.ScopedTimer.init("scoped_operation");
         defer scoped.deinit();
-        std.time.sleep(5 * std.time.ns_per_ms); // Sleep for 5ms
+        std.Thread.sleep(5 * std.time.ns_per_ms); // Sleep for 5ms
     }
 
     // Timing statistics
@@ -100,7 +100,7 @@ pub fn main() !void {
     while (i < 10) : (i += 1) {
         var operation_timer = timer.Timer.start("iteration");
         // Simulate work
-        std.time.sleep(std.time.ns_per_ms * (1 + i % 3));
+        std.Thread.sleep(std.time.ns_per_ms * (1 + i % 3));
         try stats.addSample(operation_timer.elapsed());
     }
     stats.print();
@@ -112,11 +112,11 @@ pub fn main() !void {
     i = 0;
     while (i < 5) : (i += 1) {
         var prof_timer = profiler.startTimer("task_a");
-        std.time.sleep(std.time.ns_per_ms * 2);
+        std.Thread.sleep(std.time.ns_per_ms * 2);
         try profiler.recordTiming("task_a", prof_timer.elapsed());
 
         prof_timer = profiler.startTimer("task_b");
-        std.time.sleep(std.time.ns_per_ms * 3);
+        std.Thread.sleep(std.time.ns_per_ms * 3);
         try profiler.recordTiming("task_b", prof_timer.elapsed());
     }
 

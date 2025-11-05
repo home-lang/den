@@ -31,7 +31,7 @@ pub const StackTrace = struct {
     /// Capture the current stack trace
     pub fn capture(self: *StackTrace, skip_frames: usize) void {
         var stack = std.builtin.StackTrace{
-            .instruction_addresses = self.addresses.ptr,
+            .instruction_addresses = self.addresses[0..],
             .index = 0,
         };
 

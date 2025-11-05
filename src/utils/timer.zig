@@ -106,17 +106,17 @@ pub const TimingStats = struct {
     pub fn init(allocator: std.mem.Allocator, name: []const u8) TimingStats {
         return .{
             .name = name,
-            .samples = std.ArrayList(u64).init(allocator),
+            .samples = std.ArrayList(u64){},
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *TimingStats) void {
-        self.samples.deinit();
+        self.samples.deinit(self.allocator);
     }
 
     pub fn addSample(self: *TimingStats, ns: u64) !void {
-        try self.samples.append(ns);
+        try self.samples.append(self.allocator, ns);
     }
 
     pub fn mean(self: *const TimingStats) f64 {
@@ -178,7 +178,7 @@ pub const TimingStats = struct {
         return @sqrt(variance);
     }
 
-    pub fn print(self: *const TimingStats) void {
+    pub fn print(self: *TimingStats) void {
         if (self.samples.items.len == 0) {
             printStderr("No timing data collected\n");
             return;
