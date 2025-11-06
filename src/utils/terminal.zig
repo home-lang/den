@@ -796,17 +796,34 @@ pub const LineEditor = struct {
         const completions = self.completion_list orelse return;
         const completion = completions[self.completion_index];
 
-        // The completion is just the basename (e.g., "Documents/")
-        // We want to replace from completion_word_start with just this completion
+        // Get the current word being completed
+        const current_word = self.buffer[self.completion_word_start..self.cursor];
+
+        // Find the path prefix (everything up to and including the last /)
+        const path_prefix = blk: {
+            if (std.mem.lastIndexOfScalar(u8, current_word, '/')) |last_slash| {
+                // Keep everything up to and including the last /
+                break :blk current_word[0 .. last_slash + 1];
+            } else {
+                // No path, just completing in current dir
+                break :blk "";
+            }
+        };
 
         // Save the old length for terminal cursor positioning
         const old_word_len = self.cursor - self.completion_word_start;
 
-        // Update buffer: replace from word_start with the completion
+        // Update buffer: replace from word_start with path_prefix + completion
         self.cursor = self.completion_word_start;
         self.length = self.completion_word_start;
 
-        // Just insert the completion (which is already a full basename like "Documents/")
+        // Insert path prefix (e.g., "Documents/Projects/")
+        for (path_prefix) |c| {
+            self.buffer[self.length] = c;
+            self.length += 1;
+        }
+
+        // Insert the completion basename (e.g., "better-dx/")
         for (completion) |c| {
             self.buffer[self.length] = c;
             self.length += 1;
@@ -825,7 +842,8 @@ pub const LineEditor = struct {
         // Clear to end of line
         try self.writeBytes("\x1b[K");
 
-        // Write the new completion
+        // Write the new text (path_prefix + completion)
+        try self.writeBytes(path_prefix);
         try self.writeBytes(completion);
     }
 
