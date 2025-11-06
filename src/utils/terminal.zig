@@ -711,21 +711,29 @@ pub const LineEditor = struct {
             // Single completion - insert it
             const completion = completions[0];
 
-            // Find the common prefix already typed
+            // Find the word being completed
             const word_start = self.findWordStart();
-            const typed_prefix = self.buffer[word_start..self.cursor];
+            const typed_word = self.buffer[word_start..self.cursor];
 
-            // Find what we need to add (skip the part already typed)
-            if (completion.len >= typed_prefix.len) {
-                const to_insert = completion[typed_prefix.len..];
+            // Find just the basename part (after last /)
+            const typed_basename = blk: {
+                if (std.mem.lastIndexOfScalar(u8, typed_word, '/')) |last_slash| {
+                    break :blk typed_word[last_slash + 1 ..];
+                } else {
+                    break :blk typed_word;
+                }
+            };
+
+            // Insert the rest of the completion after the typed basename
+            if (completion.len >= typed_basename.len) {
+                const to_insert = completion[typed_basename.len..];
 
                 // Insert the remaining part
                 for (to_insert) |c| {
                     try self.insertChar(c);
                 }
 
-                // Add a space after completion for convenience
-                try self.insertChar(' ');
+                // Don't add space - let user continue typing path
             }
         } else {
             // Multiple completions - show them
