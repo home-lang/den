@@ -251,6 +251,10 @@ pub const LineEditor = struct {
     history_index: ?usize = null,
     saved_line: ?[]const u8 = null, // Save current line when browsing history
     completion_fn: ?CompletionFn = null, // Callback for tab completion
+    // Completion cycling state
+    completion_list: ?[][]const u8 = null,
+    completion_index: usize = 0,
+    completion_word_start: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator, prompt: []const u8) LineEditor {
         return .{
@@ -348,23 +352,46 @@ pub const LineEditor = struct {
                     // Otherwise, delete character under cursor
                     try self.deleteChar();
                 },
-                0x01 => try self.moveCursorHome(), // Ctrl+A
-                0x05 => try self.moveCursorEnd(), // Ctrl+E
-                0x02 => try self.moveCursorLeft(), // Ctrl+B
-                0x06 => try self.moveCursorRight(), // Ctrl+F
-                0x0B => try self.killToEnd(), // Ctrl+K
-                0x15 => try self.killToStart(), // Ctrl+U
-                0x17 => try self.deleteWord(), // Ctrl+W
+                0x01 => {
+                    self.clearCompletionState();
+                    try self.moveCursorHome(); // Ctrl+A
+                },
+                0x05 => {
+                    self.clearCompletionState();
+                    try self.moveCursorEnd(); // Ctrl+E
+                },
+                0x02 => {
+                    self.clearCompletionState();
+                    try self.moveCursorLeft(); // Ctrl+B
+                },
+                0x06 => {
+                    self.clearCompletionState();
+                    try self.moveCursorRight(); // Ctrl+F
+                },
+                0x0B => {
+                    self.clearCompletionState();
+                    try self.killToEnd(); // Ctrl+K
+                },
+                0x15 => {
+                    self.clearCompletionState();
+                    try self.killToStart(); // Ctrl+U
+                },
+                0x17 => {
+                    self.clearCompletionState();
+                    try self.deleteWord(); // Ctrl+W
+                },
                 0x09 => {
                     // Tab - handle completion
                     try self.handleTabCompletion();
                 },
                 0x7F, 0x08 => {
                     // Backspace (DEL or BS)
+                    self.clearCompletionState();
                     try self.backspace();
                 },
                 0x20...0x7E => {
                     // Printable ASCII
+                    self.clearCompletionState();
                     try self.insertChar(byte);
                 },
                 else => {
@@ -691,102 +718,171 @@ pub const LineEditor = struct {
 
         // Get current line up to cursor
         const input = self.buffer[0..self.cursor];
+        const word_start = self.findWordStart();
 
-        // Get completions
-        const completions = try completion_fn(input, self.allocator);
-        defer {
-            for (completions) |c| {
-                self.allocator.free(c);
-            }
-            self.allocator.free(completions);
-        }
-
-        if (completions.len == 0) {
-            // No completions, beep
-            try self.writeBytes("\x07");
-            return;
-        }
-
-        if (completions.len == 1) {
-            // Single completion - insert it
-            const completion = completions[0];
-
-            // Find the word being completed
-            const word_start = self.findWordStart();
-            const typed_word = self.buffer[word_start..self.cursor];
-
-            // Find just the basename part (after last /)
-            const typed_basename = blk: {
-                if (std.mem.lastIndexOfScalar(u8, typed_word, '/')) |last_slash| {
-                    break :blk typed_word[last_slash + 1 ..];
-                } else {
-                    break :blk typed_word;
+        // Check if we're cycling through existing completions
+        const is_cycling = blk: {
+            if (self.completion_list) |_| {
+                // Check if the word start position is the same
+                if (self.completion_word_start == word_start) {
+                    break :blk true;
                 }
-            };
-
-            // Insert the rest of the completion after the typed basename
-            if (completion.len >= typed_basename.len) {
-                const to_insert = completion[typed_basename.len..];
-
-                // Insert the remaining part
-                for (to_insert) |c| {
-                    try self.insertChar(c);
-                }
-
-                // Don't add space - let user continue typing path
             }
+            break :blk false;
+        };
+
+        if (is_cycling) {
+            // Cycle to next completion
+            self.completion_index = (self.completion_index + 1) % self.completion_list.?.len;
+            try self.applyCurrentCompletion();
         } else {
-            // Multiple completions - show them
+            // Clear old state
+            self.clearCompletionState();
 
-            // Find common prefix among all completions
-            const word_start = self.findWordStart();
-            const typed_prefix = self.buffer[word_start..self.cursor];
-            var common_len = if (completions.len > 0) completions[0].len else 0;
+            // Get new completions
+            const completions = try completion_fn(input, self.allocator);
 
-            for (completions[1..]) |completion| {
-                var i: usize = 0;
-                while (i < common_len and i < completion.len) : (i += 1) {
-                    if (completions[0][i] != completion[i]) {
-                        common_len = i;
-                        break;
+            if (completions.len == 0) {
+                // No completions, beep
+                for (completions) |c| {
+                    self.allocator.free(c);
+                }
+                self.allocator.free(completions);
+                try self.writeBytes("\x07");
+                return;
+            }
+
+            if (completions.len == 1) {
+                // Single completion - insert it directly
+                const completion = completions[0];
+                const typed_word = self.buffer[word_start..self.cursor];
+
+                // Find just the basename part (after last /)
+                const typed_basename = blk: {
+                    if (std.mem.lastIndexOfScalar(u8, typed_word, '/')) |last_slash| {
+                        break :blk typed_word[last_slash + 1 ..];
+                    } else {
+                        break :blk typed_word;
+                    }
+                };
+
+                // Insert the rest of the completion
+                if (completion.len >= typed_basename.len) {
+                    const to_insert = completion[typed_basename.len..];
+                    for (to_insert) |c| {
+                        try self.insertChar(c);
                     }
                 }
-                common_len = @min(common_len, completion.len);
-            }
 
-            // Auto-complete with common prefix if longer than what was typed
-            if (common_len > typed_prefix.len and completions.len > 0) {
-                const to_insert = completions[0][typed_prefix.len..common_len];
-                for (to_insert) |c| {
-                    try self.insertChar(c);
+                // Clean up
+                for (completions) |c| {
+                    self.allocator.free(c);
                 }
+                self.allocator.free(completions);
+            } else {
+                // Multiple completions - save state and show list
+                self.completion_list = completions;
+                self.completion_index = 0;
+                self.completion_word_start = word_start;
+
+                // Show the list
+                try self.displayCompletionList();
             }
-
-            // Save cursor position - we'll restore it after showing completions
-            try self.writeBytes("\x1b[s"); // Save cursor position (ESC 7 alternative: \x1b7)
-
-            // Move to a new line and show completions
-            try self.writeBytes("\r\n");
-
-            // Display completions in columns
-            var col: usize = 0;
-            const max_cols = 4;
-            for (completions, 0..) |completion, i| {
-                try self.writeBytes(completion);
-                try self.writeBytes("  ");
-                col += 1;
-
-                if (col >= max_cols or i == completions.len - 1) {
-                    if (i < completions.len - 1) {
-                        try self.writeBytes("\r\n");
-                    }
-                    col = 0;
-                }
-            }
-
-            // Restore cursor position to where it was before Tab
-            try self.writeBytes("\x1b[u"); // Restore cursor position (ESC 8 alternative: \x1b8)
         }
+    }
+
+    /// Apply the current completion from the cycling list
+    fn applyCurrentCompletion(self: *LineEditor) !void {
+        const completions = self.completion_list orelse return;
+        const completion = completions[self.completion_index];
+
+        // Clear from word_start to end
+        self.cursor = self.completion_word_start;
+        self.length = self.completion_word_start;
+
+        // Get the path prefix (everything before the last /)
+        const orig_word = blk: {
+            var i = self.completion_word_start;
+            while (i > 0) : (i -= 1) {
+                if (self.buffer[i - 1] == ' ') break;
+            }
+            break :blk self.buffer[i..self.completion_word_start];
+        };
+
+        const path_prefix = blk: {
+            if (std.mem.lastIndexOfScalar(u8, orig_word, '/')) |last_slash| {
+                break :blk orig_word[0 .. last_slash + 1];
+            } else {
+                break :blk "";
+            }
+        };
+
+        // Insert path prefix + completion
+        for (path_prefix) |c| {
+            self.buffer[self.length] = c;
+            self.length += 1;
+            self.cursor += 1;
+        }
+
+        for (completion) |c| {
+            self.buffer[self.length] = c;
+            self.length += 1;
+            self.cursor += 1;
+        }
+
+        // Redraw line
+        try self.redrawLine();
+    }
+
+    /// Display completion list
+    fn displayCompletionList(self: *LineEditor) !void {
+        const completions = self.completion_list orelse return;
+
+        // Save cursor, show list, restore cursor
+        try self.writeBytes("\x1b[s");
+        try self.writeBytes("\r\n");
+
+        // Display in columns
+        var col: usize = 0;
+        const max_cols = 4;
+        for (completions, 0..) |completion, i| {
+            try self.writeBytes(completion);
+            try self.writeBytes("  ");
+            col += 1;
+
+            if (col >= max_cols or i == completions.len - 1) {
+                if (i < completions.len - 1) {
+                    try self.writeBytes("\r\n");
+                }
+                col = 0;
+            }
+        }
+
+        try self.writeBytes("\x1b[u");
+    }
+
+    /// Clear completion state
+    fn clearCompletionState(self: *LineEditor) void {
+        if (self.completion_list) |list| {
+            for (list) |item| {
+                self.allocator.free(item);
+            }
+            self.allocator.free(list);
+            self.completion_list = null;
+        }
+        self.completion_index = 0;
+        self.completion_word_start = 0;
+    }
+
+    /// Redraw the current line
+    fn redrawLine(self: *LineEditor) !void {
+        // Move to start of line and clear it
+        try self.writeBytes("\r");
+        try self.writeBytes("\x1b[2K"); // Clear entire line
+
+        // Redraw prompt and buffer
+        try self.writeBytes(self.prompt);
+        try self.writeBytes(self.buffer[0..self.length]);
     }
 
     /// Find the start of the current word (for completion)
@@ -811,5 +907,6 @@ pub const LineEditor = struct {
             self.allocator.free(saved);
             self.saved_line = null;
         }
+        self.clearCompletionState();
     }
 };
