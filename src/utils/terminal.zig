@@ -796,57 +796,36 @@ pub const LineEditor = struct {
         const completions = self.completion_list orelse return;
         const completion = completions[self.completion_index];
 
-        // Clear from word_start to end
+        // The completion is just the basename (e.g., "Documents/")
+        // We want to replace from completion_word_start with just this completion
+
+        // Save the old length for terminal cursor positioning
+        const old_word_len = self.cursor - self.completion_word_start;
+
+        // Update buffer: replace from word_start with the completion
         self.cursor = self.completion_word_start;
         self.length = self.completion_word_start;
 
-        // Get the path prefix (everything before the last /)
-        const orig_word = blk: {
-            var i = self.completion_word_start;
-            while (i > 0) : (i -= 1) {
-                if (self.buffer[i - 1] == ' ') break;
-            }
-            break :blk self.buffer[i..self.completion_word_start];
-        };
-
-        const path_prefix = blk: {
-            if (std.mem.lastIndexOfScalar(u8, orig_word, '/')) |last_slash| {
-                break :blk orig_word[0 .. last_slash + 1];
-            } else {
-                break :blk "";
-            }
-        };
-
-        // Insert path prefix + completion
-        for (path_prefix) |c| {
-            self.buffer[self.length] = c;
-            self.length += 1;
-            self.cursor += 1;
-        }
-
+        // Just insert the completion (which is already a full basename like "Documents/")
         for (completion) |c| {
             self.buffer[self.length] = c;
             self.length += 1;
-            self.cursor += 1;
         }
 
-        // Just update the line in place without redrawing prompt
-        // We need to position cursor at completion_word_start
-        // Current cursor is at end of new completion
-        // completion_word_start is where the word starts (after "cd ")
+        self.cursor = self.length;
 
-        // Move cursor back to word_start position
-        const chars_written = path_prefix.len + completion.len;
+        // Update terminal display
+        // Move cursor back to where the old word started
+        if (old_word_len > 0) {
+            var buf: [32]u8 = undefined;
+            const move_back = try std.fmt.bufPrint(&buf, "\x1b[{d}D", .{old_word_len});
+            try self.writeBytes(move_back);
+        }
 
-        var buf: [32]u8 = undefined;
-        const move_back = try std.fmt.bufPrint(&buf, "\x1b[{d}D", .{chars_written});
-        try self.writeBytes(move_back);
-
-        // Clear to end of line from here
+        // Clear to end of line
         try self.writeBytes("\x1b[K");
 
         // Write the new completion
-        try self.writeBytes(path_prefix);
         try self.writeBytes(completion);
     }
 
