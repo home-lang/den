@@ -830,8 +830,24 @@ pub const LineEditor = struct {
             self.cursor += 1;
         }
 
-        // Redraw line
-        try self.redrawLine();
+        // Just update the line in place without redrawing prompt
+        // We need to position cursor at completion_word_start
+        // Current cursor is at end of new completion
+        // completion_word_start is where the word starts (after "cd ")
+
+        // Move cursor back to word_start position
+        const chars_written = path_prefix.len + completion.len;
+
+        var buf: [32]u8 = undefined;
+        const move_back = try std.fmt.bufPrint(&buf, "\x1b[{d}D", .{chars_written});
+        try self.writeBytes(move_back);
+
+        // Clear to end of line from here
+        try self.writeBytes("\x1b[K");
+
+        // Write the new completion
+        try self.writeBytes(path_prefix);
+        try self.writeBytes(completion);
     }
 
     /// Display completion list
