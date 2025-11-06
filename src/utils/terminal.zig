@@ -255,6 +255,7 @@ pub const LineEditor = struct {
     completion_list: ?[][]const u8 = null,
     completion_index: usize = 0,
     completion_word_start: usize = 0,
+    completion_path_prefix: ?[]const u8 = null, // Save the path prefix (e.g., "Documents/Projects/")
 
     pub fn init(allocator: std.mem.Allocator, prompt: []const u8) LineEditor {
         return .{
@@ -785,6 +786,20 @@ pub const LineEditor = struct {
                 self.completion_index = 0;
                 self.completion_word_start = word_start;
 
+                // Save the path prefix from the original input
+                const current_word = self.buffer[word_start..self.cursor];
+                const path_prefix = blk: {
+                    if (std.mem.lastIndexOfScalar(u8, current_word, '/')) |last_slash| {
+                        break :blk current_word[0 .. last_slash + 1];
+                    } else {
+                        break :blk "";
+                    }
+                };
+                self.completion_path_prefix = if (path_prefix.len > 0)
+                    try self.allocator.dupe(u8, path_prefix)
+                else
+                    null;
+
                 // Show the list
                 try self.displayCompletionList();
             }
@@ -796,19 +811,8 @@ pub const LineEditor = struct {
         const completions = self.completion_list orelse return;
         const completion = completions[self.completion_index];
 
-        // Get the current word being completed
-        const current_word = self.buffer[self.completion_word_start..self.cursor];
-
-        // Find the path prefix (everything up to and including the last /)
-        const path_prefix = blk: {
-            if (std.mem.lastIndexOfScalar(u8, current_word, '/')) |last_slash| {
-                // Keep everything up to and including the last /
-                break :blk current_word[0 .. last_slash + 1];
-            } else {
-                // No path, just completing in current dir
-                break :blk "";
-            }
-        };
+        // Use the SAVED path prefix, not the current buffer (which may be corrupted)
+        const path_prefix = self.completion_path_prefix orelse "";
 
         // Save the old length for terminal cursor positioning
         const old_word_len = self.cursor - self.completion_word_start;
@@ -882,6 +886,10 @@ pub const LineEditor = struct {
             }
             self.allocator.free(list);
             self.completion_list = null;
+        }
+        if (self.completion_path_prefix) |prefix| {
+            self.allocator.free(prefix);
+            self.completion_path_prefix = null;
         }
         self.completion_index = 0;
         self.completion_word_start = 0;
