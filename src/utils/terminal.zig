@@ -736,6 +736,8 @@ pub const LineEditor = struct {
             // Cycle to next completion
             self.completion_index = (self.completion_index + 1) % self.completion_list.?.len;
             try self.applyCurrentCompletion();
+            // Update the list to show new highlight
+            try self.updateCompletionListHighlight();
         } else {
             // Clear old state
             self.clearCompletionState();
@@ -859,11 +861,21 @@ pub const LineEditor = struct {
         try self.writeBytes("\x1b[s");
         try self.writeBytes("\r\n");
 
-        // Display in columns
+        // Display in columns with highlighting
         var col: usize = 0;
         const max_cols = 4;
         for (completions, 0..) |completion, i| {
+            // Highlight the current selection
+            if (i == self.completion_index) {
+                try self.writeBytes("\x1b[30;46m"); // Black text on cyan background
+            }
+
             try self.writeBytes(completion);
+
+            if (i == self.completion_index) {
+                try self.writeBytes("\x1b[0m"); // Reset colors
+            }
+
             try self.writeBytes("  ");
             col += 1;
 
@@ -875,6 +887,46 @@ pub const LineEditor = struct {
             }
         }
 
+        try self.writeBytes("\x1b[u");
+    }
+
+    /// Update the completion list highlight without redrawing the input line
+    fn updateCompletionListHighlight(self: *LineEditor) !void {
+        const completions = self.completion_list orelse return;
+
+        // Save current cursor position
+        try self.writeBytes("\x1b[s");
+
+        // Move to where the completion list starts (one line below current)
+        try self.writeBytes("\r\n");
+
+        // Redraw the list with updated highlighting
+        var col: usize = 0;
+        const max_cols = 4;
+        for (completions, 0..) |completion, i| {
+            // Clear the current position and redraw with/without highlight
+            if (i == self.completion_index) {
+                try self.writeBytes("\x1b[30;46m"); // Black text on cyan background
+            }
+
+            try self.writeBytes(completion);
+
+            if (i == self.completion_index) {
+                try self.writeBytes("\x1b[0m"); // Reset colors
+            }
+
+            try self.writeBytes("  ");
+            col += 1;
+
+            if (col >= max_cols or i == completions.len - 1) {
+                if (i < completions.len - 1) {
+                    try self.writeBytes("\r\n");
+                }
+                col = 0;
+            }
+        }
+
+        // Restore cursor position
         try self.writeBytes("\x1b[u");
     }
 
