@@ -331,6 +331,12 @@ pub const LineEditor = struct {
             switch (byte) {
                 '\r', '\n' => {
                     // Enter key
+                    // If we have an active completion list, accept it instead of submitting
+                    if (self.completion_list != null) {
+                        self.clearCompletionState();
+                        continue;
+                    }
+
                     try self.writeBytes("\r\n");
                     try self.terminal.disableRawMode();
 
@@ -605,6 +611,42 @@ pub const LineEditor = struct {
     }
 
     fn handleEscapeSequence(self: *LineEditor, seq: EscapeSequence) !void {
+        // If we have an active completion list, handle arrow keys for completion navigation
+        if (self.completion_list != null) {
+            switch (seq) {
+                .down_arrow => {
+                    // Move to next completion
+                    const list_len = self.completion_list.?.len;
+                    self.completion_index = (self.completion_index + 1) % list_len;
+                    try self.applyCurrentCompletion();
+                    try self.updateCompletionListHighlight();
+                    return;
+                },
+                .up_arrow => {
+                    // Move to previous completion
+                    const list_len = self.completion_list.?.len;
+                    if (self.completion_index == 0) {
+                        self.completion_index = list_len - 1;
+                    } else {
+                        self.completion_index -= 1;
+                    }
+                    try self.applyCurrentCompletion();
+                    try self.updateCompletionListHighlight();
+                    return;
+                },
+                .right_arrow => {
+                    // Accept current completion and clear completion state
+                    self.clearCompletionState();
+                    return;
+                },
+                else => {
+                    // Clear completion on other keys
+                    self.clearCompletionState();
+                },
+            }
+        }
+
+        // Normal arrow key handling (no active completions)
         switch (seq) {
             .up_arrow => try self.historyPrevious(),
             .down_arrow => try self.historyNext(),
