@@ -904,8 +904,21 @@ pub const LineEditor = struct {
         // Use the SAVED path prefix, not the current buffer (which may be corrupted)
         const path_prefix = self.completion_path_prefix orelse "";
 
-        // Save the old length for terminal cursor positioning
+        // Calculate how far back we need to go from current cursor position
         const old_word_len = self.cursor - self.completion_word_start;
+
+        // Hide cursor to prevent flicker
+        try self.writeBytes("\x1b[?25l");
+
+        // First, move cursor back to word start position (do this BEFORE updating buffer)
+        if (old_word_len > 0) {
+            var buf: [32]u8 = undefined;
+            const move_back = try std.fmt.bufPrint(&buf, "\x1b[{d}D", .{old_word_len});
+            try self.writeBytes(move_back);
+        }
+
+        // Clear from current position to end of line
+        try self.writeBytes("\x1b[K");
 
         // Update buffer: replace from word_start with path_prefix + completion
         self.cursor = self.completion_word_start;
@@ -925,20 +938,12 @@ pub const LineEditor = struct {
 
         self.cursor = self.length;
 
-        // Update terminal display
-        // Move cursor back to where the old word started
-        if (old_word_len > 0) {
-            var buf: [32]u8 = undefined;
-            const move_back = try std.fmt.bufPrint(&buf, "\x1b[{d}D", .{old_word_len});
-            try self.writeBytes(move_back);
-        }
-
-        // Clear to end of line
-        try self.writeBytes("\x1b[K");
-
-        // Write the new text (path_prefix + completion)
+        // Write the new text (path_prefix + completion) - cursor naturally follows
         try self.writeBytes(path_prefix);
         try self.writeBytes(completion);
+
+        // Show cursor again
+        try self.writeBytes("\x1b[?25h");
     }
 
     /// Display completion list
