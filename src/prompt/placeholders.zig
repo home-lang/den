@@ -89,21 +89,55 @@ fn expandGit(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u
         try parts.appendSlice(allocator, branch);
         try parts.appendSlice(allocator, "\x1b[0m"); // Reset
 
-        // [📝] if dirty
-        if (ctx.git_dirty) {
-            try parts.appendSlice(allocator, " [\xF0\x9F\x93\x9D]"); // [📝]
+        // Detailed status indicators
+        var has_status = false;
+
+        // Staged files (green +)
+        if (ctx.git_staged > 0) {
+            const staged_str = try std.fmt.allocPrint(allocator, " \x1b[32m+{d}\x1b[0m", .{ctx.git_staged});
+            defer allocator.free(staged_str);
+            try parts.appendSlice(allocator, staged_str);
+            has_status = true;
         }
 
-        // Ahead/behind indicators
+        // Unstaged files (yellow !)
+        if (ctx.git_unstaged > 0) {
+            const unstaged_str = try std.fmt.allocPrint(allocator, " \x1b[33m!{d}\x1b[0m", .{ctx.git_unstaged});
+            defer allocator.free(unstaged_str);
+            try parts.appendSlice(allocator, unstaged_str);
+            has_status = true;
+        }
+
+        // Untracked files (red ?)
+        if (ctx.git_untracked > 0) {
+            const untracked_str = try std.fmt.allocPrint(allocator, " \x1b[31m?{d}\x1b[0m", .{ctx.git_untracked});
+            defer allocator.free(untracked_str);
+            try parts.appendSlice(allocator, untracked_str);
+            has_status = true;
+        }
+
+        // Stash indicator (cyan $)
+        if (ctx.git_stash > 0) {
+            const stash_str = try std.fmt.allocPrint(allocator, " \x1b[36m${d}\x1b[0m", .{ctx.git_stash});
+            defer allocator.free(stash_str);
+            try parts.appendSlice(allocator, stash_str);
+        }
+
+        // Ahead/behind indicators (white)
         if (ctx.git_ahead > 0) {
-            const ahead_str = try std.fmt.allocPrint(allocator, " ↑{d}", .{ctx.git_ahead});
+            const ahead_str = try std.fmt.allocPrint(allocator, " \x1b[37m↑{d}\x1b[0m", .{ctx.git_ahead});
             defer allocator.free(ahead_str);
             try parts.appendSlice(allocator, ahead_str);
         }
         if (ctx.git_behind > 0) {
-            const behind_str = try std.fmt.allocPrint(allocator, " ↓{d}", .{ctx.git_behind});
+            const behind_str = try std.fmt.allocPrint(allocator, " \x1b[37m↓{d}\x1b[0m", .{ctx.git_behind});
             defer allocator.free(behind_str);
             try parts.appendSlice(allocator, behind_str);
+        }
+
+        // If no changes, show clean indicator (green ✓)
+        if (!has_status) {
+            try parts.appendSlice(allocator, " \x1b[32m✓\x1b[0m");
         }
 
         return try parts.toOwnedSlice(allocator);

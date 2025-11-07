@@ -524,6 +524,10 @@ pub const Shell = struct {
         self.prompt_context.git_dirty = git_info.is_dirty;
         self.prompt_context.git_ahead = git_info.ahead;
         self.prompt_context.git_behind = git_info.behind;
+        self.prompt_context.git_staged = git_info.staged_count;
+        self.prompt_context.git_unstaged = git_info.unstaged_count;
+        self.prompt_context.git_untracked = git_info.untracked_count;
+        self.prompt_context.git_stash = git_info.stash_count;
 
         // Detect package version from package.json/package.jsonc/pantry.json/pantry.jsonc
         if (self.prompt_context.package_version) |old_ver| {

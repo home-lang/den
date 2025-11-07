@@ -57,6 +57,10 @@ pub const PromptContext = struct {
     git_dirty: bool,
     git_ahead: usize,
     git_behind: usize,
+    git_staged: usize,
+    git_unstaged: usize,
+    git_untracked: usize,
+    git_stash: usize,
 
     // User info
     username: []const u8,
@@ -96,6 +100,10 @@ pub const PromptContext = struct {
             .git_dirty = false,
             .git_ahead = 0,
             .git_behind = 0,
+            .git_staged = 0,
+            .git_unstaged = 0,
+            .git_untracked = 0,
+            .git_stash = 0,
             .username = "",
             .hostname = "",
             .is_root = false,
@@ -158,7 +166,7 @@ pub const PromptTemplate = struct {
         // via ↯ v0.15.1 in bold yellow (zig)
         // > in green/red based on exit code
         return .{
-            .left_format = try allocator.dupe(u8, "\x1b[1;96m{path}\x1b[0m{git}{pkg}{node}{bun}{python}{ruby}{go}{rust}{zig}\n{symbol}"),
+            .left_format = try allocator.dupe(u8, "\x1b[1;96m{path}\x1b[0m{git}{pkg}{node}{bun}{python}{ruby}{go}{zig}\n{symbol}"),
             .right_format = null,
             .transient_enabled = false,
             .transient_format = null,
