@@ -407,7 +407,8 @@ pub const Shell = struct {
             if (line == null) {
                 // EOF (Ctrl+D)
                 try IO.print("\nGoodbye from Den!\n", .{});
-                break;
+                std.Thread.sleep(500 * std.time.ns_per_ms); // 500ms delay
+                std.process.exit(0);
             }
 
             defer self.allocator.free(line.?);
@@ -423,7 +424,8 @@ pub const Shell = struct {
             if (std.mem.eql(u8, trimmed, "exit")) {
                 self.running = false;
                 try IO.print("Goodbye from Den!\n", .{});
-                break;
+                std.Thread.sleep(500 * std.time.ns_per_ms); // 500ms delay
+                std.process.exit(0);
             }
 
             // Execute command

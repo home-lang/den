@@ -356,6 +356,10 @@ pub const LineEditor = struct {
                 0x04 => {
                     // Ctrl+D (EOF)
                     if (self.length == 0) {
+                        // Clear any visible completion list first
+                        if (self.completion_list != null) {
+                            try self.clearCompletionDisplay();
+                        }
                         try self.writeBytes("\r\n");
                         try self.terminal.disableRawMode();
                         return null; // Signal EOF
