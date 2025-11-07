@@ -913,14 +913,14 @@ pub const LineEditor = struct {
         for (completions, 0..) |completion, i| {
             // Highlight the current selection
             if (i == self.completion_index) {
-                try self.writeBytes("\x1b[30;46m"); // Black text on cyan background
+                try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
+            } else {
+                try self.writeBytes("\x1b[1;36m"); // Bold cyan/teal text for directories
             }
 
             try self.writeBytes(completion);
 
-            if (i == self.completion_index) {
-                try self.writeBytes("\x1b[0m"); // Reset colors
-            }
+            try self.writeBytes("\x1b[0m"); // Reset colors
 
             try self.writeBytes("  ");
             col += 1;
@@ -952,14 +952,14 @@ pub const LineEditor = struct {
         for (completions, 0..) |completion, i| {
             // Clear the current position and redraw with/without highlight
             if (i == self.completion_index) {
-                try self.writeBytes("\x1b[30;46m"); // Black text on cyan background
+                try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
+            } else {
+                try self.writeBytes("\x1b[1;36m"); // Bold cyan/teal text for directories
             }
 
             try self.writeBytes(completion);
 
-            if (i == self.completion_index) {
-                try self.writeBytes("\x1b[0m"); // Reset colors
-            }
+            try self.writeBytes("\x1b[0m"); // Reset colors
 
             try self.writeBytes("  ");
             col += 1;
