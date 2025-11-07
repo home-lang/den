@@ -256,6 +256,8 @@ pub const LineEditor = struct {
     completion_index: usize = 0,
     completion_word_start: usize = 0,
     completion_path_prefix: ?[]const u8 = null, // Save the path prefix (e.g., "Documents/Projects/")
+    // Inline suggestion state
+    suggestion: ?[]const u8 = null, // The suggested text from history
 
     pub fn init(allocator: std.mem.Allocator, prompt: []const u8) LineEditor {
         return .{
@@ -445,6 +447,11 @@ pub const LineEditor = struct {
     fn insertChar(self: *LineEditor, char: u8) !void {
         if (self.length >= self.buffer.len) return;
 
+        // Clear old suggestion from screen if present
+        if (self.suggestion != null) {
+            try self.writeBytes("\x1b[0K"); // Clear from cursor to end of line
+        }
+
         // Move characters after cursor to the right
         if (self.cursor < self.length) {
             var i = self.length;
@@ -468,10 +475,21 @@ pub const LineEditor = struct {
                 try self.writeBytes("\x1B[D"); // ESC [ D = cursor left
             }
         }
+
+        // Update and display suggestion only if cursor is at end
+        if (self.cursor == self.length) {
+            try self.updateSuggestion();
+            try self.displaySuggestion();
+        }
     }
 
     fn backspace(self: *LineEditor) !void {
         if (self.cursor == 0) return;
+
+        // Clear old suggestion from screen if present
+        if (self.suggestion != null) {
+            try self.writeBytes("\x1b[0K"); // Clear from cursor to end of line
+        }
 
         // Move characters after cursor to the left
         var i = self.cursor - 1;
@@ -493,6 +511,12 @@ pub const LineEditor = struct {
         var j: usize = 0;
         while (j < back_count) : (j += 1) {
             try self.writeBytes("\x1B[D");
+        }
+
+        // Update and display suggestion only if cursor is at end
+        if (self.cursor == self.length) {
+            try self.updateSuggestion();
+            try self.displaySuggestion();
         }
     }
 
@@ -659,9 +683,23 @@ pub const LineEditor = struct {
             .up_arrow => try self.historyPrevious(),
             .down_arrow => try self.historyNext(),
             .left_arrow => try self.moveCursorLeft(),
-            .right_arrow => try self.moveCursorRight(),
+            .right_arrow => {
+                // If there's a suggestion and cursor is at end, accept it
+                if (self.suggestion != null and self.cursor == self.length) {
+                    try self.acceptSuggestion();
+                } else {
+                    try self.moveCursorRight();
+                }
+            },
             .home => try self.moveCursorHome(),
-            .end_key => try self.moveCursorEnd(),
+            .end_key => {
+                // End key also accepts suggestion if present
+                if (self.suggestion != null and self.cursor == self.length) {
+                    try self.acceptSuggestion();
+                } else {
+                    try self.moveCursorEnd();
+                }
+            },
             .delete => try self.deleteChar(),
             else => {},
         }
@@ -1049,6 +1087,75 @@ pub const LineEditor = struct {
         return 0;
     }
 
+    /// Search history for a suggestion matching current input
+    fn updateSuggestion(self: *LineEditor) !void {
+        // Clear any existing suggestion
+        self.clearSuggestion();
+
+        // Only suggest if we have input and history
+        if (self.length == 0) return;
+        if (self.history == null or self.history_count == null) return;
+
+        const current_input = self.buffer[0..self.length];
+        const history = self.history.?;
+        const count = self.history_count.?.*;
+
+        // Search backward through history for most recent match
+        var i: usize = count;
+        while (i > 0) {
+            i -= 1;
+            if (history[i]) |entry| {
+                // Check if this history entry starts with current input
+                if (entry.len > current_input.len and std.mem.startsWith(u8, entry, current_input)) {
+                    // Found a match! Save the suggestion (the part after current input)
+                    self.suggestion = try self.allocator.dupe(u8, entry[current_input.len..]);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Display the suggestion in gray text
+    fn displaySuggestion(self: *LineEditor) !void {
+        if (self.suggestion) |sugg| {
+            try self.writeBytes("\x1b[90m"); // Gray text
+            try self.writeBytes(sugg);
+            try self.writeBytes("\x1b[0m"); // Reset
+
+            // Move cursor back to original position
+            var i: usize = 0;
+            while (i < sugg.len) : (i += 1) {
+                try self.writeBytes("\x1b[D");
+            }
+        }
+    }
+
+    /// Clear the suggestion from screen and memory
+    fn clearSuggestion(self: *LineEditor) void {
+        if (self.suggestion) |sugg| {
+            self.allocator.free(sugg);
+            self.suggestion = null;
+        }
+    }
+
+    /// Accept the current suggestion
+    fn acceptSuggestion(self: *LineEditor) !void {
+        if (self.suggestion) |sugg| {
+            // Add suggestion text to buffer
+            for (sugg) |char| {
+                if (self.length >= self.buffer.len) break;
+                self.buffer[self.length] = char;
+                self.length += 1;
+                self.cursor += 1;
+            }
+
+            // Display the accepted text
+            try self.writeBytes(sugg);
+
+            self.clearSuggestion();
+        }
+    }
+
     pub fn deinit(self: *LineEditor) void {
         self.terminal.disableRawMode() catch {};
         if (self.saved_line) |saved| {
@@ -1056,5 +1163,6 @@ pub const LineEditor = struct {
             self.saved_line = null;
         }
         self.clearCompletionState();
+        self.clearSuggestion();
     }
 };
