@@ -64,15 +64,16 @@ pub const PlaceholderRegistry = struct {
 fn expandPath(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
     const cwd = ctx.current_dir;
 
-    // Replace home directory with ~
+    // If in home directory, show ~
     if (ctx.home_dir) |home| {
-        if (std.mem.startsWith(u8, cwd, home)) {
-            const rest = cwd[home.len..];
-            return try std.fmt.allocPrint(allocator, "~{s}", .{rest});
+        if (std.mem.eql(u8, cwd, home)) {
+            return try allocator.dupe(u8, "~");
         }
     }
 
-    return try allocator.dupe(u8, cwd);
+    // Otherwise show just the current directory name (basename)
+    const basename = std.fs.path.basename(cwd);
+    return try allocator.dupe(u8, basename);
 }
 
 fn expandGit(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
