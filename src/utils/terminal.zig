@@ -345,6 +345,10 @@ pub const LineEditor = struct {
                 },
                 0x03 => {
                     // Ctrl+C
+                    // Clear any visible completion list first
+                    if (self.completion_list != null) {
+                        try self.clearCompletionDisplay();
+                    }
                     try self.writeBytes("^C\r\n");
                     try self.terminal.disableRawMode();
                     return error.Interrupted;
@@ -972,9 +976,34 @@ pub const LineEditor = struct {
         try self.writeBytes("\x1b[u");
     }
 
+    /// Clear the completion list display from the screen
+    fn clearCompletionDisplay(self: *LineEditor) !void {
+        const completions = self.completion_list orelse return;
+
+        // Calculate how many lines the completion list occupies
+        const max_cols = 4;
+        const num_rows = (completions.len + max_cols - 1) / max_cols;
+
+        // Save cursor position
+        try self.writeBytes("\x1b[s");
+
+        // Move down and clear each line of the completion list
+        var i: usize = 0;
+        while (i < num_rows) : (i += 1) {
+            try self.writeBytes("\r\n");
+            try self.writeBytes("\x1b[2K"); // Clear entire line
+        }
+
+        // Restore cursor position
+        try self.writeBytes("\x1b[u");
+    }
+
     /// Clear completion state
     fn clearCompletionState(self: *LineEditor) void {
         if (self.completion_list) |list| {
+            // Clear the completion list from screen before freeing memory
+            self.clearCompletionDisplay() catch {};
+
             for (list) |item| {
                 self.allocator.free(item);
             }
