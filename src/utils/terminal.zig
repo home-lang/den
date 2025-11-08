@@ -646,7 +646,7 @@ pub const LineEditor = struct {
         // If we have an active completion list, handle arrow keys for completion navigation
         if (self.completion_list != null) {
             switch (seq) {
-                .down_arrow => {
+                .down_arrow, .right_arrow => {
                     // Move to next completion
                     const list_len = self.completion_list.?.len;
                     self.completion_index = (self.completion_index + 1) % list_len;
@@ -654,7 +654,7 @@ pub const LineEditor = struct {
                     try self.updateCompletionListHighlight();
                     return;
                 },
-                .up_arrow => {
+                .up_arrow, .left_arrow => {
                     // Move to previous completion
                     const list_len = self.completion_list.?.len;
                     if (self.completion_index == 0) {
@@ -664,11 +664,6 @@ pub const LineEditor = struct {
                     }
                     try self.applyCurrentCompletion();
                     try self.updateCompletionListHighlight();
-                    return;
-                },
-                .right_arrow => {
-                    // Accept current completion and clear completion state
-                    self.clearCompletionState();
                     return;
                 },
                 else => {
