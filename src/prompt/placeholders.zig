@@ -56,6 +56,7 @@ pub const PlaceholderRegistry = struct {
         try self.register("go", expandGo);
         try self.register("rust", expandRust);
         try self.register("zig", expandZig);
+        try self.register("runtimes", expandRuntimes);
     }
 };
 
@@ -287,7 +288,7 @@ fn expandBun(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u
 
 fn expandNode(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
     if (ctx.node_version) |version| {
-        // via ⬢ v20.0.0 in bold green
+        // via ⬢ v20.0.0 in bold green (first runtime gets "via")
         var result: std.ArrayList(u8) = .{
             .items = &[_]u8{},
             .capacity = 0,
@@ -409,4 +410,106 @@ fn expandZig(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u
     }
 
     return try allocator.dupe(u8, "");
+}
+
+fn expandRuntimes(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    var result: std.ArrayList(u8) = .{
+        .items = &[_]u8{},
+        .capacity = 0,
+    };
+    defer result.deinit(allocator);
+
+    var first = true;
+
+    // Node
+    if (ctx.node_version) |version| {
+        if (first) {
+            try result.appendSlice(allocator, " via ");
+            first = false;
+        } else {
+            try result.appendSlice(allocator, " & ");
+        }
+        try result.appendSlice(allocator, "\xE2\xAC\xA2 "); // ⬢
+        try result.appendSlice(allocator, "\x1b[1;32m"); // Bold green
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+    }
+
+    // Bun
+    if (ctx.bun_version) |version| {
+        if (first) {
+            try result.appendSlice(allocator, " via ");
+            first = false;
+        } else {
+            try result.appendSlice(allocator, " & ");
+        }
+        try result.appendSlice(allocator, "\xF0\x9F\x90\xB0 "); // 🐰
+        try result.appendSlice(allocator, "\x1b[1;31m"); // Bold red
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+    }
+
+    // Python
+    if (ctx.python_version) |version| {
+        if (first) {
+            try result.appendSlice(allocator, " via ");
+            first = false;
+        } else {
+            try result.appendSlice(allocator, " & ");
+        }
+        try result.appendSlice(allocator, "\xF0\x9F\x90\x8D "); // 🐍
+        try result.appendSlice(allocator, "\x1b[1;33m"); // Bold yellow
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+    }
+
+    // Ruby
+    if (ctx.ruby_version) |version| {
+        if (first) {
+            try result.appendSlice(allocator, " via ");
+            first = false;
+        } else {
+            try result.appendSlice(allocator, " & ");
+        }
+        try result.appendSlice(allocator, "\xF0\x9F\x92\x8E "); // 💎
+        try result.appendSlice(allocator, "\x1b[1;31m"); // Bold red
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+    }
+
+    // Go
+    if (ctx.go_version) |version| {
+        if (first) {
+            try result.appendSlice(allocator, " via ");
+            first = false;
+        } else {
+            try result.appendSlice(allocator, " & ");
+        }
+        try result.appendSlice(allocator, "\xF0\x9F\x90\xB9 "); // 🐹
+        try result.appendSlice(allocator, "\x1b[1;36m"); // Bold cyan
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+    }
+
+    // Zig
+    if (ctx.zig_version) |version| {
+        if (first) {
+            try result.appendSlice(allocator, " via ");
+            first = false;
+        } else {
+            try result.appendSlice(allocator, " & ");
+        }
+        try result.appendSlice(allocator, "\xE2\x86\xAF "); // ↯
+        try result.appendSlice(allocator, "\x1b[1;93m"); // Bold bright yellow
+        try result.appendSlice(allocator, "v");
+        try result.appendSlice(allocator, version);
+        try result.appendSlice(allocator, "\x1b[0m"); // Reset
+    }
+
+    return try result.toOwnedSlice(allocator);
 }

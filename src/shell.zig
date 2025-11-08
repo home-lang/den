@@ -3108,6 +3108,11 @@ pub const Shell = struct {
 fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
     var completion = Completion.init(allocator);
 
+    // If input is empty, show nothing
+    if (input.len == 0) {
+        return &[_][]const u8{};
+    }
+
     // Find the first word (command) and current word being completed
     var first_word_end: usize = 0;
     while (first_word_end < input.len) : (first_word_end += 1) {
@@ -3124,8 +3129,11 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
     const prefix = input[word_start..];
     const command = input[0..first_word_end];
 
-    // If first word, try command completion
+    // If first word, try command completion (but only if there's a prefix)
     if (word_start == 0) {
+        if (prefix.len == 0) {
+            return &[_][]const u8{};
+        }
         return completion.completeCommand(prefix);
     }
 
@@ -3134,8 +3142,258 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
         return completion.completeDirectory(prefix);
     }
 
+    // For bun command, show scripts, commands, and files
+    if (std.mem.eql(u8, command, "bun")) {
+        return try completeBun(allocator, prefix);
+    }
+
+    // For npm command, show scripts, commands, and files
+    if (std.mem.eql(u8, command, "npm")) {
+        return try completeNpm(allocator, prefix);
+    }
+
     // Otherwise, try file completion
     return completion.completeFile(prefix);
+}
+
+/// Get completions for bun command (scripts, commands, files)
+fn completeBun(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Bun built-in commands
+    const bun_commands = [_][]const u8{
+        "add", "bun", "create", "dev", "help",
+        "install", "pm", "remove", "run", "upgrade", "x",
+    };
+
+    // Add matching bun commands (mark with \x02 for default styling)
+    for (bun_commands) |cmd| {
+        if (std.mem.startsWith(u8, cmd, prefix)) {
+            const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+            try results.append(allocator, marked_cmd);
+        }
+    }
+
+    // Try to read package.json and extract scripts
+    const package_json = std.fs.cwd().readFileAlloc(allocator, "package.json", 1024 * 1024) catch null;
+    if (package_json) |json_content| {
+        defer allocator.free(json_content);
+
+        // Simple JSON parsing to find scripts
+        const scripts_start = std.mem.indexOf(u8, json_content, "\"scripts\"");
+        if (scripts_start) |start| {
+            // Find the opening brace after "scripts"
+            var brace_pos = start;
+            while (brace_pos < json_content.len and json_content[brace_pos] != '{') : (brace_pos += 1) {}
+
+            if (brace_pos < json_content.len) {
+                // Find matching closing brace
+                var depth: i32 = 1;
+                var pos = brace_pos + 1;
+                var scripts_end: usize = brace_pos + 1;
+
+                while (pos < json_content.len and depth > 0) : (pos += 1) {
+                    if (json_content[pos] == '{') depth += 1;
+                    if (json_content[pos] == '}') {
+                        depth -= 1;
+                        if (depth == 0) {
+                            scripts_end = pos;
+                            break;
+                        }
+                    }
+                }
+
+                const scripts_section = json_content[brace_pos + 1 .. scripts_end];
+
+                // Extract script names (simple approach: find quoted strings before colons)
+                var i: usize = 0;
+                while (i < scripts_section.len) : (i += 1) {
+                    if (scripts_section[i] == '"') {
+                        const name_start = i + 1;
+                        var name_end = name_start;
+                        while (name_end < scripts_section.len and scripts_section[name_end] != '"') : (name_end += 1) {}
+
+                        if (name_end < scripts_section.len) {
+                            const script_name = scripts_section[name_start..name_end];
+
+                            // Check if this is followed by a colon (it's a key)
+                            var check_pos = name_end + 1;
+                            while (check_pos < scripts_section.len and (scripts_section[check_pos] == ' ' or scripts_section[check_pos] == '\t' or scripts_section[check_pos] == '\n')) : (check_pos += 1) {}
+
+                            if (check_pos < scripts_section.len and scripts_section[check_pos] == ':') {
+                                // This is a script name!
+                                if (std.mem.startsWith(u8, script_name, prefix)) {
+                                    // Check for duplicates
+                                    var is_dup = false;
+                                    for (results.items) |existing| {
+                                        if (std.mem.eql(u8, existing, script_name)) {
+                                            is_dup = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!is_dup) {
+                                        // Mark scripts with \x02 prefix so they can be styled differently
+                                        const marked_name = try std.fmt.allocPrint(allocator, "\x02{s}", .{script_name});
+                                        try results.append(allocator, marked_name);
+                                    }
+                                }
+                            }
+
+                            i = name_end;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Add matching files from current directory
+    var completion = Completion.init(allocator);
+    const file_completions = try completion.completeFile(prefix);
+    defer {
+        for (file_completions) |c| {
+            allocator.free(c);
+        }
+        allocator.free(file_completions);
+    }
+
+    for (file_completions) |file| {
+        // Check for duplicates
+        var is_dup = false;
+        for (results.items) |existing| {
+            if (std.mem.eql(u8, existing, file)) {
+                is_dup = true;
+                break;
+            }
+        }
+        if (!is_dup) {
+            try results.append(allocator, try allocator.dupe(u8, file));
+        }
+    }
+
+    return try results.toOwnedSlice(allocator);
+}
+
+/// Get completions for npm command (scripts, commands, files)
+fn completeNpm(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // NPM built-in commands
+    const npm_commands = [_][]const u8{
+        "install", "i", "add", "run", "test", "start", "build",
+        "init", "update", "uninstall", "remove", "rm", "publish",
+        "version", "outdated", "ls", "link", "unlink", "cache",
+        "audit", "fund", "doctor", "exec", "ci", "prune",
+    };
+
+    // Add matching npm commands (mark with \x02 for default styling)
+    for (npm_commands) |cmd| {
+        if (std.mem.startsWith(u8, cmd, prefix)) {
+            const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+            try results.append(allocator, marked_cmd);
+        }
+    }
+
+    // Try to read package.json and extract scripts
+    const package_json = std.fs.cwd().readFileAlloc(allocator, "package.json", 1024 * 1024) catch null;
+    if (package_json) |json_content| {
+        defer allocator.free(json_content);
+
+        // Simple JSON parsing to find scripts
+        const scripts_start = std.mem.indexOf(u8, json_content, "\"scripts\"");
+        if (scripts_start) |start| {
+            // Find the opening brace after "scripts"
+            var brace_pos = start;
+            while (brace_pos < json_content.len and json_content[brace_pos] != '{') : (brace_pos += 1) {}
+
+            if (brace_pos < json_content.len) {
+                // Find matching closing brace
+                var depth: i32 = 1;
+                var pos = brace_pos + 1;
+                var scripts_end: usize = brace_pos + 1;
+
+                while (pos < json_content.len and depth > 0) : (pos += 1) {
+                    if (json_content[pos] == '{') depth += 1;
+                    if (json_content[pos] == '}') {
+                        depth -= 1;
+                        if (depth == 0) {
+                            scripts_end = pos;
+                            break;
+                        }
+                    }
+                }
+
+                const scripts_section = json_content[brace_pos + 1 .. scripts_end];
+
+                // Extract script names (simple approach: find quoted strings before colons)
+                var i: usize = 0;
+                while (i < scripts_section.len) : (i += 1) {
+                    if (scripts_section[i] == '"') {
+                        const name_start = i + 1;
+                        var name_end = name_start;
+                        while (name_end < scripts_section.len and scripts_section[name_end] != '"') : (name_end += 1) {}
+
+                        if (name_end < scripts_section.len) {
+                            const script_name = scripts_section[name_start..name_end];
+
+                            // Check if this is followed by a colon (it's a key)
+                            var check_pos = name_end + 1;
+                            while (check_pos < scripts_section.len and (scripts_section[check_pos] == ' ' or scripts_section[check_pos] == '\t' or scripts_section[check_pos] == '\n')) : (check_pos += 1) {}
+
+                            if (check_pos < scripts_section.len and scripts_section[check_pos] == ':') {
+                                // This is a script name!
+                                if (std.mem.startsWith(u8, script_name, prefix)) {
+                                    // Check for duplicates
+                                    var is_dup = false;
+                                    for (results.items) |existing| {
+                                        if (std.mem.eql(u8, existing, script_name)) {
+                                            is_dup = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!is_dup) {
+                                        // Mark scripts with \x02 prefix so they can be styled differently
+                                        const marked_name = try std.fmt.allocPrint(allocator, "\x02{s}", .{script_name});
+                                        try results.append(allocator, marked_name);
+                                    }
+                                }
+                            }
+
+                            i = name_end;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Add matching files from current directory
+    var completion = Completion.init(allocator);
+    const file_completions = try completion.completeFile(prefix);
+    defer {
+        for (file_completions) |c| {
+            allocator.free(c);
+        }
+        allocator.free(file_completions);
+    }
+
+    for (file_completions) |file| {
+        // Check for duplicates
+        var is_dup = false;
+        for (results.items) |existing| {
+            if (std.mem.eql(u8, existing, file)) {
+                is_dup = true;
+                break;
+            }
+        }
+        if (!is_dup) {
+            try results.append(allocator, try allocator.dupe(u8, file));
+        }
+    }
+
+    return try results.toOwnedSlice(allocator);
 }
 
 test "shell initialization" {

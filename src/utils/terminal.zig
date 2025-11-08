@@ -802,6 +802,17 @@ pub const LineEditor = struct {
 
         // Get current line up to cursor
         const input = self.buffer[0..self.cursor];
+
+        // If input is empty or only whitespace, insert spaces like a normal tab
+        const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+        if (trimmed.len == 0) {
+            try self.insertChar(' ');
+            try self.insertChar(' ');
+            try self.insertChar(' ');
+            try self.insertChar(' ');
+            return;
+        }
+
         const word_start = self.findWordStart();
 
         // Check if we're cycling through existing completions
@@ -896,6 +907,12 @@ pub const LineEditor = struct {
         const completions = self.completion_list orelse return;
         const completion = completions[self.completion_index];
 
+        // Strip marker if present (e.g., \x02 for scripts)
+        const actual_completion = if (completion.len > 0 and completion[0] == '\x02')
+            completion[1..]
+        else
+            completion;
+
         // Use the SAVED path prefix, not the current buffer (which may be corrupted)
         const path_prefix = self.completion_path_prefix orelse "";
 
@@ -925,8 +942,8 @@ pub const LineEditor = struct {
             self.length += 1;
         }
 
-        // Insert the completion basename (e.g., "better-dx/")
-        for (completion) |c| {
+        // Insert the actual completion (without marker)
+        for (actual_completion) |c| {
             self.buffer[self.length] = c;
             self.length += 1;
         }
@@ -935,7 +952,7 @@ pub const LineEditor = struct {
 
         // Write the new text (path_prefix + completion) - cursor naturally follows
         try self.writeBytes(path_prefix);
-        try self.writeBytes(completion);
+        try self.writeBytes(actual_completion);
 
         // Show cursor again
         try self.writeBytes("\x1b[?25h");
@@ -953,14 +970,21 @@ pub const LineEditor = struct {
         var col: usize = 0;
         const max_cols = 4;
         for (completions, 0..) |completion, i| {
+            // Check if this is a script (marked with \x02)
+            const is_script = completion.len > 0 and completion[0] == '\x02';
+            const display_text = if (is_script) completion[1..] else completion;
+
             // Highlight the current selection
             if (i == self.completion_index) {
                 try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
+            } else if (is_script) {
+                // Scripts: default color (no styling)
+                // Don't output any color codes, just use default
             } else {
-                try self.writeBytes("\x1b[1;36m"); // Bold cyan/teal text for directories
+                try self.writeBytes("\x1b[1;36m"); // Bold cyan/teal text for commands/directories
             }
 
-            try self.writeBytes(completion);
+            try self.writeBytes(display_text);
 
             try self.writeBytes("\x1b[0m"); // Reset colors
 
@@ -992,14 +1016,21 @@ pub const LineEditor = struct {
         var col: usize = 0;
         const max_cols = 4;
         for (completions, 0..) |completion, i| {
+            // Check if this is a script (marked with \x02)
+            const is_script = completion.len > 0 and completion[0] == '\x02';
+            const display_text = if (is_script) completion[1..] else completion;
+
             // Clear the current position and redraw with/without highlight
             if (i == self.completion_index) {
                 try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
+            } else if (is_script) {
+                // Scripts: default color (no styling)
+                // Don't output any color codes, just use default
             } else {
-                try self.writeBytes("\x1b[1;36m"); // Bold cyan/teal text for directories
+                try self.writeBytes("\x1b[1;36m"); // Bold cyan/teal text for commands/directories
             }
 
-            try self.writeBytes(completion);
+            try self.writeBytes(display_text);
 
             try self.writeBytes("\x1b[0m"); // Reset colors
 
