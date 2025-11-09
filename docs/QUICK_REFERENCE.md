@@ -65,6 +65,32 @@ den> docker ps -a
 - Press Down past last match to return to search query
 - Type any character to exit search mode
 
+### Reverse Incremental Search (Ctrl+R)
+```bash
+# Press Ctrl+R to enter reverse search mode
+den>
+(reverse-i-search)`': _
+
+# Type to search backwards through history
+(reverse-i-search)`dock': docker ps -a
+
+# Press Ctrl+R again to find next match
+(reverse-i-search)`dock': docker build -t myapp .
+
+# Press Enter to use the command
+den> docker build -t myapp .
+
+# Or press Ctrl+C to cancel
+```
+
+**Features:**
+- Real-time incremental search as you type
+- Searches backwards from most recent
+- Press Ctrl+R repeatedly to cycle through matches
+- Shows matching command with search term highlighted
+- Backspace to edit search query
+- Just like bash/zsh!
+
 ## Keyboard Shortcuts
 
 ### Line Editing
@@ -75,30 +101,118 @@ den> docker ps -a
 | `Ctrl+U` | Clear line before cursor |
 | `Ctrl+K` | Clear line after cursor |
 | `Ctrl+W` | Delete word before cursor |
-| `Ctrl+L` | Clear screen |
+| `Alt+D` | Delete word after cursor |
+| `Ctrl+T` | Transpose (swap) characters |
+| `Ctrl+L` | Clear screen and redraw prompt |
 | `Ctrl+C` | Cancel current line |
 | `Ctrl+D` | Exit shell (if line is empty) |
 
 ### Cursor Movement
 | Key | Action |
 |-----|--------|
-| `Left Arrow` | Move cursor left |
-| `Right Arrow` | Move cursor right |
-| `Home` | Move to beginning of line |
-| `End` | Move to end of line |
+| `Left Arrow` | Move cursor left one character |
+| `Right Arrow` | Move cursor right one character |
+| `Ctrl+Left` / `Alt+B` | Move cursor left one word |
+| `Ctrl+Right` / `Alt+F` | Move cursor right one word |
+| `Home` / `Ctrl+A` | Move to beginning of line |
+| `End` / `Ctrl+E` | Move to end of line |
 
 ### History
 | Key | Action |
 |-----|--------|
 | `Up Arrow` | Previous history / Previous match (if searching) |
 | `Down Arrow` | Next history / Next match (if searching) |
-| `Ctrl+R` | Reverse search (coming soon) |
+| `Ctrl+R` | Reverse incremental search |
 
 ### Completion
 | Key | Action |
 |-----|--------|
 | `TAB` | Complete / Cycle through suggestions |
 | `Esc` | Cancel completion |
+
+## Advanced Line Editing
+
+### Word Navigation
+Navigate by words instead of characters for faster editing:
+
+```bash
+# Type a long command
+den> git commit -m "Add new feature to the authentication system"
+                      ^cursor here
+
+# Jump back one word (Ctrl+Left or Alt+B)
+den> git commit -m "Add new feature to the authentication system"
+                  ^jumped to "new"
+
+# Jump forward one word (Ctrl+Right or Alt+F)
+den> git commit -m "Add new feature to the authentication system"
+                          ^jumped to "feature"
+```
+
+**Pro tip:** Use word navigation to quickly fix mistakes in the middle of long commands!
+
+### Delete Word Forward (Alt+D)
+Delete from cursor to end of next word:
+
+```bash
+den> git commit -m "fix typo error in function"
+              ^cursor here
+
+# Press Alt+D
+den> git commit -m "fix  error in function"
+              ^deleted "typo "
+
+# Press Alt+D again
+den> git commit -m "fix  in function"
+              ^deleted "error "
+```
+
+**Use case:** Quickly remove words without backspacing or selecting.
+
+### Transpose Characters (Ctrl+T)
+Fix common typos instantly by swapping characters:
+
+```bash
+# Oops, typed "teh" instead of "the"
+den> echo teh
+          ^cursor here
+
+# Press Ctrl+T
+den> echo the
+         ^fixed! cursor moved forward
+```
+
+```bash
+# Also works at end of line
+den> echo hello wordl
+                     ^cursor at end
+
+# Press Ctrl+T (swaps last two chars)
+den> echo hello world
+                     ^fixed!
+```
+
+**Pro tip:** Ctrl+T is the fastest way to fix transposed letters. Much faster than backspace!
+
+### Clear Screen (Ctrl+L)
+Clear the terminal and get a fresh prompt without losing your current command:
+
+```bash
+# After lots of output...
+den> ls -la
+total 48
+drwxr-xr-x  12 user  staff   384 Nov  9 10:30 .
+drwxr-xr-x   8 user  staff   256 Nov  8 15:22 ..
+[... many more lines ...]
+
+den> git status
+# More output...
+
+# Press Ctrl+L - screen clears and you get fresh prompt
+den> _
+```
+
+**Use case:** Keep your terminal clean while working without losing your command history.
 
 ## Quick Tips
 
@@ -289,6 +403,7 @@ Future configuration options:
 
 ## Learn More
 
+- **[Line Editing](LINE_EDITING.md)** - Complete guide to word navigation, editing, and history search
 - **[Tab Completion](TAB_COMPLETION.md)** - Complete guide to interactive completion
 - **[Mid-Word Completion](MID_WORD_COMPLETION.md)** - Path abbreviation deep dive
 - **[History Substring Search](HISTORY_SUBSTRING_SEARCH.md)** - History navigation guide
@@ -307,25 +422,33 @@ Future configuration options:
 
 # History search
 <text><Up>               Search history for text
+Ctrl+R                   Reverse incremental search
 <Down>                   Next match / Return to query
 
 # Line editing
 Ctrl+A / Ctrl+E          Start / End of line
 Ctrl+U / Ctrl+K          Clear before / after cursor
-Ctrl+W                   Delete previous word
+Ctrl+W / Alt+D           Delete word backward / forward
+Ctrl+T                   Transpose (swap) characters
 Ctrl+L                   Clear screen
 Ctrl+C                   Cancel line
 
-# Navigation
+# Word navigation
+Ctrl+Left / Alt+B        Jump backward by word
+Ctrl+Right / Alt+F       Jump forward by word
+
+# Character navigation
+Left / Right             Move one character
 Up / Down                History navigation
-Left / Right             Cursor movement
 ```
 
 **Remember:**
 - TAB is your friend - use it everywhere!
 - Type less, complete more
-- Search history by substring, not just prefix
+- Search history with Ctrl+R or substring search
 - Path abbreviations save keystrokes
+- Word navigation is faster than character movement
+- Ctrl+T fixes typos instantly
 
 ---
 

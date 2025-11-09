@@ -191,6 +191,7 @@ pub const EscapeSequence = enum {
     ctrl_right,    // Ctrl+Right arrow (word forward)
     alt_b,         // Alt+B (word back)
     alt_f,         // Alt+F (word forward)
+    alt_d,         // Alt+D (delete word forward)
     home,
     end_key,
     delete,
@@ -243,6 +244,7 @@ pub const EscapeSequence = enum {
             switch (bytes[1]) {
                 'b', 'B' => return .alt_b,  // Alt+B (word back)
                 'f', 'F' => return .alt_f,  // Alt+F (word forward)
+                'd', 'D' => return .alt_d,  // Alt+D (delete word forward)
                 else => return .unknown,
             }
         }
@@ -433,6 +435,14 @@ pub const LineEditor = struct {
                 0x0B => {
                     self.clearCompletionState();
                     try self.killToEnd(); // Ctrl+K
+                },
+                0x0C => {
+                    self.clearCompletionState();
+                    try self.clearScreen(); // Ctrl+L
+                },
+                0x14 => {
+                    self.clearCompletionState();
+                    try self.transposeChars(); // Ctrl+T
                 },
                 0x15 => {
                     self.clearCompletionState();
@@ -803,6 +813,93 @@ pub const LineEditor = struct {
         }
     }
 
+    fn deleteWordForward(self: *LineEditor) !void {
+        if (self.cursor >= self.length) return;
+
+        // Clear history search when user deletes word
+        self.clearHistorySearch();
+
+        // Find end of next word
+        const delete_to = self.findNextWord();
+        const chars_to_delete = delete_to - self.cursor;
+
+        if (chars_to_delete == 0) return;
+
+        // Shift remaining characters left
+        const remaining = self.length - delete_to;
+        var i: usize = 0;
+        while (i < remaining) : (i += 1) {
+            self.buffer[self.cursor + i] = self.buffer[delete_to + i];
+        }
+        self.length -= chars_to_delete;
+
+        // Redraw line from cursor position
+        try self.writeBytes(self.buffer[self.cursor..self.length]);
+        try self.writeBytes(" ");  // Clear the last character
+        try self.writeBytes("\x1B[K");  // Clear to end of line
+
+        // Move cursor back to correct position
+        const moves_needed = self.length - self.cursor + 1;
+        i = 0;
+        while (i < moves_needed) : (i += 1) {
+            try self.writeBytes("\x1B[D");
+        }
+    }
+
+    fn transposeChars(self: *LineEditor) !void {
+        // Need at least 2 characters to transpose
+        if (self.length < 2) return;
+        if (self.cursor == 0) return;
+
+        // Clear history search when user transposes
+        self.clearHistorySearch();
+
+        var pos1: usize = undefined;
+        var pos2: usize = undefined;
+
+        if (self.cursor == self.length) {
+            // At end of line: swap last two characters
+            pos1 = self.length - 2;
+            pos2 = self.length - 1;
+        } else {
+            // Middle of line: swap char before cursor with char at cursor
+            pos1 = self.cursor - 1;
+            pos2 = self.cursor;
+        }
+
+        // Swap the characters
+        const temp = self.buffer[pos1];
+        self.buffer[pos1] = self.buffer[pos2];
+        self.buffer[pos2] = temp;
+
+        // Redraw the affected area
+        // Move cursor to pos1
+        while (self.cursor > pos1) {
+            try self.writeBytes("\x1B[D");
+            self.cursor -= 1;
+        }
+        while (self.cursor < pos1) {
+            try self.writeBytes("\x1B[C");
+            self.cursor += 1;
+        }
+
+        // Redraw from pos1 to end
+        try self.writeBytes(self.buffer[pos1..self.length]);
+
+        // Position cursor after the transposed pair
+        const target_pos = pos2 + 1;
+        while (self.cursor < target_pos and self.cursor < self.length) {
+            try self.writeBytes("\x1B[C");
+            self.cursor += 1;
+        }
+
+        // Move cursor back to where it should be
+        while (self.cursor > target_pos) {
+            try self.writeBytes("\x1B[D");
+            self.cursor -= 1;
+        }
+    }
+
     fn moveCursorHome(self: *LineEditor) !void {
         while (self.cursor > 0) {
             try self.moveCursorLeft();
@@ -854,6 +951,26 @@ pub const LineEditor = struct {
             try self.writeBytes("\x1B[D");
         }
         self.cursor = 0;
+    }
+
+    fn clearScreen(self: *LineEditor) !void {
+        // Clear entire screen and move cursor to home
+        try self.writeBytes("\x1B[2J\x1B[H");
+
+        // Redisplay prompt
+        try self.displayPrompt();
+
+        // Redraw current buffer
+        if (self.length > 0) {
+            try self.writeBytes(self.buffer[0..self.length]);
+
+            // Move cursor back to correct position
+            const moves_needed = self.length - self.cursor;
+            var i: usize = 0;
+            while (i < moves_needed) : (i += 1) {
+                try self.writeBytes("\x1B[D");
+            }
+        }
     }
 
     fn deleteWord(self: *LineEditor) !void {
@@ -945,6 +1062,7 @@ pub const LineEditor = struct {
             },
             .ctrl_left, .alt_b => try self.moveCursorWordLeft(),
             .ctrl_right, .alt_f => try self.moveCursorWordRight(),
+            .alt_d => try self.deleteWordForward(),
             .home => try self.moveCursorHome(),
             .end_key => {
                 // End key also accepts suggestion if present
