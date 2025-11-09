@@ -187,6 +187,10 @@ pub const EscapeSequence = enum {
     down_arrow,
     left_arrow,
     right_arrow,
+    ctrl_left,     // Ctrl+Left arrow (word back)
+    ctrl_right,    // Ctrl+Right arrow (word forward)
+    alt_b,         // Alt+B (word back)
+    alt_f,         // Alt+F (word forward)
     home,
     end_key,
     delete,
@@ -223,11 +227,24 @@ pub const EscapeSequence = enum {
                     else => {},
                 }
             }
+
+            // Ctrl+Arrow sequences: ESC[1;5C (right) or ESC[1;5D (left)
+            if (bytes.len >= 6 and bytes[2] == '1' and bytes[3] == ';' and bytes[4] == '5') {
+                switch (bytes[5]) {
+                    'C' => return .ctrl_right,
+                    'D' => return .ctrl_left,
+                    else => {},
+                }
+            }
         }
 
         // Alt+key sequences (ESC followed by character)
-        if (bytes[0] == 0x1B and bytes.len >= 2) {
-            return .unknown;
+        if (bytes[0] == 0x1B and bytes.len >= 2 and bytes[1] != '[') {
+            switch (bytes[1]) {
+                'b', 'B' => return .alt_b,  // Alt+B (word back)
+                'f', 'F' => return .alt_f,  // Alt+F (word forward)
+                else => return .unknown,
+            }
         }
 
         return .unknown;
@@ -259,6 +276,12 @@ pub const LineEditor = struct {
     completion_path_prefix: ?[]const u8 = null, // Save the path prefix (e.g., "Documents/Projects/")
     // Inline suggestion state
     suggestion: ?[]const u8 = null, // The suggested text from history
+    // Reverse search mode (Ctrl+R)
+    reverse_search_mode: bool = false,
+    reverse_search_query: [256]u8 = undefined,
+    reverse_search_query_len: usize = 0,
+    reverse_search_match: ?[]const u8 = null,
+    reverse_search_history_index: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator, prompt: []const u8) LineEditor {
         return .{
@@ -334,6 +357,17 @@ pub const LineEditor = struct {
             switch (byte) {
                 '\r', '\n' => {
                     // Enter key
+                    // If in reverse search mode, accept the match
+                    if (self.reverse_search_mode) {
+                        try self.acceptReverseSearch();
+                        if (self.length > 0) {
+                            try self.writeBytes("\r\n");
+                            try self.terminal.disableRawMode();
+                            return try self.allocator.dupe(u8, self.buffer[0..self.length]);
+                        }
+                        continue;
+                    }
+
                     // If we have an active completion list, accept it instead of submitting
                     if (self.completion_list != null) {
                         self.clearCompletionState();
@@ -348,6 +382,16 @@ pub const LineEditor = struct {
                 },
                 0x03 => {
                     // Ctrl+C
+                    if (self.reverse_search_mode) {
+                        // Cancel reverse search and clear line
+                        try self.cancelReverseSearch();
+                        try self.writeBytes("\r\n");
+                        try self.writeBytes(self.prompt);
+                        self.length = 0;
+                        self.cursor = 0;
+                        continue;
+                    }
+
                     // Clear any visible completion list first
                     if (self.completion_list != null) {
                         try self.clearCompletionDisplay();
@@ -398,19 +442,54 @@ pub const LineEditor = struct {
                     self.clearCompletionState();
                     try self.deleteWord(); // Ctrl+W
                 },
+                0x12 => {
+                    // Ctrl+R - Reverse search
+                    if (self.reverse_search_mode) {
+                        // Already in search mode - find next match
+                        try self.continueReverseSearch();
+                    } else {
+                        // Enter reverse search mode
+                        try self.startReverseSearch();
+                    }
+                },
                 0x09 => {
                     // Tab - handle completion
-                    try self.handleTabCompletion();
+                    if (!self.reverse_search_mode) {
+                        try self.handleTabCompletion();
+                    }
                 },
                 0x7F, 0x08 => {
                     // Backspace (DEL or BS)
-                    self.clearCompletionState();
-                    try self.backspace();
+                    if (self.reverse_search_mode) {
+                        // Delete character from search query
+                        if (self.reverse_search_query_len > 0) {
+                            self.reverse_search_query_len -= 1;
+                            if (self.history_count) |count| {
+                                self.reverse_search_history_index = count.*;
+                            }
+                            try self.updateReverseSearch();
+                        }
+                    } else {
+                        self.clearCompletionState();
+                        try self.backspace();
+                    }
                 },
                 0x20...0x7E => {
                     // Printable ASCII
-                    self.clearCompletionState();
-                    try self.insertChar(byte);
+                    if (self.reverse_search_mode) {
+                        // Add character to search query
+                        if (self.reverse_search_query_len < self.reverse_search_query.len) {
+                            self.reverse_search_query[self.reverse_search_query_len] = byte;
+                            self.reverse_search_query_len += 1;
+                            if (self.history_count) |count| {
+                                self.reverse_search_history_index = count.*;
+                            }
+                            try self.updateReverseSearch();
+                        }
+                    } else {
+                        self.clearCompletionState();
+                        try self.insertChar(byte);
+                    }
                 },
                 else => {
                     // Ignore other control characters
@@ -456,6 +535,97 @@ pub const LineEditor = struct {
             self.allocator.free(saved);
             self.saved_line = null;
         }
+    }
+
+    /// Start reverse search mode (Ctrl+R)
+    fn startReverseSearch(self: *LineEditor) !void {
+        _ = self.history orelse return;
+        const count = self.history_count orelse return;
+        if (count.* == 0) return;
+
+        self.reverse_search_mode = true;
+        self.reverse_search_query_len = 0;
+        self.reverse_search_history_index = count.*;
+        try self.updateReverseSearch();
+    }
+
+    /// Update reverse search with current query
+    fn updateReverseSearch(self: *LineEditor) !void {
+        const history = self.history orelse return;
+        _ = self.history_count orelse return;
+
+        const query = self.reverse_search_query[0..self.reverse_search_query_len];
+
+        // Search backwards from current position
+        var i = self.reverse_search_history_index;
+        while (i > 0) {
+            i -= 1;
+            if (history[i]) |entry| {
+                // Check if entry contains the query
+                if (query.len == 0 or std.mem.indexOf(u8, entry, query) != null) {
+                    self.reverse_search_match = entry;
+                    self.reverse_search_history_index = i;
+                    try self.redrawReverseSearch();
+                    return;
+                }
+            }
+        }
+
+        // No match found - keep current match or show no results
+        try self.redrawReverseSearch();
+    }
+
+    /// Continue reverse search (find next match) - called when user presses Ctrl+R again
+    fn continueReverseSearch(self: *LineEditor) !void {
+        if (!self.reverse_search_mode) return;
+        if (self.reverse_search_history_index > 0) {
+            self.reverse_search_history_index -= 1;
+            try self.updateReverseSearch();
+        }
+    }
+
+    /// Redraw the reverse search prompt and matched line
+    fn redrawReverseSearch(self: *LineEditor) !void {
+        // Clear current line
+        try self.writeBytes("\r\x1B[K");
+
+        // Show reverse search prompt
+        const query = self.reverse_search_query[0..self.reverse_search_query_len];
+        var prompt_buf: [512]u8 = undefined;
+        const search_prompt = if (self.reverse_search_match) |match|
+            try std.fmt.bufPrint(&prompt_buf, "(reverse-i-search)`{s}': {s}", .{ query, match })
+        else
+            try std.fmt.bufPrint(&prompt_buf, "(failed reverse-i-search)`{s}': ", .{query});
+
+        try self.writeBytes(search_prompt);
+    }
+
+    /// Accept reverse search result
+    fn acceptReverseSearch(self: *LineEditor) !void {
+        if (self.reverse_search_match) |match| {
+            // Copy match to buffer
+            const len = @min(match.len, self.buffer.len);
+            @memcpy(self.buffer[0..len], match[0..len]);
+            self.length = len;
+            self.cursor = len;
+        }
+        try self.cancelReverseSearch();
+    }
+
+    /// Cancel reverse search mode
+    fn cancelReverseSearch(self: *LineEditor) !void {
+        self.reverse_search_mode = false;
+        self.reverse_search_match = null;
+        self.reverse_search_query_len = 0;
+        self.reverse_search_history_index = 0;
+
+        // Redraw normal prompt and buffer
+        try self.writeBytes("\r\x1B[K");
+        try self.writeBytes(self.prompt);
+        try self.writeBytes(self.buffer[0..self.length]);
+
+        // Move cursor to end
+        self.cursor = self.length;
     }
 
     fn insertChar(self: *LineEditor, char: u8) !void {
@@ -577,6 +747,60 @@ pub const LineEditor = struct {
         if (self.cursor >= self.length) return;
         self.cursor += 1;
         try self.writeBytes("\x1B[C");
+    }
+
+    /// Find the start of the previous word
+    fn findPreviousWord(self: *LineEditor) usize {
+        if (self.cursor == 0) return 0;
+
+        var pos = self.cursor;
+
+        // Skip any whitespace immediately before cursor
+        while (pos > 0 and std.ascii.isWhitespace(self.buffer[pos - 1])) {
+            pos -= 1;
+        }
+
+        // Skip non-whitespace (the word)
+        while (pos > 0 and !std.ascii.isWhitespace(self.buffer[pos - 1])) {
+            pos -= 1;
+        }
+
+        return pos;
+    }
+
+    /// Find the start of the next word
+    fn findNextWord(self: *LineEditor) usize {
+        if (self.cursor >= self.length) return self.length;
+
+        var pos = self.cursor;
+
+        // Skip non-whitespace (current word)
+        while (pos < self.length and !std.ascii.isWhitespace(self.buffer[pos])) {
+            pos += 1;
+        }
+
+        // Skip whitespace to get to next word
+        while (pos < self.length and std.ascii.isWhitespace(self.buffer[pos])) {
+            pos += 1;
+        }
+
+        return pos;
+    }
+
+    /// Move cursor to the start of the previous word
+    fn moveCursorWordLeft(self: *LineEditor) !void {
+        const target = self.findPreviousWord();
+        while (self.cursor > target) {
+            try self.moveCursorLeft();
+        }
+    }
+
+    /// Move cursor to the start of the next word
+    fn moveCursorWordRight(self: *LineEditor) !void {
+        const target = self.findNextWord();
+        while (self.cursor < target) {
+            try self.moveCursorRight();
+        }
     }
 
     fn moveCursorHome(self: *LineEditor) !void {
@@ -719,6 +943,8 @@ pub const LineEditor = struct {
                     try self.moveCursorRight();
                 }
             },
+            .ctrl_left, .alt_b => try self.moveCursorWordLeft(),
+            .ctrl_right, .alt_f => try self.moveCursorWordRight(),
             .home => try self.moveCursorHome(),
             .end_key => {
                 // End key also accepts suggestion if present

@@ -108,11 +108,22 @@ pub const CompletionProvider = struct {
 };
 
 /// Plugin Interface Registry - manages hooks, commands, and completions
+/// Error statistics for a plugin
+pub const PluginErrorStats = struct {
+    plugin_name: []const u8,
+    hook_errors: u64 = 0,
+    command_errors: u64 = 0,
+    last_error: ?[]const u8 = null,
+    last_error_time: i64 = 0,
+};
+
 pub const PluginRegistry = struct {
     allocator: std.mem.Allocator,
     hooks: [6]std.ArrayList(Hook), // One list per HookType
     commands: std.StringHashMap(PluginCommand),
     completions: std.ArrayList(CompletionProvider),
+    error_stats: std.StringHashMap(PluginErrorStats), // Error tracking per plugin
+    verbose_errors: bool = true, // Whether to print errors to stderr
 
     pub fn init(allocator: std.mem.Allocator) PluginRegistry {
         var hooks: [6]std.ArrayList(Hook) = undefined;
@@ -131,6 +142,8 @@ pub const PluginRegistry = struct {
                 .items = &[_]CompletionProvider{},
                 .capacity = 0,
             },
+            .error_stats = std.StringHashMap(PluginErrorStats).init(allocator),
+            .verbose_errors = true,
         };
     }
 
@@ -156,6 +169,16 @@ pub const PluginRegistry = struct {
             completion.deinit();
         }
         self.completions.deinit(self.allocator);
+
+        // Clean up error stats
+        var stats_iter = self.error_stats.iterator();
+        while (stats_iter.next()) |entry| {
+            self.allocator.free(entry.value_ptr.plugin_name);
+            if (entry.value_ptr.last_error) |err_msg| {
+                self.allocator.free(err_msg);
+            }
+        }
+        self.error_stats.deinit();
     }
 
     /// Register a hook
@@ -192,13 +215,51 @@ pub const PluginRegistry = struct {
         }
     }
 
+    /// Record an error for a plugin
+    fn recordError(self: *PluginRegistry, plugin_name: []const u8, error_type: []const u8, err: anyerror) !void {
+        const gop = try self.error_stats.getOrPut(plugin_name);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = PluginErrorStats{
+                .plugin_name = try self.allocator.dupe(u8, plugin_name),
+            };
+        }
+
+        // Increment appropriate counter
+        if (std.mem.eql(u8, error_type, "hook")) {
+            gop.value_ptr.hook_errors += 1;
+        } else if (std.mem.eql(u8, error_type, "command")) {
+            gop.value_ptr.command_errors += 1;
+        }
+
+        // Update last error
+        if (gop.value_ptr.last_error) |old_err| {
+            self.allocator.free(old_err);
+        }
+        const err_msg = try std.fmt.allocPrint(self.allocator, "{s}: {}", .{ error_type, err });
+        gop.value_ptr.last_error = err_msg;
+        gop.value_ptr.last_error_time = std.time.timestamp();
+    }
+
     /// Execute hooks of a specific type
     pub fn executeHooks(self: *PluginRegistry, hook_type: HookType, context: *HookContext) !void {
         const index = @intFromEnum(hook_type);
         for (self.hooks[index].items) |hook| {
             if (hook.enabled) {
                 hook.function(context) catch |err| {
-                    std.debug.print("Hook error ({s}): {}\n", .{ hook.plugin_name, err });
+                    // Record the error
+                    self.recordError(hook.plugin_name, "hook", err) catch {};
+
+                    // Print error if verbose mode is enabled
+                    if (self.verbose_errors) {
+                        var buf: [512]u8 = undefined;
+                        const msg = std.fmt.bufPrint(&buf, "[Plugin Error] {s} hook '{s}' failed: {}\n", .{
+                            hook.plugin_name,
+                            @tagName(hook_type),
+                            err,
+                        }) catch "[Plugin Error] Failed to format error message\n";
+
+                        _ = std.posix.write(std.posix.STDERR_FILENO, msg) catch {};
+                    }
                 };
             }
         }
@@ -321,6 +382,43 @@ pub const PluginRegistry = struct {
         const result = try self.allocator.alloc([]const u8, all_completions_count);
         @memcpy(result, all_completions_buffer[0..all_completions_count]);
         return result;
+    }
+
+    /// Get error statistics for a specific plugin
+    pub fn getPluginErrors(self: *PluginRegistry, plugin_name: []const u8) ?PluginErrorStats {
+        return self.error_stats.get(plugin_name);
+    }
+
+    /// Get all plugin error statistics
+    pub fn getAllErrors(self: *PluginRegistry) ![]PluginErrorStats {
+        var stats_buffer: [256]PluginErrorStats = undefined;
+        var count: usize = 0;
+
+        var iter = self.error_stats.iterator();
+        while (iter.next()) |entry| {
+            if (count >= stats_buffer.len) break;
+            stats_buffer[count] = entry.value_ptr.*;
+            count += 1;
+        }
+
+        const result = try self.allocator.alloc(PluginErrorStats, count);
+        @memcpy(result, stats_buffer[0..count]);
+        return result;
+    }
+
+    /// Clear error statistics for a plugin
+    pub fn clearPluginErrors(self: *PluginRegistry, plugin_name: []const u8) void {
+        if (self.error_stats.fetchRemove(plugin_name)) |kv| {
+            self.allocator.free(kv.value.plugin_name);
+            if (kv.value.last_error) |err| {
+                self.allocator.free(err);
+            }
+        }
+    }
+
+    /// Set verbose error reporting
+    pub fn setVerboseErrors(self: *PluginRegistry, verbose: bool) void {
+        self.verbose_errors = verbose;
     }
 };
 

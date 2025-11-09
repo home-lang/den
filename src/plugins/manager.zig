@@ -29,7 +29,16 @@ pub const PluginManager = struct {
         var iter = self.plugins.iterator();
         while (iter.next()) |entry| {
             var plugin = entry.value_ptr;
-            plugin.shutdown() catch {};
+            plugin.shutdown() catch |err| {
+                // Log shutdown errors but continue cleanup
+                var buf: [256]u8 = undefined;
+                const msg = std.fmt.bufPrint(&buf, "[Plugin Manager] Warning: Failed to shutdown plugin '{s}': {}\n", .{
+                    entry.key_ptr.*,
+                    err,
+                }) catch "[Plugin Manager] Warning: Shutdown failed\n";
+
+                _ = std.posix.write(std.posix.STDERR_FILENO, msg) catch {};
+            };
             plugin.deinit();
             // Free the key
             self.allocator.free(entry.key_ptr.*);

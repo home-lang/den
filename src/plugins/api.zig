@@ -15,6 +15,9 @@ pub const LogLevel = enum {
     err,
 };
 
+// Forward declare Shell to avoid circular dependency
+const Shell = @import("../shell.zig").Shell;
+
 /// Plugin API - provides access to shell functionality
 pub const PluginAPI = struct {
     allocator: std.mem.Allocator,
@@ -22,6 +25,7 @@ pub const PluginAPI = struct {
     registry: *PluginRegistry,
     config: std.StringHashMap([]const u8),
     logger: Logger,
+    shell: ?*Shell = null, // Optional reference to shell for state access
 
     pub fn init(allocator: std.mem.Allocator, plugin_name: []const u8, registry: *PluginRegistry) !PluginAPI {
         return .{
@@ -30,7 +34,13 @@ pub const PluginAPI = struct {
             .registry = registry,
             .config = std.StringHashMap([]const u8).init(allocator),
             .logger = Logger.init(allocator, plugin_name),
+            .shell = null,
         };
+    }
+
+    /// Set the shell reference (called by shell after plugin initialization)
+    pub fn setShell(self: *PluginAPI, shell: *Shell) void {
+        self.shell = shell;
     }
 
     pub fn deinit(self: *PluginAPI) void {
@@ -225,6 +235,115 @@ pub const PluginAPI = struct {
     /// Get current timestamp in milliseconds
     pub fn timestamp(_: *PluginAPI) i64 {
         return std.time.milliTimestamp();
+    }
+
+    // === Shell State Access API ===
+
+    /// Get an environment variable
+    /// Returns null if shell is not set or variable doesn't exist
+    pub fn getEnvironmentVar(self: *PluginAPI, name: []const u8) ?[]const u8 {
+        const shell = self.shell orelse return null;
+        return shell.environment.get(name);
+    }
+
+    /// Get all environment variables
+    /// Returns empty array if shell is not set
+    /// Caller must free the returned array (but not the strings inside)
+    pub fn getAllEnvironmentVars(self: *PluginAPI) ![][2][]const u8 {
+        const shell = self.shell orelse {
+            return try self.allocator.alloc([2][]const u8, 0);
+        };
+
+        var env_buffer: [256][2][]const u8 = undefined;
+        var count: usize = 0;
+
+        var iter = shell.environment.iterator();
+        while (iter.next()) |entry| {
+            if (count >= env_buffer.len) break;
+            env_buffer[count] = .{ entry.key_ptr.*, entry.value_ptr.* };
+            count += 1;
+        }
+
+        const result = try self.allocator.alloc([2][]const u8, count);
+        @memcpy(result, env_buffer[0..count]);
+        return result;
+    }
+
+    /// Get current working directory
+    /// Returns null if unable to get cwd
+    /// Caller must free the returned string
+    pub fn getCurrentDirectory(self: *PluginAPI) ?[]const u8 {
+        _ = self.shell orelse return null;
+
+        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cwd = std.posix.getcwd(&cwd_buf) catch return null;
+        return self.allocator.dupe(u8, cwd) catch null;
+    }
+
+    /// Get command history
+    /// Returns empty array if shell is not set
+    /// Caller must NOT free the returned strings (they belong to shell)
+    /// Caller must free the array itself
+    pub fn getHistory(self: *PluginAPI) ![][]const u8 {
+        const shell = self.shell orelse {
+            return try self.allocator.alloc([]const u8, 0);
+        };
+
+        var history_buffer: [1000][]const u8 = undefined;
+        var count: usize = 0;
+
+        for (shell.history[0..shell.history_count]) |maybe_entry| {
+            if (maybe_entry) |entry| {
+                history_buffer[count] = entry;
+                count += 1;
+            }
+        }
+
+        const result = try self.allocator.alloc([]const u8, count);
+        @memcpy(result, history_buffer[0..count]);
+        return result;
+    }
+
+    /// Get last exit code
+    /// Returns 0 if shell is not set
+    pub fn getLastExitCode(self: *PluginAPI) i32 {
+        const shell = self.shell orelse return 0;
+        return shell.last_exit_code;
+    }
+
+    /// Get shell alias
+    /// Returns null if shell is not set or alias doesn't exist
+    pub fn getAlias(self: *PluginAPI, name: []const u8) ?[]const u8 {
+        const shell = self.shell orelse return null;
+        return shell.aliases.get(name);
+    }
+
+    /// Get all aliases
+    /// Returns empty array if shell is not set
+    /// Caller must free the returned array (but not the strings inside)
+    pub fn getAllAliases(self: *PluginAPI) ![][2][]const u8 {
+        const shell = self.shell orelse {
+            return try self.allocator.alloc([2][]const u8, 0);
+        };
+
+        var alias_buffer: [256][2][]const u8 = undefined;
+        var count: usize = 0;
+
+        var iter = shell.aliases.iterator();
+        while (iter.next()) |entry| {
+            if (count >= alias_buffer.len) break;
+            alias_buffer[count] = .{ entry.key_ptr.*, entry.value_ptr.* };
+            count += 1;
+        }
+
+        const result = try self.allocator.alloc([2][]const u8, count);
+        @memcpy(result, alias_buffer[0..count]);
+        return result;
+    }
+
+    /// Check if shell reference is available
+    pub fn hasShellAccess(self: *PluginAPI) bool {
+        return self.shell != null;
     }
 };
 
