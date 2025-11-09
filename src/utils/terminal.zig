@@ -250,6 +250,7 @@ pub const LineEditor = struct {
     history_count: ?*usize = null,
     history_index: ?usize = null,
     saved_line: ?[]const u8 = null, // Save current line when browsing history
+    history_search_query: ?[]const u8 = null, // Substring to filter history (for substring search)
     completion_fn: ?CompletionFn = null, // Callback for tab completion
     // Completion cycling state
     completion_list: ?[][]const u8 = null,
@@ -444,8 +445,24 @@ pub const LineEditor = struct {
         }
     }
 
+    /// Clear history search state (called when user modifies the line during search)
+    fn clearHistorySearch(self: *LineEditor) void {
+        if (self.history_search_query) |query| {
+            self.allocator.free(query);
+            self.history_search_query = null;
+        }
+        self.history_index = null;
+        if (self.saved_line) |saved| {
+            self.allocator.free(saved);
+            self.saved_line = null;
+        }
+    }
+
     fn insertChar(self: *LineEditor, char: u8) !void {
         if (self.length >= self.buffer.len) return;
+
+        // Clear history search when user types
+        self.clearHistorySearch();
 
         // Clear old suggestion from screen if present
         if (self.suggestion != null) {
@@ -486,6 +503,9 @@ pub const LineEditor = struct {
     fn backspace(self: *LineEditor) !void {
         if (self.cursor == 0) return;
 
+        // Clear history search when user types
+        self.clearHistorySearch();
+
         // Clear old suggestion from screen if present
         if (self.suggestion != null) {
             try self.writeBytes("\x1b[0K"); // Clear from cursor to end of line
@@ -522,6 +542,9 @@ pub const LineEditor = struct {
 
     fn deleteChar(self: *LineEditor) !void {
         if (self.cursor >= self.length) return;
+
+        // Clear history search when user deletes
+        self.clearHistorySearch();
 
         // Move characters after cursor to the left
         var i = self.cursor;
@@ -570,12 +593,19 @@ pub const LineEditor = struct {
 
     fn killToEnd(self: *LineEditor) !void {
         if (self.cursor >= self.length) return;
+
+        // Clear history search when user kills text
+        self.clearHistorySearch();
+
         try self.writeBytes("\x1B[K"); // Clear to end of line
         self.length = self.cursor;
     }
 
     fn killToStart(self: *LineEditor) !void {
         if (self.cursor == 0) return;
+
+        // Clear history search when user kills text
+        self.clearHistorySearch();
 
         // Move remaining characters to start
         const remaining = self.length - self.cursor;
@@ -604,6 +634,9 @@ pub const LineEditor = struct {
 
     fn deleteWord(self: *LineEditor) !void {
         if (self.cursor == 0) return;
+
+        // Clear history search when user deletes word
+        self.clearHistorySearch();
 
         // Find start of previous word
         var word_start = self.cursor;
@@ -704,21 +737,43 @@ pub const LineEditor = struct {
         const history = self.history orelse return;
         const count = self.history_count orelse return;
 
-        // Save current line if first time browsing history
-        if (self.history_index == null and self.length > 0) {
-            self.saved_line = try self.allocator.dupe(u8, self.buffer[0..self.length]);
+        // If first time browsing history, set up search query and save line
+        if (self.history_index == null) {
+            if (self.length > 0) {
+                // Save current line
+                self.saved_line = try self.allocator.dupe(u8, self.buffer[0..self.length]);
+                // Set up substring search with current input
+                self.history_search_query = try self.allocator.dupe(u8, self.buffer[0..self.length]);
+            }
         }
 
         const current_index = self.history_index orelse count.*;
+        const search_query = self.history_search_query;
 
-        if (current_index == 0) return; // At oldest entry
+        // Search backward through history for matching entry
+        var i: usize = current_index;
+        while (i > 0) {
+            i -= 1;
 
-        const new_index = current_index - 1;
-        const entry = history[new_index] orelse return;
+            if (history[i]) |entry| {
+                // If we have a search query, only match entries containing it
+                if (search_query) |query| {
+                    if (std.mem.indexOf(u8, entry, query) != null) {
+                        // Found a match!
+                        try self.replaceLine(entry);
+                        self.history_index = i;
+                        return;
+                    }
+                } else {
+                    // No search query, show all history
+                    try self.replaceLine(entry);
+                    self.history_index = i;
+                    return;
+                }
+            }
+        }
 
-        // Replace current line with history entry
-        try self.replaceLine(entry);
-        self.history_index = new_index;
+        // No more matches found (stay at current position)
     }
 
     fn historyNext(self: *LineEditor) !void {
@@ -726,25 +781,45 @@ pub const LineEditor = struct {
         const count = self.history_count orelse return;
 
         const current_index = self.history_index orelse return; // Not browsing history
+        const search_query = self.history_search_query;
 
-        if (current_index >= count.* - 1) {
-            // At newest entry, restore saved line
-            if (self.saved_line) |saved| {
-                try self.replaceLine(saved);
-                self.allocator.free(saved);
-                self.saved_line = null;
-            } else {
-                try self.replaceLine("");
+        // Search forward through history for matching entry
+        var i: usize = current_index + 1;
+        while (i < count.*) : (i += 1) {
+            if (history[i]) |entry| {
+                // If we have a search query, only match entries containing it
+                if (search_query) |query| {
+                    if (std.mem.indexOf(u8, entry, query) != null) {
+                        // Found a match!
+                        try self.replaceLine(entry);
+                        self.history_index = i;
+                        return;
+                    }
+                } else {
+                    // No search query, show all history
+                    try self.replaceLine(entry);
+                    self.history_index = i;
+                    return;
+                }
             }
-            self.history_index = null;
-            return;
         }
 
-        const new_index = current_index + 1;
-        const entry = history[new_index] orelse return;
+        // Reached end of history, restore saved line or search query
+        if (self.saved_line) |saved| {
+            try self.replaceLine(saved);
+            self.allocator.free(saved);
+            self.saved_line = null;
+        } else {
+            try self.replaceLine("");
+        }
 
-        try self.replaceLine(entry);
-        self.history_index = new_index;
+        // Clear search state
+        if (self.history_search_query) |query| {
+            self.allocator.free(query);
+            self.history_search_query = null;
+        }
+
+        self.history_index = null;
     }
 
     fn replaceLine(self: *LineEditor, text: []const u8) !void {
@@ -850,24 +925,73 @@ pub const LineEditor = struct {
             }
 
             if (completions.len == 1) {
-                // Single completion - insert it directly
+                // Single completion - replace the word with completion
                 const completion = completions[0];
                 const typed_word = self.buffer[word_start..self.cursor];
 
-                // Find just the basename part (after last /)
-                const typed_basename = blk: {
-                    if (std.mem.lastIndexOfScalar(u8, typed_word, '/')) |last_slash| {
-                        break :blk typed_word[last_slash + 1 ..];
-                    } else {
-                        break :blk typed_word;
-                    }
-                };
+                // Check if completion is a full path (contains /) and typed_word also contains /
+                // This indicates mid-word expansion where we need to replace the whole thing
+                const is_path_expansion = std.mem.indexOfScalar(u8, completion, '/') != null and
+                                         std.mem.indexOfScalar(u8, typed_word, '/') != null;
 
-                // Insert the rest of the completion
-                if (completion.len >= typed_basename.len) {
-                    const to_insert = completion[typed_basename.len..];
-                    for (to_insert) |c| {
-                        try self.insertChar(c);
+                if (is_path_expansion) {
+                    // Replace the entire typed word with the completion
+                    // Save any text after cursor
+                    const text_after_cursor = self.buffer[self.cursor..self.length];
+                    var saved_after: [4096]u8 = undefined;
+                    const saved_len = text_after_cursor.len;
+                    if (saved_len > 0) {
+                        @memcpy(saved_after[0..saved_len], text_after_cursor);
+                    }
+
+                    // Replace buffer content from word_start
+                    const new_len = word_start + completion.len + saved_len;
+                    if (new_len <= self.buffer.len) {
+                        @memcpy(self.buffer[word_start..word_start + completion.len], completion);
+                        if (saved_len > 0) {
+                            @memcpy(self.buffer[word_start + completion.len..new_len], saved_after[0..saved_len]);
+                        }
+                        self.length = new_len;
+
+                        // Redraw from word_start
+                        // Move cursor back to word_start
+                        while (self.cursor > word_start) {
+                            try self.writeBytes("\x1B[D");
+                            self.cursor -= 1;
+                        }
+
+                        // Write the new content from word_start onward
+                        const bytes_to_write = self.buffer[word_start..self.length];
+                        try self.writeBytes(bytes_to_write);
+                        try self.writeBytes("\x1B[K"); // Clear to end of line
+
+                        // After writing, cursor is at self.length
+                        // Move cursor back to after completion (word_start + completion.len)
+                        const target_cursor = word_start + completion.len;
+                        const chars_to_go_back = self.length - target_cursor;
+                        var i: usize = 0;
+                        while (i < chars_to_go_back) : (i += 1) {
+                            try self.writeBytes("\x1B[D");
+                        }
+                        self.cursor = target_cursor;
+                    }
+                } else {
+                    // Traditional completion: just append the suffix
+                    // Find just the basename part (after last /)
+                    const typed_basename = blk: {
+                        if (std.mem.lastIndexOfScalar(u8, typed_word, '/')) |last_slash| {
+                            break :blk typed_word[last_slash + 1 ..];
+                        } else {
+                            break :blk typed_word;
+                        }
+                    };
+
+                    // Insert the rest of the completion
+                    if (completion.len >= typed_basename.len) {
+                        const to_insert = completion[typed_basename.len..];
+                        for (to_insert) |c| {
+                            try self.insertChar(c);
+                        }
                     }
                 }
 
@@ -1192,6 +1316,10 @@ pub const LineEditor = struct {
         if (self.saved_line) |saved| {
             self.allocator.free(saved);
             self.saved_line = null;
+        }
+        if (self.history_search_query) |query| {
+            self.allocator.free(query);
+            self.history_search_query = null;
         }
         self.clearCompletionState();
         self.clearSuggestion();

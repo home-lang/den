@@ -5,10 +5,17 @@ Welcome to the Den Shell documentation! This directory contains comprehensive do
 ## Table of Contents
 
 ### For Users
+- **[Quick Reference](QUICK_REFERENCE.md)** 🚀 - Cheat sheet for all features
 - [Getting Started](intro.md) - Introduction and quick start
 - [Installation](install.md) - Installation instructions
 - [Usage Guide](usage.md) - How to use Den Shell
 - [Configuration](config.md) - Configuration options
+
+#### Features
+- **[Tab Completion](TAB_COMPLETION.md)** ⭐ - Interactive tab completion guide
+- **[Mid-Word Completion](MID_WORD_COMPLETION.md)** - zsh-style path abbreviation (`/u/l/b` → `/usr/local/bin/`)
+- **[History Substring Search](HISTORY_SUBSTRING_SEARCH.md)** - Search command history by substring
+- **[Autocompletion](AUTOCOMPLETION.md)** - Shell completion scripts (bash/zsh/fish)
 
 ### For Developers
 - **[Architecture](ARCHITECTURE.md)** ⭐ - System architecture and design
