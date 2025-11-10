@@ -673,11 +673,7 @@ pub const LineEditor = struct {
             }
         }
 
-        // Update and display suggestion only if cursor is at end
-        if (self.cursor == self.length) {
-            try self.updateSuggestion();
-            try self.displaySuggestion();
-        }
+        // Auto-suggestions disabled - user can trigger via Tab completion instead
     }
 
     fn backspace(self: *LineEditor) !void {
@@ -713,11 +709,7 @@ pub const LineEditor = struct {
             try self.writeBytes("\x1B[D");
         }
 
-        // Update and display suggestion only if cursor is at end
-        if (self.cursor == self.length) {
-            try self.updateSuggestion();
-            try self.displaySuggestion();
-        }
+        // Auto-suggestions disabled - user can trigger via Tab completion instead
     }
 
     fn deleteChar(self: *LineEditor) !void {
