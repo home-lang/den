@@ -1273,9 +1273,15 @@ pub const LineEditor = struct {
                 const completion = completions[0];
                 const typed_word = self.buffer[word_start..self.cursor];
 
+                // Strip marker if present (e.g., \x02 for scripts/commands)
+                const actual_completion = if (completion.len > 0 and completion[0] == '\x02')
+                    completion[1..]
+                else
+                    completion;
+
                 // Check if completion is a full path (contains /) and typed_word also contains /
                 // This indicates mid-word expansion where we need to replace the whole thing
-                const is_path_expansion = std.mem.indexOfScalar(u8, completion, '/') != null and
+                const is_path_expansion = std.mem.indexOfScalar(u8, actual_completion, '/') != null and
                                          std.mem.indexOfScalar(u8, typed_word, '/') != null;
 
                 if (is_path_expansion) {
@@ -1289,11 +1295,11 @@ pub const LineEditor = struct {
                     }
 
                     // Replace buffer content from word_start
-                    const new_len = word_start + completion.len + saved_len;
+                    const new_len = word_start + actual_completion.len + saved_len;
                     if (new_len <= self.buffer.len) {
-                        @memcpy(self.buffer[word_start..word_start + completion.len], completion);
+                        @memcpy(self.buffer[word_start..word_start + actual_completion.len], actual_completion);
                         if (saved_len > 0) {
-                            @memcpy(self.buffer[word_start + completion.len..new_len], saved_after[0..saved_len]);
+                            @memcpy(self.buffer[word_start + actual_completion.len..new_len], saved_after[0..saved_len]);
                         }
                         self.length = new_len;
 
@@ -1310,8 +1316,8 @@ pub const LineEditor = struct {
                         try self.writeBytes("\x1B[K"); // Clear to end of line
 
                         // After writing, cursor is at self.length
-                        // Move cursor back to after completion (word_start + completion.len)
-                        const target_cursor = word_start + completion.len;
+                        // Move cursor back to after completion (word_start + actual_completion.len)
+                        const target_cursor = word_start + actual_completion.len;
                         const chars_to_go_back = self.length - target_cursor;
                         var i: usize = 0;
                         while (i < chars_to_go_back) : (i += 1) {
@@ -1331,8 +1337,8 @@ pub const LineEditor = struct {
                     };
 
                     // Insert the rest of the completion
-                    if (completion.len >= typed_basename.len) {
-                        const to_insert = completion[typed_basename.len..];
+                    if (actual_completion.len >= typed_basename.len) {
+                        const to_insert = actual_completion[typed_basename.len..];
                         for (to_insert) |c| {
                             try self.insertChar(c);
                         }
@@ -1434,9 +1440,7 @@ pub const LineEditor = struct {
         try self.writeBytes("\x1b[s");
         try self.writeBytes("\r\n");
 
-        // Display in columns with highlighting
-        var col: usize = 0;
-        const max_cols = 4;
+        // Display one per line with highlighting
         for (completions, 0..) |completion, i| {
             // Check if this is a script (marked with \x02)
             const is_script = completion.len > 0 and completion[0] == '\x02';
@@ -1456,14 +1460,9 @@ pub const LineEditor = struct {
 
             try self.writeBytes("\x1b[0m"); // Reset colors
 
-            try self.writeBytes("  ");
-            col += 1;
-
-            if (col >= max_cols or i == completions.len - 1) {
-                if (i < completions.len - 1) {
-                    try self.writeBytes("\r\n");
-                }
-                col = 0;
+            // New line after each completion (except the last one)
+            if (i < completions.len - 1) {
+                try self.writeBytes("\r\n");
             }
         }
 
@@ -1480,9 +1479,7 @@ pub const LineEditor = struct {
         // Move to where the completion list starts (one line below current)
         try self.writeBytes("\r\n");
 
-        // Redraw the list with updated highlighting
-        var col: usize = 0;
-        const max_cols = 4;
+        // Redraw the list with updated highlighting (one per line)
         for (completions, 0..) |completion, i| {
             // Check if this is a script (marked with \x02)
             const is_script = completion.len > 0 and completion[0] == '\x02';
@@ -1502,14 +1499,9 @@ pub const LineEditor = struct {
 
             try self.writeBytes("\x1b[0m"); // Reset colors
 
-            try self.writeBytes("  ");
-            col += 1;
-
-            if (col >= max_cols or i == completions.len - 1) {
-                if (i < completions.len - 1) {
-                    try self.writeBytes("\r\n");
-                }
-                col = 0;
+            // New line after each completion (except the last one)
+            if (i < completions.len - 1) {
+                try self.writeBytes("\r\n");
             }
         }
 
@@ -1521,9 +1513,8 @@ pub const LineEditor = struct {
     fn clearCompletionDisplay(self: *LineEditor) !void {
         const completions = self.completion_list orelse return;
 
-        // Calculate how many lines the completion list occupies
-        const max_cols = 4;
-        const num_rows = (completions.len + max_cols - 1) / max_cols;
+        // Each completion occupies one line
+        const num_rows = completions.len;
 
         // Save cursor position
         try self.writeBytes("\x1b[s");

@@ -3139,6 +3139,11 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
         return completion.completeDirectory(prefix);
     }
 
+    // For git command, show branches, files, subcommands
+    if (std.mem.eql(u8, command, "git")) {
+        return try completeGit(allocator, input, prefix);
+    }
+
     // For bun command, show scripts, commands, and files
     if (std.mem.eql(u8, command, "bun")) {
         return try completeBun(allocator, prefix);
@@ -3151,6 +3156,142 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
 
     // Otherwise, try file completion
     return completion.completeFile(prefix);
+}
+
+/// Get completions for git command (branches, files, subcommands)
+fn completeGit(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Parse to find the git subcommand
+    var tokens = std.mem.tokenizeScalar(u8, input, ' ');
+    _ = tokens.next(); // Skip "git"
+    const subcommand = tokens.next(); // Get subcommand (if any)
+
+    const git_commands = [_][]const u8{
+        "add", "bisect", "branch", "checkout", "cherry-pick", "clone", "commit",
+        "diff", "fetch", "grep", "init", "log", "merge", "mv", "pull", "push",
+        "rebase", "reset", "restore", "revert", "rm", "show", "stash", "status",
+        "switch", "tag",
+    };
+
+    // If no subcommand yet, or if we're still typing the subcommand (prefix matches subcommand),
+    // show matching git subcommands
+    if (subcommand == null or (subcommand != null and std.mem.eql(u8, subcommand.?, prefix))) {
+        for (git_commands) |cmd| {
+            if (std.mem.startsWith(u8, cmd, prefix)) {
+                const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+                try results.append(allocator, marked_cmd);
+            }
+        }
+
+        const owned = try allocator.alloc([]const u8, results.items.len);
+        @memcpy(owned, results.items);
+        return owned;
+    }
+
+    // At this point, we have a complete subcommand and are completing arguments
+
+    // Branch-related subcommands: checkout, branch, merge, rebase, switch
+    const branch_commands = [_][]const u8{ "checkout", "branch", "merge", "rebase", "switch", "cherry-pick" };
+    for (branch_commands) |branch_cmd| {
+        if (std.mem.eql(u8, subcommand.?, branch_cmd)) {
+            return try getGitBranches(allocator, prefix);
+        }
+    }
+
+    // File-related subcommands: add, diff, restore, reset
+    const file_commands = [_][]const u8{ "add", "diff", "restore", "reset" };
+    for (file_commands) |file_cmd| {
+        if (std.mem.eql(u8, subcommand.?, file_cmd)) {
+            return try getGitModifiedFiles(allocator, prefix);
+        }
+    }
+
+    // For other subcommands, don't provide completions
+    return &[_][]const u8{};
+}
+
+/// Get git branches for completion
+fn getGitBranches(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Run: git branch -a --format=%(refname:short)
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "git", "branch", "-a", "--format=%(refname:short)" },
+    }) catch {
+        return &[_][]const u8{};
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    if (result.term.Exited != 0) {
+        return &[_][]const u8{};
+    }
+
+    // Parse output line by line
+    var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+        if (trimmed.len == 0) continue;
+
+        // Skip remote tracking branches that are duplicates
+        if (std.mem.startsWith(u8, trimmed, "remotes/origin/")) {
+            const branch_name = trimmed["remotes/origin/".len..];
+            // Skip HEAD pointer
+            if (std.mem.eql(u8, branch_name, "HEAD")) continue;
+        }
+
+        if (std.mem.startsWith(u8, trimmed, prefix)) {
+            const branch = try allocator.dupe(u8, trimmed);
+            try results.append(allocator, branch);
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
+}
+
+/// Get modified files from git status
+fn getGitModifiedFiles(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Run: git status --porcelain
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "git", "status", "--porcelain" },
+    }) catch {
+        return &[_][]const u8{};
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    if (result.term.Exited != 0) {
+        return &[_][]const u8{};
+    }
+
+    // Parse output line by line
+    var lines = std.mem.tokenizeScalar(u8, result.stdout, '\n');
+    while (lines.next()) |line| {
+        if (line.len < 3) continue;
+
+        // Format: "XY filename" where XY are status codes
+        const filename = std.mem.trim(u8, line[3..], &std.ascii.whitespace);
+        if (filename.len == 0) continue;
+
+        if (std.mem.startsWith(u8, filename, prefix)) {
+            const file = try allocator.dupe(u8, filename);
+            try results.append(allocator, file);
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
 }
 
 /// Get completions for bun command (scripts, commands, files)
