@@ -1446,19 +1446,16 @@ pub const LineEditor = struct {
             const is_script = completion.len > 0 and completion[0] == '\x02';
             const display_text = if (is_script) completion[1..] else completion;
 
-            // Highlight the current selection
+            // Highlight the current selection only
             if (i == self.completion_index) {
                 try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
-            } else if (is_script) {
-                // Scripts: default color (no styling)
-                // Don't output any color codes, just use default
-            } else {
-                try self.writeBytes("\x1b[1;36m"); // Bold cyan/teal text for commands/directories
             }
 
             try self.writeBytes(display_text);
 
-            try self.writeBytes("\x1b[0m"); // Reset colors
+            if (i == self.completion_index) {
+                try self.writeBytes("\x1b[0m"); // Reset colors after highlight
+            }
 
             // New line after each completion (except the last one)
             if (i < completions.len - 1) {
@@ -1485,19 +1482,16 @@ pub const LineEditor = struct {
             const is_script = completion.len > 0 and completion[0] == '\x02';
             const display_text = if (is_script) completion[1..] else completion;
 
-            // Clear the current position and redraw with/without highlight
+            // Highlight the current selection only
             if (i == self.completion_index) {
                 try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
-            } else if (is_script) {
-                // Scripts: default color (no styling)
-                // Don't output any color codes, just use default
-            } else {
-                try self.writeBytes("\x1b[1;36m"); // Bold cyan/teal text for commands/directories
             }
 
             try self.writeBytes(display_text);
 
-            try self.writeBytes("\x1b[0m"); // Reset colors
+            if (i == self.completion_index) {
+                try self.writeBytes("\x1b[0m"); // Reset colors after highlight
+            }
 
             // New line after each completion (except the last one)
             if (i < completions.len - 1) {
