@@ -1281,8 +1281,11 @@ pub const LineEditor = struct {
 
                 // Check if completion is a full path (contains /) and typed_word also contains /
                 // This indicates mid-word expansion where we need to replace the whole thing
+                // BUT: if typed_word ends with '/', the completion is just a basename to append
+                const typed_ends_with_slash = typed_word.len > 0 and typed_word[typed_word.len - 1] == '/';
                 const is_path_expansion = std.mem.indexOfScalar(u8, actual_completion, '/') != null and
-                                         std.mem.indexOfScalar(u8, typed_word, '/') != null;
+                                         std.mem.indexOfScalar(u8, typed_word, '/') != null and
+                                         !typed_ends_with_slash;
 
                 if (is_path_expansion) {
                     // Replace the entire typed word with the completion
