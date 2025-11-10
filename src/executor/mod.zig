@@ -505,7 +505,7 @@ pub const Executor = struct {
             "pushd", "popd", "dirs", "eval", "exec", "command", "builtin",
             "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
             "umask", "getopts", "clear", "time", "hash", "yes", "reload",
-            "watch", "tree", "grep", "find", "calc", "json"
+            "watch", "tree", "grep", "find", "calc", "json", "ls"
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -608,6 +608,8 @@ pub const Executor = struct {
             return try self.builtinCalc(command);
         } else if (std.mem.eql(u8, command.name, "json")) {
             return try self.builtinJson(command);
+        } else if (std.mem.eql(u8, command.name, "ls")) {
+            return try self.builtinLs(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -2775,6 +2777,70 @@ pub const Executor = struct {
         // The Zig 0.15 JSON API has changed significantly. For 1.0, we validate and print as-is.
         // Future versions can implement indented output using the new stringify API.
         try IO.print("{s}\n", .{content});
+
+        return 0;
+    }
+
+    fn builtinLs(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = command;
+
+        // Simple ls - just list current directory without hidden files
+        var dir = std.fs.cwd().openDir(".", .{ .iterate = true }) catch |err| {
+            try IO.eprint("den: ls: cannot open directory: {}\n", .{err});
+            return 1;
+        };
+        defer dir.close();
+
+        // Collect visible entries only - need to copy names since they're temporary
+        var entries: [256][]const u8 = undefined;
+        var kinds: [256]std.fs.Dir.Entry.Kind = undefined;
+        var count: usize = 0;
+
+        var iter = dir.iterate();
+        while (try iter.next()) |entry| {
+            // Skip hidden files (starting with .)
+            if (entry.name[0] == '.') continue;
+            if (count >= 256) break;
+
+            // IMPORTANT: Copy the name since entry.name is temporary
+            entries[count] = try self.allocator.dupe(u8, entry.name);
+            kinds[count] = entry.kind;
+            count += 1;
+        }
+
+        // Sort entries
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            var j: usize = i + 1;
+            while (j < count) : (j += 1) {
+                if (std.mem.order(u8, entries[i], entries[j]) == .gt) {
+                    // Swap
+                    const temp_name = entries[i];
+                    const temp_kind = kinds[i];
+                    entries[i] = entries[j];
+                    kinds[i] = kinds[j];
+                    entries[j] = temp_name;
+                    kinds[j] = temp_kind;
+                }
+            }
+        }
+
+        // Print entries
+        i = 0;
+        while (i < count) : (i += 1) {
+            if (kinds[i] == .directory) {
+                try IO.print("\x1b[1;36m{s}\x1b[0m  ", .{entries[i]});
+            } else {
+                try IO.print("{s}  ", .{entries[i]});
+            }
+        }
+        try IO.print("\n", .{});
+
+        // Free copied names
+        i = 0;
+        while (i < count) : (i += 1) {
+            self.allocator.free(entries[i]);
+        }
 
         return 0;
     }
