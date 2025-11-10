@@ -673,7 +673,11 @@ pub const LineEditor = struct {
             }
         }
 
-        // Auto-suggestions disabled - user can trigger via Tab completion instead
+        // Update and display suggestion only if cursor is at end and we have at least 3 characters
+        if (self.cursor == self.length and self.length >= 3) {
+            try self.updateSuggestion();
+            try self.displaySuggestion();
+        }
     }
 
     fn backspace(self: *LineEditor) !void {
@@ -709,7 +713,11 @@ pub const LineEditor = struct {
             try self.writeBytes("\x1B[D");
         }
 
-        // Auto-suggestions disabled - user can trigger via Tab completion instead
+        // Update and display suggestion only if cursor is at end and we have at least 3 characters
+        if (self.cursor == self.length and self.length >= 3) {
+            try self.updateSuggestion();
+            try self.displaySuggestion();
+        }
     }
 
     fn deleteChar(self: *LineEditor) !void {

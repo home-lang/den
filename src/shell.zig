@@ -3129,11 +3129,8 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
     const prefix = input[word_start..];
     const command = input[0..first_word_end];
 
-    // If first word, try command completion (but only if there's a prefix)
+    // If first word, try command completion
     if (word_start == 0) {
-        if (prefix.len == 0) {
-            return &[_][]const u8{};
-        }
         return completion.completeCommand(prefix);
     }
 

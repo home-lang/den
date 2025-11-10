@@ -9,6 +9,45 @@ pub const Completion = struct {
         return .{ .allocator = allocator };
     }
 
+    /// Escape special characters in a filename for shell use
+    fn escapeFilename(self: *Completion, filename: []const u8) ![]const u8 {
+        // Count how many characters need escaping
+        var escape_count: usize = 0;
+        for (filename) |c| {
+            switch (c) {
+                ' ', '\t', '\n', '\'', '"', '\\', '&', '|', ';', '<', '>', '(', ')', '$', '`', '*', '?', '[', ']', '{', '}', '!' => {
+                    escape_count += 1;
+                },
+                else => {},
+            }
+        }
+
+        // If no escaping needed, return as-is
+        if (escape_count == 0) {
+            return try self.allocator.dupe(u8, filename);
+        }
+
+        // Allocate buffer with space for backslashes
+        const result = try self.allocator.alloc(u8, filename.len + escape_count);
+        var i: usize = 0;
+        for (filename) |c| {
+            switch (c) {
+                ' ', '\t', '\n', '\'', '"', '\\', '&', '|', ';', '<', '>', '(', ')', '$', '`', '*', '?', '[', ']', '{', '}', '!' => {
+                    result[i] = '\\';
+                    i += 1;
+                    result[i] = c;
+                    i += 1;
+                },
+                else => {
+                    result[i] = c;
+                    i += 1;
+                },
+            }
+        }
+
+        return result;
+    }
+
     /// Find command completions from PATH
     pub fn completeCommand(self: *Completion, prefix: []const u8) ![][]const u8 {
         var matches_buffer: [256][]const u8 = undefined;
@@ -123,19 +162,31 @@ pub const Completion = struct {
             if (std.mem.startsWith(u8, entry.name, file_prefix)) {
                 if (match_count >= matches_buffer.len) break;
 
-                // Build full path
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const full_path = if (std.mem.eql(u8, dir_path, ".")) blk: {
-                    break :blk try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
-                } else blk: {
-                    break :blk try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name });
+                // If the original prefix ended with '/', return just the basename
+                // Otherwise, return the full path
+                const completion_text = blk: {
+                    var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+
+                    if (use_prefix.len > 0 and use_prefix[use_prefix.len - 1] == '/') {
+                        // Prefix ended with slash: return just basename with trailing slash
+                        const with_slash = try std.fmt.bufPrint(&slash_buf, "{s}/", .{entry.name});
+                        break :blk with_slash;
+                    } else {
+                        // Prefix didn't end with slash: return full path with trailing slash
+                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        const full_path = if (std.mem.eql(u8, dir_path, ".")) blk2: {
+                            break :blk2 try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
+                        } else blk2: {
+                            break :blk2 try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name });
+                        };
+                        const with_slash = try std.fmt.bufPrint(&slash_buf, "{s}/", .{full_path});
+                        break :blk with_slash;
+                    }
                 };
 
-                // Add trailing slash for directories
-                var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-                const with_slash = try std.fmt.bufPrint(&slash_buf, "{s}/", .{full_path});
-
-                matches_buffer[match_count] = try self.allocator.dupe(u8, with_slash);
+                // Escape special characters (spaces, etc.)
+                const escaped = try self.escapeFilename(completion_text);
+                matches_buffer[match_count] = escaped;
                 match_count += 1;
             }
         }
@@ -169,8 +220,21 @@ pub const Completion = struct {
         var match_count: usize = 0;
 
         // Parse directory and filename parts
-        const dir_path = std.fs.path.dirname(use_prefix) orelse ".";
-        const file_prefix = std.fs.path.basename(use_prefix);
+        // If prefix ends with '/', we want to list contents of that directory
+        const dir_path = if (use_prefix.len > 0 and use_prefix[use_prefix.len - 1] == '/') blk: {
+            // Remove trailing slash for dirname
+            const without_slash = use_prefix[0 .. use_prefix.len - 1];
+            break :blk if (without_slash.len > 0) without_slash else ".";
+        } else blk: {
+            break :blk std.fs.path.dirname(use_prefix) orelse ".";
+        };
+
+        const file_prefix = if (use_prefix.len > 0 and use_prefix[use_prefix.len - 1] == '/') blk: {
+            // If ends with slash, we're completing everything in that dir
+            break :blk "";
+        } else blk: {
+            break :blk std.fs.path.basename(use_prefix);
+        };
 
         // Safety check: ensure dir_path doesn't contain null bytes
         if (std.mem.indexOfScalar(u8, dir_path, 0) != null) {
@@ -195,21 +259,41 @@ pub const Completion = struct {
             if (std.mem.startsWith(u8, entry.name, file_prefix)) {
                 if (match_count >= matches_buffer.len) break;
 
-                // Build full path
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const full_path = if (std.mem.eql(u8, dir_path, ".")) blk: {
-                    break :blk try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
-                } else blk: {
-                    break :blk try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name });
+                // If the original prefix ended with '/', return just the basename
+                // Otherwise, return the full path
+                const completion_text = blk: {
+                    if (use_prefix.len > 0 and use_prefix[use_prefix.len - 1] == '/') {
+                        // Prefix ended with slash: return just basename (with slash if directory)
+                        if (entry.kind == .directory) {
+                            var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+                            const with_slash = try std.fmt.bufPrint(&slash_buf, "{s}/", .{entry.name});
+                            break :blk with_slash;
+                        } else {
+                            break :blk entry.name;
+                        }
+                    } else {
+                        // Prefix didn't end with slash: return full path
+                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        const full_path = if (std.mem.eql(u8, dir_path, ".")) blk2: {
+                            break :blk2 try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
+                        } else blk2: {
+                            break :blk2 try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name });
+                        };
+
+                        // Add trailing slash for directories
+                        if (entry.kind == .directory) {
+                            var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+                            const with_slash = try std.fmt.bufPrint(&slash_buf, "{s}/", .{full_path});
+                            break :blk with_slash;
+                        } else {
+                            break :blk full_path;
+                        }
+                    }
                 };
 
-                // Add trailing slash for directories
-                const with_slash = if (entry.kind == .directory) blk: {
-                    var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-                    break :blk try std.fmt.bufPrint(&slash_buf, "{s}/", .{full_path});
-                } else full_path;
-
-                matches_buffer[match_count] = try self.allocator.dupe(u8, with_slash);
+                // Escape special characters (spaces, etc.)
+                const escaped = try self.escapeFilename(completion_text);
+                matches_buffer[match_count] = escaped;
                 match_count += 1;
             }
         }

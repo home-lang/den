@@ -307,12 +307,33 @@ pub const Tokenizer = struct {
     }
 
     fn parseWord(self: *Tokenizer, start_line: usize, start_col: usize) !Token {
-        const start_pos = self.pos;
         var in_single_quote = false;
         var in_double_quote = false;
 
+        // Build the word with escape processing
+        var word_buffer: [4096]u8 = undefined;
+        var word_len: usize = 0;
+
         while (self.pos < self.input.len) {
             const char = self.input[self.pos];
+
+            // Handle backslash escapes (not in single quotes)
+            if (char == '\\' and !in_single_quote) {
+                self.pos += 1;
+                self.column += 1;
+
+                // If there's a next character, use it literally
+                if (self.pos < self.input.len) {
+                    const escaped_char = self.input[self.pos];
+                    if (word_len < word_buffer.len) {
+                        word_buffer[word_len] = escaped_char;
+                        word_len += 1;
+                    }
+                    self.pos += 1;
+                    self.column += 1;
+                }
+                continue;
+            }
 
             // Handle quotes
             if (char == '\'' and !in_double_quote) {
@@ -339,11 +360,18 @@ pub const Tokenizer = struct {
                 }
             }
 
+            // Add character to word
+            if (word_len < word_buffer.len) {
+                word_buffer[word_len] = char;
+                word_len += 1;
+            }
+
             self.pos += 1;
             self.column += 1;
         }
 
-        const word = self.input[start_pos..self.pos];
+        // Allocate and copy the processed word
+        const word = try self.allocator.dupe(u8, word_buffer[0..word_len]);
 
         // Check for keywords (only if not quoted)
         const token_type = if (in_single_quote or in_double_quote)
