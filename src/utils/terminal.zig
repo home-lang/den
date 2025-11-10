@@ -1440,26 +1440,31 @@ pub const LineEditor = struct {
         try self.writeBytes("\x1b[s");
         try self.writeBytes("\r\n");
 
-        // Display one per line with highlighting
+        // Display horizontally with spacing
         for (completions, 0..) |completion, i| {
             // Check if this is a script (marked with \x02)
             const is_script = completion.len > 0 and completion[0] == '\x02';
             const display_text = if (is_script) completion[1..] else completion;
 
+            // Check if this is a directory (ends with /)
+            const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
+
             // Highlight the current selection only
             if (i == self.completion_index) {
                 try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
+            } else if (is_dir) {
+                try self.writeBytes("\x1b[1;36m"); // Teal, semibold for directories
             }
 
             try self.writeBytes(display_text);
 
-            if (i == self.completion_index) {
-                try self.writeBytes("\x1b[0m"); // Reset colors after highlight
+            if (i == self.completion_index or is_dir) {
+                try self.writeBytes("\x1b[0m"); // Reset colors after highlight or directory
             }
 
-            // New line after each completion (except the last one)
+            // Add spacing between items (except after the last one)
             if (i < completions.len - 1) {
-                try self.writeBytes("\r\n");
+                try self.writeBytes("  ");
             }
         }
 
@@ -1476,26 +1481,31 @@ pub const LineEditor = struct {
         // Move to where the completion list starts (one line below current)
         try self.writeBytes("\r\n");
 
-        // Redraw the list with updated highlighting (one per line)
+        // Redraw the list with updated highlighting horizontally
         for (completions, 0..) |completion, i| {
             // Check if this is a script (marked with \x02)
             const is_script = completion.len > 0 and completion[0] == '\x02';
             const display_text = if (is_script) completion[1..] else completion;
 
+            // Check if this is a directory (ends with /)
+            const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
+
             // Highlight the current selection only
             if (i == self.completion_index) {
                 try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
+            } else if (is_dir) {
+                try self.writeBytes("\x1b[1;36m"); // Teal, semibold for directories
             }
 
             try self.writeBytes(display_text);
 
-            if (i == self.completion_index) {
-                try self.writeBytes("\x1b[0m"); // Reset colors after highlight
+            if (i == self.completion_index or is_dir) {
+                try self.writeBytes("\x1b[0m"); // Reset colors after highlight or directory
             }
 
-            // New line after each completion (except the last one)
+            // Add spacing between items (except after the last one)
             if (i < completions.len - 1) {
-                try self.writeBytes("\r\n");
+                try self.writeBytes("  ");
             }
         }
 
