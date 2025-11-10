@@ -14,6 +14,7 @@ Welcome to the Den Shell documentation! This directory contains comprehensive do
 #### Features
 - **[Line Editing](LINE_EDITING.md)** ⭐ - Word navigation, Ctrl+R search, transpose, and more
 - **[Tab Completion](TAB_COMPLETION.md)** ⭐ - Interactive tab completion guide
+- **[Git Completion](GIT_COMPLETION.md)** ⭐ - Smart git command, branch, and file completion
 - **[Mid-Word Completion](MID_WORD_COMPLETION.md)** - zsh-style path abbreviation (`/u/l/b` → `/usr/local/bin/`)
 - **[History Substring Search](HISTORY_SUBSTRING_SEARCH.md)** - Search command history by substring
 - **[Autocompletion](AUTOCOMPLETION.md)** - Shell completion scripts (bash/zsh/fish)

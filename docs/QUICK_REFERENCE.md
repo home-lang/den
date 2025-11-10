@@ -37,6 +37,27 @@ cd /usr/l<TAB>
 # (even though /usr/l matches lib, libexec, local)
 ```
 
+### Git Command Completion
+```bash
+# Complete git subcommands
+git st<TAB>           → git status
+git che<TAB>          → Shows: checkout, cherry-pick
+
+# Complete branch names
+git checkout <TAB>    → Shows all branches (local and remote)
+git merge main<TAB>   → git merge main
+
+# Complete modified files
+git add <TAB>         → Shows modified/untracked files
+git diff src/<TAB>    → Shows modified files in src/
+
+# Supported commands:
+# Branches: checkout, branch, merge, rebase, switch, cherry-pick
+# Files: add, diff, restore, reset
+```
+
+For complete details, see [Git Completion Guide](GIT_COMPLETION.md).
+
 ## History Navigation
 
 ### Basic History
