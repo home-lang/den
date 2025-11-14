@@ -2926,12 +2926,25 @@ pub const Executor = struct {
 
         // Print entries
         if (long_format) {
-            // Calculate total blocks (512-byte blocks)
+            // Calculate total blocks using actual stat() calls to get real block count
             var total_blocks: u64 = 0;
             i = 0;
             while (i < count) : (i += 1) {
-                // Each file uses (size + 511) / 512 blocks
-                total_blocks += (entries[i].size + 511) / 512;
+                // Get actual allocated blocks from filesystem
+                const path_buf = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ target_path, entries[i].name });
+                defer self.allocator.free(path_buf);
+
+                const path_z = try std.posix.toPosixPath(path_buf);
+                var st: std.c.Stat = undefined;
+                const result = std.c.stat(&path_z, &st);
+                if (result != 0) {
+                    // Fallback to size-based calculation if stat fails
+                    total_blocks += (entries[i].size + 511) / 512;
+                    continue;
+                }
+
+                // st_blocks is in 512-byte blocks on POSIX systems
+                total_blocks += @intCast(st.blocks);
             }
             try IO.print("total {d}\n", .{total_blocks});
 
