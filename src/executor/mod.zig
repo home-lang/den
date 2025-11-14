@@ -2789,29 +2789,110 @@ pub const Executor = struct {
     }
 
     fn builtinLs(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = command;
+        // Parse flags
+        var show_all = false;
+        var long_format = false;
+        var reverse = false;
+        var sort_by_time = false;
+        var sort_by_size = false;
+        var human_readable = false;
+        var recursive = false;
+        var one_per_line = false;
+        var directory_only = false;
+        var target_path: []const u8 = ".";
 
-        // Simple ls - just list current directory without hidden files
-        var dir = std.fs.cwd().openDir(".", .{ .iterate = true }) catch |err| {
-            try IO.eprint("den: ls: cannot open directory: {}\n", .{err});
+        for (command.args) |arg| {
+            if (arg.len > 0 and arg[0] == '-') {
+                // Parse flags
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'a' => show_all = true,
+                        'l' => long_format = true,
+                        'r' => reverse = true,
+                        't' => sort_by_time = true,
+                        'S' => sort_by_size = true,
+                        'h' => human_readable = true,
+                        'R' => recursive = true,
+                        '1' => one_per_line = true,
+                        'd' => directory_only = true,
+                        else => {
+                            try IO.eprint("ls: invalid option -- '{c}'\n", .{c});
+                            return 1;
+                        },
+                    }
+                }
+            } else {
+                // Path argument
+                target_path = arg;
+            }
+        }
+
+        // Handle -d flag (directory itself, not contents)
+        if (directory_only) {
+            try IO.print("{s}\n", .{target_path});
+            return 0;
+        }
+
+        var dir = std.fs.cwd().openDir(target_path, .{ .iterate = true }) catch |err| {
+            try IO.eprint("ls: cannot access '{s}': {}\n", .{ target_path, err });
             return 1;
         };
         defer dir.close();
 
-        // Collect visible entries only - need to copy names since they're temporary
-        var entries: [256][]const u8 = undefined;
-        var kinds: [256]std.fs.Dir.Entry.Kind = undefined;
+        // Entry info for sorting
+        const EntryInfo = struct {
+            name: []const u8,
+            kind: std.fs.Dir.Entry.Kind,
+            size: u64,
+            mtime: i128,
+        };
+
+        var entries: [512]EntryInfo = undefined;
         var count: usize = 0;
 
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
-            // Skip hidden files (starting with .)
-            if (entry.name[0] == '.') continue;
-            if (count >= 256) break;
+            // Skip hidden files unless -a flag
+            if (!show_all and entry.name.len > 0 and entry.name[0] == '.') continue;
+            if (count >= 512) break;
 
-            // IMPORTANT: Copy the name since entry.name is temporary
-            entries[count] = try self.allocator.dupe(u8, entry.name);
-            kinds[count] = entry.kind;
+            // Get file stats
+            const stat = dir.statFile(entry.name) catch |err| {
+                if (err == error.IsDir) {
+                    // For directories, use stat instead
+                    const dir_stat = dir.stat() catch std.fs.File.Stat{
+                        .size = 0,
+                        .mtime = 0,
+                        .atime = 0,
+                        .ctime = 0,
+                        .mode = 0,
+                        .kind = .directory,
+                        .inode = 0,
+                    };
+                    entries[count] = .{
+                        .name = try self.allocator.dupe(u8, entry.name),
+                        .kind = entry.kind,
+                        .size = dir_stat.size,
+                        .mtime = dir_stat.mtime,
+                    };
+                } else {
+                    entries[count] = .{
+                        .name = try self.allocator.dupe(u8, entry.name),
+                        .kind = entry.kind,
+                        .size = 0,
+                        .mtime = 0,
+                    };
+                }
+                count += 1;
+                continue;
+            };
+
+            entries[count] = .{
+                .name = try self.allocator.dupe(u8, entry.name),
+                .kind = entry.kind,
+                .size = stat.size,
+                .mtime = stat.mtime,
+            };
             count += 1;
         }
 
@@ -2820,33 +2901,197 @@ pub const Executor = struct {
         while (i < count) : (i += 1) {
             var j: usize = i + 1;
             while (j < count) : (j += 1) {
-                if (std.mem.order(u8, entries[i], entries[j]) == .gt) {
-                    // Swap
-                    const temp_name = entries[i];
-                    const temp_kind = kinds[i];
+                const should_swap = if (sort_by_size)
+                    if (reverse)
+                        entries[i].size < entries[j].size
+                    else
+                        entries[i].size > entries[j].size
+                else if (sort_by_time)
+                    if (reverse)
+                        entries[i].mtime < entries[j].mtime
+                    else
+                        entries[i].mtime > entries[j].mtime
+                else if (reverse)
+                    std.mem.order(u8, entries[i].name, entries[j].name) == .lt
+                else
+                    std.mem.order(u8, entries[i].name, entries[j].name) == .gt;
+
+                if (should_swap) {
+                    const temp = entries[i];
                     entries[i] = entries[j];
-                    kinds[i] = kinds[j];
-                    entries[j] = temp_name;
-                    kinds[j] = temp_kind;
+                    entries[j] = temp;
                 }
             }
         }
 
         // Print entries
-        i = 0;
-        while (i < count) : (i += 1) {
-            if (kinds[i] == .directory) {
-                try IO.print("\x1b[1;36m{s}\x1b[0m  ", .{entries[i]});
-            } else {
-                try IO.print("{s}  ", .{entries[i]});
+        if (long_format) {
+            // Print total (simplified - just print "total 0" for now)
+            try IO.print("total 0\n", .{});
+
+            // Long format: permissions links owner group size date name
+            i = 0;
+            while (i < count) : (i += 1) {
+                const entry = entries[i];
+                const kind_char: u8 = switch (entry.kind) {
+                    .directory => 'd',
+                    .sym_link => 'l',
+                    else => '-',
+                };
+
+                // Simple permissions (hardcoded for now - proper implementation would need stat)
+                const perms = "rw-r--r--";
+
+                // Get username (simplified)
+                const username = std.posix.getenv("USER") orelse "user";
+                const groupname = std.posix.getenv("GROUP") orelse "staff";
+
+                // Format size
+                const size_str = if (human_readable) blk: {
+                    if (entry.size < 1024) {
+                        break :blk try std.fmt.allocPrint(self.allocator, "{d}", .{entry.size});
+                    } else if (entry.size < 1024 * 1024) {
+                        break :blk try std.fmt.allocPrint(self.allocator, "{d}K", .{entry.size / 1024});
+                    } else if (entry.size < 1024 * 1024 * 1024) {
+                        break :blk try std.fmt.allocPrint(self.allocator, "{d}M", .{entry.size / (1024 * 1024)});
+                    } else {
+                        break :blk try std.fmt.allocPrint(self.allocator, "{d}G", .{entry.size / (1024 * 1024 * 1024)});
+                    }
+                } else try std.fmt.allocPrint(self.allocator, "{d}", .{entry.size});
+                defer self.allocator.free(size_str);
+
+                // Format time (convert to "Mon DD HH:MM" format)
+                const time_ns: u64 = @intCast(@max(0, entry.mtime));
+                const time_s = time_ns / std.time.ns_per_s;
+
+                // Simple date conversion
+                const seconds_per_day = 86400;
+                const days_since_epoch = time_s / seconds_per_day;
+                const seconds_today = time_s % seconds_per_day;
+                const hours = seconds_today / 3600;
+                const minutes = (seconds_today % 3600) / 60;
+
+                // Approximate month/day (simplified)
+                const day_of_year = @mod(days_since_epoch, 365);
+                const month_names = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+                const month_idx = @min((day_of_year / 30), 11);
+                const day = @mod(day_of_year, 30) + 1;
+
+                const time_str = try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} {d:>2} {d:0>2}:{d:0>2}",
+                    .{ month_names[month_idx], day, hours, minutes },
+                );
+                defer self.allocator.free(time_str);
+
+                // Print with standard ls format
+                // permissions links owner group size date name
+                if (entry.kind == .directory) {
+                    try IO.print("{c}{s}  1 {s:<20} {s:<10} {s:>8} {s} \x1b[1;36m{s}\x1b[0m\n", .{
+                        kind_char,
+                        perms,
+                        username,
+                        groupname,
+                        size_str,
+                        time_str,
+                        entry.name,
+                    });
+                } else {
+                    try IO.print("{c}{s}  1 {s:<20} {s:<10} {s:>8} {s} {s}\n", .{
+                        kind_char,
+                        perms,
+                        username,
+                        groupname,
+                        size_str,
+                        time_str,
+                        entry.name,
+                    });
+                }
+            }
+        } else {
+            // Simple format: just names
+            i = 0;
+            while (i < count) : (i += 1) {
+                if (one_per_line) {
+                    // One per line
+                    if (entries[i].kind == .directory) {
+                        try IO.print("\x1b[1;36m{s}\x1b[0m\n", .{entries[i].name});
+                    } else {
+                        try IO.print("{s}\n", .{entries[i].name});
+                    }
+                } else {
+                    // Multiple per line
+                    if (entries[i].kind == .directory) {
+                        try IO.print("\x1b[1;36m{s}\x1b[0m  ", .{entries[i].name});
+                    } else {
+                        try IO.print("{s}  ", .{entries[i].name});
+                    }
+                }
+            }
+            if (count > 0 and !one_per_line) try IO.print("\n", .{});
+        }
+
+        // Handle recursive flag (simplified - just show subdirectories)
+        if (recursive) {
+            i = 0;
+            while (i < count) : (i += 1) {
+                if (entries[i].kind == .directory) {
+                    // Skip . and .. directories
+                    if (std.mem.eql(u8, entries[i].name, ".") or std.mem.eql(u8, entries[i].name, "..")) {
+                        continue;
+                    }
+
+                    // Print directory header
+                    try IO.print("\n{s}/{s}:\n", .{ target_path, entries[i].name });
+
+                    // Build new path
+                    const new_path = try std.fmt.allocPrint(
+                        self.allocator,
+                        "{s}/{s}",
+                        .{ target_path, entries[i].name },
+                    );
+                    defer self.allocator.free(new_path);
+
+                    // Create simple args array for recursion
+                    var recursive_args_buf: [2][]const u8 = undefined;
+                    var recursive_args_len: usize = 0;
+
+                    // Add flags (without R to prevent deep recursion for now)
+                    var flag_buf: [32]u8 = undefined;
+                    var flag_len: usize = 0;
+                    flag_buf[flag_len] = '-';
+                    flag_len += 1;
+                    if (show_all) {
+                        flag_buf[flag_len] = 'a';
+                        flag_len += 1;
+                    }
+                    if (long_format) {
+                        flag_buf[flag_len] = 'l';
+                        flag_len += 1;
+                    }
+                    if (flag_len > 1) {
+                        recursive_args_buf[recursive_args_len] = flag_buf[0..flag_len];
+                        recursive_args_len += 1;
+                    }
+
+                    recursive_args_buf[recursive_args_len] = new_path;
+                    recursive_args_len += 1;
+
+                    var recursive_cmd = types.ParsedCommand{
+                        .name = "ls",
+                        .args = recursive_args_buf[0..recursive_args_len],
+                        .redirections = &[_]types.Redirection{},
+                    };
+
+                    _ = self.builtinLs(&recursive_cmd) catch {};
+                }
             }
         }
-        try IO.print("\n", .{});
 
         // Free copied names
         i = 0;
         while (i < count) : (i += 1) {
-            self.allocator.free(entries[i]);
+            self.allocator.free(entries[i].name);
         }
 
         return 0;
