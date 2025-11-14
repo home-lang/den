@@ -22,7 +22,7 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.1
+          version: 0.15.2
 
       - name: Extract version from tag
         id: version
@@ -49,4 +49,5 @@ jobs:
             dist/den-*-linux-arm64.tar.gz
             dist/den-*-darwin-x64.tar.gz
             dist/den-*-darwin-arm64.tar.gz
+            dist/den-*-windows-x64.zip
             dist/checksums-*.txt

@@ -1,0 +1,109 @@
+{
+  // Monokai Theme for Den Shell
+  // Based on the original Monokai color scheme
+  // Created by Wimer Hazenberg
+
+  "theme": {
+    "name": "Monokai",
+    "author": "Wimer Hazenberg",
+    "description": "The iconic Monokai color scheme from TextMate and Sublime Text",
+
+    // Monokai Color Palette
+    "colors": {
+      // Base colors
+      "background": "#272822",
+      "foreground": "#f8f8f2",
+      "selection": "#49483e",
+      "line_highlight": "#3e3d32",
+      "comment": "#75715e",
+
+      // Monokai accent colors
+      "red": "#f92672",
+      "orange": "#fd971f",
+      "yellow": "#e6db74",
+      "green": "#a6e22e",
+      "blue": "#66d9ef",
+      "purple": "#ae81ff",
+      "brown": "#75715e"
+    },
+
+    // Shell Prompt
+    "prompt": {
+      "format": "{user}@{host}:{cwd} {git}$ ",
+      "user_color": "#a6e22e",           // green
+      "host_color": "#66d9ef",           // blue
+      "cwd_color": "#ae81ff",            // purple
+      "git_color": "#f92672",            // red
+      "prompt_char": "#f8f8f2",          // foreground
+      "error_color": "#f92672"           // red
+    },
+
+    // Syntax Highlighting
+    "syntax": {
+      "command": "#a6e22e",              // green - valid commands
+      "builtin": "#66d9ef",              // blue - builtin commands
+      "keyword": "#f92672",              // red - keywords
+      "string": "#e6db74",               // yellow - strings
+      "number": "#ae81ff",               // purple - numbers
+      "variable": "#fd971f",             // orange - variables
+      "comment": "#75715e",              // brown - comments
+      "operator": "#f92672",             // red - operators
+      "flag": "#66d9ef",                 // blue - command flags
+      "path": "#ae81ff",                 // purple - file paths
+      "error": "#f92672"                 // red - errors
+    },
+
+    // File Types
+    "file_types": {
+      "directory": "#66d9ef",            // blue
+      "executable": "#a6e22e",           // green
+      "symlink": "#66d9ef",              // blue
+      "archive": "#e6db74",              // yellow
+      "image": "#ae81ff",                // purple
+      "video": "#ae81ff",                // purple
+      "audio": "#fd971f",                // orange
+      "document": "#f8f8f2",             // foreground
+      "code": "#66d9ef",                 // blue
+      "hidden": "#75715e"                // brown
+    },
+
+    // UI Elements
+    "ui": {
+      "border": "#49483e",               // selection
+      "selection": "#49483e",            // selection
+      "cursor": "#f8f8f0",               // white
+      "line_number": "#75715e",          // brown
+      "status_bar_bg": "#3e3d32",        // line_highlight
+      "status_bar_fg": "#f8f8f2",        // foreground
+      "error_bg": "#f92672",             // red
+      "error_fg": "#272822",             // background
+      "warning_bg": "#fd971f",           // orange
+      "warning_fg": "#272822",           // background
+      "info_bg": "#66d9ef",              // blue
+      "info_fg": "#272822",              // background
+      "success_bg": "#a6e22e",           // green
+      "success_fg": "#272822"            // background
+    },
+
+    // Completion Menu
+    "completion": {
+      "background": "#3e3d32",           // line_highlight
+      "foreground": "#f8f8f2",           // foreground
+      "selected_bg": "#49483e",          // selection
+      "selected_fg": "#f8f8f2",          // foreground
+      "description": "#75715e",          // brown
+      "border": "#49483e"                // selection
+    },
+
+    // Git Integration
+    "git": {
+      "branch": "#f92672",               // red
+      "clean": "#a6e22e",                // green
+      "dirty": "#e6db74",                // yellow
+      "staged": "#66d9ef",               // blue
+      "conflict": "#f92672",             // red
+      "ahead": "#ae81ff",                // purple
+      "behind": "#fd971f"                // orange
+    }
+  }
+}

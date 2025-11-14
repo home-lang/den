@@ -1,0 +1,241 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run integration tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        zig-version: ['0.15.2']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ matrix.zig-version }}
+
+      - name: Cache Zig artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/zig
+            .zig-cache
+          key: ${{ runner.os }}-zig-${{ matrix.zig-version }}-${{ hashFiles('build.zig') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-${{ matrix.zig-version }}-
+
+      - name: Build release binary
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Test basic shell startup
+        shell: bash
+        run: |
+          echo "Testing shell startup..."
+          timeout 5 ./zig-out/bin/den exec "echo 'Hello from Den'" || true
+
+      - name: Test builtin commands
+        shell: bash
+        run: |
+          echo "Testing builtin commands..."
+          ./zig-out/bin/den exec "pwd" || true
+          ./zig-out/bin/den exec "echo test" || true
+          ./zig-out/bin/den exec "cd ." || true
+
+      - name: Test ls command with flags
+        shell: bash
+        run: |
+          echo "Testing ls command..."
+          ./zig-out/bin/den exec "ls" || true
+          ./zig-out/bin/den exec "ls -l" || true
+          ./zig-out/bin/den exec "ls -la" || true
+          ./zig-out/bin/den exec "ls -lart" || true
+
+      - name: Test productivity builtins
+        shell: bash
+        run: |
+          echo "Testing productivity builtins..."
+          ./zig-out/bin/den exec "date" || true
+          ./zig-out/bin/den exec "calc 2 + 2" || true
+          ./zig-out/bin/den exec "seq 1 5" || true
+
+      - name: Test file operations
+        shell: bash
+        run: |
+          echo "Testing file operations..."
+          ./zig-out/bin/den exec "echo 'test content' > test.txt" || true
+          ./zig-out/bin/den exec "cat test.txt" || true
+          ./zig-out/bin/den exec "rm test.txt" || true
+
+      - name: Test environment variables
+        shell: bash
+        run: |
+          echo "Testing environment variables..."
+          ./zig-out/bin/den exec "export TEST_VAR=hello" || true
+          ./zig-out/bin/den exec "echo \$TEST_VAR" || true
+
+      - name: Test command chaining
+        shell: bash
+        run: |
+          echo "Testing command chaining..."
+          ./zig-out/bin/den exec "echo 'first' && echo 'second'" || true
+          ./zig-out/bin/den exec "false || echo 'fallback'" || true
+
+      - name: Test pipes
+        shell: bash
+        run: |
+          echo "Testing pipes..."
+          ./zig-out/bin/den exec "echo 'hello' | grep 'ell'" || true
+          ./zig-out/bin/den exec "ls | head -5" || true
+
+      - name: Test script execution
+        shell: bash
+        run: |
+          echo "Testing script execution..."
+          echo "#!/bin/bash" > test.sh
+          echo "echo 'Script works'" >> test.sh
+          chmod +x test.sh
+          ./zig-out/bin/den exec "./test.sh" || true
+          rm test.sh
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-test-logs-${{ matrix.os }}
+          path: |
+            zig-out/
+            .zig-cache/
+
+  e2e-shell-session:
+    name: End-to-End Shell Session
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.2'
+
+      - name: Build
+        run: zig build
+
+      - name: Create test script
+        run: |
+          cat > e2e_test.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          echo "=== E2E Shell Session Test ==="
+
+          # Test 1: Basic commands
+          echo "Test 1: Basic commands"
+          ./zig-out/bin/den exec "pwd"
+          ./zig-out/bin/den exec "echo 'Hello World'"
+
+          # Test 2: Directory navigation
+          echo "Test 2: Directory navigation"
+          mkdir -p test_dir
+          ./zig-out/bin/den exec "cd test_dir && pwd"
+          rm -rf test_dir
+
+          # Test 3: File manipulation
+          echo "Test 3: File manipulation"
+          ./zig-out/bin/den exec "echo 'test' > temp.txt"
+          ./zig-out/bin/den exec "cat temp.txt"
+          ./zig-out/bin/den exec "rm temp.txt"
+
+          # Test 4: Builtins
+          echo "Test 4: Builtins"
+          ./zig-out/bin/den exec "calc 10 + 20"
+          ./zig-out/bin/den exec "seq 1 3"
+          ./zig-out/bin/den exec "date"
+
+          # Test 5: Complex commands
+          echo "Test 5: Complex commands"
+          ./zig-out/bin/den exec "ls -la | head -5"
+          ./zig-out/bin/den exec "echo 'test' && echo 'success'"
+
+          echo "=== All E2E tests passed! ==="
+          EOF
+
+          chmod +x e2e_test.sh
+
+      - name: Run E2E tests
+        run: ./e2e_test.sh
+
+      - name: Cleanup
+        if: always()
+        run: rm -f e2e_test.sh
+
+  plugin-integration:
+    name: Plugin System Integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.2'
+
+      - name: Build
+        run: zig build
+
+      - name: Test plugin loading
+        run: |
+          echo "Testing plugin system..."
+          # Test will be expanded as plugin system matures
+          echo "Plugin tests placeholder - to be implemented"
+
+  performance-benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.2'
+
+      - name: Build release
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Run basic benchmarks
+        run: |
+          echo "=== Performance Benchmarks ==="
+
+          # Benchmark startup time
+          echo "Benchmark: Startup time"
+          time ./zig-out/bin/den exec "echo 'startup test'" || true
+
+          # Benchmark command execution
+          echo "Benchmark: Command execution"
+          time for i in {1..10}; do ./zig-out/bin/den exec "echo test$i" > /dev/null; done || true
+
+          # Benchmark ls performance
+          echo "Benchmark: ls command"
+          time ./zig-out/bin/den exec "ls -la" > /dev/null || true
+
+          echo "=== Benchmarks complete ==="

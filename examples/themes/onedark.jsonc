@@ -1,0 +1,115 @@
+{
+  // One Dark Theme for Den Shell
+  // Based on Atom's One Dark theme
+  // https://github.com/atom/atom/tree/master/packages/one-dark-syntax
+
+  "theme": {
+    "name": "One Dark",
+    "author": "Atom",
+    "description": "Atom's iconic One Dark theme",
+
+    // One Dark Color Palette
+    "colors": {
+      // Mono
+      "mono_1": "#abb2bf",  // default foreground
+      "mono_2": "#828997",  // comments
+      "mono_3": "#5c6370",  // invisible/line numbers
+
+      // Hue
+      "hue_1": "#56b6c2",   // cyan
+      "hue_2": "#61afef",   // blue
+      "hue_3": "#c678dd",   // purple
+      "hue_4": "#98c379",   // green
+      "hue_5": "#e06c75",   // red
+      "hue_5_2": "#be5046", // dark red
+      "hue_6": "#d19a66",   // orange
+      "hue_6_2": "#e5c07b", // yellow
+
+      // Syntax
+      "syntax_fg": "#abb2bf",
+      "syntax_bg": "#282c34",
+      "syntax_gutter": "#636d83",
+      "syntax_guide": "#3b4048",
+      "syntax_accent": "#528bff"
+    },
+
+    // Shell Prompt
+    "prompt": {
+      "format": "{user}@{host}:{cwd} {git}$ ",
+      "user_color": "#98c379",           // green
+      "host_color": "#61afef",           // blue
+      "cwd_color": "#56b6c2",            // cyan
+      "git_color": "#c678dd",            // purple
+      "prompt_char": "#abb2bf",          // mono_1
+      "error_color": "#e06c75"           // red
+    },
+
+    // Syntax Highlighting
+    "syntax": {
+      "command": "#98c379",              // green - valid commands
+      "builtin": "#61afef",              // blue - builtin commands
+      "keyword": "#c678dd",              // purple - keywords
+      "string": "#98c379",               // green - strings
+      "number": "#d19a66",               // orange - numbers
+      "variable": "#e5c07b",             // yellow - variables
+      "comment": "#5c6370",              // mono_3 - comments
+      "operator": "#56b6c2",             // cyan - operators
+      "flag": "#61afef",                 // blue - command flags
+      "path": "#56b6c2",                 // cyan - file paths
+      "error": "#e06c75"                 // red - errors
+    },
+
+    // File Types
+    "file_types": {
+      "directory": "#61afef",            // blue
+      "executable": "#98c379",           // green
+      "symlink": "#56b6c2",              // cyan
+      "archive": "#e5c07b",              // yellow
+      "image": "#c678dd",                // purple
+      "video": "#c678dd",                // purple
+      "audio": "#d19a66",                // orange
+      "document": "#abb2bf",             // mono_1
+      "code": "#61afef",                 // blue
+      "hidden": "#5c6370"                // mono_3
+    },
+
+    // UI Elements
+    "ui": {
+      "border": "#3b4048",               // syntax_guide
+      "selection": "#3e4451",            // slightly lighter bg
+      "cursor": "#528bff",               // syntax_accent
+      "line_number": "#636d83",          // syntax_gutter
+      "status_bar_bg": "#21252b",        // darker bg
+      "status_bar_fg": "#abb2bf",        // mono_1
+      "error_bg": "#e06c75",             // red
+      "error_fg": "#282c34",             // bg
+      "warning_bg": "#e5c07b",           // yellow
+      "warning_fg": "#282c34",           // bg
+      "info_bg": "#61afef",              // blue
+      "info_fg": "#282c34",              // bg
+      "success_bg": "#98c379",           // green
+      "success_fg": "#282c34"            // bg
+    },
+
+    // Completion Menu
+    "completion": {
+      "background": "#21252b",           // darker bg
+      "foreground": "#abb2bf",           // mono_1
+      "selected_bg": "#2c313a",          // medium bg
+      "selected_fg": "#abb2bf",          // mono_1
+      "description": "#5c6370",          // mono_3
+      "border": "#3b4048"                // syntax_guide
+    },
+
+    // Git Integration
+    "git": {
+      "branch": "#c678dd",               // purple
+      "clean": "#98c379",                // green
+      "dirty": "#e5c07b",                // yellow
+      "staged": "#56b6c2",               // cyan
+      "conflict": "#e06c75",             // red
+      "ahead": "#61afef",                // blue
+      "behind": "#d19a66"                // orange
+    }
+  }
+}

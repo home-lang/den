@@ -1,0 +1,117 @@
+{
+  // Nord Theme for Den Shell
+  // Based on the Nord color palette
+  // https://www.nordtheme.com/
+
+  "theme": {
+    "name": "Nord",
+    "author": "Arctic Ice Studio",
+    "description": "An arctic, north-bluish color palette",
+
+    // Nord Color Palette
+    "colors": {
+      // Polar Night
+      "nord0": "#2e3440",   // darkest background
+      "nord1": "#3b4252",   // dark background
+      "nord2": "#434c5e",   // lighter background
+      "nord3": "#4c566a",   // lightest background / comments
+
+      // Snow Storm
+      "nord4": "#d8dee9",   // dark foreground
+      "nord5": "#e5e9f0",   // foreground
+      "nord6": "#eceff4",   // bright foreground
+
+      // Frost
+      "nord7": "#8fbcbb",   // cyan-ish
+      "nord8": "#88c0d0",   // bright cyan
+      "nord9": "#81a1c1",   // blue
+      "nord10": "#5e81ac",  // dark blue
+
+      // Aurora
+      "nord11": "#bf616a",  // red
+      "nord12": "#d08770",  // orange
+      "nord13": "#ebcb8b",  // yellow
+      "nord14": "#a3be8c",  // green
+      "nord15": "#b48ead"   // purple
+    },
+
+    // Shell Prompt
+    "prompt": {
+      "format": "{user}@{host}:{cwd} {git}$ ",
+      "user_color": "#a3be8c",           // nord14 - green
+      "host_color": "#88c0d0",           // nord8 - bright cyan
+      "cwd_color": "#81a1c1",            // nord9 - blue
+      "git_color": "#b48ead",            // nord15 - purple
+      "prompt_char": "#d8dee9",          // nord4
+      "error_color": "#bf616a"           // nord11 - red
+    },
+
+    // Syntax Highlighting
+    "syntax": {
+      "command": "#a3be8c",              // nord14 - green
+      "builtin": "#88c0d0",              // nord8 - cyan
+      "keyword": "#81a1c1",              // nord9 - blue
+      "string": "#a3be8c",               // nord14 - green
+      "number": "#b48ead",               // nord15 - purple
+      "variable": "#d08770",             // nord12 - orange
+      "comment": "#4c566a",              // nord3
+      "operator": "#81a1c1",             // nord9 - blue
+      "flag": "#88c0d0",                 // nord8 - cyan
+      "path": "#8fbcbb",                 // nord7 - cyan-ish
+      "error": "#bf616a"                 // nord11 - red
+    },
+
+    // File Types
+    "file_types": {
+      "directory": "#81a1c1",            // nord9 - blue
+      "executable": "#a3be8c",           // nord14 - green
+      "symlink": "#88c0d0",              // nord8 - cyan
+      "archive": "#ebcb8b",              // nord13 - yellow
+      "image": "#b48ead",                // nord15 - purple
+      "video": "#b48ead",                // nord15 - purple
+      "audio": "#d08770",                // nord12 - orange
+      "document": "#d8dee9",             // nord4
+      "code": "#88c0d0",                 // nord8 - cyan
+      "hidden": "#4c566a"                // nord3
+    },
+
+    // UI Elements
+    "ui": {
+      "border": "#4c566a",               // nord3
+      "selection": "#434c5e",            // nord2
+      "cursor": "#d8dee9",               // nord4
+      "line_number": "#4c566a",          // nord3
+      "status_bar_bg": "#3b4252",        // nord1
+      "status_bar_fg": "#d8dee9",        // nord4
+      "error_bg": "#bf616a",             // nord11
+      "error_fg": "#2e3440",             // nord0
+      "warning_bg": "#ebcb8b",           // nord13
+      "warning_fg": "#2e3440",           // nord0
+      "info_bg": "#81a1c1",              // nord9
+      "info_fg": "#2e3440",              // nord0
+      "success_bg": "#a3be8c",           // nord14
+      "success_fg": "#2e3440"            // nord0
+    },
+
+    // Completion Menu
+    "completion": {
+      "background": "#3b4252",           // nord1
+      "foreground": "#d8dee9",           // nord4
+      "selected_bg": "#434c5e",          // nord2
+      "selected_fg": "#eceff4",          // nord6
+      "description": "#4c566a",          // nord3
+      "border": "#4c566a"                // nord3
+    },
+
+    // Git Integration
+    "git": {
+      "branch": "#b48ead",               // nord15 - purple
+      "clean": "#a3be8c",                // nord14 - green
+      "dirty": "#ebcb8b",                // nord13 - yellow
+      "staged": "#88c0d0",               // nord8 - cyan
+      "conflict": "#bf616a",             // nord11 - red
+      "ahead": "#81a1c1",                // nord9 - blue
+      "behind": "#d08770"                // nord12 - orange
+    }
+  }
+}

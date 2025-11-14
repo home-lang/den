@@ -1,0 +1,111 @@
+{
+  // Dracula Theme for Den Shell
+  // Based on the official Dracula color scheme
+  // https://draculatheme.com/
+
+  "theme": {
+    "name": "Dracula",
+    "author": "Dracula Theme",
+    "description": "A dark theme with vibrant colors inspired by the Dracula color palette",
+
+    // Dracula Color Palette
+    "colors": {
+      // Background
+      "background": "#282a36",
+      "current_line": "#44475a",
+      "selection": "#44475a",
+      "foreground": "#f8f8f2",
+
+      // Comments
+      "comment": "#6272a4",
+
+      // Dracula Colors
+      "cyan": "#8be9fd",
+      "green": "#50fa7b",
+      "orange": "#ffb86c",
+      "pink": "#ff79c6",
+      "purple": "#bd93f9",
+      "red": "#ff5555",
+      "yellow": "#f1fa8c"
+    },
+
+    // Shell Prompt
+    "prompt": {
+      "format": "{user}@{host}:{cwd} {git}$ ",
+      "user_color": "#50fa7b",           // green
+      "host_color": "#8be9fd",           // cyan
+      "cwd_color": "#bd93f9",            // purple
+      "git_color": "#ff79c6",            // pink
+      "prompt_char": "#f8f8f2",         // foreground
+      "error_color": "#ff5555"           // red
+    },
+
+    // Syntax Highlighting
+    "syntax": {
+      "command": "#50fa7b",              // green - valid commands
+      "builtin": "#8be9fd",              // cyan - builtin commands
+      "keyword": "#ff79c6",              // pink - keywords (if, then, else)
+      "string": "#f1fa8c",               // yellow - strings
+      "number": "#bd93f9",               // purple - numbers
+      "variable": "#ffb86c",             // orange - variables
+      "comment": "#6272a4",              // comment - comments
+      "operator": "#ff79c6",             // pink - operators
+      "flag": "#8be9fd",                 // cyan - command flags
+      "path": "#bd93f9",                 // purple - file paths
+      "error": "#ff5555"                 // red - errors
+    },
+
+    // File Types (for ls command)
+    "file_types": {
+      "directory": "#bd93f9",            // purple
+      "executable": "#50fa7b",           // green
+      "symlink": "#8be9fd",              // cyan
+      "archive": "#f1fa8c",              // yellow
+      "image": "#ff79c6",                // pink
+      "video": "#ff79c6",                // pink
+      "audio": "#ffb86c",                // orange
+      "document": "#f8f8f2",             // foreground
+      "code": "#8be9fd",                 // cyan
+      "hidden": "#6272a4"                // comment
+    },
+
+    // UI Elements
+    "ui": {
+      "border": "#6272a4",               // comment
+      "selection": "#44475a",            // current_line
+      "cursor": "#f8f8f2",               // foreground
+      "line_number": "#6272a4",          // comment
+      "status_bar_bg": "#44475a",        // current_line
+      "status_bar_fg": "#f8f8f2",        // foreground
+      "error_bg": "#ff5555",             // red
+      "error_fg": "#282a36",             // background
+      "warning_bg": "#ffb86c",           // orange
+      "warning_fg": "#282a36",           // background
+      "info_bg": "#8be9fd",              // cyan
+      "info_fg": "#282a36",              // background
+      "success_bg": "#50fa7b",           // green
+      "success_fg": "#282a36"            // background
+    },
+
+    // Completion Menu
+    "completion": {
+      "background": "#44475a",           // current_line
+      "foreground": "#f8f8f2",           // foreground
+      "selected_bg": "#6272a4",          // comment (lighter)
+      "selected_fg": "#f8f8f2",          // foreground
+      "description": "#6272a4",          // comment
+      "border": "#6272a4"                // comment
+    },
+
+    // Git Integration
+    "git": {
+      "branch": "#ff79c6",               // pink
+      "clean": "#50fa7b",                // green
+      "dirty": "#f1fa8c",                // yellow
+      "staged": "#8be9fd",               // cyan
+      "conflict": "#ff5555",             // red
+      "ahead": "#bd93f9",                // purple
+      "behind": "#ffb86c"                // orange
+    }
+  }
+}

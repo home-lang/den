@@ -2926,8 +2926,14 @@ pub const Executor = struct {
 
         // Print entries
         if (long_format) {
-            // Print total (simplified - just print "total 0" for now)
-            try IO.print("total 0\n", .{});
+            // Calculate total blocks (512-byte blocks)
+            var total_blocks: u64 = 0;
+            i = 0;
+            while (i < count) : (i += 1) {
+                // Each file uses (size + 511) / 512 blocks
+                total_blocks += (entries[i].size + 511) / 512;
+            }
+            try IO.print("total {d}\n", .{total_blocks});
 
             // Long format: permissions links owner group size date name
             i = 0;
@@ -3010,25 +3016,64 @@ pub const Executor = struct {
             }
         } else {
             // Simple format: just names
-            i = 0;
-            while (i < count) : (i += 1) {
-                if (one_per_line) {
-                    // One per line
+            if (one_per_line) {
+                // One per line
+                i = 0;
+                while (i < count) : (i += 1) {
                     if (entries[i].kind == .directory) {
                         try IO.print("\x1b[1;36m{s}\x1b[0m\n", .{entries[i].name});
                     } else {
                         try IO.print("{s}\n", .{entries[i].name});
                     }
-                } else {
-                    // Multiple per line
-                    if (entries[i].kind == .directory) {
-                        try IO.print("\x1b[1;36m{s}\x1b[0m  ", .{entries[i].name});
-                    } else {
-                        try IO.print("{s}  ", .{entries[i].name});
+                }
+            } else {
+                // Multi-column format
+                // First, find the longest filename to determine column width
+                var max_len: usize = 0;
+                i = 0;
+                while (i < count) : (i += 1) {
+                    if (entries[i].name.len > max_len) {
+                        max_len = entries[i].name.len;
                     }
                 }
+
+                // Get terminal width (use signal handling module)
+                const signals = @import("../utils/signals.zig");
+                const term_width = if (signals.getWindowSize()) |ws| ws.cols else |_| 80;
+
+                // Calculate column width (name + 2 spaces padding)
+                const col_width = max_len + 2;
+                const num_cols = @max(1, term_width / col_width);
+                const num_rows = (count + num_cols - 1) / num_cols;
+
+                // Print in column-major order (down then across)
+                var row: usize = 0;
+                while (row < num_rows) : (row += 1) {
+                    var col: usize = 0;
+                    while (col < num_cols) : (col += 1) {
+                        const idx = col * num_rows + row;
+                        if (idx >= count) break;
+
+                        const entry = entries[idx];
+                        const padding = col_width - entry.name.len;
+
+                        if (entry.kind == .directory) {
+                            try IO.print("\x1b[1;36m{s}\x1b[0m", .{entry.name});
+                        } else {
+                            try IO.print("{s}", .{entry.name});
+                        }
+
+                        // Add padding except for last column
+                        if (col < num_cols - 1 and idx + num_rows < count) {
+                            var p: usize = 0;
+                            while (p < padding) : (p += 1) {
+                                try IO.print(" ", .{});
+                            }
+                        }
+                    }
+                    try IO.print("\n", .{});
+                }
             }
-            if (count > 0 and !one_per_line) try IO.print("\n", .{});
         }
 
         // Handle recursive flag (simplified - just show subdirectories)

@@ -1,0 +1,115 @@
+{
+  // Solarized Dark Theme for Den Shell
+  // Based on the Solarized color scheme by Ethan Schoonover
+  // https://ethanschoonover.com/solarized/
+
+  "theme": {
+    "name": "Solarized Dark",
+    "author": "Ethan Schoonover",
+    "description": "Precision colors for machines and people - Dark variant",
+
+    // Solarized Color Palette
+    "colors": {
+      // Dark Background Tones
+      "base03": "#002b36",  // background
+      "base02": "#073642",  // background highlights
+      "base01": "#586e75",  // optional emphasized content
+      "base00": "#657b83",  // body text / default code / primary content
+
+      // Light Foreground Tones
+      "base0": "#839496",   // comments / secondary content
+      "base1": "#93a1a1",   // optional emphasized content
+      "base2": "#eee8d5",   // background highlights
+      "base3": "#fdf6e3",   // background
+
+      // Accent Colors
+      "yellow": "#b58900",
+      "orange": "#cb4b16",
+      "red": "#dc322f",
+      "magenta": "#d33682",
+      "violet": "#6c71c4",
+      "blue": "#268bd2",
+      "cyan": "#2aa198",
+      "green": "#859900"
+    },
+
+    // Shell Prompt
+    "prompt": {
+      "format": "{user}@{host}:{cwd} {git}$ ",
+      "user_color": "#859900",           // green
+      "host_color": "#268bd2",           // blue
+      "cwd_color": "#2aa198",            // cyan
+      "git_color": "#d33682",            // magenta
+      "prompt_char": "#839496",          // base0
+      "error_color": "#dc322f"           // red
+    },
+
+    // Syntax Highlighting
+    "syntax": {
+      "command": "#859900",              // green - valid commands
+      "builtin": "#268bd2",              // blue - builtin commands
+      "keyword": "#d33682",              // magenta - keywords
+      "string": "#2aa198",               // cyan - strings
+      "number": "#6c71c4",               // violet - numbers
+      "variable": "#b58900",             // yellow - variables
+      "comment": "#586e75",              // base01 - comments
+      "operator": "#cb4b16",             // orange - operators
+      "flag": "#268bd2",                 // blue - command flags
+      "path": "#2aa198",                 // cyan - file paths
+      "error": "#dc322f"                 // red - errors
+    },
+
+    // File Types
+    "file_types": {
+      "directory": "#268bd2",            // blue
+      "executable": "#859900",           // green
+      "symlink": "#2aa198",              // cyan
+      "archive": "#b58900",              // yellow
+      "image": "#d33682",                // magenta
+      "video": "#6c71c4",                // violet
+      "audio": "#cb4b16",                // orange
+      "document": "#839496",             // base0
+      "code": "#268bd2",                 // blue
+      "hidden": "#586e75"                // base01
+    },
+
+    // UI Elements
+    "ui": {
+      "border": "#586e75",               // base01
+      "selection": "#073642",            // base02
+      "cursor": "#839496",               // base0
+      "line_number": "#586e75",          // base01
+      "status_bar_bg": "#073642",        // base02
+      "status_bar_fg": "#839496",        // base0
+      "error_bg": "#dc322f",             // red
+      "error_fg": "#002b36",             // base03
+      "warning_bg": "#b58900",           // yellow
+      "warning_fg": "#002b36",           // base03
+      "info_bg": "#268bd2",              // blue
+      "info_fg": "#002b36",              // base03
+      "success_bg": "#859900",           // green
+      "success_fg": "#002b36"            // base03
+    },
+
+    // Completion Menu
+    "completion": {
+      "background": "#073642",           // base02
+      "foreground": "#839496",           // base0
+      "selected_bg": "#586e75",          // base01
+      "selected_fg": "#eee8d5",          // base2
+      "description": "#586e75",          // base01
+      "border": "#586e75"                // base01
+    },
+
+    // Git Integration
+    "git": {
+      "branch": "#d33682",               // magenta
+      "clean": "#859900",                // green
+      "dirty": "#b58900",                // yellow
+      "staged": "#2aa198",               // cyan
+      "conflict": "#dc322f",             // red
+      "ahead": "#6c71c4",                // violet
+      "behind": "#cb4b16"                // orange
+    }
+  }
+}

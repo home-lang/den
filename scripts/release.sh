@@ -40,8 +40,7 @@ declare -a PLATFORMS=(
     "linux-arm64:den:tar.gz"
     "darwin-x64:den:tar.gz"
     "darwin-arm64:den:tar.gz"
-    # Windows support deferred - requires Windows-specific process management
-    # "windows-x64:den.exe:zip"
+    "windows-x64:den.exe:zip"
 )
 
 for platform_config in "${PLATFORMS[@]}"; do

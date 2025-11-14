@@ -130,8 +130,8 @@ pub fn getWindowSize() !WindowSize {
         }
 
         return WindowSize{
-            .rows = ws.ws_row,
-            .cols = ws.ws_col,
+            .rows = ws.row,
+            .cols = ws.col,
         };
     }
 }
