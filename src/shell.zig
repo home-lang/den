@@ -28,6 +28,7 @@ const PromptTemplate = @import("prompt/types.zig").PromptTemplate;
 const SystemInfo = @import("prompt/sysinfo.zig").SystemInfo;
 const GitModule = @import("prompt/git.zig").GitModule;
 const ansi = @import("utils/ansi.zig");
+const signals = @import("utils/signals.zig");
 
 /// Extract exit status from wait status (cross-platform)
 fn getExitStatus(status: u32) i32 {
@@ -135,6 +136,11 @@ pub const Shell = struct {
 
         // Initialize thread pool with automatic CPU detection
         const thread_pool = try concurrency.ThreadPool.init(allocator, 0);
+
+        // Install signal handlers
+        signals.installHandlers() catch |err| {
+            std.debug.print("Warning: Failed to install signal handlers: {}\n", .{err});
+        };
 
         var shell = Shell{
             .allocator = allocator,
@@ -366,6 +372,33 @@ pub const Shell = struct {
         try IO.print("Type 'exit' to quit or Ctrl+D to exit.\n\n", .{});
 
         while (self.running) {
+            // Check for signals
+            if (signals.checkSignal()) |sig| {
+                switch (sig) {
+                    .interrupt => {
+                        // SIGINT (Ctrl+C) - just print newline and continue
+                        try IO.print("\n", .{});
+                        continue;
+                    },
+                    .terminate => {
+                        // SIGTERM - graceful shutdown
+                        try IO.print("\nReceived termination signal, shutting down...\n", .{});
+                        self.running = false;
+                        break;
+                    },
+                    .winch => {
+                        // SIGWINCH - window resize
+                        // The terminal will automatically adjust
+                    },
+                    .none => {},
+                }
+            }
+
+            // Check for window size changes
+            if (signals.checkWindowSizeChanged()) {
+                // Window was resized, terminal will auto-adjust
+            }
+
             // Check for completed background jobs
             try self.checkBackgroundJobs();
 

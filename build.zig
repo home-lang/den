@@ -149,6 +149,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    test_module.addImport("zig-config", zig_config);
 
     const unit_tests = b.addTest(.{
         .root_module = test_module,

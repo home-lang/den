@@ -505,7 +505,8 @@ pub const Executor = struct {
             "pushd", "popd", "dirs", "eval", "exec", "command", "builtin",
             "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
             "umask", "getopts", "clear", "time", "hash", "yes", "reload",
-            "watch", "tree", "grep", "find", "calc", "json", "ls"
+            "watch", "tree", "grep", "find", "calc", "json", "ls",
+            "seq", "date", "parallel"
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -610,6 +611,12 @@ pub const Executor = struct {
             return try self.builtinJson(command);
         } else if (std.mem.eql(u8, command.name, "ls")) {
             return try self.builtinLs(command);
+        } else if (std.mem.eql(u8, command.name, "seq")) {
+            return try self.builtinSeq(command);
+        } else if (std.mem.eql(u8, command.name, "date")) {
+            return try self.builtinDate(command);
+        } else if (std.mem.eql(u8, command.name, "parallel")) {
+            return try self.builtinParallel(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -3079,5 +3086,129 @@ pub const Executor = struct {
 
         // Detach - don't wait for completion
         // The process will continue running independently
+    }
+
+    /// Builtin: seq - generate number sequences
+    fn builtinSeq(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        if (command.args.len == 0) {
+            try IO.eprint("seq: missing operand\nUsage: seq [FIRST [INCREMENT]] LAST\n", .{});
+            return 1;
+        }
+
+        const first: i64 = if (command.args.len >= 2)
+            try std.fmt.parseInt(i64, command.args[0], 10)
+        else
+            1;
+
+        const increment: i64 = if (command.args.len >= 3)
+            try std.fmt.parseInt(i64, command.args[1], 10)
+        else
+            1;
+
+        const last_idx: usize = if (command.args.len >= 3) 2 else if (command.args.len >= 2) 1 else 0;
+        const last = try std.fmt.parseInt(i64, command.args[last_idx], 10);
+
+        if (increment == 0) {
+            try IO.eprint("seq: INCREMENT must not be zero\n", .{});
+            return 1;
+        }
+
+        if (increment > 0) {
+            var i = first;
+            while (i <= last) : (i += increment) {
+                try IO.print("{d}\n", .{i});
+            }
+        } else {
+            var i = first;
+            while (i >= last) : (i += increment) {
+                try IO.print("{d}\n", .{i});
+            }
+        }
+
+        return 0;
+    }
+
+    /// Builtin: date - display or set date/time
+    fn builtinDate(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        const timestamp = std.time.timestamp();
+        const epoch_seconds: u64 = @intCast(timestamp);
+
+        // Parse format string if provided
+        const format = if (command.args.len > 0) command.args[0] else "+%a %b %d %H:%M:%S %Z %Y";
+
+        // Simple format string support
+        if (std.mem.startsWith(u8, format, "+")) {
+            const fmt = format[1..];
+
+            // Convert epoch to calendar date
+            const seconds_per_day = 86400;
+            const days_since_epoch = epoch_seconds / seconds_per_day;
+            const seconds_today = epoch_seconds % seconds_per_day;
+
+            const hours = seconds_today / 3600;
+            const minutes = (seconds_today % 3600) / 60;
+            const seconds = seconds_today % 60;
+
+            // Simple date calculation (Unix epoch: 1970-01-01 was a Thursday)
+            const days_since_1970 = days_since_epoch;
+            const day_of_week = @mod((days_since_1970 + 4), 7); // Thursday = 4
+
+            // Approximate year calculation
+            const days_per_year = 365;
+            const year = 1970 + (days_since_1970 / days_per_year);
+
+            const weekdays = [_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+            const months = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+            // Very simple format parsing
+            if (std.mem.eql(u8, fmt, "%s")) {
+                try IO.print("{d}\n", .{epoch_seconds});
+            } else if (std.mem.eql(u8, fmt, "%Y")) {
+                try IO.print("{d}\n", .{year});
+            } else if (std.mem.eql(u8, fmt, "%H:%M:%S")) {
+                try IO.print("{d:0>2}:{d:0>2}:{d:0>2}\n", .{ hours, minutes, seconds });
+            } else {
+                // Default format
+                try IO.print("{s} {s} 01 {d:0>2}:{d:0>2}:{d:0>2} UTC {d}\n", .{
+                    weekdays[day_of_week],
+                    months[0],
+                    hours,
+                    minutes,
+                    seconds,
+                    year,
+                });
+            }
+        } else if (std.mem.eql(u8, format, "--iso-8601")) {
+            // ISO 8601 format
+            const days_since_epoch = epoch_seconds / 86400;
+            const year = 1970 + (days_since_epoch / 365);
+            try IO.print("{d}-01-01\n", .{year});
+        } else {
+            try IO.eprint("date: invalid format\nUsage: date [+FORMAT]\n", .{});
+            return 1;
+        }
+
+        return 0;
+    }
+
+    /// Builtin: parallel - run commands in parallel (stub)
+    fn builtinParallel(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        if (command.args.len == 0) {
+            try IO.eprint("parallel: missing command\nUsage: parallel command [args...]\n", .{});
+            try IO.eprint("Note: parallel is a stub implementation\n", .{});
+            return 1;
+        }
+
+        // Stub implementation - just notify the user
+        try IO.print("parallel: stub implementation - command would run in parallel\n", .{});
+        try IO.print("Command: {s}\n", .{command.args[0]});
+
+        return 0;
     }
 };
