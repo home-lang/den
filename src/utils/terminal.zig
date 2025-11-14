@@ -1443,31 +1443,67 @@ pub const LineEditor = struct {
         try self.writeBytes("\x1b[s");
         try self.writeBytes("\r\n");
 
-        // Display horizontally with spacing
-        for (completions, 0..) |completion, i| {
-            // Check if this is a script (marked with \x02)
+        // Find the longest completion to determine column width
+        var max_len: usize = 0;
+        for (completions) |completion| {
             const is_script = completion.len > 0 and completion[0] == '\x02';
             const display_text = if (is_script) completion[1..] else completion;
-
-            // Check if this is a directory (ends with /)
-            const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
-
-            // Highlight the current selection only
-            if (i == self.completion_index) {
-                try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
-            } else if (is_dir) {
-                try self.writeBytes("\x1b[1;36m"); // Teal, semibold for directories
+            if (display_text.len > max_len) {
+                max_len = display_text.len;
             }
+        }
 
-            try self.writeBytes(display_text);
+        // Get terminal width
+        const signals = @import("signals.zig");
+        const term_width = if (signals.getWindowSize()) |ws| ws.cols else |_| 80;
 
-            if (i == self.completion_index or is_dir) {
-                try self.writeBytes("\x1b[0m"); // Reset colors after highlight or directory
+        // Calculate column width (name + 2 spaces padding)
+        const col_width = max_len + 2;
+        const num_cols = @max(1, term_width / col_width);
+        const num_rows = (completions.len + num_cols - 1) / num_cols;
+
+        // Print in column-major order (down then across)
+        var row: usize = 0;
+        while (row < num_rows) : (row += 1) {
+            var col: usize = 0;
+            while (col < num_cols) : (col += 1) {
+                const idx = col * num_rows + row;
+                if (idx >= completions.len) break;
+
+                const completion = completions[idx];
+
+                // Check if this is a script (marked with \x02)
+                const is_script = completion.len > 0 and completion[0] == '\x02';
+                const display_text = if (is_script) completion[1..] else completion;
+
+                // Check if this is a directory (ends with /)
+                const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
+
+                // Highlight the current selection only
+                if (idx == self.completion_index) {
+                    try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
+                } else if (is_dir) {
+                    try self.writeBytes("\x1b[1;36m"); // Cyan for directories
+                }
+
+                try self.writeBytes(display_text);
+
+                if (idx == self.completion_index or is_dir) {
+                    try self.writeBytes("\x1b[0m"); // Reset colors after highlight or directory
+                }
+
+                // Add padding to align columns (except for the last column)
+                if (col < num_cols - 1 and idx < completions.len - 1) {
+                    const padding = col_width - display_text.len;
+                    var p: usize = 0;
+                    while (p < padding) : (p += 1) {
+                        try self.writeBytes(" ");
+                    }
+                }
             }
-
-            // Add spacing between items (except after the last one)
-            if (i < completions.len - 1) {
-                try self.writeBytes("  ");
+            // Move to next row (except after the last row)
+            if (row < num_rows - 1) {
+                try self.writeBytes("\r\n");
             }
         }
 
@@ -1484,31 +1520,67 @@ pub const LineEditor = struct {
         // Move to where the completion list starts (one line below current)
         try self.writeBytes("\r\n");
 
-        // Redraw the list with updated highlighting horizontally
-        for (completions, 0..) |completion, i| {
-            // Check if this is a script (marked with \x02)
+        // Find the longest completion to determine column width
+        var max_len: usize = 0;
+        for (completions) |completion| {
             const is_script = completion.len > 0 and completion[0] == '\x02';
             const display_text = if (is_script) completion[1..] else completion;
-
-            // Check if this is a directory (ends with /)
-            const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
-
-            // Highlight the current selection only
-            if (i == self.completion_index) {
-                try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
-            } else if (is_dir) {
-                try self.writeBytes("\x1b[1;36m"); // Teal, semibold for directories
+            if (display_text.len > max_len) {
+                max_len = display_text.len;
             }
+        }
 
-            try self.writeBytes(display_text);
+        // Get terminal width
+        const signals = @import("signals.zig");
+        const term_width = if (signals.getWindowSize()) |ws| ws.cols else |_| 80;
 
-            if (i == self.completion_index or is_dir) {
-                try self.writeBytes("\x1b[0m"); // Reset colors after highlight or directory
+        // Calculate column width (name + 2 spaces padding)
+        const col_width = max_len + 2;
+        const num_cols = @max(1, term_width / col_width);
+        const num_rows = (completions.len + num_cols - 1) / num_cols;
+
+        // Print in column-major order (down then across)
+        var row: usize = 0;
+        while (row < num_rows) : (row += 1) {
+            var col: usize = 0;
+            while (col < num_cols) : (col += 1) {
+                const idx = col * num_rows + row;
+                if (idx >= completions.len) break;
+
+                const completion = completions[idx];
+
+                // Check if this is a script (marked with \x02)
+                const is_script = completion.len > 0 and completion[0] == '\x02';
+                const display_text = if (is_script) completion[1..] else completion;
+
+                // Check if this is a directory (ends with /)
+                const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
+
+                // Highlight the current selection only
+                if (idx == self.completion_index) {
+                    try self.writeBytes("\x1b[30;47m"); // Black text on light gray background
+                } else if (is_dir) {
+                    try self.writeBytes("\x1b[1;36m"); // Cyan for directories
+                }
+
+                try self.writeBytes(display_text);
+
+                if (idx == self.completion_index or is_dir) {
+                    try self.writeBytes("\x1b[0m"); // Reset colors after highlight or directory
+                }
+
+                // Add padding to align columns (except for the last column)
+                if (col < num_cols - 1 and idx < completions.len - 1) {
+                    const padding = col_width - display_text.len;
+                    var p: usize = 0;
+                    while (p < padding) : (p += 1) {
+                        try self.writeBytes(" ");
+                    }
+                }
             }
-
-            // Add spacing between items (except after the last one)
-            if (i < completions.len - 1) {
-                try self.writeBytes("  ");
+            // Move to next row (except after the last row)
+            if (row < num_rows - 1) {
+                try self.writeBytes("\r\n");
             }
         }
 

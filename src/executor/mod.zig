@@ -506,7 +506,7 @@ pub const Executor = struct {
             "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
             "umask", "getopts", "clear", "time", "hash", "yes", "reload",
             "watch", "tree", "grep", "find", "calc", "json", "ls",
-            "seq", "date", "parallel"
+            "seq", "date", "parallel", "http", "base64", "uuid"
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -617,6 +617,12 @@ pub const Executor = struct {
             return try self.builtinDate(command);
         } else if (std.mem.eql(u8, command.name, "parallel")) {
             return try self.builtinParallel(command);
+        } else if (std.mem.eql(u8, command.name, "http")) {
+            return try self.builtinHttp(command);
+        } else if (std.mem.eql(u8, command.name, "base64")) {
+            return try self.builtinBase64(command);
+        } else if (std.mem.eql(u8, command.name, "uuid")) {
+            return try self.builtinUuid(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -3512,6 +3518,171 @@ pub const Executor = struct {
         try IO.print("parallel: stub implementation - command would run in parallel\n", .{});
         try IO.print("Command: {s}\n", .{command.args[0]});
 
+        return 0;
+    }
+
+    fn builtinHttp(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        if (command.args.len == 0) {
+            try IO.eprint("http: missing URL\n", .{});
+            try IO.eprint("Usage: http [OPTIONS] URL\n", .{});
+            try IO.eprint("Options:\n", .{});
+            try IO.eprint("  -X METHOD     HTTP method (GET, POST, PUT, DELETE)\n", .{});
+            try IO.eprint("  -d DATA       Request body data\n", .{});
+            try IO.eprint("  -i            Show response headers\n", .{});
+            try IO.eprint("\nExamples:\n", .{});
+            try IO.eprint("  http https://api.example.com/users\n", .{});
+            try IO.eprint("  http -X POST -d 'data' https://api.example.com/users\n", .{});
+            try IO.eprint("\nNote: This is a stub implementation.\n", .{});
+            try IO.eprint("For full HTTP client functionality, use curl or wget.\n", .{});
+            return 1;
+        }
+
+        var method: []const u8 = "GET";
+        var url: ?[]const u8 = null;
+        var data: ?[]const u8 = null;
+
+        // Parse arguments
+        var i: usize = 0;
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+
+            if (std.mem.eql(u8, arg, "-X") or std.mem.eql(u8, arg, "--request")) {
+                if (i + 1 >= command.args.len) {
+                    try IO.eprint("http: -X requires an argument\n", .{});
+                    return 1;
+                }
+                i += 1;
+                method = command.args[i];
+            } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--data")) {
+                if (i + 1 >= command.args.len) {
+                    try IO.eprint("http: -d requires an argument\n", .{});
+                    return 1;
+                }
+                i += 1;
+                data = command.args[i];
+            } else if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--include")) {
+                // Accepted but ignored in stub
+            } else if (arg[0] != '-') {
+                url = arg;
+            } else {
+                try IO.eprint("http: unknown option {s}\n", .{arg});
+                return 1;
+            }
+        }
+
+        if (url == null) {
+            try IO.eprint("http: missing URL\n", .{});
+            return 1;
+        }
+
+        const target_url = url.?;
+
+        // Stub implementation - show what would be done
+        try IO.print("http: stub implementation\n", .{});
+        try IO.print("Would perform {s} {s}\n", .{ method, target_url });
+        if (data) |body| {
+            try IO.print("With data {s}\n", .{body});
+        }
+        try IO.print("\nTo use full HTTP functionality, use:\n", .{});
+        if (data) |body| {
+            try IO.print("  curl -X {s} -d '{s}' {s}\n", .{ method, body, target_url });
+        } else {
+            try IO.print("  curl {s}\n", .{target_url});
+        }
+
+        return 0;
+    }
+
+    fn builtinBase64(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (command.args.len == 0) {
+            try IO.eprint("base64: missing input\n", .{});
+            try IO.eprint("Usage: base64 [-d] <string>\n", .{});
+            try IO.eprint("Options:\n", .{});
+            try IO.eprint("  -d    Decode base64 input\n", .{});
+            try IO.eprint("\nExamples:\n", .{});
+            try IO.eprint("  base64 'Hello World'\n", .{});
+            try IO.eprint("  base64 -d 'SGVsbG8gV29ybGQ='\n", .{});
+            return 1;
+        }
+
+        var decode: bool = false;
+        var input: ?[]const u8 = null;
+
+        // Parse arguments
+        var i: usize = 0;
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+            if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--decode")) {
+                decode = true;
+            } else {
+                input = arg;
+            }
+        }
+
+        if (input == null) {
+            try IO.eprint("base64: missing input\n", .{});
+            return 1;
+        }
+
+        const data = input.?;
+
+        if (decode) {
+            // Decode base64
+            const decoder = std.base64.standard.Decoder;
+            const max_size = try decoder.calcSizeForSlice(data);
+            const output = try self.allocator.alloc(u8, max_size);
+            defer self.allocator.free(output);
+
+            decoder.decode(output, data) catch {
+                try IO.eprint("base64: invalid base64 input\n", .{});
+                return 1;
+            };
+
+            try IO.print("{s}\n", .{output[0..max_size]});
+        } else {
+            // Encode to base64
+            const encoder = std.base64.standard.Encoder;
+            const output_size = encoder.calcSize(data.len);
+            const output = try self.allocator.alloc(u8, output_size);
+            defer self.allocator.free(output);
+
+            const encoded = encoder.encode(output, data);
+            try IO.print("{s}\n", .{encoded});
+        }
+
+        return 0;
+    }
+
+    fn builtinUuid(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = command;
+
+        // Generate a simple UUID v4 (random)
+        var rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+        var random = rng.random();
+
+        var uuid: [16]u8 = undefined;
+        random.bytes(&uuid);
+
+        // Set version (4) and variant bits
+        uuid[6] = (uuid[6] & 0x0f) | 0x40; // Version 4
+        uuid[8] = (uuid[8] & 0x3f) | 0x80; // Variant
+
+        // Format as UUID string
+        const uuid_str = try std.fmt.allocPrint(
+            self.allocator,
+            "{x:0>2}{x:0>2}{x:0>2}{x:0>2}-{x:0>2}{x:0>2}-{x:0>2}{x:0>2}-{x:0>2}{x:0>2}-{x:0>2}{x:0>2}{x:0>2}{x:0>2}{x:0>2}{x:0>2}",
+            .{
+                uuid[0],  uuid[1],  uuid[2],  uuid[3],
+                uuid[4],  uuid[5],  uuid[6],  uuid[7],
+                uuid[8],  uuid[9],  uuid[10], uuid[11],
+                uuid[12], uuid[13], uuid[14], uuid[15],
+            },
+        );
+        defer self.allocator.free(uuid_str);
+
+        try IO.print("{s}\n", .{uuid_str});
         return 0;
     }
 };

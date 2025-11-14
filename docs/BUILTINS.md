@@ -13,6 +13,8 @@ Den Shell provides a comprehensive set of built-in commands that are optimized f
   - [date - Date and Time](#date---date-and-time)
   - [seq - Sequence Generator](#seq---sequence-generator)
   - [watch - Execute Periodically](#watch---execute-periodically)
+  - [base64 - Base64 Encoding/Decoding](#base64---base64-encodingdecoding)
+  - [uuid - UUID Generator](#uuid---uuid-generator)
 - [Shell Control](#shell-control)
   - [exit - Exit Shell](#exit---exit-shell)
   - [export - Set Environment Variables](#export---set-environment-variables)
@@ -319,6 +321,119 @@ watch -n 1 date
 watch -n 5 "ls -l | wc -l"
 # Counts files in directory every 5 seconds
 ```
+
+---
+
+### base64 - Base64 Encoding/Decoding
+
+Encode or decode data using Base64 encoding.
+
+#### Syntax
+
+```bash
+base64 [OPTIONS] STRING
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-d`, `--decode` | Decode Base64 input instead of encoding |
+
+#### Examples
+
+**Encode a string:**
+```bash
+base64 'Hello World'
+# Output: SGVsbG8gV29ybGQ=
+```
+
+**Decode a Base64 string:**
+```bash
+base64 -d 'SGVsbG8gV29ybGQ='
+# Output: Hello World
+```
+
+**Encoding with special characters:**
+```bash
+base64 'User:Password123!'
+# Output: VXNlcjpQYXNzd29yZDEyMyE=
+```
+
+**Decoding back:**
+```bash
+base64 -d 'VXNlcjpQYXNzd29yZDEyMyE='
+# Output: User:Password123!
+```
+
+#### Use Cases
+
+- **API Authentication**: Encode credentials for Basic Authentication headers
+- **Data Transfer**: Safely transmit binary data in text format
+- **Configuration**: Encode sensitive data in configuration files
+- **Email Attachments**: Base64 is used in MIME email encoding
+
+#### Technical Details
+
+- Uses standard Base64 alphabet (RFC 4648)
+- Automatically handles padding with `=` characters
+- Supports encoding/decoding of arbitrary length strings
+- Error handling for invalid Base64 input during decoding
+
+---
+
+### uuid - UUID Generator
+
+Generate a universally unique identifier (UUID) version 4.
+
+#### Syntax
+
+```bash
+uuid
+```
+
+#### Examples
+
+**Generate a UUID:**
+```bash
+uuid
+# Output: df155616-5763-4a4b-b359-6719554d3928
+```
+
+**Generate multiple UUIDs:**
+```bash
+uuid && uuid && uuid
+# Output:
+# a3c2f9b1-4d7e-4a8c-9f1b-2e5d8a7c3f4b
+# 7f8e2c4d-9a1b-4c5e-8d3f-6a9b2c7e4f1d
+# 2b9c7e4f-1d8a-4f3e-9c2b-5a8d3f7e1c4b
+```
+
+**Use in scripts:**
+```bash
+export SESSION_ID=$(uuid)
+echo "Session ID: $SESSION_ID"
+```
+
+#### Use Cases
+
+- **Session IDs**: Generate unique session identifiers for web applications
+- **Database Keys**: Create unique primary keys or identifiers
+- **File Names**: Generate unique temporary file names
+- **Request Tracking**: Track requests across distributed systems
+- **Testing**: Create unique test data identifiers
+
+#### Technical Details
+
+- Generates UUID version 4 (random-based)
+- Uses cryptographically random data from system RNG
+- Properly sets version bits (4) and variant bits (RFC 4122)
+- Format: `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`
+  - Where `x` is a random hexadecimal digit
+  - `4` indicates version 4
+  - `y` is one of `8`, `9`, `a`, or `b` (variant bits)
+- 122 bits of randomness (2^122 possible values)
+- Collision probability is astronomically low
 
 ---
 
