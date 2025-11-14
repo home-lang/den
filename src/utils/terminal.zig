@@ -1,6 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const builtin = @import("builtin");
+const SyntaxHighlighter = @import("syntax_highlight.zig").SyntaxHighlighter;
 
 /// Windows console mode flags and APIs
 const windows = if (builtin.os.tag == .windows) struct {
@@ -278,6 +279,8 @@ pub const LineEditor = struct {
     completion_path_prefix: ?[]const u8 = null, // Save the path prefix (e.g., "Documents/Projects/")
     // Inline suggestion state
     suggestion: ?[]const u8 = null, // The suggested text from history
+    // Syntax highlighting
+    syntax_highlighting: bool = true, // Enable/disable syntax highlighting
     // Reverse search mode (Ctrl+R)
     reverse_search_mode: bool = false,
     reverse_search_query: [256]u8 = undefined,
@@ -1635,9 +1638,18 @@ pub const LineEditor = struct {
         try self.writeBytes("\r");
         try self.writeBytes("\x1b[2K"); // Clear entire line
 
-        // Redraw prompt and buffer
+        // Redraw prompt
         try self.writeBytes(self.prompt);
-        try self.writeBytes(self.buffer[0..self.length]);
+
+        // Apply syntax highlighting if enabled
+        if (self.syntax_highlighting and self.length > 0) {
+            var highlighter = SyntaxHighlighter.init(self.allocator);
+            const highlighted = try highlighter.highlight(self.buffer[0..self.length]);
+            defer self.allocator.free(highlighted);
+            try self.writeBytes(highlighted);
+        } else {
+            try self.writeBytes(self.buffer[0..self.length]);
+        }
     }
 
     /// Find the start of the current word (for completion)
