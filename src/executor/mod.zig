@@ -2958,18 +2958,60 @@ pub const Executor = struct {
             i = 0;
             while (i < count) : (i += 1) {
                 const entry = entries[i];
+
+                // Get actual file stats including permissions and links
+                const path_buf = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ target_path, entry.name });
+                defer self.allocator.free(path_buf);
+
+                const path_z = try std.posix.toPosixPath(path_buf);
+                var st: std.c.Stat = undefined;
+                const stat_result = std.c.stat(&path_z, &st);
+
                 const kind_char: u8 = switch (entry.kind) {
                     .directory => 'd',
                     .sym_link => 'l',
                     else => '-',
                 };
 
-                // Simple permissions (hardcoded for now - proper implementation would need stat)
-                const perms = "rw-r--r--";
+                // Get actual permissions from stat
+                var perms_buf: [9]u8 = undefined;
+                if (stat_result == 0) {
+                    const mode = st.mode;
+                    // Owner permissions
+                    perms_buf[0] = if (mode & 0o400 != 0) 'r' else '-';
+                    perms_buf[1] = if (mode & 0o200 != 0) 'w' else '-';
+                    perms_buf[2] = if (mode & 0o100 != 0) 'x' else '-';
+                    // Group permissions
+                    perms_buf[3] = if (mode & 0o040 != 0) 'r' else '-';
+                    perms_buf[4] = if (mode & 0o020 != 0) 'w' else '-';
+                    perms_buf[5] = if (mode & 0o010 != 0) 'x' else '-';
+                    // Other permissions
+                    perms_buf[6] = if (mode & 0o004 != 0) 'r' else '-';
+                    perms_buf[7] = if (mode & 0o002 != 0) 'w' else '-';
+                    perms_buf[8] = if (mode & 0o001 != 0) 'x' else '-';
+                } else {
+                    // Fallback if stat fails
+                    @memcpy(&perms_buf, "rw-r--r--");
+                }
+                const perms = perms_buf[0..];
 
-                // Get username (simplified)
+                // Check for extended attributes (macOS-specific)
+                var has_xattr = false;
+                if (stat_result == 0) {
+                    // Use extern function for listxattr on macOS
+                    const listxattr = struct {
+                        extern "c" fn listxattr(path: [*:0]const u8, namebuf: ?[*]u8, size: usize, options: c_int) isize;
+                    }.listxattr;
+                    const xattr_list_size = listxattr(&path_z, null, 0, 0);
+                    has_xattr = xattr_list_size > 0;
+                }
+
+                // Get hard link count
+                const nlink: u64 = if (stat_result == 0) @intCast(st.nlink) else 1;
+
+                // Get username and group (simplified - use env vars)
                 const username = std.posix.getenv("USER") orelse "user";
-                const groupname = std.posix.getenv("GROUP") orelse "staff";
+                const groupname = "staff";
 
                 // Format size
                 const size_str = if (human_readable) blk: {
@@ -3010,24 +3052,29 @@ pub const Executor = struct {
                 defer self.allocator.free(time_str);
 
                 // Print with standard ls format
-                // permissions links owner group size date name
+                // Format: permissions[@] nlink user group size date name
+                const xattr_char = if (has_xattr) "@" else " ";
                 if (entry.kind == .directory) {
-                    try IO.print("{c}{s}  1 {s:<20} {s:<10} {s:>8} {s} \x1b[1;36m{s}\x1b[0m\n", .{
+                    try IO.print("{c}{s}{s} {d:>3} {s:<20} {s:<10} {d:>8} {s} \x1b[1;36m{s}\x1b[0m\n", .{
                         kind_char,
                         perms,
+                        xattr_char,
+                        nlink,
                         username,
                         groupname,
-                        size_str,
+                        entry.size,
                         time_str,
                         entry.name,
                     });
                 } else {
-                    try IO.print("{c}{s}  1 {s:<20} {s:<10} {s:>8} {s} {s}\n", .{
+                    try IO.print("{c}{s}{s} {d:>3} {s:<20} {s:<10} {d:>8} {s} {s}\n", .{
                         kind_char,
                         perms,
+                        xattr_char,
+                        nlink,
                         username,
                         groupname,
-                        size_str,
+                        entry.size,
                         time_str,
                         entry.name,
                     });
