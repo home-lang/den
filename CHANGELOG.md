@@ -1,6 +1,13 @@
 
 ## ...main
 
+### 🚀 Features
+
+- **Auto CD** - Navigate to directories without typing `cd` (zsh-style) ([src/executor/mod.zig:495-507](src/executor/mod.zig))
+  - Type directory paths directly: `Documents/Projects`, `../`, `~`, etc.
+  - Works with relative paths, absolute paths, parent directories (..), and home (~)
+  - Signature zsh feature now available in Den!
+
 ### 🩹 Fixes
 
 - Fix ls -l command to display proper Unix file permissions, extended attributes, and hard link counts ([src/executor/mod.zig:2957-3095](src/executor/mod.zig))

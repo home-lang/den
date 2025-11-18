@@ -492,8 +492,50 @@ pub const Executor = struct {
             return try self.executeBuiltin(command);
         }
 
+        // Check if it's a directory path (auto cd feature, like zsh)
+        if (try self.isDirectory(command.name)) {
+            // Auto cd to the directory
+            var args = [_][]const u8{command.name};
+            var redirections = [_]types.Redirection{};
+            var cd_command = types.ParsedCommand{
+                .name = "cd",
+                .args = args[0..],
+                .redirections = redirections[0..],
+                .type = .builtin,
+            };
+            return try self.executeBuiltin(&cd_command);
+        }
+
         // Execute external command
         return try self.executeExternal(command);
+    }
+
+    fn isDirectory(self: *Executor, path: []const u8) !bool {
+        _ = self;
+
+        // Handle special directory shortcuts
+        if (std.mem.eql(u8, path, "..") or
+            std.mem.eql(u8, path, "../") or
+            std.mem.eql(u8, path, ".") or
+            std.mem.eql(u8, path, "./") or
+            std.mem.eql(u8, path, "-"))
+        {
+            return true;
+        }
+
+        // Handle tilde expansion
+        if (path.len > 0 and path[0] == '~') {
+            return true;
+        }
+
+        // Check if it's a valid directory path
+        // Try to open as directory
+        var dir = std.fs.cwd().openDir(path, .{}) catch {
+            // Not a directory or doesn't exist
+            return false;
+        };
+        dir.close();
+        return true;
     }
 
     fn isBuiltin(self: *Executor, name: []const u8) bool {
