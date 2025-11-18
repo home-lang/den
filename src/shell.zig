@@ -458,6 +458,8 @@ pub const Shell = struct {
             if (std.mem.eql(u8, trimmed, "exit")) {
                 self.running = false;
                 try IO.print("Goodbye from Den!\n", .{});
+                // Save history before exiting
+                try self.saveHistory();
                 std.Thread.sleep(500 * std.time.ns_per_ms); // 500ms delay
                 std.process.exit(0);
             }

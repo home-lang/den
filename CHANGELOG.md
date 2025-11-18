@@ -3,12 +3,32 @@
 
 ### 🚀 Features
 
+- **History Deduplication** - Intelligent command history management (zsh-style) ([src/shell.zig:1243-1264](src/shell.zig))
+  - Automatically removes duplicate commands from history
+  - Checks last 50 commands and removes old duplicates when new ones are added
+  - Deduplicates when loading history from file
+  - Keeps history clean and more useful for searching
+  - More efficient history navigation
+
 - **Auto CD** - Navigate to directories without typing `cd` (zsh-style) ([src/executor/mod.zig:495-507](src/executor/mod.zig))
   - Type directory paths directly: `Documents/Projects`, `../`, `~`, etc.
   - Works with relative paths, absolute paths, parent directories (..), and home (~)
   - Signature zsh feature now available in Den!
 
+- **Menu Completion** - Interactive completion with arrow key navigation (already implemented) ([src/utils/terminal.zig:1034-1062](src/utils/terminal.zig))
+  - Visual menu for selecting completions with arrow keys
+  - Highlighted selection (black text on gray background)
+  - Navigate with Up/Down or Left/Right arrow keys
+  - Tab cycles through completions
+  - Enter accepts selection
+  - Directories shown in cyan color
+
 ### 🩹 Fixes
+
+- **Fix history not being saved on exit** - History now saves before exit command terminates ([src/shell.zig:462](src/shell.zig))
+  - Previously `std.process.exit(0)` bypassed the `deinit()` method where history was saved
+  - Now explicitly calls `saveHistory()` before exiting
+  - Ensures all commands are properly persisted to `~/.den_history`
 
 - Fix ls -l command to display proper Unix file permissions, extended attributes, and hard link counts ([src/executor/mod.zig:2957-3095](src/executor/mod.zig))
   - Now reads actual file permissions from stat() instead of hardcoded "rw-r--r--"
