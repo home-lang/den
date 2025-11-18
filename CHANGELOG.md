@@ -1,6 +1,19 @@
 
 ## ...main
 
+### 🩹 Fixes
+
+- Fix ls -l command to display proper Unix file permissions, extended attributes, and hard link counts ([src/executor/mod.zig:2957-3095](src/executor/mod.zig))
+  - Now reads actual file permissions from stat() instead of hardcoded "rw-r--r--"
+  - Added @ indicator for files with extended attributes (macOS)
+  - Displays actual hard link count from stat() instead of hardcoded "1"
+  - Updated output format to match standard Unix ls -l format
+
+- Fix prompt not displaying after Ctrl+L clear screen ([src/utils/terminal.zig:965-988](src/utils/terminal.zig), [src/shell.zig:3144-3177](src/shell.zig))
+  - Added prompt refresh callback to LineEditor
+  - Prompt now updates with current directory when screen is cleared with Ctrl+L
+  - Current directory displays immediately after clear without needing to press Enter
+  - Note: Cmd+K (macOS Terminal) is handled by Terminal.app, use Ctrl+L for shell-managed clear
 
 ### 🏡 Chore
 

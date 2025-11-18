@@ -281,6 +281,8 @@ pub const LineEditor = struct {
     suggestion: ?[]const u8 = null, // The suggested text from history
     // Syntax highlighting
     syntax_highlighting: bool = true, // Enable/disable syntax highlighting
+    // Prompt refresh callback
+    prompt_refresh_fn: ?*const fn (*LineEditor) anyerror!void = null,
     // Reverse search mode (Ctrl+R)
     reverse_search_mode: bool = false,
     reverse_search_query: [256]u8 = undefined,
@@ -302,6 +304,10 @@ pub const LineEditor = struct {
 
     pub fn setCompletionFn(self: *LineEditor, completion_fn: CompletionFn) void {
         self.completion_fn = completion_fn;
+    }
+
+    pub fn setPromptRefreshFn(self: *LineEditor, refresh_fn: *const fn (*LineEditor) anyerror!void) void {
+        self.prompt_refresh_fn = refresh_fn;
     }
 
     /// Read a line with editing support
@@ -959,6 +965,11 @@ pub const LineEditor = struct {
     fn clearScreen(self: *LineEditor) !void {
         // Clear entire screen and move cursor to home
         try self.writeBytes("\x1B[2J\x1B[H");
+
+        // Refresh prompt if callback is set (to update current directory, etc.)
+        if (self.prompt_refresh_fn) |refresh_fn| {
+            try refresh_fn(self);
+        }
 
         // Redisplay prompt
         try self.displayPrompt();

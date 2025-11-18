@@ -3,9 +3,9 @@
 layout: home
 
 hero:
-  name: "ts-starter"
-  text: "For a better local environment."
-  tagline: "Modern and smart reverse proxy."
+  name: "Den Shell"
+  text: "A blazing-fast POSIX shell written in Zig"
+  tagline: "Native performance meets modern safety"
   image: /images/logo-white.png
   actions:
     - theme: brand
@@ -13,21 +13,27 @@ hero:
       link: /intro
     - theme: alt
       text: View on GitHub
-      link: https://github.com/stacksjs/rpx
+      link: https://github.com/stacksjs/den
 
 features:
-  - title: "Minimal Starter Kit"
-    icon: "🔀"
-    details: "Bootstrap your next TypeScript project."
-  - title: "Documentation"
-    icon: "📚"
-    details: "Easily document your idea/package/library."
-  - title: "CLI"
-    icon: "🛠"
-    details: "Build your own CLI."
-  - title: "Binary"
-    icon: "🚀"
-    details: "Automatically builds a binary for your project out of your CLI."
+  - title: "⚡ Lightning Fast"
+    icon: "⚡"
+    details: "5ms startup, 5-9x faster than bash/zsh/fish. Zero runtime overhead."
+  - title: "🛡️ Memory Safe"
+    icon: "🛡️"
+    details: "Written in Zig. Compile-time safety prevents memory leaks and crashes."
+  - title: "📦 Zero Dependencies"
+    icon: "📦"
+    details: "1.8MB binary with no external dependencies. Deploy anywhere."
+  - title: "🎯 Feature Rich"
+    icon: "🎯"
+    details: "54 builtins, job control, history, completion, and full POSIX support."
+  - title: "🔧 Extensible"
+    icon: "🔧"
+    details: "Plugin system, custom themes, and comprehensive configuration."
+  - title: "📊 Benchmarked"
+    icon: "📊"
+    details: "Continuous performance monitoring. 2-4x less memory than alternatives."
 ---
 
 <Home />

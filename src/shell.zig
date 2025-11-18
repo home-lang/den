@@ -411,6 +411,7 @@ pub const Shell = struct {
                         var editor = LineEditor.init(self.allocator, prompt_str);
                         editor.setHistory(&self.history, &self.history_count);
                         editor.setCompletionFn(tabCompletionFn);
+                        editor.setPromptRefreshFn(refreshPromptCallback);
                         self.line_editor = editor;
                         // Don't free prompt_str here - LineEditor needs it!
                     } else {
@@ -3138,6 +3139,37 @@ pub const Shell = struct {
 
 
 /// Tab completion function for line editor
+/// Callback to refresh the prompt (e.g., when Cmd+K clears screen)
+/// This updates the prompt to reflect current directory changes
+fn refreshPromptCallback(editor: *LineEditor) !void {
+    // Get current directory
+    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cwd = std.posix.getcwd(&cwd_buf) catch "/";
+
+    // Get home directory to abbreviate with ~
+    const home = std.posix.getenv("HOME");
+
+    // Build a simple prompt with current directory
+    var prompt_buf: [4096]u8 = undefined;
+    const prompt = if (home) |h| blk: {
+        if (std.mem.startsWith(u8, cwd, h)) {
+            const relative = cwd[h.len..];
+            if (relative.len == 0) {
+                break :blk std.fmt.bufPrint(&prompt_buf, "den ~> ", .{}) catch "den> ";
+            } else {
+                break :blk std.fmt.bufPrint(&prompt_buf, "den ~{s}> ", .{relative}) catch "den> ";
+            }
+        }
+        break :blk std.fmt.bufPrint(&prompt_buf, "den {s}> ", .{cwd}) catch "den> ";
+    } else std.fmt.bufPrint(&prompt_buf, "den {s}> ", .{cwd}) catch "den> ";
+
+    // Free the old prompt first
+    editor.allocator.free(editor.prompt);
+
+    // Allocate and set new prompt
+    editor.prompt = try editor.allocator.dupe(u8, prompt);
+}
+
 fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
     var completion = Completion.init(allocator);
 
