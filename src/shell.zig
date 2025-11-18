@@ -1231,10 +1231,34 @@ pub const Shell = struct {
         // Don't add empty commands or duplicate of last command
         if (command.len == 0) return;
 
+        // Skip if same as last command (consecutive deduplication)
         if (self.history_count > 0) {
             if (self.history[self.history_count - 1]) |last_cmd| {
                 if (std.mem.eql(u8, last_cmd, command)) {
-                    return; // Skip duplicate
+                    return; // Skip consecutive duplicate
+                }
+            }
+        }
+
+        // Optional: Also check for duplicates in recent history (more aggressive)
+        // This prevents duplicate commands even if they're not consecutive
+        const check_last_n = @min(self.history_count, 50); // Check last 50 commands
+        var i: usize = 0;
+        while (i < check_last_n) : (i += 1) {
+            const idx = self.history_count - 1 - i;
+            if (self.history[idx]) |cmd| {
+                if (std.mem.eql(u8, cmd, command)) {
+                    // Found duplicate in recent history - remove old one and add at end
+                    self.allocator.free(cmd);
+
+                    // Shift entries to remove the duplicate
+                    var j = idx;
+                    while (j < self.history_count - 1) : (j += 1) {
+                        self.history[j] = self.history[j + 1];
+                    }
+                    self.history[self.history_count - 1] = null;
+                    self.history_count -= 1;
+                    break;
                 }
             }
         }
@@ -1247,9 +1271,9 @@ pub const Shell = struct {
             }
 
             // Shift all entries left
-            var i: usize = 0;
-            while (i < self.history.len - 1) : (i += 1) {
-                self.history[i] = self.history[i + 1];
+            var m: usize = 0;
+            while (m < self.history.len - 1) : (m += 1) {
+                self.history[m] = self.history[m + 1];
             }
             self.history[self.history.len - 1] = null;
             self.history_count -= 1;
@@ -1274,14 +1298,28 @@ pub const Shell = struct {
         const content = try file.readToEndAlloc(self.allocator, max_size);
         defer self.allocator.free(content);
 
-        // Split by newlines and add to history
+        // Split by newlines and add to history (with deduplication)
         var iter = std.mem.splitScalar(u8, content, '\n');
         while (iter.next()) |line| {
             const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
             if (trimmed.len > 0 and self.history_count < self.history.len) {
-                const cmd_copy = try self.allocator.dupe(u8, trimmed);
-                self.history[self.history_count] = cmd_copy;
-                self.history_count += 1;
+                // Check for duplicates before adding
+                var is_duplicate = false;
+                var k: usize = 0;
+                while (k < self.history_count) : (k += 1) {
+                    if (self.history[k]) |existing| {
+                        if (std.mem.eql(u8, existing, trimmed)) {
+                            is_duplicate = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!is_duplicate) {
+                    const cmd_copy = try self.allocator.dupe(u8, trimmed);
+                    self.history[self.history_count] = cmd_copy;
+                    self.history_count += 1;
+                }
             }
         }
     }
