@@ -692,7 +692,7 @@ pub const Executor = struct {
     }
 
     fn builtinCd(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const path = if (command.args.len > 0) command.args[0] else blk: {
+        var path = if (command.args.len > 0) command.args[0] else blk: {
             // Default to HOME
             if (self.environment.get("HOME")) |home| {
                 break :blk home;
@@ -700,6 +700,31 @@ pub const Executor = struct {
             try IO.eprint("den: cd: HOME not set\n", .{});
             return 1;
         };
+
+        // Expand ~name for named directories (zsh-style)
+        var expanded_path: ?[]const u8 = null;
+        defer if (expanded_path) |p| self.allocator.free(p);
+
+        if (path.len > 0 and path[0] == '~') {
+            if (self.shell) |shell| {
+                if (path.len > 1 and path[1] != '/') {
+                    // ~name format - look up in named directories
+                    const name_end = std.mem.indexOfAny(u8, path[1..], &[_]u8{ '/' }) orelse path.len - 1;
+                    const name = path[1 .. name_end + 1];
+
+                    if (shell.named_dirs.get(name)) |named_path| {
+                        if (name_end + 1 < path.len) {
+                            // ~name/rest format
+                            expanded_path = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ named_path, path[name_end + 1 ..] });
+                            path = expanded_path.?;
+                        } else {
+                            // Just ~name
+                            path = named_path;
+                        }
+                    }
+                }
+            }
+        }
 
         std.posix.chdir(path) catch |err| {
             try IO.eprint("den: cd: {s}: {}\n", .{ path, err });

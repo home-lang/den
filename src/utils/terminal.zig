@@ -1229,6 +1229,101 @@ pub const LineEditor = struct {
         }
     }
 
+    /// Sort completions by fuzzy match score (best matches first)
+    fn sortCompletionsByFuzzyScore(self: *LineEditor, pattern: []const u8) !void {
+        const completions = self.completion_list orelse return;
+        if (completions.len <= 1) return;
+
+        // Create array of (index, score) pairs
+        const ScoredCompletion = struct {
+            index: usize,
+            score: u32,
+        };
+
+        var scored = try self.allocator.alloc(ScoredCompletion, completions.len);
+        defer self.allocator.free(scored);
+
+        for (completions, 0..) |completion, i| {
+            // Strip marker if present
+            const text = if (completion.len > 0 and completion[0] == '\x02')
+                completion[1..]
+            else
+                completion;
+
+            scored[i] = .{
+                .index = i,
+                .score = fuzzyMatchScore(pattern, text),
+            };
+        }
+
+        // Sort by score (descending)
+        std.mem.sort(ScoredCompletion, scored, {}, struct {
+            fn lessThan(_: void, a: ScoredCompletion, b: ScoredCompletion) bool {
+                return a.score > b.score; // Higher scores first
+            }
+        }.lessThan);
+
+        // Reorder completions array based on scores
+        var new_completions = try self.allocator.alloc([]const u8, completions.len);
+        for (scored, 0..) |item, i| {
+            new_completions[i] = completions[item.index];
+        }
+
+        // Free old array and replace with sorted one
+        self.allocator.free(completions);
+        self.completion_list = new_completions;
+    }
+
+    /// Fuzzy match score - returns 0 if no match, higher scores are better matches
+    fn fuzzyMatchScore(pattern: []const u8, text: []const u8) u32 {
+        if (pattern.len == 0) return 0;
+        if (text.len == 0) return 0;
+
+        var score: u32 = 0;
+        var pattern_idx: usize = 0;
+        var text_idx: usize = 0;
+        var consecutive: u32 = 0;
+
+        while (pattern_idx < pattern.len and text_idx < text.len) {
+            const p_char = std.ascii.toLower(pattern[pattern_idx]);
+            const t_char = std.ascii.toLower(text[text_idx]);
+
+            if (p_char == t_char) {
+                // Match found
+                score += 1;
+                consecutive += 1;
+
+                // Bonus for consecutive matches
+                if (consecutive > 1) {
+                    score += consecutive * 2;
+                }
+
+                // Bonus for match at start
+                if (pattern_idx == 0 and text_idx == 0) {
+                    score += 10;
+                }
+
+                // Bonus for match after separator
+                if (text_idx > 0 and (text[text_idx - 1] == '/' or text[text_idx - 1] == '_' or text[text_idx - 1] == '-')) {
+                    score += 5;
+                }
+
+                pattern_idx += 1;
+            } else {
+                consecutive = 0;
+            }
+
+            text_idx += 1;
+        }
+
+        // Must match all pattern characters
+        if (pattern_idx < pattern.len) {
+            return 0;
+        }
+
+        return score;
+    }
+
     /// Handle tab completion
     fn handleTabCompletion(self: *LineEditor) !void {
         const completion_fn = self.completion_fn orelse return;
@@ -1386,6 +1481,11 @@ pub const LineEditor = struct {
                     try self.allocator.dupe(u8, path_prefix)
                 else
                     null;
+
+                // Sort completions by fuzzy match score for better relevance
+                const typed_word = self.buffer[word_start..self.cursor];
+                const stripped_word = if (path_prefix.len > 0) typed_word[path_prefix.len..] else typed_word;
+                try self.sortCompletionsByFuzzyScore(stripped_word);
 
                 // Show the list
                 try self.displayCompletionList();

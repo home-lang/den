@@ -96,6 +96,8 @@ pub const Shell = struct {
     signal_handlers: std.StringHashMap([]const u8),
     // Command path cache (for hash builtin)
     command_cache: std.StringHashMap([]const u8),
+    // Named directories (zsh-style hash -d)
+    named_dirs: std.StringHashMap([]const u8),
     // Plugin system
     plugin_registry: PluginRegistry,
     plugin_manager: PluginManager,
@@ -169,6 +171,7 @@ pub const Shell = struct {
             .function_manager = FunctionManager.init(allocator),
             .signal_handlers = std.StringHashMap([]const u8).init(allocator),
             .command_cache = std.StringHashMap([]const u8).init(allocator),
+            .named_dirs = std.StringHashMap([]const u8).init(allocator),
             .plugin_registry = PluginRegistry.init(allocator),
             .plugin_manager = PluginManager.init(allocator),
             .auto_suggest = null, // Initialized on demand
@@ -259,6 +262,14 @@ pub const Shell = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.command_cache.deinit();
+
+        // Clean up named directories
+        var named_iter = self.named_dirs.iterator();
+        while (named_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.named_dirs.deinit();
 
         // Clean up background jobs
         for (self.background_jobs) |maybe_job| {
@@ -1285,6 +1296,11 @@ pub const Shell = struct {
         const cmd_copy = try self.allocator.dupe(u8, command);
         self.history[self.history_count] = cmd_copy;
         self.history_count += 1;
+
+        // Incremental append to history file (zsh-style)
+        self.appendToHistoryFile(command) catch {
+            // Ignore errors when appending to history file
+        };
     }
 
     /// Load history from file
@@ -1337,6 +1353,19 @@ pub const Shell = struct {
                 _ = try file.write("\n");
             }
         }
+    }
+
+    /// Append a single command to history file (incremental append)
+    fn appendToHistoryFile(self: *Shell, command: []const u8) !void {
+        const file = try std.fs.cwd().openFile(self.history_file_path, .{ .mode = .write_only });
+        defer file.close();
+
+        // Seek to end of file
+        try file.seekFromEnd(0);
+
+        // Append the command
+        _ = try file.writeAll(command);
+        _ = try file.write("\n");
     }
 
     /// Builtin: history - show command history
@@ -2487,9 +2516,88 @@ pub const Shell = struct {
     /// Builtin: hash - remember/display command paths (simplified)
     fn builtinHash(self: *Shell, cmd: *types.ParsedCommand) !void {
         if (cmd.args.len == 0) {
-            // Display message - full hash table implementation would go here
-            try IO.print("den: hash: command path caching not yet implemented\n", .{});
+            // Display all named directories
+            var iter = self.named_dirs.iterator();
+            var has_entries = false;
+            while (iter.next()) |entry| {
+                try IO.print("hash -d {s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                has_entries = true;
+            }
+            if (!has_entries) {
+                try IO.print("den: hash: no named directories defined\n", .{});
+            }
             self.last_exit_code = 0;
+        } else if (std.mem.eql(u8, cmd.args[0], "-d")) {
+            // Named directory operations (zsh-style)
+            if (cmd.args.len == 1) {
+                // List all named directories
+                var iter = self.named_dirs.iterator();
+                var has_entries = false;
+                while (iter.next()) |entry| {
+                    try IO.print("{s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                    has_entries = true;
+                }
+                if (!has_entries) {
+                    try IO.print("den: hash -d: no named directories defined\n", .{});
+                }
+                self.last_exit_code = 0;
+            } else {
+                // Add/update named directory: hash -d name=path
+                const arg = cmd.args[1];
+                if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
+                    const name = arg[0..eq_pos];
+                    var path = arg[eq_pos + 1 ..];
+
+                    // Expand ~ in path
+                    if (path.len > 0 and path[0] == '~') {
+                        if (std.posix.getenv("HOME")) |home| {
+                            if (path.len == 1) {
+                                path = home;
+                            } else if (path[1] == '/') {
+                                // ~/ case - need to concatenate
+                                const expanded = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ home, path[1..] });
+                                defer self.allocator.free(expanded);
+
+                                // Store the expanded path
+                                const name_copy = try self.allocator.dupe(u8, name);
+                                const path_copy = try self.allocator.dupe(u8, expanded);
+
+                                // Free old value if exists
+                                if (self.named_dirs.get(name)) |old_path| {
+                                    self.allocator.free(old_path);
+                                    const old_name = self.named_dirs.getKey(name).?;
+                                    self.allocator.free(old_name);
+                                    _ = self.named_dirs.remove(name);
+                                }
+
+                                try self.named_dirs.put(name_copy, path_copy);
+                                try IO.print("den: hash -d: {s}={s}\n", .{ name, path_copy });
+                                self.last_exit_code = 0;
+                                return;
+                            }
+                        }
+                    }
+
+                    // Store the named directory
+                    const name_copy = try self.allocator.dupe(u8, name);
+                    const path_copy = try self.allocator.dupe(u8, path);
+
+                    // Free old value if exists
+                    if (self.named_dirs.get(name)) |old_path| {
+                        self.allocator.free(old_path);
+                        const old_name = self.named_dirs.getKey(name).?;
+                        self.allocator.free(old_name);
+                        _ = self.named_dirs.remove(name);
+                    }
+
+                    try self.named_dirs.put(name_copy, path_copy);
+                    try IO.print("den: hash -d: {s}={s}\n", .{ name, path });
+                    self.last_exit_code = 0;
+                } else {
+                    try IO.eprint("den: hash -d: usage: hash -d name=path\n", .{});
+                    self.last_exit_code = 1;
+                }
+            }
         } else if (std.mem.eql(u8, cmd.args[0], "-r")) {
             // Clear hash table
             try IO.print("den: hash: cache cleared\n", .{});

@@ -3,6 +3,25 @@
 
 ### 🚀 Features
 
+- **Incremental History Append** - History saves after each command (zsh-style) ([src/shell.zig:1289-1292, 1342-1353](src/shell.zig))
+  - Commands are immediately appended to history file after execution
+  - Multiple shell sessions can now share history in real-time
+  - No data loss if shell crashes or is force-killed
+  - More reliable history across sessions
+
+- **Fuzzy/Approximate Completion** - Smart completion matching (zsh-style) ([src/utils/terminal.zig:1232-1324](src/utils/terminal.zig))
+  - Completions sorted by relevance using fuzzy matching scores
+  - Better matches appear first in completion menu
+  - Bonus points for: consecutive matches, start-of-string matches, matches after separators
+  - Makes finding the right completion faster and more intuitive
+
+- **Named Directories** - Quick navigation with directory aliases (zsh-style) ([src/shell.zig:99, 2517-2610](src/shell.zig), [src/executor/mod.zig:704-727](src/executor/mod.zig))
+  - `hash -d proj=~/Documents/Projects` - Create directory alias
+  - `cd ~proj` - Navigate to aliased directory
+  - `cd ~proj/subfolder` - Works with subdirectories too
+  - `hash -d` - List all named directories
+  - Expands `~` in paths automatically
+
 - **History Deduplication** - Intelligent command history management (zsh-style) ([src/shell.zig:1243-1264](src/shell.zig))
   - Automatically removes duplicate commands from history
   - Checks last 50 commands and removes old duplicates when new ones are added
