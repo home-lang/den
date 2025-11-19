@@ -6,6 +6,7 @@ const env_utils = @import("env.zig");
 pub const Expansion = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
+    arrays: ?*std.StringHashMap([][]const u8), // Array variables
     last_exit_code: i32,
     positional_params: []const []const u8, // $1, $2, etc.
     shell_name: []const u8, // $0
@@ -17,6 +18,7 @@ pub const Expansion = struct {
         return .{
             .allocator = allocator,
             .environment = environment,
+            .arrays = null,
             .last_exit_code = last_exit_code,
             .positional_params = &[_][]const u8{},
             .shell_name = "den",
@@ -38,6 +40,7 @@ pub const Expansion = struct {
         return .{
             .allocator = allocator,
             .environment = environment,
+            .arrays = null,
             .last_exit_code = last_exit_code,
             .positional_params = positional_params,
             .shell_name = shell_name,
@@ -60,6 +63,7 @@ pub const Expansion = struct {
         return .{
             .allocator = allocator,
             .environment = environment,
+            .arrays = null,
             .last_exit_code = last_exit_code,
             .positional_params = positional_params,
             .shell_name = shell_name,
@@ -295,6 +299,67 @@ pub const Expansion = struct {
         }
 
         const content = input[2..end];
+
+        // Check for array expansion: ${arr[@]}, ${arr[*]}, ${arr[0]}, ${#arr}
+        if (std.mem.indexOfScalar(u8, content, '[')) |bracket_pos| {
+            const var_name = content[0..bracket_pos];
+            const close_bracket = std.mem.indexOfScalar(u8, content[bracket_pos..], ']') orelse {
+                // No closing bracket - treat as literal
+                return ExpansionResult{ .value = "$", .consumed = 1 };
+            };
+            const index_part = content[bracket_pos + 1 .. bracket_pos + close_bracket];
+
+            if (self.arrays) |arrays| {
+                if (arrays.get(var_name)) |array| {
+                    if (std.mem.eql(u8, index_part, "@") or std.mem.eql(u8, index_part, "*")) {
+                        // ${arr[@]} or ${arr[*]} - all elements
+                        if (array.len == 0) {
+                            return ExpansionResult{ .value = "", .consumed = end + 1 };
+                        }
+                        var total_len: usize = 0;
+                        for (array) |item| {
+                            total_len += item.len;
+                        }
+                        if (array.len > 1) {
+                            total_len += array.len - 1; // spaces
+                        }
+
+                        var result = try self.allocator.alloc(u8, total_len);
+                        var pos: usize = 0;
+                        for (array, 0..) |item, i| {
+                            @memcpy(result[pos..pos + item.len], item);
+                            pos += item.len;
+                            if (i < array.len - 1) {
+                                result[pos] = ' ';
+                                pos += 1;
+                            }
+                        }
+                        return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    } else {
+                        // ${arr[index]} - specific index
+                        const index = std.fmt.parseInt(usize, index_part, 10) catch {
+                            return ExpansionResult{ .value = "", .consumed = end + 1 };
+                        };
+                        if (index < array.len) {
+                            const value = try self.allocator.dupe(u8, array[index]);
+                            return ExpansionResult{ .value = value, .consumed = end + 1 };
+                        }
+                        return ExpansionResult{ .value = "", .consumed = end + 1 };
+                    }
+                }
+            }
+        }
+
+        // Check for array length: ${#arr}
+        if (content.len > 0 and content[0] == '#') {
+            const var_name = content[1..];
+            if (self.arrays) |arrays| {
+                if (arrays.get(var_name)) |array| {
+                    const value = try std.fmt.allocPrint(self.allocator, "{d}", .{array.len});
+                    return ExpansionResult{ .value = value, .consumed = end + 1 };
+                }
+            }
+        }
 
         // Check for default value syntax: ${VAR:-default}
         if (std.mem.indexOf(u8, content, ":-")) |sep_pos| {

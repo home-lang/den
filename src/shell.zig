@@ -98,6 +98,8 @@ pub const Shell = struct {
     command_cache: std.StringHashMap([]const u8),
     // Named directories (zsh-style hash -d)
     named_dirs: std.StringHashMap([]const u8),
+    // Array variables (zsh-style arrays)
+    arrays: std.StringHashMap([][]const u8),
     // Plugin system
     plugin_registry: PluginRegistry,
     plugin_manager: PluginManager,
@@ -172,6 +174,7 @@ pub const Shell = struct {
             .signal_handlers = std.StringHashMap([]const u8).init(allocator),
             .command_cache = std.StringHashMap([]const u8).init(allocator),
             .named_dirs = std.StringHashMap([]const u8).init(allocator),
+            .arrays = std.StringHashMap([][]const u8).init(allocator),
             .plugin_registry = PluginRegistry.init(allocator),
             .plugin_manager = PluginManager.init(allocator),
             .auto_suggest = null, // Initialized on demand
@@ -270,6 +273,17 @@ pub const Shell = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.named_dirs.deinit();
+
+        // Clean up arrays
+        var arrays_iter = self.arrays.iterator();
+        while (arrays_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            for (entry.value_ptr.*) |item| {
+                self.allocator.free(item);
+            }
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.arrays.deinit();
 
         // Clean up background jobs
         for (self.background_jobs) |maybe_job| {
@@ -645,6 +659,12 @@ pub const Shell = struct {
     }
 
     pub fn executeCommand(self: *Shell, input: []const u8) !void {
+        // Check for array assignment first
+        if (isArrayAssignment(input)) {
+            try self.executeArrayAssignment(input);
+            return;
+        }
+
         // Execute pre_command hooks
         const cmd_copy = try self.allocator.dupe(u8, input);
         defer self.allocator.free(cmd_copy);
@@ -962,6 +982,7 @@ pub const Shell = struct {
             pid_for_expansion,
             self.last_arg,
         );
+        expander.arrays = &self.arrays; // Add array support
         var glob = Glob.init(self.allocator);
         var brace = BraceExpander.init(self.allocator);
 
@@ -2723,6 +2744,95 @@ pub const Shell = struct {
                 }
             }
         }
+        self.last_exit_code = 0;
+    }
+
+    /// Check if input is an array assignment: name=(value1 value2 ...)
+    fn isArrayAssignment(input: []const u8) bool {
+        // Look for pattern: name=(...)
+        const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return false;
+        if (eq_pos >= input.len - 1) return false;
+        if (input[eq_pos + 1] != '(') return false;
+
+        // Check for closing paren
+        return std.mem.indexOfScalar(u8, input[eq_pos + 2..], ')') != null;
+    }
+
+    /// Parse and execute array assignment
+    fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
+        const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return error.InvalidSyntax;
+        const name = std.mem.trim(u8, input[0..eq_pos], &std.ascii.whitespace);
+
+        // Validate variable name
+        if (name.len == 0) return error.InvalidVariableName;
+        for (name) |c| {
+            if (!std.ascii.isAlphanumeric(c) and c != '_') {
+                return error.InvalidVariableName;
+            }
+        }
+
+        // Find array content between ( and )
+        const start_paren = eq_pos + 1;
+        if (input[start_paren] != '(') return error.InvalidSyntax;
+
+        const end_paren = std.mem.lastIndexOfScalar(u8, input, ')') orelse return error.InvalidSyntax;
+        if (end_paren <= start_paren + 1) {
+            // Empty array: name=()
+            const key = try self.allocator.dupe(u8, name);
+            const empty_array = try self.allocator.alloc([]const u8, 0);
+
+            // Free old array if exists
+            if (self.arrays.get(name)) |old_array| {
+                for (old_array) |item| {
+                    self.allocator.free(item);
+                }
+                self.allocator.free(old_array);
+                const old_key = self.arrays.getKey(name).?;
+                self.allocator.free(old_key);
+                _ = self.arrays.remove(name);
+            }
+
+            try self.arrays.put(key, empty_array);
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Parse array elements
+        const content = std.mem.trim(u8, input[start_paren + 1..end_paren], &std.ascii.whitespace);
+
+        // Count elements first
+        var count: usize = 0;
+        var count_iter = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
+        while (count_iter.next()) |_| {
+            count += 1;
+        }
+
+        // Allocate array
+        const array = try self.allocator.alloc([]const u8, count);
+        errdefer self.allocator.free(array);
+
+        // Fill array
+        var i: usize = 0;
+        var iter = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
+        while (iter.next()) |token| : (i += 1) {
+            array[i] = try self.allocator.dupe(u8, token);
+        }
+
+        // Store array
+        const key = try self.allocator.dupe(u8, name);
+
+        // Free old array if exists
+        if (self.arrays.get(name)) |old_array| {
+            for (old_array) |item| {
+                self.allocator.free(item);
+            }
+            self.allocator.free(old_array);
+            const old_key = self.arrays.getKey(name).?;
+            self.allocator.free(old_key);
+            _ = self.arrays.remove(name);
+        }
+
+        try self.arrays.put(key, array);
         self.last_exit_code = 0;
     }
 

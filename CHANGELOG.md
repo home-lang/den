@@ -3,6 +3,15 @@
 
 ### 🚀 Features
 
+- **Arrays** - Full array support for shell scripting (zsh/bash-style) ([src/shell.zig:102, 2743-2837](src/shell.zig), [src/utils/expansion.zig:303-362](src/utils/expansion.zig), [src/types/variable.zig](src/types/variable.zig))
+  - `arr=(one two three)` - Array creation and assignment
+  - `${arr[@]}` or `${arr[*]}` - Expand all array elements
+  - `${arr[0]}`, `${arr[1]}` - Access elements by index (0-based)
+  - `${#arr}` - Get array length
+  - `arr=()` - Create empty arrays
+  - Arrays properly cleaned up on shell exit
+  - Essential for advanced shell scripting!
+
 - **Incremental History Append** - History saves after each command (zsh-style) ([src/shell.zig:1289-1292, 1342-1353](src/shell.zig))
   - Commands are immediately appended to history file after execution
   - Multiple shell sessions can now share history in real-time
