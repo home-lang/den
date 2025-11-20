@@ -3,6 +3,15 @@
 
 ### 🚀 Features
 
+- **Async Prompt Updates** - Non-blocking git status with caching and timeout (zsh-style) ([src/prompt/async_git.zig](src/prompt/async_git.zig), [src/shell.zig:120, 217-218, 580-582](src/shell.zig))
+  - Git status fetched in background thread - no more waiting!
+  - 200ms timeout prevents slow git repos from blocking prompt
+  - 5-second intelligent caching avoids redundant git calls
+  - Cached results used immediately while fresh data loads in background
+  - Prompt stays responsive even in large git repositories
+  - Thread-safe with mutex-protected cache
+  - Smooth, snappy prompt experience like modern zsh!
+
 - **Extended Glob Patterns** - Advanced file matching patterns (zsh-style) ([src/utils/glob.zig:78-179](src/utils/glob.zig))
   - `*.txt~*.log` - Exclusion patterns (match *.txt but exclude *.log files)
   - `*.(sh|zsh)` - Alternation (match multiple extensions in one pattern)

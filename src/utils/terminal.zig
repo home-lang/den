@@ -443,7 +443,7 @@ pub const LineEditor = struct {
                 },
                 0x0B => {
                     self.clearCompletionState();
-                    try self.killToEnd(); // Ctrl+K
+                    try self.clearScreen(); // Ctrl+K (same as Ctrl+L / Cmd+K)
                 },
                 0x0C => {
                     self.clearCompletionState();

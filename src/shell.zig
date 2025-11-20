@@ -27,6 +27,7 @@ const PromptContext = @import("prompt/types.zig").PromptContext;
 const PromptTemplate = @import("prompt/types.zig").PromptTemplate;
 const SystemInfo = @import("prompt/sysinfo.zig").SystemInfo;
 const GitModule = @import("prompt/git.zig").GitModule;
+const AsyncGitFetcher = @import("prompt/async_git.zig").AsyncGitFetcher;
 const ansi = @import("utils/ansi.zig");
 const signals = @import("utils/signals.zig");
 
@@ -115,6 +116,8 @@ pub const Shell = struct {
     // Prompt rendering
     prompt_renderer: ?PromptRenderer,
     prompt_context: PromptContext,
+    // Async git fetcher for non-blocking prompts
+    async_git: AsyncGitFetcher,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         // Load configuration from files and environment variables
@@ -185,6 +188,7 @@ pub const Shell = struct {
             .line_editor = null,
             .prompt_renderer = null,
             .prompt_context = PromptContext.init(allocator),
+            .async_git = AsyncGitFetcher.init(allocator),
         };
 
         // Detect if stdin is a TTY
@@ -210,6 +214,9 @@ pub const Shell = struct {
     }
 
     pub fn deinit(self: *Shell) void {
+        // Clean up async git fetcher
+        self.async_git.deinit();
+
         // Clean up prompt renderer
         if (self.prompt_renderer) |*renderer| {
             renderer.deinit();
@@ -532,7 +539,6 @@ pub const Shell = struct {
 
     fn updatePromptContext(self: *Shell) !void {
         var sysinfo = SystemInfo.init(self.allocator);
-        var git_module = GitModule.init(self.allocator);
 
         // Get current directory
         const cwd = try sysinfo.getCurrentDir();
@@ -570,8 +576,8 @@ pub const Shell = struct {
         self.prompt_context.is_root = sysinfo.isRoot();
         self.prompt_context.last_exit_code = self.last_exit_code;
 
-        // Get git info
-        var git_info = try git_module.getInfo(cwd);
+        // Get git info asynchronously (with caching and timeout)
+        var git_info = try self.async_git.getInfo(cwd);
         defer git_info.deinit();
 
         if (self.prompt_context.git_branch) |old_branch| {
