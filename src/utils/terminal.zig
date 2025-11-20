@@ -289,6 +289,16 @@ pub const LineEditor = struct {
     reverse_search_query_len: usize = 0,
     reverse_search_match: ?[]const u8 = null,
     reverse_search_history_index: usize = 0,
+    // Undo/Redo support
+    undo_stack: [50]UndoState = undefined,
+    undo_stack_size: usize = 0,
+    undo_index: usize = 0, // Current position in undo stack
+
+    const UndoState = struct {
+        buffer: [4096]u8,
+        length: usize,
+        cursor: usize,
+    };
 
     pub fn init(allocator: std.mem.Allocator, prompt: []const u8) LineEditor {
         return .{
@@ -460,6 +470,10 @@ pub const LineEditor = struct {
                 0x17 => {
                     self.clearCompletionState();
                     try self.deleteWord(); // Ctrl+W
+                },
+                0x1F => {
+                    self.clearCompletionState();
+                    try self.undo(); // Ctrl+_ (undo)
                 },
                 0x12 => {
                     // Ctrl+R - Reverse search
@@ -650,6 +664,9 @@ pub const LineEditor = struct {
     fn insertChar(self: *LineEditor, char: u8) !void {
         if (self.length >= self.buffer.len) return;
 
+        // Save state for undo
+        self.saveUndoState();
+
         // Clear history search when user types
         self.clearHistorySearch();
 
@@ -692,6 +709,9 @@ pub const LineEditor = struct {
     fn backspace(self: *LineEditor) !void {
         if (self.cursor == 0) return;
 
+        // Save state for undo
+        self.saveUndoState();
+
         // Clear history search when user types
         self.clearHistorySearch();
 
@@ -731,6 +751,9 @@ pub const LineEditor = struct {
 
     fn deleteChar(self: *LineEditor) !void {
         if (self.cursor >= self.length) return;
+
+        // Save state for undo
+        self.saveUndoState();
 
         // Clear history search when user deletes
         self.clearHistorySearch();
@@ -824,6 +847,9 @@ pub const LineEditor = struct {
 
     fn deleteWordForward(self: *LineEditor) !void {
         if (self.cursor >= self.length) return;
+
+        // Save state for undo
+        self.saveUndoState();
 
         // Clear history search when user deletes word
         self.clearHistorySearch();
@@ -924,6 +950,9 @@ pub const LineEditor = struct {
     fn killToEnd(self: *LineEditor) !void {
         if (self.cursor >= self.length) return;
 
+        // Save state for undo
+        self.saveUndoState();
+
         // Clear history search when user kills text
         self.clearHistorySearch();
 
@@ -933,6 +962,9 @@ pub const LineEditor = struct {
 
     fn killToStart(self: *LineEditor) !void {
         if (self.cursor == 0) return;
+
+        // Save state for undo
+        self.saveUndoState();
 
         // Clear history search when user kills text
         self.clearHistorySearch();
@@ -989,6 +1021,9 @@ pub const LineEditor = struct {
 
     fn deleteWord(self: *LineEditor) !void {
         if (self.cursor == 0) return;
+
+        // Save state for undo
+        self.saveUndoState();
 
         // Clear history search when user deletes word
         self.clearHistorySearch();
@@ -1845,6 +1880,109 @@ pub const LineEditor = struct {
             try self.writeBytes(sugg);
 
             self.clearSuggestion();
+        }
+    }
+
+    /// Save current state to undo stack
+    fn saveUndoState(self: *LineEditor) void {
+        // If we're not at the end of the stack, truncate everything after current position
+        if (self.undo_index < self.undo_stack_size) {
+            self.undo_stack_size = self.undo_index;
+        }
+
+        // Don't save if stack is full
+        if (self.undo_stack_size >= self.undo_stack.len) {
+            // Shift stack left to make room
+            var i: usize = 0;
+            while (i < self.undo_stack.len - 1) : (i += 1) {
+                self.undo_stack[i] = self.undo_stack[i + 1];
+            }
+            self.undo_stack_size = self.undo_stack.len - 1;
+        }
+
+        // Save current state
+        self.undo_stack[self.undo_stack_size] = .{
+            .buffer = self.buffer,
+            .length = self.length,
+            .cursor = self.cursor,
+        };
+        self.undo_stack_size += 1;
+        self.undo_index = self.undo_stack_size;
+    }
+
+    /// Undo last edit (Ctrl+_)
+    fn undo(self: *LineEditor) !void {
+        if (self.undo_index == 0 or self.undo_stack_size == 0) {
+            // Nothing to undo
+            try self.writeBytes("\x07"); // Bell
+            return;
+        }
+
+        // If at the end, save current state first before undoing
+        if (self.undo_index == self.undo_stack_size) {
+            self.saveUndoState();
+            self.undo_index -= 1; // Move back to actually undo
+        }
+
+        // Move back in undo stack
+        self.undo_index -= 1;
+
+        // Restore state
+        const state = self.undo_stack[self.undo_index];
+        self.buffer = state.buffer;
+        self.length = state.length;
+        self.cursor = state.cursor;
+
+        // Refresh display - move to start, clear line, redisplay prompt and buffer
+        try self.writeBytes("\r"); // Move to start of line
+        try self.writeBytes("\x1B[K"); // Clear to end of line
+        try self.displayPrompt();
+        if (self.length > 0) {
+            try self.writeBytes(self.buffer[0..self.length]);
+        }
+
+        // Position cursor correctly
+        if (self.cursor < self.length) {
+            const moves_back = self.length - self.cursor;
+            var i: usize = 0;
+            while (i < moves_back) : (i += 1) {
+                try self.writeBytes("\x1B[D");
+            }
+        }
+    }
+
+    /// Redo last undo (Ctrl+Shift+_  or Alt+_)
+    fn redo(self: *LineEditor) !void {
+        if (self.undo_index >= self.undo_stack_size - 1) {
+            // Nothing to redo
+            try self.writeBytes("\x07"); // Bell
+            return;
+        }
+
+        // Move forward in undo stack
+        self.undo_index += 1;
+
+        // Restore state
+        const state = self.undo_stack[self.undo_index];
+        self.buffer = state.buffer;
+        self.length = state.length;
+        self.cursor = state.cursor;
+
+        // Refresh display - move to start, clear line, redisplay prompt and buffer
+        try self.writeBytes("\r"); // Move to start of line
+        try self.writeBytes("\x1B[K"); // Clear to end of line
+        try self.displayPrompt();
+        if (self.length > 0) {
+            try self.writeBytes(self.buffer[0..self.length]);
+        }
+
+        // Position cursor correctly
+        if (self.cursor < self.length) {
+            const moves_back = self.length - self.cursor;
+            var i: usize = 0;
+            while (i < moves_back) : (i += 1) {
+                try self.writeBytes("\x1B[D");
+            }
         }
     }
 

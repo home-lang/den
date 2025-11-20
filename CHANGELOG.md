@@ -3,6 +3,15 @@
 
 ### 🚀 Features
 
+- **Undo/Redo** - Full undo/redo support for command line editing (emacs-style) ([src/utils/terminal.zig:292-301, 1886-1987](src/utils/terminal.zig))
+  - Press `Ctrl+_` to undo editing changes
+  - 50-level undo stack for extensive history
+  - Captures all edit operations: insertions, deletions, word kills, line kills
+  - Non-destructive redo capability
+  - Bell notification when no more undo/redo available
+  - Smart state management - redo history preserved until new edits
+  - Perfect for fixing typos or recovering accidentally deleted text!
+
 - **Async Prompt Updates** - Non-blocking git status with caching and timeout (zsh-style) ([src/prompt/async_git.zig](src/prompt/async_git.zig), [src/shell.zig:120, 217-218, 580-582](src/shell.zig))
   - Git status fetched in background thread - no more waiting!
   - 200ms timeout prevents slow git repos from blocking prompt
