@@ -24,12 +24,19 @@ pub const Signal = enum {
             return .none;
         }
 
-        return switch (sig) {
-            std.posix.SIG.INT => .interrupt,
-            std.posix.SIG.TERM => .terminate,
-            std.posix.SIG.WINCH => .winch,
-            else => .none,
-        };
+        // On macOS/BSD, SIG constants are enums. Convert to integer for comparison.
+        const sig_int = @intFromEnum(std.posix.SIG.INT);
+        const sig_term = @intFromEnum(std.posix.SIG.TERM);
+        const sig_winch = @intFromEnum(std.posix.SIG.WINCH);
+
+        return if (sig == sig_int)
+            .interrupt
+        else if (sig == sig_term)
+            .terminate
+        else if (sig == sig_winch)
+            .winch
+        else
+            .none;
     }
 
     /// Convert Windows console control event to Signal
@@ -107,13 +114,14 @@ pub fn installHandlers() !void {
     std.posix.sigaction(std.posix.SIG.WINCH, &sigwinch_action, null);
 }
 
-/// Signal handler function
-fn handleSignal(sig: c_int) callconv(.c) void {
-    const signal = Signal.fromPosix(@intCast(sig));
+/// Signal handler function - accept the platform-appropriate signal type
+fn handleSignal(sig: std.posix.SIG) callconv(.c) void {
+    const sig_val: u32 = @intFromEnum(sig);
+    const signal = Signal.fromPosix(sig_val);
 
     switch (signal) {
         .interrupt, .terminate => {
-            signal_received.store(@intCast(sig), .release);
+            signal_received.store(sig_val, .release);
         },
         .winch => {
             window_size_changed.store(true, .release);

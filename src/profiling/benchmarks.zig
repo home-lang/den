@@ -77,9 +77,10 @@ pub const Benchmark = struct {
 
         i = 0;
         while (i < self.iterations) : (i += 1) {
-            const start = std.time.nanoTimestamp();
+            const start = std.time.Instant.now() catch unreachable;
             _ = try @call(.auto, func, args);
-            const duration = std.time.nanoTimestamp() - start;
+            const end = std.time.Instant.now() catch unreachable;
+            const duration = end.since(start);
             const duration_i64 = @as(i64, @intCast(duration));
 
             timings[i] = duration_i64;

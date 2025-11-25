@@ -292,7 +292,8 @@ pub const Shell = struct {
         }
         self.arrays.deinit();
 
-        // Clean up background jobs
+        // Clean up background jobs - kill them first, then free memory
+        self.killAllBackgroundJobs();
         for (self.background_jobs) |maybe_job| {
             if (maybe_job) |job| {
                 self.allocator.free(job.command);
@@ -471,10 +472,10 @@ pub const Shell = struct {
             };
 
             if (line == null) {
-                // EOF (Ctrl+D)
+                // EOF (Ctrl+D) - graceful shutdown
                 try IO.print("\nGoodbye from Den!\n", .{});
-                std.Thread.sleep(500 * std.time.ns_per_ms); // 500ms delay
-                std.process.exit(0);
+                self.running = false;
+                break; // Exit loop and let deinit() handle cleanup
             }
 
             defer self.allocator.free(line.?);
@@ -488,12 +489,9 @@ pub const Shell = struct {
 
             // Handle exit command
             if (std.mem.eql(u8, trimmed, "exit")) {
-                self.running = false;
                 try IO.print("Goodbye from Den!\n", .{});
-                // Save history before exiting
-                try self.saveHistory();
-                std.Thread.sleep(500 * std.time.ns_per_ms); // 500ms delay
-                std.process.exit(0);
+                self.running = false;
+                break; // Exit loop and let deinit() handle cleanup
             }
 
             // Execute command
@@ -1093,6 +1091,49 @@ pub const Shell = struct {
         }
     }
 
+    /// Kill all background jobs (for graceful shutdown)
+    fn killAllBackgroundJobs(self: *Shell) void {
+        if (builtin.os.tag == .windows) {
+            // Windows: terminate processes using TerminateProcess
+            const windows = std.os.windows;
+            const PROCESS_TERMINATE: u32 = 0x0001;
+
+            for (self.background_jobs) |maybe_job| {
+                if (maybe_job) |job| {
+                    // Get process handle with terminate permission
+                    const handle = windows.kernel32.OpenProcess(PROCESS_TERMINATE, 0, @intFromPtr(job.pid));
+                    if (handle) |h| {
+                        _ = windows.kernel32.TerminateProcess(h, 1);
+                        _ = windows.kernel32.CloseHandle(h);
+                    }
+                }
+            }
+            return;
+        }
+
+        // Unix: send SIGTERM to all background jobs, then SIGKILL if needed
+        for (self.background_jobs) |maybe_job| {
+            if (maybe_job) |job| {
+                if (job.status == .running) {
+                    // First try SIGTERM for graceful termination
+                    _ = std.posix.kill(job.pid, std.posix.SIG.TERM) catch {};
+
+                    // Give process a short time to exit gracefully
+                    std.posix.nanosleep(0, 100_000_000); // 100ms
+
+                    // Check if still running
+                    const result = std.posix.waitpid(job.pid, std.posix.W.NOHANG);
+                    if (result.pid == 0) {
+                        // Still running, force kill
+                        _ = std.posix.kill(job.pid, std.posix.SIG.KILL) catch {};
+                        // Reap the zombie
+                        _ = std.posix.waitpid(job.pid, 0);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn addBackgroundJob(self: *Shell, pid: ProcessId, command: []const u8) !void {
         // Find first empty slot
         var slot_index: ?usize = null;
@@ -1340,8 +1381,17 @@ pub const Shell = struct {
 
         // Read entire file
         const max_size = 1024 * 1024; // 1MB max
-        const content = try file.readToEndAlloc(self.allocator, max_size);
-        defer self.allocator.free(content);
+        const file_size = try file.getEndPos();
+        const read_size: usize = @min(file_size, max_size);
+        const buffer = try self.allocator.alloc(u8, read_size);
+        defer self.allocator.free(buffer);
+        var total_read: usize = 0;
+        while (total_read < read_size) {
+            const bytes_read = try file.read(buffer[total_read..]);
+            if (bytes_read == 0) break;
+            total_read += bytes_read;
+        }
+        const content = buffer[0..total_read];
 
         // Split by newlines and add to history (with deduplication)
         var iter = std.mem.splitScalar(u8, content, '\n');
@@ -1720,12 +1770,29 @@ pub const Shell = struct {
         defer file.close();
 
         const max_size = 1024 * 1024; // 1MB max
-        const content = file.readToEndAlloc(self.allocator, max_size) catch |err| {
+        const file_size = file.getEndPos() catch |err| {
             try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
             self.last_exit_code = 1;
             return;
         };
-        defer self.allocator.free(content);
+        const read_size: usize = @min(file_size, max_size);
+        const buffer = self.allocator.alloc(u8, read_size) catch |err| {
+            try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
+            self.last_exit_code = 1;
+            return;
+        };
+        defer self.allocator.free(buffer);
+        var total_read: usize = 0;
+        while (total_read < read_size) {
+            const bytes_read = file.read(buffer[total_read..]) catch |err| {
+                try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
+                self.last_exit_code = 1;
+                return;
+            };
+            if (bytes_read == 0) break;
+            total_read += bytes_read;
+        }
+        const content = buffer[0..total_read];
 
         // Execute each line by tokenizing and executing directly
         var lines = std.mem.splitScalar(u8, content, '\n');
@@ -3160,8 +3227,18 @@ pub const Shell = struct {
             const file = std.fs.cwd().openFile(path, .{}) catch continue;
             defer file.close();
 
-            const content = file.readToEndAlloc(self.allocator, 8192) catch continue;
-            defer self.allocator.free(content);
+            const max_size: usize = 8192;
+            const file_size = file.getEndPos() catch continue;
+            const read_size: usize = @min(file_size, max_size);
+            const buffer = self.allocator.alloc(u8, read_size) catch continue;
+            defer self.allocator.free(buffer);
+            var total_read: usize = 0;
+            while (total_read < read_size) {
+                const n = file.read(buffer[total_read..]) catch break;
+                if (n == 0) break;
+                total_read += n;
+            }
+            const content = buffer[0..total_read];
 
             var i: usize = 0;
             while (i < content.len) : (i += 1) {
@@ -3883,8 +3960,18 @@ test "shell initialization" {
             defer file.close();
 
             // Read file (limit to 8KB for safety)
-            const content = file.readToEndAlloc(self.allocator, 8192) catch continue;
-            defer self.allocator.free(content);
+            const max_size: usize = 8192;
+            const file_size = file.getEndPos() catch continue;
+            const read_size: usize = @min(file_size, max_size);
+            const buffer = self.allocator.alloc(u8, read_size) catch continue;
+            defer self.allocator.free(buffer);
+            var total_read: usize = 0;
+            while (total_read < read_size) {
+                const n = file.read(buffer[total_read..]) catch break;
+                if (n == 0) break;
+                total_read += n;
+            }
+            const content = buffer[0..total_read];
 
             // Simple JSON parsing to find "version": "x.y.z"
             var i: usize = 0;

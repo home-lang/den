@@ -2432,7 +2432,7 @@ pub const Executor = struct {
         }
 
         // POSIX implementation
-        var signal: u8 = explicit_signal orelse std.posix.SIG.TERM;
+        var signal: u8 = explicit_signal orelse @intFromEnum(std.posix.SIG.TERM);
 
         // Parse signal if provided (and not already set via -s)
         if (explicit_signal == null and start_idx < command.args.len and
@@ -2464,7 +2464,7 @@ pub const Executor = struct {
                 continue;
             };
 
-            std.posix.kill(pid, signal) catch |err| {
+            std.posix.kill(pid, @enumFromInt(signal)) catch |err| {
                 try IO.eprint("den: kill: ({d}): {}\n", .{ pid, err });
                 return 1;
             };
@@ -2482,35 +2482,35 @@ pub const Executor = struct {
             return null;
         }
 
-        if (std.mem.eql(u8, name, "HUP")) return std.posix.SIG.HUP
-        else if (std.mem.eql(u8, name, "INT")) return std.posix.SIG.INT
-        else if (std.mem.eql(u8, name, "QUIT")) return std.posix.SIG.QUIT
-        else if (std.mem.eql(u8, name, "ILL")) return std.posix.SIG.ILL
-        else if (std.mem.eql(u8, name, "TRAP")) return std.posix.SIG.TRAP
-        else if (std.mem.eql(u8, name, "ABRT")) return std.posix.SIG.ABRT
-        else if (std.mem.eql(u8, name, "BUS")) return std.posix.SIG.BUS
-        else if (std.mem.eql(u8, name, "FPE")) return std.posix.SIG.FPE
-        else if (std.mem.eql(u8, name, "KILL")) return std.posix.SIG.KILL
-        else if (std.mem.eql(u8, name, "USR1")) return std.posix.SIG.USR1
-        else if (std.mem.eql(u8, name, "SEGV")) return std.posix.SIG.SEGV
-        else if (std.mem.eql(u8, name, "USR2")) return std.posix.SIG.USR2
-        else if (std.mem.eql(u8, name, "PIPE")) return std.posix.SIG.PIPE
-        else if (std.mem.eql(u8, name, "ALRM")) return std.posix.SIG.ALRM
-        else if (std.mem.eql(u8, name, "TERM")) return std.posix.SIG.TERM
-        else if (std.mem.eql(u8, name, "CHLD")) return std.posix.SIG.CHLD
-        else if (std.mem.eql(u8, name, "CONT")) return std.posix.SIG.CONT
-        else if (std.mem.eql(u8, name, "STOP")) return std.posix.SIG.STOP
-        else if (std.mem.eql(u8, name, "TSTP")) return std.posix.SIG.TSTP
-        else if (std.mem.eql(u8, name, "TTIN")) return std.posix.SIG.TTIN
-        else if (std.mem.eql(u8, name, "TTOU")) return std.posix.SIG.TTOU
-        else if (std.mem.eql(u8, name, "URG")) return std.posix.SIG.URG
-        else if (std.mem.eql(u8, name, "XCPU")) return std.posix.SIG.XCPU
-        else if (std.mem.eql(u8, name, "XFSZ")) return std.posix.SIG.XFSZ
-        else if (std.mem.eql(u8, name, "VTALRM")) return std.posix.SIG.VTALRM
-        else if (std.mem.eql(u8, name, "PROF")) return std.posix.SIG.PROF
-        else if (std.mem.eql(u8, name, "WINCH")) return std.posix.SIG.WINCH
-        else if (std.mem.eql(u8, name, "IO")) return std.posix.SIG.IO
-        else if (std.mem.eql(u8, name, "SYS")) return std.posix.SIG.SYS
+        if (std.mem.eql(u8, name, "HUP")) return @intFromEnum(std.posix.SIG.HUP)
+        else if (std.mem.eql(u8, name, "INT")) return @intFromEnum(std.posix.SIG.INT)
+        else if (std.mem.eql(u8, name, "QUIT")) return @intFromEnum(std.posix.SIG.QUIT)
+        else if (std.mem.eql(u8, name, "ILL")) return @intFromEnum(std.posix.SIG.ILL)
+        else if (std.mem.eql(u8, name, "TRAP")) return @intFromEnum(std.posix.SIG.TRAP)
+        else if (std.mem.eql(u8, name, "ABRT")) return @intFromEnum(std.posix.SIG.ABRT)
+        else if (std.mem.eql(u8, name, "BUS")) return @intFromEnum(std.posix.SIG.BUS)
+        else if (std.mem.eql(u8, name, "FPE")) return @intFromEnum(std.posix.SIG.FPE)
+        else if (std.mem.eql(u8, name, "KILL")) return @intFromEnum(std.posix.SIG.KILL)
+        else if (std.mem.eql(u8, name, "USR1")) return @intFromEnum(std.posix.SIG.USR1)
+        else if (std.mem.eql(u8, name, "SEGV")) return @intFromEnum(std.posix.SIG.SEGV)
+        else if (std.mem.eql(u8, name, "USR2")) return @intFromEnum(std.posix.SIG.USR2)
+        else if (std.mem.eql(u8, name, "PIPE")) return @intFromEnum(std.posix.SIG.PIPE)
+        else if (std.mem.eql(u8, name, "ALRM")) return @intFromEnum(std.posix.SIG.ALRM)
+        else if (std.mem.eql(u8, name, "TERM")) return @intFromEnum(std.posix.SIG.TERM)
+        else if (std.mem.eql(u8, name, "CHLD")) return @intFromEnum(std.posix.SIG.CHLD)
+        else if (std.mem.eql(u8, name, "CONT")) return @intFromEnum(std.posix.SIG.CONT)
+        else if (std.mem.eql(u8, name, "STOP")) return @intFromEnum(std.posix.SIG.STOP)
+        else if (std.mem.eql(u8, name, "TSTP")) return @intFromEnum(std.posix.SIG.TSTP)
+        else if (std.mem.eql(u8, name, "TTIN")) return @intFromEnum(std.posix.SIG.TTIN)
+        else if (std.mem.eql(u8, name, "TTOU")) return @intFromEnum(std.posix.SIG.TTOU)
+        else if (std.mem.eql(u8, name, "URG")) return @intFromEnum(std.posix.SIG.URG)
+        else if (std.mem.eql(u8, name, "XCPU")) return @intFromEnum(std.posix.SIG.XCPU)
+        else if (std.mem.eql(u8, name, "XFSZ")) return @intFromEnum(std.posix.SIG.XFSZ)
+        else if (std.mem.eql(u8, name, "VTALRM")) return @intFromEnum(std.posix.SIG.VTALRM)
+        else if (std.mem.eql(u8, name, "PROF")) return @intFromEnum(std.posix.SIG.PROF)
+        else if (std.mem.eql(u8, name, "WINCH")) return @intFromEnum(std.posix.SIG.WINCH)
+        else if (std.mem.eql(u8, name, "IO")) return @intFromEnum(std.posix.SIG.IO)
+        else if (std.mem.eql(u8, name, "SYS")) return @intFromEnum(std.posix.SIG.SYS)
         else return null;
     }
 
@@ -2770,7 +2770,7 @@ pub const Executor = struct {
 
         // Time the execution of an external command
         // For now, we only support timing external commands to avoid circular dependencies
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch return 1;
 
         var new_cmd = types.ParsedCommand{
             .name = command.args[0],
@@ -2781,8 +2781,8 @@ pub const Executor = struct {
         // Execute as external command to avoid recursive error set inference
         const exit_code = try self.executeExternal(&new_cmd);
 
-        const end_time = std.time.nanoTimestamp();
-        const elapsed_ns = end_time - start_time;
+        const end_time = std.time.Instant.now() catch return exit_code;
+        const elapsed_ns = end_time.since(start_time);
         const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000_000.0;
 
         try IO.eprint("\nreal\t{d:.3}s\n", .{elapsed_s});
@@ -2910,8 +2910,6 @@ pub const Executor = struct {
             return 1;
         }
 
-        const interval_ns = interval_seconds * std.time.ns_per_s;
-
         // Repeatedly execute the command
         while (true) {
             // Clear screen and show header
@@ -2937,7 +2935,7 @@ pub const Executor = struct {
             };
 
             // Sleep for the interval
-            std.Thread.sleep(interval_ns);
+            std.posix.nanosleep(interval_seconds, 0);
         }
 
         return 0;
@@ -3047,11 +3045,24 @@ pub const Executor = struct {
             };
             defer file.close();
 
-            const content = file.readToEndAlloc(self.allocator, 10 * 1024 * 1024) catch |err| {
-                try IO.eprint("den: grep: error reading {s}: {}\n", .{ file_path, err });
+            const max_size: usize = 10 * 1024 * 1024;
+            const file_size = file.getEndPos() catch {
+                try IO.eprint("den: grep: error reading {s}\n", .{file_path});
                 continue;
             };
-            defer self.allocator.free(content);
+            const read_size: usize = @min(file_size, max_size);
+            const buffer = self.allocator.alloc(u8, read_size) catch {
+                try IO.eprint("den: grep: out of memory\n", .{});
+                continue;
+            };
+            defer self.allocator.free(buffer);
+            var total_read: usize = 0;
+            while (total_read < read_size) {
+                const n = file.read(buffer[total_read..]) catch break;
+                if (n == 0) break;
+                total_read += n;
+            }
+            const content = buffer[0..total_read];
 
             var line_iter = std.mem.splitScalar(u8, content, '\n');
             var line_num: usize = 1;
@@ -3268,11 +3279,27 @@ pub const Executor = struct {
         };
         defer file.close();
 
-        const content = file.readToEndAlloc(self.allocator, 10 * 1024 * 1024) catch |err| {
+        const max_size: usize = 10 * 1024 * 1024;
+        const file_size = file.getEndPos() catch |err| {
             try IO.eprint("den: json: error reading {s}: {}\n", .{ file_path, err });
             return 1;
         };
-        defer self.allocator.free(content);
+        const read_size: usize = @min(file_size, max_size);
+        const buffer = self.allocator.alloc(u8, read_size) catch |err| {
+            try IO.eprint("den: json: out of memory: {}\n", .{err});
+            return 1;
+        };
+        defer self.allocator.free(buffer);
+        var total_read: usize = 0;
+        while (total_read < read_size) {
+            const n = file.read(buffer[total_read..]) catch |err| {
+                try IO.eprint("den: json: error reading {s}: {}\n", .{ file_path, err });
+                return 1;
+            };
+            if (n == 0) break;
+            total_read += n;
+        }
+        const content = buffer[0..total_read];
 
         // Parse JSON to validate it
         var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, content, .{}) catch |err| {
@@ -3346,7 +3373,7 @@ pub const Executor = struct {
             name: []const u8,
             kind: std.fs.Dir.Entry.Kind,
             size: u64,
-            mtime: i128,
+            mtime_ns: i96,
         };
 
         var entries: [512]EntryInfo = undefined;
@@ -3362,27 +3389,28 @@ pub const Executor = struct {
             const stat = dir.statFile(entry.name) catch |err| {
                 if (err == error.IsDir) {
                     // For directories, use stat instead
-                    const dir_stat = dir.stat() catch std.fs.File.Stat{
-                        .size = 0,
-                        .mtime = 0,
-                        .atime = 0,
-                        .ctime = 0,
-                        .mode = 0,
-                        .kind = .directory,
-                        .inode = 0,
+                    const dir_stat = dir.stat() catch {
+                        entries[count] = .{
+                            .name = try self.allocator.dupe(u8, entry.name),
+                            .kind = entry.kind,
+                            .size = 0,
+                            .mtime_ns = 0,
+                        };
+                        count += 1;
+                        continue;
                     };
                     entries[count] = .{
                         .name = try self.allocator.dupe(u8, entry.name),
                         .kind = entry.kind,
                         .size = dir_stat.size,
-                        .mtime = dir_stat.mtime,
+                        .mtime_ns = dir_stat.mtime.nanoseconds,
                     };
                 } else {
                     entries[count] = .{
                         .name = try self.allocator.dupe(u8, entry.name),
                         .kind = entry.kind,
                         .size = 0,
-                        .mtime = 0,
+                        .mtime_ns = 0,
                     };
                 }
                 count += 1;
@@ -3393,7 +3421,7 @@ pub const Executor = struct {
                 .name = try self.allocator.dupe(u8, entry.name),
                 .kind = entry.kind,
                 .size = stat.size,
-                .mtime = stat.mtime,
+                .mtime_ns = stat.mtime.nanoseconds,
             };
             count += 1;
         }
@@ -3410,9 +3438,9 @@ pub const Executor = struct {
                         entries[i].size > entries[j].size
                 else if (sort_by_time)
                     if (reverse)
-                        entries[i].mtime < entries[j].mtime
+                        entries[i].mtime_ns < entries[j].mtime_ns
                     else
-                        entries[i].mtime > entries[j].mtime
+                        entries[i].mtime_ns > entries[j].mtime_ns
                 else if (reverse)
                     std.mem.order(u8, entries[i].name, entries[j].name) == .lt
                 else
@@ -3524,7 +3552,7 @@ pub const Executor = struct {
                 defer self.allocator.free(size_str);
 
                 // Format time (convert to "Mon DD HH:MM" format)
-                const time_ns: u64 = @intCast(@max(0, entry.mtime));
+                const time_ns: u64 = @intCast(@max(0, entry.mtime_ns));
                 const time_s = time_ns / std.time.ns_per_s;
 
                 // Simple date conversion
@@ -3986,8 +4014,12 @@ pub const Executor = struct {
     fn builtinDate(self: *Executor, command: *types.ParsedCommand) !i32 {
         _ = self;
 
-        const timestamp = std.time.timestamp();
-        const epoch_seconds: u64 = @intCast(timestamp);
+        // Get current time - use seconds from the timestamp
+        const instant = std.time.Instant.now() catch {
+            try IO.eprint("date: cannot get current time\n", .{});
+            return 1;
+        };
+        const epoch_seconds: u64 = @intCast(instant.timestamp.sec);
 
         // Parse format string if provided
         const format = if (command.args.len > 0) command.args[0] else "+%a %b %d %H:%M:%S %Z %Y";

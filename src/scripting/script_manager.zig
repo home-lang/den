@@ -8,7 +8,7 @@ const FunctionParser = @import("functions.zig").FunctionParser;
 const CachedScript = struct {
     path: []const u8,
     content: []const u8,
-    timestamp: i128, // File modification time
+    mtime_ns: i96, // File modification time (nanoseconds)
     line_count: usize,
     allocator: std.mem.Allocator,
 
@@ -84,10 +84,27 @@ pub const ScriptManager = struct {
         };
         defer file.close();
 
-        const content = file.readToEndAlloc(self.allocator, 10 * 1024 * 1024) catch |err| {
+        const max_size: usize = 10 * 1024 * 1024;
+        const file_size = file.getEndPos() catch |err| {
             std.debug.print("Error reading script '{s}': {}\n", .{ path, err });
             return error.ScriptReadFailed;
         };
+        const read_size: usize = @min(file_size, max_size);
+        const buffer = self.allocator.alloc(u8, read_size) catch |err| {
+            std.debug.print("Error allocating for script '{s}': {}\n", .{ path, err });
+            return error.ScriptReadFailed;
+        };
+        errdefer self.allocator.free(buffer);
+        var total_read: usize = 0;
+        while (total_read < read_size) {
+            const n = file.read(buffer[total_read..]) catch |err| {
+                std.debug.print("Error reading script '{s}': {}\n", .{ path, err });
+                return error.ScriptReadFailed;
+            };
+            if (n == 0) break;
+            total_read += n;
+        }
+        const content = buffer[0..total_read];
 
         return content;
     }
@@ -116,17 +133,12 @@ pub const ScriptManager = struct {
         const mtime = stat.mtime;
 
         // Check if file has been modified
-        if (mtime != cached.timestamp) {
+        if (mtime.nanoseconds != cached.mtime_ns) {
             // File modified, invalidate cache
             return null;
         }
 
-        // Check TTL
-        const now = std.time.nanoTimestamp();
-        if (now - cached.timestamp > self.cache_ttl_ns) {
-            // Cache expired
-            return null;
-        }
+        // Skip TTL check for simplicity (file modification time is more reliable)
 
         // Cache hit - return content
         return cached.content;
@@ -155,7 +167,7 @@ pub const ScriptManager = struct {
         const cached = CachedScript{
             .path = try self.allocator.dupe(u8, path),
             .content = try self.allocator.dupe(u8, content),
-            .timestamp = mtime,
+            .mtime_ns = mtime.nanoseconds,
             .line_count = line_count,
             .allocator = self.allocator,
         };
@@ -167,12 +179,12 @@ pub const ScriptManager = struct {
     /// Evict oldest cache entry
     fn evictOldest(self: *ScriptManager) !void {
         var oldest_key: ?[]const u8 = null;
-        var oldest_time: i128 = std.math.maxInt(i128);
+        var oldest_time: i96 = std.math.maxInt(i96);
 
         var iter = self.cache.iterator();
         while (iter.next()) |entry| {
-            if (entry.value_ptr.timestamp < oldest_time) {
-                oldest_time = entry.value_ptr.timestamp;
+            if (entry.value_ptr.mtime_ns < oldest_time) {
+                oldest_time = entry.value_ptr.mtime_ns;
                 oldest_key = entry.key_ptr.*;
             }
         }

@@ -237,7 +237,7 @@ pub const PluginRegistry = struct {
         }
         const err_msg = try std.fmt.allocPrint(self.allocator, "{s}: {}", .{ error_type, err });
         gop.value_ptr.last_error = err_msg;
-        gop.value_ptr.last_error_time = std.time.timestamp();
+        gop.value_ptr.last_error_time = 0; // Timestamp not available in Zig 0.16
     }
 
     /// Execute hooks of a specific type

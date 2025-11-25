@@ -20,7 +20,7 @@ fn testHook(ctx: *HookContext) !void {
 
 fn slowHook(ctx: *HookContext) !void {
     _ = ctx;
-    std.Thread.sleep(100 * std.time.ns_per_ms); // Sleep for 100ms
+    std.posix.nanosleep(0, 100_000_000); // Sleep for 100ms
     test_hook_called = true;
 }
 

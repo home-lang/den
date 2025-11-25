@@ -170,15 +170,21 @@ fn execCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     // Join arguments into a single command string
     var buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
+    var pos: usize = 0;
 
     for (args, 0..) |arg, i| {
-        if (i > 0) try writer.writeByte(' ');
-        try writer.writeAll(arg);
+        if (i > 0) {
+            if (pos < buf.len) {
+                buf[pos] = ' ';
+                pos += 1;
+            }
+        }
+        const to_copy = @min(arg.len, buf.len - pos);
+        @memcpy(buf[pos..][0..to_copy], arg[0..to_copy]);
+        pos += to_copy;
     }
 
-    const command = fbs.getWritten();
+    const command = buf[0..pos];
 
     var den_shell = try shell.Shell.init(allocator);
     defer den_shell.deinit();

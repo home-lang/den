@@ -118,7 +118,7 @@ pub const PromptContext = struct {
             .go_version = null,
             .rust_version = null,
             .package_version = null,
-            .current_time = std.time.timestamp(),
+            .current_time = 0, // Will be updated when needed
             .custom_data = std.StringHashMap([]const u8).init(allocator),
             .allocator = allocator,
         };

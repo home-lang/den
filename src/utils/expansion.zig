@@ -718,7 +718,17 @@ pub const Expansion = struct {
 
         // Read stdout
         const stdout = child.stdout.?;
-        const output = try stdout.readToEndAlloc(self.allocator, 1024 * 1024); // Max 1MB output
+        const max_output: usize = 1024 * 1024; // Max 1MB output
+        var output_buffer = std.ArrayList(u8).empty;
+
+        var read_buf: [4096]u8 = undefined;
+        while (true) {
+            const bytes_read = stdout.read(&read_buf) catch break;
+            if (bytes_read == 0) break;
+            try output_buffer.appendSlice(self.allocator, read_buf[0..bytes_read]);
+            if (output_buffer.items.len >= max_output) break;
+        }
+        const output = try output_buffer.toOwnedSlice(self.allocator);
 
         const term = try child.wait();
         _ = term;

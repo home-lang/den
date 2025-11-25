@@ -130,6 +130,32 @@ pub const IO = struct {
     pub fn flush() void {
         // POSIX write() is unbuffered, so no flush needed
     }
+
+    /// Read entire file contents into allocated buffer (Zig 0.16 compatible)
+    /// Replaces deprecated file.readToEndAlloc()
+    pub fn readFileAlloc(allocator: std.mem.Allocator, file: std.fs.File, max_size: usize) ![]u8 {
+        const file_size = try file.getEndPos();
+        const read_size: usize = @min(file_size, max_size);
+        const buffer = try allocator.alloc(u8, read_size);
+        errdefer allocator.free(buffer);
+
+        // Read in a loop until buffer is full or EOF
+        var total_read: usize = 0;
+        while (total_read < read_size) {
+            const bytes_read = try file.read(buffer[total_read..]);
+            if (bytes_read == 0) break; // EOF
+            total_read += bytes_read;
+        }
+
+        if (total_read < read_size) {
+            // Return only the bytes we read
+            const result = try allocator.alloc(u8, total_read);
+            @memcpy(result, buffer[0..total_read]);
+            allocator.free(buffer);
+            return result;
+        }
+        return buffer;
+    }
 };
 
 test "IO.print" {

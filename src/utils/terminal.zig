@@ -342,10 +342,19 @@ pub const LineEditor = struct {
         var escape_len: usize = 0;
         var in_escape: bool = false;
 
+        // Import signals module for SIGWINCH handling
+        const signals = @import("signals.zig");
+
         while (true) {
+            // Check for window resize (SIGWINCH)
+            if (signals.checkWindowSizeChanged()) {
+                // Terminal was resized - redraw the current line
+                try self.handleWindowResize();
+            }
+
             const byte = (try self.terminal.readByte()) orelse {
                 // No data, sleep briefly (10ms)
-                std.Thread.sleep(10 * std.time.ns_per_ms);
+                std.posix.nanosleep(0, 10_000_000);
                 continue;
             };
 
@@ -1795,6 +1804,36 @@ pub const LineEditor = struct {
             try self.writeBytes(highlighted);
         } else {
             try self.writeBytes(self.buffer[0..self.length]);
+        }
+    }
+
+    /// Handle terminal window resize (SIGWINCH)
+    fn handleWindowResize(self: *LineEditor) !void {
+        // Clear any completion display first (it may be misaligned now)
+        if (self.completion_list != null) {
+            try self.clearCompletionDisplay();
+        }
+
+        // Redraw the current line
+        try self.redrawLine();
+
+        // Move cursor back to correct position
+        if (self.cursor < self.length) {
+            const moves_needed = self.length - self.cursor;
+            var i: usize = 0;
+            while (i < moves_needed) : (i += 1) {
+                try self.writeBytes("\x1B[D");
+            }
+        }
+
+        // Redraw completion list if active (with new dimensions)
+        if (self.completion_list != null) {
+            try self.displayCompletionList();
+        }
+
+        // Redraw suggestion if present
+        if (self.suggestion != null) {
+            try self.displaySuggestion();
         }
     }
 
