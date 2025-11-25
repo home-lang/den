@@ -4,19 +4,20 @@ const std = @import("std");
 /// Profiling zone for measuring performance
 pub const ProfileZone = struct {
     name: []const u8,
-    start_time: i64,
+    start_time: std.time.Instant,
     parent: ?*ProfileZone,
 
     pub fn init(name: []const u8, parent: ?*ProfileZone) ProfileZone {
         return .{
             .name = name,
-            .start_time = std.time.nanoTimestamp(),
+            .start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant),
             .parent = parent,
         };
     }
 
     pub fn end(self: *const ProfileZone) i64 {
-        return std.time.nanoTimestamp() - self.start_time;
+        const now = std.time.Instant.now() catch return 0;
+        return @intCast(now.since(self.start_time));
     }
 
     pub fn endMs(self: *const ProfileZone) f64 {
@@ -71,7 +72,7 @@ pub const Profiler = struct {
     events: std.ArrayList(ProfileEvent),
     enabled: bool,
     output_file: ?[]const u8,
-    start_time: i64,
+    start_time: std.time.Instant,
     mutex: std.Thread.Mutex,
 
     pub fn init(allocator: std.mem.Allocator) !*Profiler {
@@ -81,7 +82,7 @@ pub const Profiler = struct {
             .events = std.ArrayList(ProfileEvent).init(allocator),
             .enabled = false,
             .output_file = null,
-            .start_time = std.time.nanoTimestamp(),
+            .start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant),
             .mutex = .{},
         };
         return profiler;
@@ -98,7 +99,7 @@ pub const Profiler = struct {
 
         self.enabled = true;
         self.output_file = output_file;
-        self.start_time = std.time.nanoTimestamp();
+        self.start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
     }
 
     pub fn disable(self: *Profiler) void {
@@ -123,11 +124,12 @@ pub const Profiler = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
+        const now = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
         const event = ProfileEvent{
             .name = name,
             .category = category,
             .duration_ns = duration_ns,
-            .timestamp = @as(i64, @intCast(std.time.nanoTimestamp() - self.start_time)),
+            .timestamp = @as(i64, @intCast(now.since(self.start_time))),
             .thread_id = std.Thread.getCurrentId(),
         };
 
@@ -267,7 +269,7 @@ pub const Profiler = struct {
         defer self.mutex.unlock();
 
         self.events.clearRetainingCapacity();
-        self.start_time = std.time.nanoTimestamp();
+        self.start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
     }
 
     /// Get event count

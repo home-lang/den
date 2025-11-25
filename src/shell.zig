@@ -659,7 +659,7 @@ pub const Shell = struct {
         }
         self.prompt_context.zig_version = self.detectZigVersion() catch null;
 
-        self.prompt_context.current_time = std.time.timestamp();
+        self.prompt_context.current_time = if (std.time.Instant.now()) |instant| @intCast(instant.timestamp.sec) else |_| 0;
     }
 
     pub fn executeCommand(self: *Shell, input: []const u8) !void {
@@ -2489,7 +2489,11 @@ pub const Shell = struct {
         const command_str = cmd_buf[0..cmd_len];
 
         // Get start time
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch {
+            try IO.eprint("den: time: cannot get time\n", .{});
+            self.last_exit_code = 1;
+            return;
+        };
 
         // Execute command
         var tokenizer = parser_mod.Tokenizer.init(self.allocator, command_str);
@@ -2519,8 +2523,11 @@ pub const Shell = struct {
         };
 
         // Get end time and calculate duration
-        const end_time = std.time.nanoTimestamp();
-        const duration_ns = end_time - start_time;
+        const end_time = std.time.Instant.now() catch {
+            self.last_exit_code = exit_code;
+            return;
+        };
+        const duration_ns: i128 = @intCast(end_time.since(start_time));
         const duration_ms = @divFloor(duration_ns, 1_000_000);
         const duration_s = @divFloor(duration_ms, 1000);
         const remaining_ms = @mod(duration_ms, 1000);
@@ -3022,27 +3029,35 @@ pub const Shell = struct {
             return;
         }
 
-        var signal: u8 = std.posix.SIG.TERM; // Default signal
+        var signal: std.posix.SIG = .TERM; // Default signal
         var arg_idx: usize = 0;
 
         // Parse signal specification
         if (cmd.args.len > 1 and cmd.args[0][0] == '-') {
             const sig_arg = cmd.args[0];
             if (sig_arg.len > 1) {
-                // Try to parse as number (e.g., -9)
-                signal = std.fmt.parseInt(u8, sig_arg[1..], 10) catch blk: {
-                    // Try to parse as name (e.g., -TERM, -KILL)
-                    const sig_name = sig_arg[1..];
-                    if (std.mem.eql(u8, sig_name, "TERM")) break :blk std.posix.SIG.TERM;
-                    if (std.mem.eql(u8, sig_name, "KILL")) break :blk std.posix.SIG.KILL;
-                    if (std.mem.eql(u8, sig_name, "INT")) break :blk std.posix.SIG.INT;
-                    if (std.mem.eql(u8, sig_name, "HUP")) break :blk std.posix.SIG.HUP;
-                    if (std.mem.eql(u8, sig_name, "STOP")) break :blk std.posix.SIG.STOP;
-                    if (std.mem.eql(u8, sig_name, "CONT")) break :blk std.posix.SIG.CONT;
+                // Try to parse as name (e.g., -TERM, -KILL)
+                const sig_name = sig_arg[1..];
+                if (std.mem.eql(u8, sig_name, "TERM")) {
+                    signal = .TERM;
+                } else if (std.mem.eql(u8, sig_name, "KILL")) {
+                    signal = .KILL;
+                } else if (std.mem.eql(u8, sig_name, "INT")) {
+                    signal = .INT;
+                } else if (std.mem.eql(u8, sig_name, "HUP")) {
+                    signal = .HUP;
+                } else if (std.mem.eql(u8, sig_name, "STOP")) {
+                    signal = .STOP;
+                } else if (std.mem.eql(u8, sig_name, "CONT")) {
+                    signal = .CONT;
+                } else if (std.fmt.parseInt(u32, sig_arg[1..], 10)) |sig_num| {
+                    // Try to parse as number (e.g., -9)
+                    signal = @enumFromInt(sig_num);
+                } else |_| {
                     try IO.eprint("den: kill: {s}: invalid signal specification\n", .{sig_name});
                     self.last_exit_code = 1;
                     return;
-                };
+                }
                 arg_idx = 1;
             }
         }

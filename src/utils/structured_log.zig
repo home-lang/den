@@ -107,30 +107,98 @@ pub const StructuredLogger = struct {
         comptime msg: []const u8,
     ) void {
         var buf: [4096]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const writer = fbs.writer();
+        var pos: usize = 0;
 
         // Write the main message
-        writer.writeAll(msg) catch return;
+        if (pos + msg.len <= buf.len) {
+            @memcpy(buf[pos..][0..msg.len], msg);
+            pos += msg.len;
+        }
 
         // Add fields
         if (self.fields.count() > 0) {
-            writer.writeAll(" {") catch return;
+            if (pos + 2 <= buf.len) {
+                buf[pos] = ' ';
+                buf[pos + 1] = '{';
+                pos += 2;
+            }
             var it = self.fields.iterator();
             var first = true;
             while (it.next()) |entry| {
                 if (!first) {
-                    writer.writeAll(", ") catch return;
+                    if (pos + 2 <= buf.len) {
+                        buf[pos] = ',';
+                        buf[pos + 1] = ' ';
+                        pos += 2;
+                    }
                 }
-                writer.print("{s}={f}", .{ entry.key_ptr.*, entry.value_ptr.* }) catch return;
+                // Format the field
+                if (std.fmt.bufPrint(buf[pos..], "{s}=", .{entry.key_ptr.*})) |result| {
+                    pos += result.len;
+                } else |_| {}
+                // Format the value based on its type
+                switch (entry.value_ptr.*) {
+                    .string => |s| {
+                        if (std.fmt.bufPrint(buf[pos..], "\"{s}\"", .{s})) |result| {
+                            pos += result.len;
+                        } else |_| {}
+                    },
+                    .int => |i| {
+                        if (std.fmt.bufPrint(buf[pos..], "{d}", .{i})) |result| {
+                            pos += result.len;
+                        } else |_| {}
+                    },
+                    .uint => |u| {
+                        if (std.fmt.bufPrint(buf[pos..], "{d}", .{u})) |result| {
+                            pos += result.len;
+                        } else |_| {}
+                    },
+                    .float => |f| {
+                        if (std.fmt.bufPrint(buf[pos..], "{d:.2}", .{f})) |result| {
+                            pos += result.len;
+                        } else |_| {}
+                    },
+                    .bool => |b| {
+                        const val = if (b) "true" else "false";
+                        if (pos + val.len <= buf.len) {
+                            @memcpy(buf[pos..][0..val.len], val);
+                            pos += val.len;
+                        }
+                    },
+                    .duration_ns => |ns| {
+                        if (ns < 1000) {
+                            if (std.fmt.bufPrint(buf[pos..], "{d}ns", .{ns})) |result| pos += result.len else |_| {}
+                        } else if (ns < 1_000_000) {
+                            if (std.fmt.bufPrint(buf[pos..], "{d:.2}us", .{@as(f64, @floatFromInt(ns)) / 1000.0})) |result| pos += result.len else |_| {}
+                        } else if (ns < 1_000_000_000) {
+                            if (std.fmt.bufPrint(buf[pos..], "{d:.2}ms", .{@as(f64, @floatFromInt(ns)) / 1_000_000.0})) |result| pos += result.len else |_| {}
+                        } else {
+                            if (std.fmt.bufPrint(buf[pos..], "{d:.2}s", .{@as(f64, @floatFromInt(ns)) / 1_000_000_000.0})) |result| pos += result.len else |_| {}
+                        }
+                    },
+                    .bytes => |b| {
+                        if (b < 1024) {
+                            if (std.fmt.bufPrint(buf[pos..], "{d}B", .{b})) |result| pos += result.len else |_| {}
+                        } else if (b < 1024 * 1024) {
+                            if (std.fmt.bufPrint(buf[pos..], "{d:.2}KB", .{@as(f64, @floatFromInt(b)) / 1024.0})) |result| pos += result.len else |_| {}
+                        } else if (b < 1024 * 1024 * 1024) {
+                            if (std.fmt.bufPrint(buf[pos..], "{d:.2}MB", .{@as(f64, @floatFromInt(b)) / (1024.0 * 1024.0)})) |result| pos += result.len else |_| {}
+                        } else {
+                            if (std.fmt.bufPrint(buf[pos..], "{d:.2}GB", .{@as(f64, @floatFromInt(b)) / (1024.0 * 1024.0 * 1024.0)})) |result| pos += result.len else |_| {}
+                        }
+                    },
+                }
                 first = false;
             }
-            writer.writeAll("}") catch return;
+            if (pos < buf.len) {
+                buf[pos] = '}';
+                pos += 1;
+            }
         }
 
         // Log using the standard logger
         const logger = log_mod.getLogger();
-        logger.log(level, src, "{s}", .{fbs.getWritten()});
+        logger.log(level, src, "{s}", .{buf[0..pos]});
     }
 
     /// Convenience methods for each log level

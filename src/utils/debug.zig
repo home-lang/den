@@ -9,12 +9,8 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     if (!enabled) return;
 
     var buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
+    const output = std.fmt.bufPrint(&buf, "[DEBUG] " ++ fmt ++ "\n", args) catch return;
 
-    writer.print("[DEBUG] " ++ fmt ++ "\n", args) catch return;
-
-    const output = fbs.getWritten();
     if (builtin.os.tag == .windows) {
         const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return;
         const stderr = std.fs.File{ .handle = handle };
@@ -33,38 +29,46 @@ pub fn hexDump(label: []const u8, data: []const u8) void {
     var i: usize = 0;
     while (i < data.len) : (i += 16) {
         var buf: [128]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const writer = fbs.writer();
+        var pos: usize = 0;
 
         // Print offset
-        writer.print("{x:0>8}: ", .{i}) catch continue;
+        pos += (std.fmt.bufPrint(buf[pos..], "{x:0>8}: ", .{i}) catch continue).len;
 
         // Print hex values
         var j: usize = 0;
         while (j < 16) : (j += 1) {
             if (i + j < data.len) {
-                writer.print("{x:0>2} ", .{data[i + j]}) catch continue;
+                pos += (std.fmt.bufPrint(buf[pos..], "{x:0>2} ", .{data[i + j]}) catch continue).len;
             } else {
-                writer.writeAll("   ") catch continue;
+                if (pos + 3 <= buf.len) {
+                    buf[pos] = ' ';
+                    buf[pos + 1] = ' ';
+                    buf[pos + 2] = ' ';
+                    pos += 3;
+                }
             }
         }
 
-        writer.writeAll(" | ") catch continue;
+        if (pos + 3 <= buf.len) {
+            buf[pos] = ' ';
+            buf[pos + 1] = '|';
+            buf[pos + 2] = ' ';
+            pos += 3;
+        }
 
         // Print ASCII values
         j = 0;
         while (j < 16) : (j += 1) {
             if (i + j < data.len) {
                 const c = data[i + j];
-                if (c >= 32 and c <= 126) {
-                    writer.writeByte(c) catch continue;
-                } else {
-                    writer.writeByte('.') catch continue;
+                if (pos < buf.len) {
+                    buf[pos] = if (c >= 32 and c <= 126) c else '.';
+                    pos += 1;
                 }
             }
         }
 
-        const output = fbs.getWritten();
+        const output = buf[0..pos];
         if (builtin.os.tag == .windows) {
             const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse continue;
             const stderr = std.fs.File{ .handle = handle };

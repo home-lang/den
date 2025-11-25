@@ -12,8 +12,19 @@ fn getMacOSBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
 
     child.spawn() catch return null;
 
-    const output = child.stdout.?.readToEndAlloc(allocator, 4096) catch return null;
-    defer allocator.free(output);
+    // Read stdout manually
+    var output_buf = std.ArrayList(u8).empty;
+    defer output_buf.deinit(allocator);
+    if (child.stdout) |stdout_pipe| {
+        var read_buf: [4096]u8 = undefined;
+        while (true) {
+            const n = stdout_pipe.read(&read_buf) catch break;
+            if (n == 0) break;
+            output_buf.appendSlice(allocator, read_buf[0..n]) catch break;
+            if (output_buf.items.len >= 4096) break;
+        }
+    }
+    const output = output_buf.items;
 
     const status = child.wait() catch return null;
     if (status != .Exited or status.Exited != 0) return null;
@@ -54,14 +65,24 @@ fn getLinuxBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     defer capacity_file.close();
 
     var buf: [16]u8 = undefined;
-    const capacity_size = capacity_file.readAll(&buf) catch return null;
+    var capacity_size: usize = 0;
+    while (capacity_size < buf.len) {
+        const n = capacity_file.read(buf[capacity_size..]) catch break;
+        if (n == 0) break;
+        capacity_size += n;
+    }
     const capacity_str = std.mem.trim(u8, buf[0..capacity_size], &std.ascii.whitespace);
     const percentage = std.fmt.parseInt(u8, capacity_str, 10) catch return null;
 
     const status_file = std.fs.openFileAbsolute(status_path, .{}) catch return null;
     defer status_file.close();
 
-    const status_size = status_file.readAll(&buf) catch return null;
+    var status_size: usize = 0;
+    while (status_size < buf.len) {
+        const n = status_file.read(buf[status_size..]) catch break;
+        if (n == 0) break;
+        status_size += n;
+    }
     const status_str = std.mem.trim(u8, buf[0..status_size], &std.ascii.whitespace);
     const is_charging = std.mem.eql(u8, status_str, "Charging");
 
@@ -89,8 +110,19 @@ fn getWindowsBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
 
     child.spawn() catch return null;
 
-    const output = child.stdout.?.readToEndAlloc(allocator, 4096) catch return null;
-    defer allocator.free(output);
+    // Read stdout manually
+    var output_buf2 = std.ArrayList(u8).empty;
+    defer output_buf2.deinit(allocator);
+    if (child.stdout) |stdout_pipe| {
+        var read_buf: [4096]u8 = undefined;
+        while (true) {
+            const n = stdout_pipe.read(&read_buf) catch break;
+            if (n == 0) break;
+            output_buf2.appendSlice(allocator, read_buf[0..n]) catch break;
+            if (output_buf2.items.len >= 4096) break;
+        }
+    }
+    const output = output_buf2.items;
 
     const status = child.wait() catch return null;
     if (status != .Exited or status.Exited != 0) return null;
@@ -169,8 +201,19 @@ fn getWindowsMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
 
     child.spawn() catch return null;
 
-    const output = child.stdout.?.readToEndAlloc(allocator, 4096) catch return null;
-    defer allocator.free(output);
+    // Read stdout manually
+    var output_buf3 = std.ArrayList(u8).empty;
+    defer output_buf3.deinit(allocator);
+    if (child.stdout) |stdout_pipe| {
+        var read_buf: [4096]u8 = undefined;
+        while (true) {
+            const n = stdout_pipe.read(&read_buf) catch break;
+            if (n == 0) break;
+            output_buf3.appendSlice(allocator, read_buf[0..n]) catch break;
+            if (output_buf3.items.len >= 4096) break;
+        }
+    }
+    const output = output_buf3.items;
 
     const status = child.wait() catch return null;
     if (status != .Exited or status.Exited != 0) return null;
@@ -218,8 +261,19 @@ fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
 
             child.spawn() catch return null;
 
-            const output = child.stdout.?.readToEndAlloc(allocator, 8192) catch return null;
-            defer allocator.free(output);
+            // Read stdout manually
+            var vm_output_buf = std.ArrayList(u8).empty;
+            defer vm_output_buf.deinit(allocator);
+            if (child.stdout) |stdout_pipe| {
+                var read_buf: [8192]u8 = undefined;
+                while (true) {
+                    const n = stdout_pipe.read(&read_buf) catch break;
+                    if (n == 0) break;
+                    vm_output_buf.appendSlice(allocator, read_buf[0..n]) catch break;
+                    if (vm_output_buf.items.len >= 8192) break;
+                }
+            }
+            const output = vm_output_buf.items;
 
             _ = child.wait() catch return null;
 
@@ -267,8 +321,17 @@ fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
             const file = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return null;
             defer file.close();
 
-            const content = file.readToEndAlloc(allocator, 8192) catch return null;
-            defer allocator.free(content);
+            // Read file manually
+            var content_buf = std.ArrayList(u8).empty;
+            defer content_buf.deinit(allocator);
+            var read_buf: [4096]u8 = undefined;
+            while (true) {
+                const n = file.read(&read_buf) catch break;
+                if (n == 0) break;
+                content_buf.appendSlice(allocator, read_buf[0..n]) catch break;
+                if (content_buf.items.len >= 8192) break;
+            }
+            const content = content_buf.items;
 
             var mem_total: u64 = 0;
             var mem_available: u64 = 0;
@@ -363,7 +426,8 @@ pub fn detectOS(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
 pub fn detectTime(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
     var info = ModuleInfo.init("time");
 
-    const timestamp = std.time.timestamp();
+    const now = std.time.Instant.now() catch return null;
+    const timestamp = now.timestamp.sec;
     const seconds_in_day = @mod(timestamp, 86400);
     const hours = @divFloor(seconds_in_day, 3600);
     const minutes = @divFloor(@mod(seconds_in_day, 3600), 60);
@@ -413,8 +477,19 @@ pub fn detectDocker(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
 
         child.spawn() catch return null;
 
-        const output = child.stdout.?.readToEndAlloc(allocator, 1024) catch return null;
-        defer allocator.free(output);
+        // Read stdout manually
+        var docker_output_buf = std.ArrayList(u8).empty;
+        defer docker_output_buf.deinit(allocator);
+        if (child.stdout) |stdout_pipe| {
+            var read_buf: [1024]u8 = undefined;
+            while (true) {
+                const n = stdout_pipe.read(&read_buf) catch break;
+                if (n == 0) break;
+                docker_output_buf.appendSlice(allocator, read_buf[0..n]) catch break;
+                if (docker_output_buf.items.len >= 1024) break;
+            }
+        }
+        const output = docker_output_buf.items;
 
         const status = child.wait() catch return null;
         if (status != .Exited or status.Exited != 0) return null;
@@ -438,8 +513,19 @@ pub fn detectKubernetes(allocator: std.mem.Allocator, _: []const u8) !?ModuleInf
 
     child.spawn() catch return null;
 
-    const output = child.stdout.?.readToEndAlloc(allocator, 1024) catch return null;
-    defer allocator.free(output);
+    // Read stdout manually
+    var k8s_output_buf = std.ArrayList(u8).empty;
+    defer k8s_output_buf.deinit(allocator);
+    if (child.stdout) |stdout_pipe| {
+        var read_buf: [1024]u8 = undefined;
+        while (true) {
+            const n = stdout_pipe.read(&read_buf) catch break;
+            if (n == 0) break;
+            k8s_output_buf.appendSlice(allocator, read_buf[0..n]) catch break;
+            if (k8s_output_buf.items.len >= 1024) break;
+        }
+    }
+    const output = k8s_output_buf.items;
 
     const status = child.wait() catch return null;
     if (status != .Exited or status.Exited != 0) return null;

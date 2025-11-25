@@ -4234,7 +4234,11 @@ pub const Executor = struct {
         _ = command;
 
         // Generate a simple UUID v4 (random)
-        var rng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+        const seed: u64 = blk: {
+            const instant = std.time.Instant.now() catch break :blk 0;
+            break :blk @intCast(instant.timestamp.sec);
+        };
+        var rng = std.Random.DefaultPrng.init(seed);
         var random = rng.random();
 
         var uuid: [16]u8 = undefined;

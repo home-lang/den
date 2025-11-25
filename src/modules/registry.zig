@@ -95,7 +95,8 @@ pub const ModuleRegistry = struct {
         }
 
         // Check cache
-        const now = std.time.timestamp();
+        const now_instant = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+        const now = now_instant.timestamp.sec;
         if (self.cache.get(name)) |entry| {
             if (now - entry.timestamp < self.cache_ttl_seconds) {
                 // Return cached copy (need to dupe version string)

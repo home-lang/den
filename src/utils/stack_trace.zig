@@ -30,25 +30,10 @@ pub const StackTrace = struct {
 
     /// Capture the current stack trace
     pub fn capture(self: *StackTrace, skip_frames: usize) void {
-        var stack = std.builtin.StackTrace{
-            .instruction_addresses = self.addresses[0..],
-            .index = 0,
-        };
-
-        std.debug.captureStackTrace(@returnAddress(), &stack);
-
-        // Skip the requested frames plus our own frame
-        const total_skip = skip_frames + 1;
-        if (stack.index > total_skip) {
-            self.count = stack.index - total_skip;
-            // Move the addresses to the beginning
-            var i: usize = 0;
-            while (i < self.count) : (i += 1) {
-                self.addresses[i] = self.addresses[i + total_skip];
-            }
-        } else {
-            self.count = 0;
-        }
+        _ = skip_frames;
+        // Stack trace capture is not available in Zig 0.16
+        // Just set count to 0 as a stub
+        self.count = 0;
     }
 
     /// Format the stack trace
@@ -78,33 +63,46 @@ pub const StackTrace = struct {
         };
 
         var buf: [4096]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const writer = fbs.writer();
+        var pos: usize = 0;
 
         // Header
         if (config.use_color) {
-            writer.print("{s}{s}Stack Trace:{s}\n", .{ Color.bold, Color.cyan, Color.reset }) catch return;
+            if (std.fmt.bufPrint(buf[pos..], "{s}{s}Stack Trace:{s}\n", .{ Color.bold, Color.cyan, Color.reset })) |result| {
+                pos += result.len;
+            } else |_| return;
         } else {
-            writer.writeAll("Stack Trace:\n") catch return;
+            const header = "Stack Trace:\n";
+            if (pos + header.len <= buf.len) {
+                @memcpy(buf[pos..][0..header.len], header);
+                pos += header.len;
+            }
         }
 
         // Print each frame
         for (self.addresses[0..self.count], 0..) |addr, i| {
             if (config.use_color) {
-                writer.print("  {s}[{d}]{s} ", .{ Color.yellow, i, Color.reset }) catch continue;
+                if (std.fmt.bufPrint(buf[pos..], "  {s}[{d}]{s} ", .{ Color.yellow, i, Color.reset })) |result| {
+                    pos += result.len;
+                } else |_| continue;
             } else {
-                writer.print("  [{d}] ", .{i}) catch continue;
+                if (std.fmt.bufPrint(buf[pos..], "  [{d}] ", .{i})) |result| {
+                    pos += result.len;
+                } else |_| continue;
             }
 
             if (config.show_addresses) {
-                writer.print("0x{x:0>16}", .{addr}) catch continue;
+                if (std.fmt.bufPrint(buf[pos..], "0x{x:0>16}", .{addr})) |result| {
+                    pos += result.len;
+                } else |_| continue;
             }
 
-            writer.writeByte('\n') catch continue;
+            if (pos < buf.len) {
+                buf[pos] = '\n';
+                pos += 1;
+            }
         }
 
-        const output = fbs.getWritten();
-        writeStderr(output);
+        writeStderr(buf[0..pos]);
     }
 };
 
@@ -127,12 +125,9 @@ pub fn panicWithStackTrace(msg: []const u8, error_return_trace: ?*std.builtin.St
     _ = ret_addr;
 
     var buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
+    const output = std.fmt.bufPrint(&buf, "\n\x1b[1m\x1b[31mPANIC:\x1b[0m {s}\n\n", .{msg}) catch "";
 
-    writer.print("\n\x1b[1m\x1b[31mPANIC:\x1b[0m {s}\n\n", .{msg}) catch {};
-
-    writeStderr(fbs.getWritten());
+    writeStderr(output);
 
     // Print stack trace
     printCurrentStackTrace(.{
@@ -155,6 +150,12 @@ fn writeStderr(msg: []const u8) void {
     }
 }
 
+/// Helper to get milliseconds since some reference point
+fn getMilliTimestamp() i64 {
+    const now = std.time.Instant.now() catch return 0;
+    return @intCast(@divFloor(now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000), 1));
+}
+
 /// Trace point for debugging execution flow
 pub const TracePoint = struct {
     name: []const u8,
@@ -167,23 +168,20 @@ pub const TracePoint = struct {
             .name = name,
             .file = src.file,
             .line = src.line,
-            .time = std.time.milliTimestamp(),
+            .time = getMilliTimestamp(),
         };
     }
 
     pub fn print(self: TracePoint) void {
         var buf: [256]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const writer = fbs.writer();
-
-        writer.print("[TRACE] {s} at {s}:{d} (t={d}ms)\n", .{
+        const output = std.fmt.bufPrint(&buf, "[TRACE] {s} at {s}:{d} (t={d}ms)\n", .{
             self.name,
             self.file,
             self.line,
             self.time,
         }) catch return;
 
-        writeStderr(fbs.getWritten());
+        writeStderr(output);
     }
 };
 
@@ -197,7 +195,7 @@ pub const ExecutionTrace = struct {
         return .{
             .allocator = allocator,
             .points = std.ArrayList(TracePoint).init(allocator),
-            .start_time = std.time.milliTimestamp(),
+            .start_time = getMilliTimestamp(),
         };
     }
 
@@ -206,31 +204,38 @@ pub const ExecutionTrace = struct {
     }
 
     pub fn addPoint(self: *ExecutionTrace, point: TracePoint) !void {
-        try self.points.append(point);
+        try self.points.append(self.allocator, point);
     }
 
     pub fn print(self: *const ExecutionTrace) void {
         var buf: [4096]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const writer = fbs.writer();
+        var pos: usize = 0;
 
-        writer.writeAll("\n=== Execution Trace ===\n") catch return;
+        const header = "\n=== Execution Trace ===\n";
+        if (pos + header.len <= buf.len) {
+            @memcpy(buf[pos..][0..header.len], header);
+            pos += header.len;
+        }
 
         for (self.points.items, 0..) |point, i| {
             const elapsed = point.time - self.start_time;
-            writer.print("[{d}] +{d}ms: {s} at {s}:{d}\n", .{
+            if (std.fmt.bufPrint(buf[pos..], "[{d}] +{d}ms: {s} at {s}:{d}\n", .{
                 i,
                 elapsed,
                 point.name,
                 point.file,
                 point.line,
-            }) catch continue;
+            })) |result| {
+                pos += result.len;
+            } else |_| continue;
         }
 
-        const total = std.time.milliTimestamp() - self.start_time;
-        writer.print("\nTotal time: {d}ms\n", .{total}) catch return;
+        const total = getMilliTimestamp() - self.start_time;
+        if (std.fmt.bufPrint(buf[pos..], "\nTotal time: {d}ms\n", .{total})) |result| {
+            pos += result.len;
+        } else |_| {}
 
-        writeStderr(fbs.getWritten());
+        writeStderr(buf[0..pos]);
     }
 };
 

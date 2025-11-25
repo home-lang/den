@@ -9,18 +9,25 @@ fn assertionFailed(
     args: anytype,
 ) noreturn {
     var buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
+    var pos: usize = 0;
 
     // Format the assertion message
-    writer.print("\n\x1b[1m\x1b[31mASSERTION FAILED:\x1b[0m ", .{}) catch {};
-    writer.print(message, args) catch {};
-    writer.print("\n  at {s}:{d}\n", .{ src.file, src.line }) catch {};
+    if (std.fmt.bufPrint(buf[pos..], "\n\x1b[1m\x1b[31mASSERTION FAILED:\x1b[0m ", .{})) |result| {
+        pos += result.len;
+    } else |_| {}
+    if (std.fmt.bufPrint(buf[pos..], message, args)) |result| {
+        pos += result.len;
+    } else |_| {}
+    if (std.fmt.bufPrint(buf[pos..], "\n  at {s}:{d}\n", .{ src.file, src.line })) |result| {
+        pos += result.len;
+    } else |_| {}
     if (src.fn_name.len > 0) {
-        writer.print("  in function: {s}\n", .{src.fn_name}) catch {};
+        if (std.fmt.bufPrint(buf[pos..], "  in function: {s}\n", .{src.fn_name})) |result| {
+            pos += result.len;
+        } else |_| {}
     }
 
-    writeStderr(fbs.getWritten());
+    writeStderr(buf[0..pos]);
 
     // Print stack trace
     stack_trace.printCurrentStackTrace(.{
@@ -56,16 +63,13 @@ pub fn assertEquals(comptime T: type, expected: T, actual: T, comptime message: 
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (!std.meta.eql(expected, actual)) {
             var buf: [2048]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  Expected: {any}\n  Actual:   {any}", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  Expected: {any}\n  Actual:   {any}", .{
                 message,
                 expected,
                 actual,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -75,16 +79,13 @@ pub fn assertNotEquals(comptime T: type, not_expected: T, actual: T, comptime me
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (std.meta.eql(not_expected, actual)) {
             var buf: [2048]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  Did not expect: {any}\n  But got:        {any}", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  Did not expect: {any}\n  But got:        {any}", .{
                 message,
                 not_expected,
                 actual,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -94,15 +95,12 @@ pub fn assertNull(value: anytype, comptime message: []const u8) void {
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (value != null) {
             var buf: [1024]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  Expected null, but got: {any}", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  Expected null, but got: {any}", .{
                 message,
                 value,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -121,16 +119,13 @@ pub fn assertStringEquals(expected: []const u8, actual: []const u8, comptime mes
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (!std.mem.eql(u8, expected, actual)) {
             var buf: [2048]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  Expected: \"{s}\"\n  Actual:   \"{s}\"", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  Expected: \"{s}\"\n  Actual:   \"{s}\"", .{
                 message,
                 expected,
                 actual,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -140,16 +135,13 @@ pub fn assertStringContains(haystack: []const u8, needle: []const u8, comptime m
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (std.mem.indexOf(u8, haystack, needle) == null) {
             var buf: [2048]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  String: \"{s}\"\n  Does not contain: \"{s}\"", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  String: \"{s}\"\n  Does not contain: \"{s}\"", .{
                 message,
                 haystack,
                 needle,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -159,18 +151,15 @@ pub fn assertGreaterThan(comptime T: type, value: T, threshold: T, comptime mess
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (value <= threshold) {
             var buf: [1024]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  Expected {any} > {any}, but {any} <= {any}", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  Expected {any} > {any}, but {any} <= {any}", .{
                 message,
                 value,
                 threshold,
                 value,
                 threshold,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -180,18 +169,15 @@ pub fn assertLessThan(comptime T: type, value: T, threshold: T, comptime message
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (value >= threshold) {
             var buf: [1024]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  Expected {any} < {any}, but {any} >= {any}", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  Expected {any} < {any}, but {any} >= {any}", .{
                 message,
                 value,
                 threshold,
                 value,
                 threshold,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -201,16 +187,13 @@ pub fn assertLength(comptime T: type, slice: []const T, expected_len: usize, com
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (slice.len != expected_len) {
             var buf: [1024]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  Expected length: {d}\n  Actual length:   {d}", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  Expected length: {d}\n  Actual length:   {d}", .{
                 message,
                 expected_len,
                 slice.len,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -220,17 +203,14 @@ pub fn assertInRange(comptime T: type, value: T, min: T, max: T, comptime messag
     if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         if (value < min or value > max) {
             var buf: [1024]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-
-            writer.print("{s}\n  Expected {any} to be in range [{any}, {any}]", .{
+            const result = std.fmt.bufPrint(&buf, "{s}\n  Expected {any} to be in range [{any}, {any}]", .{
                 message,
                 value,
                 min,
                 max,
-            }) catch {};
+            }) catch "";
 
-            assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+            assertionFailed(@src(), "{s}", .{result});
         }
     }
 }
@@ -243,16 +223,13 @@ pub fn assertError(comptime E: type, result: anytype, expected_error: E, comptim
         } else |err| {
             if (err != expected_error) {
                 var buf: [1024]u8 = undefined;
-                var fbs = std.io.fixedBufferStream(&buf);
-                const writer = fbs.writer();
-
-                writer.print("{s}\n  Expected error: {s}\n  Actual error:   {s}", .{
+                const fmt_result = std.fmt.bufPrint(&buf, "{s}\n  Expected error: {s}\n  Actual error:   {s}", .{
                     message,
                     @errorName(expected_error),
                     @errorName(err),
-                }) catch {};
+                }) catch "";
 
-                assertionFailed(@src(), "{s}", .{fbs.getWritten()});
+                assertionFailed(@src(), "{s}", .{fmt_result});
             }
         }
     }

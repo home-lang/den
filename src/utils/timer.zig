@@ -3,22 +3,21 @@ const builtin = @import("builtin");
 
 /// High-precision timer for performance measurement
 pub const Timer = struct {
-    start_time: i128,
+    start_time: std.time.Instant,
     name: []const u8,
 
     /// Start a new timer
     pub fn start(name: []const u8) Timer {
         return .{
-            .start_time = std.time.nanoTimestamp(),
+            .start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant),
             .name = name,
         };
     }
 
     /// Get elapsed time in nanoseconds
     pub fn elapsed(self: *const Timer) u64 {
-        const now = std.time.nanoTimestamp();
-        const diff = now - self.start_time;
-        return @intCast(if (diff < 0) 0 else diff);
+        const now = std.time.Instant.now() catch return 0;
+        return now.since(self.start_time);
     }
 
     /// Get elapsed time in microseconds
@@ -40,27 +39,40 @@ pub const Timer = struct {
     pub fn print(self: *const Timer) void {
         const ns = self.elapsed();
         var buf: [256]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const writer = fbs.writer();
+        var pos: usize = 0;
 
-        writer.print("[TIMER] {s}: ", .{self.name}) catch return;
+        // Format "[TIMER] {name}: "
+        const prefix = "[TIMER] ";
+        const prefix_len = @min(prefix.len, buf.len - pos);
+        @memcpy(buf[pos..][0..prefix_len], prefix[0..prefix_len]);
+        pos += prefix_len;
 
+        const name_len = @min(self.name.len, buf.len - pos);
+        @memcpy(buf[pos..][0..name_len], self.name[0..name_len]);
+        pos += name_len;
+
+        const colon = ": ";
+        const colon_len = @min(colon.len, buf.len - pos);
+        @memcpy(buf[pos..][0..colon_len], colon[0..colon_len]);
+        pos += colon_len;
+
+        // Format the time value
         if (ns < 1000) {
-            writer.print("{d}ns\n", .{ns}) catch return;
+            pos += (std.fmt.bufPrint(buf[pos..], "{d}ns\n", .{ns}) catch return).len;
         } else if (ns < 1_000_000) {
-            writer.print("{d:.2}μs\n", .{@as(f64, @floatFromInt(ns)) / 1000.0}) catch return;
+            pos += (std.fmt.bufPrint(buf[pos..], "{d:.2}us\n", .{@as(f64, @floatFromInt(ns)) / 1000.0}) catch return).len;
         } else if (ns < 1_000_000_000) {
-            writer.print("{d:.2}ms\n", .{@as(f64, @floatFromInt(ns)) / 1_000_000.0}) catch return;
+            pos += (std.fmt.bufPrint(buf[pos..], "{d:.2}ms\n", .{@as(f64, @floatFromInt(ns)) / 1_000_000.0}) catch return).len;
         } else {
-            writer.print("{d:.2}s\n", .{@as(f64, @floatFromInt(ns)) / 1_000_000_000.0}) catch return;
+            pos += (std.fmt.bufPrint(buf[pos..], "{d:.2}s\n", .{@as(f64, @floatFromInt(ns)) / 1_000_000_000.0}) catch return).len;
         }
 
-        writeStderr(fbs.getWritten());
+        writeStderr(buf[0..pos]);
     }
 
     /// Reset the timer
     pub fn reset(self: *Timer) void {
-        self.start_time = std.time.nanoTimestamp();
+        self.start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
     }
 
     /// Lap time - returns elapsed time and resets
@@ -185,18 +197,17 @@ pub const TimingStats = struct {
         }
 
         var buf: [1024]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const writer = fbs.writer();
+        var pos: usize = 0;
 
-        writer.print("\n=== Timing Statistics: {s} ===\n", .{self.name}) catch return;
-        writer.print("Samples:  {d}\n", .{self.samples.items.len}) catch return;
-        writer.print("Mean:     {d:.2}ms\n", .{self.mean() / 1_000_000.0}) catch return;
-        writer.print("Median:   {d:.2}ms\n", .{@as(f64, @floatFromInt(self.median())) / 1_000_000.0}) catch return;
-        writer.print("Min:      {d:.2}ms\n", .{@as(f64, @floatFromInt(self.min())) / 1_000_000.0}) catch return;
-        writer.print("Max:      {d:.2}ms\n", .{@as(f64, @floatFromInt(self.max())) / 1_000_000.0}) catch return;
-        writer.print("Std Dev:  {d:.2}ms\n", .{self.stddev() / 1_000_000.0}) catch return;
+        pos += (std.fmt.bufPrint(buf[pos..], "\n=== Timing Statistics: {s} ===\n", .{self.name}) catch return).len;
+        pos += (std.fmt.bufPrint(buf[pos..], "Samples:  {d}\n", .{self.samples.items.len}) catch return).len;
+        pos += (std.fmt.bufPrint(buf[pos..], "Mean:     {d:.2}ms\n", .{self.mean() / 1_000_000.0}) catch return).len;
+        pos += (std.fmt.bufPrint(buf[pos..], "Median:   {d:.2}ms\n", .{@as(f64, @floatFromInt(self.median())) / 1_000_000.0}) catch return).len;
+        pos += (std.fmt.bufPrint(buf[pos..], "Min:      {d:.2}ms\n", .{@as(f64, @floatFromInt(self.min())) / 1_000_000.0}) catch return).len;
+        pos += (std.fmt.bufPrint(buf[pos..], "Max:      {d:.2}ms\n", .{@as(f64, @floatFromInt(self.max())) / 1_000_000.0}) catch return).len;
+        pos += (std.fmt.bufPrint(buf[pos..], "Std Dev:  {d:.2}ms\n", .{self.stddev() / 1_000_000.0}) catch return).len;
 
-        writeStderr(fbs.getWritten());
+        writeStderr(buf[0..pos]);
     }
 };
 

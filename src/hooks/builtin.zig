@@ -171,9 +171,10 @@ pub const HistoryHookData = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, command: []const u8) !HistoryHookData {
+        const now = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
         return .{
             .command = try allocator.dupe(u8, command),
-            .timestamp = std.time.timestamp(),
+            .timestamp = now.timestamp.sec,
             .should_add = true,
             .allocator = allocator,
         };

@@ -44,45 +44,58 @@ pub fn formatError(
     use_color: bool,
 ) ![]const u8 {
     var buf = std.ArrayList(u8){};
-    const writer = buf.writer(allocator);
 
     // Error header
     if (use_color) {
-        try writer.print("{s}{s}error:{s} ", .{ Color.bold, Color.red, Color.reset });
+        const header = try std.fmt.allocPrint(allocator, "{s}{s}error:{s} ", .{ Color.bold, Color.red, Color.reset });
+        defer allocator.free(header);
+        try buf.appendSlice(allocator, header);
     } else {
-        try writer.writeAll("error: ");
+        try buf.appendSlice(allocator, "error: ");
     }
 
     // Error name
-    try writer.print("{s}\n", .{@errorName(err)});
+    const err_name = try std.fmt.allocPrint(allocator, "{s}\n", .{@errorName(err)});
+    defer allocator.free(err_name);
+    try buf.appendSlice(allocator, err_name);
 
     // Context information
     if (context) |ctx| {
         // Location
         if (use_color) {
-            try writer.print("  {s}-->{s} {s}:{d}:{d}\n", .{
+            const loc = try std.fmt.allocPrint(allocator, "  {s}-->{s} {s}:{d}:{d}\n", .{
                 Color.cyan,
                 Color.reset,
                 ctx.file,
                 ctx.line,
                 ctx.column,
             });
+            defer allocator.free(loc);
+            try buf.appendSlice(allocator, loc);
         } else {
-            try writer.print("  --> {s}:{d}:{d}\n", .{ ctx.file, ctx.line, ctx.column });
+            const loc = try std.fmt.allocPrint(allocator, "  --> {s}:{d}:{d}\n", .{ ctx.file, ctx.line, ctx.column });
+            defer allocator.free(loc);
+            try buf.appendSlice(allocator, loc);
         }
 
         // Function
         if (ctx.function.len > 0) {
             if (use_color) {
-                try writer.print("  {s}in:{s} {s}\n", .{ Color.dim, Color.reset, ctx.function });
+                const func = try std.fmt.allocPrint(allocator, "  {s}in:{s} {s}\n", .{ Color.dim, Color.reset, ctx.function });
+                defer allocator.free(func);
+                try buf.appendSlice(allocator, func);
             } else {
-                try writer.print("  in: {s}\n", .{ctx.function});
+                const func = try std.fmt.allocPrint(allocator, "  in: {s}\n", .{ctx.function});
+                defer allocator.free(func);
+                try buf.appendSlice(allocator, func);
             }
         }
 
         // Message
         if (ctx.message.len > 0) {
-            try writer.print("\n  {s}\n", .{ctx.message});
+            const msg = try std.fmt.allocPrint(allocator, "\n  {s}\n", .{ctx.message});
+            defer allocator.free(msg);
+            try buf.appendSlice(allocator, msg);
         }
     }
 
@@ -97,12 +110,13 @@ pub fn formatErrorChain(
     use_color: bool,
 ) ![]const u8 {
     var buf = std.ArrayList(u8){};
-    const writer = buf.writer(allocator);
 
     if (use_color) {
-        try writer.print("{s}{s}error chain:{s}\n", .{ Color.bold, Color.red, Color.reset });
+        const header = try std.fmt.allocPrint(allocator, "{s}{s}error chain:{s}\n", .{ Color.bold, Color.red, Color.reset });
+        defer allocator.free(header);
+        try buf.appendSlice(allocator, header);
     } else {
-        try writer.writeAll("error chain:\n");
+        try buf.appendSlice(allocator, "error chain:\n");
     }
 
     for (errors, 0..) |err, i| {
@@ -110,30 +124,42 @@ pub fn formatErrorChain(
 
         // Chain indicator
         if (use_color) {
-            try writer.print("\n{s}[{d}]{s} ", .{ Color.yellow, i + 1, Color.reset });
+            const indicator = try std.fmt.allocPrint(allocator, "\n{s}[{d}]{s} ", .{ Color.yellow, i + 1, Color.reset });
+            defer allocator.free(indicator);
+            try buf.appendSlice(allocator, indicator);
         } else {
-            try writer.print("\n[{d}] ", .{i + 1});
+            const indicator = try std.fmt.allocPrint(allocator, "\n[{d}] ", .{i + 1});
+            defer allocator.free(indicator);
+            try buf.appendSlice(allocator, indicator);
         }
 
         // Error name
-        try writer.print("{s}\n", .{@errorName(err)});
+        const err_name = try std.fmt.allocPrint(allocator, "{s}\n", .{@errorName(err)});
+        defer allocator.free(err_name);
+        try buf.appendSlice(allocator, err_name);
 
         // Context
         if (ctx) |c| {
             if (use_color) {
-                try writer.print("    {s}-->{s} {s}:{d}:{d}\n", .{
+                const loc = try std.fmt.allocPrint(allocator, "    {s}-->{s} {s}:{d}:{d}\n", .{
                     Color.cyan,
                     Color.reset,
                     c.file,
                     c.line,
                     c.column,
                 });
+                defer allocator.free(loc);
+                try buf.appendSlice(allocator, loc);
             } else {
-                try writer.print("    --> {s}:{d}:{d}\n", .{ c.file, c.line, c.column });
+                const loc = try std.fmt.allocPrint(allocator, "    --> {s}:{d}:{d}\n", .{ c.file, c.line, c.column });
+                defer allocator.free(loc);
+                try buf.appendSlice(allocator, loc);
             }
 
             if (c.message.len > 0) {
-                try writer.print("    {s}\n", .{c.message});
+                const msg = try std.fmt.allocPrint(allocator, "    {s}\n", .{c.message});
+                defer allocator.free(msg);
+                try buf.appendSlice(allocator, msg);
             }
         }
     }

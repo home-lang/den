@@ -51,7 +51,12 @@ pub const SystemInfo = struct {
             defer file.close();
 
             var buf: [256]u8 = undefined;
-            const size = try file.readAll(&buf);
+            var size: usize = 0;
+            while (size < buf.len) {
+                const n = try file.read(buf[size..]);
+                if (n == 0) break;
+                size += n;
+            }
             const hostname = std.mem.trim(u8, buf[0..size], &std.ascii.whitespace);
 
             return try self.allocator.dupe(u8, hostname);

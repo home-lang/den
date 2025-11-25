@@ -170,87 +170,95 @@ pub const Builder = struct {
 
     /// Set foreground color
     pub fn fg(self: *Builder, color: Color) !void {
-        try self.buffer.appendSlice(self.allocator,CSI);
-        switch (color) {
-            .basic => |idx| {
-                if (idx < 8) {
-                    try self.buffer.writer(self.allocator).print("3{d}m", .{idx});
-                } else {
-                    try self.buffer.writer(self.allocator).print("9{d}m", .{idx - 8});
-                }
-            },
-            .palette => |idx| {
-                try self.buffer.writer(self.allocator).print("38;5;{d}m", .{idx});
-            },
-            .rgb => |c| {
-                try self.buffer.writer(self.allocator).print("38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-            },
-        }
+        try self.buffer.appendSlice(self.allocator, CSI);
+        var buf: [32]u8 = undefined;
+        const result = switch (color) {
+            .basic => |idx| if (idx < 8)
+                try std.fmt.bufPrint(&buf, "3{d}m", .{idx})
+            else
+                try std.fmt.bufPrint(&buf, "9{d}m", .{idx - 8}),
+            .palette => |idx| try std.fmt.bufPrint(&buf, "38;5;{d}m", .{idx}),
+            .rgb => |c| try std.fmt.bufPrint(&buf, "38;2;{d};{d};{d}m", .{ c.r, c.g, c.b }),
+        };
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Set background color
     pub fn bg(self: *Builder, color: Color) !void {
-        try self.buffer.appendSlice(self.allocator,CSI);
-        switch (color) {
-            .basic => |idx| {
-                if (idx < 8) {
-                    try self.buffer.writer(self.allocator).print("4{d}m", .{idx});
-                } else {
-                    try self.buffer.writer(self.allocator).print("10{d}m", .{idx - 8});
-                }
-            },
-            .palette => |idx| {
-                try self.buffer.writer(self.allocator).print("48;5;{d}m", .{idx});
-            },
-            .rgb => |c| {
-                try self.buffer.writer(self.allocator).print("48;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-            },
-        }
+        try self.buffer.appendSlice(self.allocator, CSI);
+        var buf: [32]u8 = undefined;
+        const result = switch (color) {
+            .basic => |idx| if (idx < 8)
+                try std.fmt.bufPrint(&buf, "4{d}m", .{idx})
+            else
+                try std.fmt.bufPrint(&buf, "10{d}m", .{idx - 8}),
+            .palette => |idx| try std.fmt.bufPrint(&buf, "48;5;{d}m", .{idx}),
+            .rgb => |c| try std.fmt.bufPrint(&buf, "48;2;{d};{d};{d}m", .{ c.r, c.g, c.b }),
+        };
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Set text style
     pub fn style(self: *Builder, s: Style) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d}m", .{@intFromEnum(s)});
+        var buf: [16]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d}m", .{@intFromEnum(s)});
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor up
     pub fn cursorUp(self: *Builder, n: u32) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d}A", .{n});
+        var buf: [16]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d}A", .{n});
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor down
     pub fn cursorDown(self: *Builder, n: u32) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d}B", .{n});
+        var buf: [16]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d}B", .{n});
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor forward (right)
     pub fn cursorForward(self: *Builder, n: u32) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d}C", .{n});
+        var buf: [16]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d}C", .{n});
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor backward (left)
     pub fn cursorBackward(self: *Builder, n: u32) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d}D", .{n});
+        var buf: [16]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d}D", .{n});
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor to next line
     pub fn cursorNextLine(self: *Builder, n: u32) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d}E", .{n});
+        var buf: [16]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d}E", .{n});
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor to previous line
     pub fn cursorPrevLine(self: *Builder, n: u32) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d}F", .{n});
+        var buf: [16]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d}F", .{n});
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor to column
     pub fn cursorToColumn(self: *Builder, col: u32) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d}G", .{col});
+        var buf: [16]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d}G", .{col});
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor to position (1-indexed)
     pub fn cursorTo(self: *Builder, row: u32, col: u32) !void {
-        try self.buffer.writer(self.allocator).print(CSI ++ "{d};{d}H", .{ row, col });
+        var buf: [24]u8 = undefined;
+        const result = try std.fmt.bufPrint(&buf, CSI ++ "{d};{d}H", .{ row, col });
+        try self.buffer.appendSlice(self.allocator, result);
     }
 
     /// Move cursor to home position (1,1)

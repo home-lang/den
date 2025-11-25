@@ -65,7 +65,7 @@ pub const TestRunner = struct {
     fn runTestModule(self: *TestRunner, module_name: []const u8) !TestResult {
         var result = try TestResult.init(self.allocator, module_name);
 
-        const start_time = std.time.nanoTimestamp();
+        const start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
 
         // Build test command
         var cmd_args = std.ArrayList([]const u8){};
@@ -85,28 +85,53 @@ pub const TestRunner = struct {
         child.stderr_behavior = .Pipe;
 
         child.spawn() catch |err| {
-            const duration = @as(u64, @intCast(std.time.nanoTimestamp() - start_time));
+            const end_time = std.time.Instant.now() catch start_time;
+            const duration = end_time.since(start_time);
             const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to spawn test: {any}", .{err});
             try result.setFailed(duration, error_msg);
             self.allocator.free(error_msg);
             return result;
         };
 
-        const stdout = child.stdout.?.readToEndAlloc(self.allocator, 1024 * 1024) catch "";
-        defer self.allocator.free(stdout);
+        // Read stdout manually
+        var stdout_buf = std.ArrayList(u8){};
+        defer stdout_buf.deinit(self.allocator);
+        if (child.stdout) |stdout_pipe| {
+            var read_buf: [4096]u8 = undefined;
+            while (true) {
+                const n = stdout_pipe.read(&read_buf) catch break;
+                if (n == 0) break;
+                try stdout_buf.appendSlice(self.allocator, read_buf[0..n]);
+                if (stdout_buf.items.len >= 1024 * 1024) break;
+            }
+        }
+        const stdout = stdout_buf.items;
 
-        const stderr = child.stderr.?.readToEndAlloc(self.allocator, 1024 * 1024) catch "";
-        defer self.allocator.free(stderr);
+        // Read stderr manually
+        var stderr_buf = std.ArrayList(u8){};
+        defer stderr_buf.deinit(self.allocator);
+        if (child.stderr) |stderr_pipe| {
+            var read_buf: [4096]u8 = undefined;
+            while (true) {
+                const n = stderr_pipe.read(&read_buf) catch break;
+                if (n == 0) break;
+                try stderr_buf.appendSlice(self.allocator, read_buf[0..n]);
+                if (stderr_buf.items.len >= 1024 * 1024) break;
+            }
+        }
+        const stderr = stderr_buf.items;
 
         const term = child.wait() catch |err| {
-            const duration = @as(u64, @intCast(std.time.nanoTimestamp() - start_time));
+            const end_time = std.time.Instant.now() catch start_time;
+            const duration = end_time.since(start_time);
             const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to wait for test: {any}", .{err});
             try result.setFailed(duration, error_msg);
             self.allocator.free(error_msg);
             return result;
         };
 
-        const duration = @as(u64, @intCast(std.time.nanoTimestamp() - start_time));
+        const end_time = std.time.Instant.now() catch start_time;
+        const duration = end_time.since(start_time);
 
         switch (term) {
             .Exited => |code| {

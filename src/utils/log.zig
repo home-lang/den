@@ -109,54 +109,72 @@ pub const Logger = struct {
 
         // Build the log message
         var buf: [4096]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const writer = fbs.writer();
+        var pos: usize = 0;
 
         // Add color if enabled
         if (self.config.use_color) {
-            writer.writeAll(level.color()) catch return;
+            const color_str = level.color();
+            const color_len = @min(color_str.len, buf.len - pos);
+            @memcpy(buf[pos..][0..color_len], color_str[0..color_len]);
+            pos += color_len;
         }
 
         // Add timestamp if enabled
         if (self.config.show_timestamp) {
-            const timestamp = std.time.timestamp();
+            const now = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+            const timestamp = now.timestamp.sec;
             const seconds = @mod(timestamp, 86400);
             const hours = @divTrunc(seconds, 3600);
             const minutes = @divTrunc(@mod(seconds, 3600), 60);
             const secs = @mod(seconds, 60);
-            writer.print("[{d:0>2}:{d:0>2}:{d:0>2}] ", .{ hours, minutes, secs }) catch return;
+            pos += (std.fmt.bufPrint(buf[pos..], "[{d:0>2}:{d:0>2}:{d:0>2}] ", .{ hours, minutes, secs }) catch return).len;
         }
 
         // Add level
-        writer.print("[{s}] ", .{level.asString()}) catch return;
+        pos += (std.fmt.bufPrint(buf[pos..], "[{s}] ", .{level.asString()}) catch return).len;
 
         // Add file and line if enabled
         if (self.config.show_file or self.config.show_line) {
-            writer.writeAll("[") catch return;
+            buf[pos] = '[';
+            pos += 1;
             if (self.config.show_file) {
                 // Extract just the filename from the full path
                 const file = std.fs.path.basename(src.file);
-                writer.writeAll(file) catch return;
+                const file_len = @min(file.len, buf.len - pos);
+                @memcpy(buf[pos..][0..file_len], file[0..file_len]);
+                pos += file_len;
             }
             if (self.config.show_line) {
-                if (self.config.show_file) writer.writeAll(":") catch return;
-                writer.print("{d}", .{src.line}) catch return;
+                if (self.config.show_file) {
+                    buf[pos] = ':';
+                    pos += 1;
+                }
+                pos += (std.fmt.bufPrint(buf[pos..], "{d}", .{src.line}) catch return).len;
             }
-            writer.writeAll("] ") catch return;
+            const suffix = "] ";
+            const suffix_len = @min(suffix.len, buf.len - pos);
+            @memcpy(buf[pos..][0..suffix_len], suffix[0..suffix_len]);
+            pos += suffix_len;
         }
 
         // Add the formatted message
-        writer.print(fmt, args) catch return;
+        pos += (std.fmt.bufPrint(buf[pos..], fmt, args) catch return).len;
 
         // Reset color if enabled
         if (self.config.use_color) {
-            writer.writeAll("\x1b[0m") catch return;
+            const reset = "\x1b[0m";
+            const reset_len = @min(reset.len, buf.len - pos);
+            @memcpy(buf[pos..][0..reset_len], reset[0..reset_len]);
+            pos += reset_len;
         }
 
-        writer.writeAll("\n") catch return;
+        if (pos < buf.len) {
+            buf[pos] = '\n';
+            pos += 1;
+        }
 
         // Write to stderr by default
-        const output = fbs.getWritten();
+        const output = buf[0..pos];
         if (self.config.output_file) |file| {
             _ = file.write(output) catch {};
         } else {
