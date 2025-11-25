@@ -752,8 +752,8 @@ pub const Expansion = struct {
         // Extract expression (between (( and ))
         const expr = input[3..end - 1];
 
-        // Evaluate arithmetic expression
-        var arith = Arithmetic.init(self.allocator);
+        // Evaluate arithmetic expression with variable support
+        var arith = Arithmetic.initWithVariables(self.allocator, self.environment);
         const result_value = arith.eval(expr) catch {
             // On error, return 0
             const value = try std.fmt.allocPrint(self.allocator, "0", .{});

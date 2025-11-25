@@ -1,11 +1,17 @@
 const std = @import("std");
 
 /// Simple arithmetic evaluator for shell arithmetic expansion
+/// Supports: +, -, *, /, %, **, <<, >>, &, |, ^, ~, !, &&, ||, <, >, <=, >=, ==, !=, ?:
 pub const Arithmetic = struct {
     allocator: std.mem.Allocator,
+    variables: ?*std.StringHashMap([]const u8) = null,
 
     pub fn init(allocator: std.mem.Allocator) Arithmetic {
-        return .{ .allocator = allocator };
+        return .{ .allocator = allocator, .variables = null };
+    }
+
+    pub fn initWithVariables(allocator: std.mem.Allocator, variables: *std.StringHashMap([]const u8)) Arithmetic {
+        return .{ .allocator = allocator, .variables = variables };
     }
 
     /// Evaluate an arithmetic expression and return the result
@@ -17,6 +23,7 @@ pub const Arithmetic = struct {
             .input = trimmed,
             .pos = 0,
             .allocator = self.allocator,
+            .variables = self.variables,
         };
 
         return try parser.parseExpression();
@@ -28,18 +35,244 @@ const ArithmeticError = error{
     NegativeExponent,
     UnexpectedEnd,
     MissingClosingParen,
+    MissingColonInTernary,
     InvalidNumber,
+    InvalidVariable,
 };
 
 const Parser = struct {
     input: []const u8,
     pos: usize,
     allocator: std.mem.Allocator,
+    variables: ?*std.StringHashMap([]const u8),
 
+    // Entry point - lowest precedence
     fn parseExpression(self: *Parser) ArithmeticError!i64 {
-        return try self.parseAddSub();
+        return try self.parseTernary();
     }
 
+    // Ternary operator: expr ? expr : expr (lowest precedence)
+    fn parseTernary(self: *Parser) ArithmeticError!i64 {
+        const condition = try self.parseLogicalOr();
+
+        self.skipWhitespace();
+        if (self.pos < self.input.len and self.input[self.pos] == '?') {
+            self.pos += 1;
+            const true_val = try self.parseTernary();
+
+            self.skipWhitespace();
+            if (self.pos >= self.input.len or self.input[self.pos] != ':') {
+                return error.MissingColonInTernary;
+            }
+            self.pos += 1;
+            const false_val = try self.parseTernary();
+
+            return if (condition != 0) true_val else false_val;
+        }
+
+        return condition;
+    }
+
+    // Logical OR: ||
+    fn parseLogicalOr(self: *Parser) ArithmeticError!i64 {
+        var left = try self.parseLogicalAnd();
+
+        while (self.pos < self.input.len) {
+            self.skipWhitespace();
+            if (self.pos + 1 < self.input.len and
+                self.input[self.pos] == '|' and
+                self.input[self.pos + 1] == '|')
+            {
+                self.pos += 2;
+                const right = try self.parseLogicalAnd();
+                left = if (left != 0 or right != 0) 1 else 0;
+            } else {
+                break;
+            }
+        }
+
+        return left;
+    }
+
+    // Logical AND: &&
+    fn parseLogicalAnd(self: *Parser) ArithmeticError!i64 {
+        var left = try self.parseBitwiseOr();
+
+        while (self.pos < self.input.len) {
+            self.skipWhitespace();
+            if (self.pos + 1 < self.input.len and
+                self.input[self.pos] == '&' and
+                self.input[self.pos + 1] == '&')
+            {
+                self.pos += 2;
+                const right = try self.parseBitwiseOr();
+                left = if (left != 0 and right != 0) 1 else 0;
+            } else {
+                break;
+            }
+        }
+
+        return left;
+    }
+
+    // Bitwise OR: |
+    fn parseBitwiseOr(self: *Parser) ArithmeticError!i64 {
+        var left = try self.parseBitwiseXor();
+
+        while (self.pos < self.input.len) {
+            self.skipWhitespace();
+            if (self.pos < self.input.len and self.input[self.pos] == '|') {
+                // Check it's not ||
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '|') {
+                    break;
+                }
+                self.pos += 1;
+                const right = try self.parseBitwiseXor();
+                left = left | right;
+            } else {
+                break;
+            }
+        }
+
+        return left;
+    }
+
+    // Bitwise XOR: ^
+    fn parseBitwiseXor(self: *Parser) ArithmeticError!i64 {
+        var left = try self.parseBitwiseAnd();
+
+        while (self.pos < self.input.len) {
+            self.skipWhitespace();
+            if (self.pos < self.input.len and self.input[self.pos] == '^') {
+                self.pos += 1;
+                const right = try self.parseBitwiseAnd();
+                left = left ^ right;
+            } else {
+                break;
+            }
+        }
+
+        return left;
+    }
+
+    // Bitwise AND: &
+    fn parseBitwiseAnd(self: *Parser) ArithmeticError!i64 {
+        var left = try self.parseEquality();
+
+        while (self.pos < self.input.len) {
+            self.skipWhitespace();
+            if (self.pos < self.input.len and self.input[self.pos] == '&') {
+                // Check it's not &&
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '&') {
+                    break;
+                }
+                self.pos += 1;
+                const right = try self.parseEquality();
+                left = left & right;
+            } else {
+                break;
+            }
+        }
+
+        return left;
+    }
+
+    // Equality: == !=
+    fn parseEquality(self: *Parser) ArithmeticError!i64 {
+        var left = try self.parseComparison();
+
+        while (self.pos < self.input.len) {
+            self.skipWhitespace();
+            if (self.pos + 1 < self.input.len) {
+                if (self.input[self.pos] == '=' and self.input[self.pos + 1] == '=') {
+                    self.pos += 2;
+                    const right = try self.parseComparison();
+                    left = if (left == right) 1 else 0;
+                } else if (self.input[self.pos] == '!' and self.input[self.pos + 1] == '=') {
+                    self.pos += 2;
+                    const right = try self.parseComparison();
+                    left = if (left != right) 1 else 0;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        return left;
+    }
+
+    // Comparison: < > <= >=
+    fn parseComparison(self: *Parser) ArithmeticError!i64 {
+        var left = try self.parseShift();
+
+        while (self.pos < self.input.len) {
+            self.skipWhitespace();
+            if (self.pos >= self.input.len) break;
+
+            if (self.pos + 1 < self.input.len and self.input[self.pos] == '<' and self.input[self.pos + 1] == '=') {
+                self.pos += 2;
+                const right = try self.parseShift();
+                left = if (left <= right) 1 else 0;
+            } else if (self.pos + 1 < self.input.len and self.input[self.pos] == '>' and self.input[self.pos + 1] == '=') {
+                self.pos += 2;
+                const right = try self.parseShift();
+                left = if (left >= right) 1 else 0;
+            } else if (self.input[self.pos] == '<') {
+                // Check it's not <<
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '<') {
+                    break;
+                }
+                self.pos += 1;
+                const right = try self.parseShift();
+                left = if (left < right) 1 else 0;
+            } else if (self.input[self.pos] == '>') {
+                // Check it's not >>
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '>') {
+                    break;
+                }
+                self.pos += 1;
+                const right = try self.parseShift();
+                left = if (left > right) 1 else 0;
+            } else {
+                break;
+            }
+        }
+
+        return left;
+    }
+
+    // Shift: << >>
+    fn parseShift(self: *Parser) ArithmeticError!i64 {
+        var left = try self.parseAddSub();
+
+        while (self.pos < self.input.len) {
+            self.skipWhitespace();
+            if (self.pos + 1 < self.input.len) {
+                if (self.input[self.pos] == '<' and self.input[self.pos + 1] == '<') {
+                    self.pos += 2;
+                    const right = try self.parseAddSub();
+                    // Zig requires u6 for shift amount
+                    const shift_amt: u6 = @intCast(@min(@max(right, 0), 63));
+                    left = left << shift_amt;
+                } else if (self.input[self.pos] == '>' and self.input[self.pos + 1] == '>') {
+                    self.pos += 2;
+                    const right = try self.parseAddSub();
+                    const shift_amt: u6 = @intCast(@min(@max(right, 0), 63));
+                    left = left >> shift_amt;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        return left;
+    }
+
+    // Addition/Subtraction: + -
     fn parseAddSub(self: *Parser) ArithmeticError!i64 {
         var left = try self.parseMulDiv();
 
@@ -64,6 +297,7 @@ const Parser = struct {
         return left;
     }
 
+    // Multiplication/Division/Modulo: * / %
     fn parseMulDiv(self: *Parser) ArithmeticError!i64 {
         var left = try self.parsePower();
 
@@ -73,6 +307,10 @@ const Parser = struct {
 
             const op = self.input[self.pos];
             if (op == '*') {
+                // Check it's not **
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '*') {
+                    break;
+                }
                 self.pos += 1;
                 const right = try self.parsePower();
                 left = left * right;
@@ -94,6 +332,7 @@ const Parser = struct {
         return left;
     }
 
+    // Power: ** (right associative)
     fn parsePower(self: *Parser) ArithmeticError!i64 {
         var left = try self.parseUnary();
 
@@ -104,7 +343,8 @@ const Parser = struct {
             // Check for ** operator
             if (self.pos + 1 < self.input.len and
                 self.input[self.pos] == '*' and
-                self.input[self.pos + 1] == '*') {
+                self.input[self.pos + 1] == '*')
+            {
                 self.pos += 2;
                 const right = try self.parseUnary();
                 left = try self.power(left, right);
@@ -116,6 +356,7 @@ const Parser = struct {
         return left;
     }
 
+    // Unary: + - ! ~
     fn parseUnary(self: *Parser) ArithmeticError!i64 {
         self.skipWhitespace();
 
@@ -128,12 +369,25 @@ const Parser = struct {
             } else if (ch == '+') {
                 self.pos += 1;
                 return try self.parseUnary();
+            } else if (ch == '!') {
+                // Check it's not !=
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '=') {
+                    return try self.parsePrimary();
+                }
+                self.pos += 1;
+                const value = try self.parseUnary();
+                return if (value == 0) 1 else 0;
+            } else if (ch == '~') {
+                self.pos += 1;
+                const value = try self.parseUnary();
+                return ~value;
             }
         }
 
         return try self.parsePrimary();
     }
 
+    // Primary: numbers, variables, parentheses
     fn parsePrimary(self: *Parser) ArithmeticError!i64 {
         self.skipWhitespace();
 
@@ -153,8 +407,54 @@ const Parser = struct {
             return value;
         }
 
+        // Handle variable reference (with or without $)
+        if (self.input[self.pos] == '$' or std.ascii.isAlphabetic(self.input[self.pos]) or self.input[self.pos] == '_') {
+            return try self.parseVariable();
+        }
+
         // Parse number
         return try self.parseNumber();
+    }
+
+    // Parse variable reference
+    fn parseVariable(self: *Parser) ArithmeticError!i64 {
+        self.skipWhitespace();
+
+        // Skip optional $
+        if (self.pos < self.input.len and self.input[self.pos] == '$') {
+            self.pos += 1;
+        }
+
+        const start = self.pos;
+
+        // Variable name: alphanumeric and underscore
+        while (self.pos < self.input.len) {
+            const c = self.input[self.pos];
+            if (std.ascii.isAlphanumeric(c) or c == '_') {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+
+        if (start == self.pos) {
+            return error.InvalidVariable;
+        }
+
+        const var_name = self.input[start..self.pos];
+
+        // Look up variable value
+        if (self.variables) |vars| {
+            if (vars.get(var_name)) |value| {
+                // Parse the variable value as a number
+                const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+                if (trimmed.len == 0) return 0;
+                return std.fmt.parseInt(i64, trimmed, 10) catch 0;
+            }
+        }
+
+        // Variable not found - return 0 (shell convention)
+        return 0;
     }
 
     fn parseNumber(self: *Parser) ArithmeticError!i64 {
@@ -162,17 +462,35 @@ const Parser = struct {
 
         const start = self.pos;
 
-        // Allow leading sign
-        if (self.pos < self.input.len and (self.input[self.pos] == '-' or self.input[self.pos] == '+')) {
-            self.pos += 1;
+        // Handle hex (0x...) and octal (0...)
+        if (self.pos + 1 < self.input.len and self.input[self.pos] == '0') {
+            if (self.input[self.pos + 1] == 'x' or self.input[self.pos + 1] == 'X') {
+                // Hexadecimal
+                self.pos += 2;
+                const hex_start = self.pos;
+                while (self.pos < self.input.len and std.ascii.isHex(self.input[self.pos])) {
+                    self.pos += 1;
+                }
+                if (hex_start == self.pos) return error.InvalidNumber;
+                return std.fmt.parseInt(i64, self.input[hex_start..self.pos], 16) catch error.InvalidNumber;
+            } else if (std.ascii.isDigit(self.input[self.pos + 1])) {
+                // Octal
+                self.pos += 1;
+                const oct_start = self.pos;
+                while (self.pos < self.input.len and self.input[self.pos] >= '0' and self.input[self.pos] <= '7') {
+                    self.pos += 1;
+                }
+                if (oct_start == self.pos) return error.InvalidNumber;
+                return std.fmt.parseInt(i64, self.input[oct_start..self.pos], 8) catch error.InvalidNumber;
+            }
         }
 
-        // Parse digits
+        // Parse decimal digits
         while (self.pos < self.input.len and std.ascii.isDigit(self.input[self.pos])) {
             self.pos += 1;
         }
 
-        if (start == self.pos or (self.pos == start + 1 and !std.ascii.isDigit(self.input[start]))) {
+        if (start == self.pos) {
             return error.InvalidNumber;
         }
 
@@ -207,6 +525,10 @@ const Parser = struct {
         return result;
     }
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 test "arithmetic basic operations" {
     const allocator = std.testing.allocator;
@@ -243,4 +565,149 @@ test "arithmetic unary operators" {
     try std.testing.expectEqual(@as(i64, -5), try arith.eval("-5"));
     try std.testing.expectEqual(@as(i64, 5), try arith.eval("+5"));
     try std.testing.expectEqual(@as(i64, -8), try arith.eval("-(3 + 5)"));
+}
+
+test "arithmetic comparison operators" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Less than
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("2 < 3"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("3 < 2"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("2 < 2"));
+
+    // Greater than
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("2 > 3"));
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("3 > 2"));
+
+    // Less than or equal
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("2 <= 3"));
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("2 <= 2"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("3 <= 2"));
+
+    // Greater than or equal
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("3 >= 2"));
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("2 >= 2"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("2 >= 3"));
+
+    // Equal
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("5 == 5"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("5 == 6"));
+
+    // Not equal
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("5 != 6"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("5 != 5"));
+}
+
+test "arithmetic logical operators" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Logical AND
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("1 && 1"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("1 && 0"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("0 && 1"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("0 && 0"));
+
+    // Logical OR
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("1 || 1"));
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("1 || 0"));
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("0 || 1"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("0 || 0"));
+
+    // Logical NOT
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("!1"));
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("!0"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("!5"));
+}
+
+test "arithmetic bitwise operators" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Bitwise AND
+    try std.testing.expectEqual(@as(i64, 0b0100), try arith.eval("0b0110 & 0b1100"));
+    try std.testing.expectEqual(@as(i64, 4), try arith.eval("6 & 12"));
+
+    // Bitwise OR
+    try std.testing.expectEqual(@as(i64, 0b1110), try arith.eval("0b0110 | 0b1100"));
+    try std.testing.expectEqual(@as(i64, 14), try arith.eval("6 | 12"));
+
+    // Bitwise XOR
+    try std.testing.expectEqual(@as(i64, 0b1010), try arith.eval("0b0110 ^ 0b1100"));
+    try std.testing.expectEqual(@as(i64, 10), try arith.eval("6 ^ 12"));
+
+    // Bitwise NOT
+    try std.testing.expectEqual(@as(i64, -6), try arith.eval("~5"));
+
+    // Left shift
+    try std.testing.expectEqual(@as(i64, 8), try arith.eval("2 << 2"));
+    try std.testing.expectEqual(@as(i64, 16), try arith.eval("1 << 4"));
+
+    // Right shift
+    try std.testing.expectEqual(@as(i64, 2), try arith.eval("8 >> 2"));
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("16 >> 4"));
+}
+
+test "arithmetic ternary operator" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    try std.testing.expectEqual(@as(i64, 10), try arith.eval("1 ? 10 : 20"));
+    try std.testing.expectEqual(@as(i64, 20), try arith.eval("0 ? 10 : 20"));
+    try std.testing.expectEqual(@as(i64, 5), try arith.eval("(3 > 2) ? 5 : 10"));
+    try std.testing.expectEqual(@as(i64, 10), try arith.eval("(3 < 2) ? 5 : 10"));
+
+    // Nested ternary
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("1 ? 1 : 0 ? 2 : 3"));
+}
+
+test "arithmetic hex and octal" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Hexadecimal
+    try std.testing.expectEqual(@as(i64, 255), try arith.eval("0xff"));
+    try std.testing.expectEqual(@as(i64, 16), try arith.eval("0x10"));
+    try std.testing.expectEqual(@as(i64, 256), try arith.eval("0xFF + 1"));
+
+    // Octal
+    try std.testing.expectEqual(@as(i64, 8), try arith.eval("010"));
+    try std.testing.expectEqual(@as(i64, 63), try arith.eval("077"));
+}
+
+test "arithmetic variables" {
+    const allocator = std.testing.allocator;
+
+    var vars = std.StringHashMap([]const u8).init(allocator);
+    defer vars.deinit();
+
+    try vars.put("x", "10");
+    try vars.put("y", "5");
+    try vars.put("empty", "");
+
+    var arith = Arithmetic.initWithVariables(allocator, &vars);
+
+    try std.testing.expectEqual(@as(i64, 10), try arith.eval("x"));
+    try std.testing.expectEqual(@as(i64, 10), try arith.eval("$x"));
+    try std.testing.expectEqual(@as(i64, 15), try arith.eval("x + y"));
+    try std.testing.expectEqual(@as(i64, 50), try arith.eval("x * y"));
+    try std.testing.expectEqual(@as(i64, 11), try arith.eval("x + 1"));
+
+    // Empty variable should be 0
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("empty"));
+
+    // Undefined variable should be 0
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("undefined_var"));
+}
+
+test "arithmetic complex expressions" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Complex expression with multiple operators
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("(5 > 3) && (2 < 4)"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("(5 > 3) && (2 > 4)"));
+    try std.testing.expectEqual(@as(i64, 7), try arith.eval("(1 + 2) | 4"));
+    try std.testing.expectEqual(@as(i64, 20), try arith.eval("(2 + 3) << 2"));
 }
