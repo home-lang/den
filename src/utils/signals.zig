@@ -5,11 +5,18 @@ const builtin = @import("builtin");
 var signal_received: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 var window_size_changed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
 
+/// Windows console control event types
+const CTRL_C_EVENT: u32 = 0;
+const CTRL_BREAK_EVENT: u32 = 1;
+const CTRL_CLOSE_EVENT: u32 = 2;
+const CTRL_LOGOFF_EVENT: u32 = 5;
+const CTRL_SHUTDOWN_EVENT: u32 = 6;
+
 /// Signal types we handle
 pub const Signal = enum {
     none,
-    interrupt,  // SIGINT (Ctrl+C)
-    terminate,  // SIGTERM
+    interrupt,  // SIGINT (Ctrl+C) / CTRL_C_EVENT
+    terminate,  // SIGTERM / CTRL_CLOSE_EVENT
     winch,      // SIGWINCH (window resize)
 
     pub fn fromPosix(sig: u32) Signal {
@@ -24,6 +31,15 @@ pub const Signal = enum {
             else => .none,
         };
     }
+
+    /// Convert Windows console control event to Signal
+    pub fn fromWindowsEvent(event: u32) Signal {
+        return switch (event) {
+            CTRL_C_EVENT, CTRL_BREAK_EVENT => .interrupt,
+            CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT => .terminate,
+            else => .none,
+        };
+    }
 };
 
 /// Terminal window size
@@ -32,10 +48,34 @@ pub const WindowSize = struct {
     cols: u16,
 };
 
+/// Windows console control handler
+fn windowsCtrlHandler(ctrl_type: u32) callconv(std.os.windows.WINAPI) std.os.windows.BOOL {
+    const signal = Signal.fromWindowsEvent(ctrl_type);
+    switch (signal) {
+        .interrupt => {
+            // Store interrupt signal (use a sentinel value distinct from POSIX)
+            signal_received.store(1, .release);
+            return std.os.windows.TRUE; // Handled
+        },
+        .terminate => {
+            // Store terminate signal
+            signal_received.store(2, .release);
+            return std.os.windows.TRUE; // Handled
+        },
+        .none, .winch => {
+            return std.os.windows.FALSE; // Not handled
+        },
+    }
+}
+
 /// Install signal handlers
 pub fn installHandlers() !void {
     if (builtin.os.tag == .windows) {
-        // Windows signal handling not yet implemented
+        // Windows: use SetConsoleCtrlHandler for Ctrl+C and close events
+        const kernel32 = std.os.windows.kernel32;
+        if (kernel32.SetConsoleCtrlHandler(@ptrCast(&windowsCtrlHandler), std.os.windows.TRUE) == 0) {
+            return error.SetConsoleCtrlHandlerFailed;
+        }
         return;
     }
 
@@ -86,6 +126,15 @@ fn handleSignal(sig: c_int) callconv(.c) void {
 pub fn checkSignal() ?Signal {
     const sig = signal_received.swap(0, .acquire);
     if (sig == 0) return null;
+
+    if (builtin.os.tag == .windows) {
+        // Windows uses sentinel values: 1 = interrupt, 2 = terminate
+        return switch (sig) {
+            1 => .interrupt,
+            2 => .terminate,
+            else => .none,
+        };
+    }
     return Signal.fromPosix(sig);
 }
 
@@ -139,6 +188,9 @@ pub fn getWindowSize() !WindowSize {
 /// Reset signal handlers to default
 pub fn resetHandlers() !void {
     if (builtin.os.tag == .windows) {
+        // Windows: remove our console control handler
+        const kernel32 = std.os.windows.kernel32;
+        _ = kernel32.SetConsoleCtrlHandler(@ptrCast(&windowsCtrlHandler), std.os.windows.FALSE);
         return;
     }
 

@@ -7,6 +7,9 @@ const builtin = @import("builtin");
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
 
+// Windows process access rights (for job control)
+const PROCESS_TERMINATE: u32 = 0x0001;
+
 pub const Executor = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
@@ -2038,8 +2041,72 @@ pub const Executor = struct {
             return 1;
         }
 
-        var signal: u8 = std.posix.SIG.TERM;
         var start_idx: usize = 0;
+
+        if (builtin.os.tag == .windows) {
+            // Windows: parse optional signal flag but only support TERM/KILL (both terminate)
+            if (command.args[0].len > 0 and command.args[0][0] == '-') {
+                const sig_str = command.args[0][1..];
+                // Only accept TERM, KILL, or their numeric equivalents (9, 15)
+                if (sig_str.len > 0) {
+                    const valid = std.mem.eql(u8, sig_str, "TERM") or
+                        std.mem.eql(u8, sig_str, "KILL") or
+                        std.mem.eql(u8, sig_str, "9") or
+                        std.mem.eql(u8, sig_str, "15");
+                    if (!valid) {
+                        // Check for other signals and warn
+                        if (std.mem.eql(u8, sig_str, "HUP") or
+                            std.mem.eql(u8, sig_str, "INT") or
+                            std.mem.eql(u8, sig_str, "QUIT") or
+                            std.mem.eql(u8, sig_str, "STOP") or
+                            std.mem.eql(u8, sig_str, "CONT"))
+                        {
+                            try IO.eprint("den: kill: signal {s} not supported on Windows, using TERM\n", .{sig_str});
+                        } else {
+                            try IO.eprint("den: kill: invalid signal: {s}\n", .{sig_str});
+                            return 1;
+                        }
+                    }
+                }
+                start_idx = 1;
+            }
+
+            if (start_idx >= command.args.len) {
+                try IO.eprint("den: kill: missing process ID\n", .{});
+                return 1;
+            }
+
+            // Terminate each process on Windows
+            for (command.args[start_idx..]) |pid_str| {
+                const pid = std.fmt.parseInt(u32, pid_str, 10) catch {
+                    try IO.eprint("den: kill: invalid process ID: {s}\n", .{pid_str});
+                    continue;
+                };
+
+                // Open process with TERMINATE permission
+                const handle = std.os.windows.kernel32.OpenProcess(
+                    PROCESS_TERMINATE,
+                    std.os.windows.FALSE,
+                    pid,
+                );
+                if (handle == null) {
+                    try IO.eprint("den: kill: ({d}): cannot open process\n", .{pid});
+                    return 1;
+                }
+                defer std.os.windows.CloseHandle(handle.?);
+
+                // Terminate the process
+                if (std.os.windows.kernel32.TerminateProcess(handle.?, 1) == 0) {
+                    try IO.eprint("den: kill: ({d}): cannot terminate process\n", .{pid});
+                    return 1;
+                }
+            }
+
+            return 0;
+        }
+
+        // POSIX implementation
+        var signal: u8 = std.posix.SIG.TERM;
 
         // Parse signal if provided
         if (command.args[0].len > 0 and command.args[0][0] == '-') {

@@ -72,11 +72,63 @@ fn getLinuxBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     };
 }
 
+/// Get battery status on Windows using WMIC
+fn getWindowsBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
+    // Use WMIC to get battery information
+    // wmic path Win32_Battery get EstimatedChargeRemaining,BatteryStatus
+    var child = std.process.Child.init(&[_][]const u8{
+        "wmic",
+        "path",
+        "Win32_Battery",
+        "get",
+        "EstimatedChargeRemaining,BatteryStatus",
+        "/format:csv",
+    }, allocator);
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Ignore;
+
+    child.spawn() catch return null;
+
+    const output = child.stdout.?.readToEndAlloc(allocator, 4096) catch return null;
+    defer allocator.free(output);
+
+    const status = child.wait() catch return null;
+    if (status != .Exited or status.Exited != 0) return null;
+
+    // Parse CSV output: Node,BatteryStatus,EstimatedChargeRemaining
+    // BatteryStatus: 1=Discharging, 2=AC Power, 3-9=Charging variants
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    _ = lines.next(); // Skip header line
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+        if (trimmed.len == 0) continue;
+
+        var parts = std.mem.splitScalar(u8, trimmed, ',');
+        _ = parts.next(); // Skip Node
+        const battery_status_str = parts.next() orelse continue;
+        const charge_str = parts.next() orelse continue;
+
+        const percentage = std.fmt.parseInt(u8, std.mem.trim(u8, charge_str, &std.ascii.whitespace), 10) catch continue;
+        const battery_status = std.fmt.parseInt(u8, std.mem.trim(u8, battery_status_str, &std.ascii.whitespace), 10) catch continue;
+
+        // BatteryStatus: 1=Discharging, 2=On AC (full), 3-9 are various charging states
+        const is_charging = battery_status >= 2;
+
+        return types.BatteryInfo{
+            .percentage = percentage,
+            .is_charging = is_charging,
+        };
+    }
+
+    return null;
+}
+
 /// Detect battery module
 pub fn detectBattery(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
     const battery = switch (builtin.os.tag) {
         .macos => try getMacOSBattery(allocator),
         .linux => try getLinuxBattery(allocator),
+        .windows => try getWindowsBattery(allocator),
         else => null,
     } orelse return null;
 
@@ -101,11 +153,66 @@ pub fn detectBattery(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
     return info;
 }
 
+/// Get memory usage on Windows using WMIC
+fn getWindowsMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
+    // Use WMIC to get memory information
+    // wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /format:csv
+    var child = std.process.Child.init(&[_][]const u8{
+        "wmic",
+        "OS",
+        "get",
+        "FreePhysicalMemory,TotalVisibleMemorySize",
+        "/format:csv",
+    }, allocator);
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Ignore;
+
+    child.spawn() catch return null;
+
+    const output = child.stdout.?.readToEndAlloc(allocator, 4096) catch return null;
+    defer allocator.free(output);
+
+    const status = child.wait() catch return null;
+    if (status != .Exited or status.Exited != 0) return null;
+
+    // Parse CSV output: Node,FreePhysicalMemory,TotalVisibleMemorySize
+    // Values are in KB
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    _ = lines.next(); // Skip header line
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+        if (trimmed.len == 0) continue;
+
+        var parts = std.mem.splitScalar(u8, trimmed, ',');
+        _ = parts.next(); // Skip Node
+        const free_str = parts.next() orelse continue;
+        const total_str = parts.next() orelse continue;
+
+        const free_kb = std.fmt.parseInt(u64, std.mem.trim(u8, free_str, &std.ascii.whitespace), 10) catch continue;
+        const total_kb = std.fmt.parseInt(u64, std.mem.trim(u8, total_str, &std.ascii.whitespace), 10) catch continue;
+
+        if (total_kb == 0) continue;
+
+        const total_bytes = total_kb * 1024;
+        const free_bytes = free_kb * 1024;
+        const used_bytes = total_bytes - free_bytes;
+        const percentage = @as(u8, @intCast((used_bytes * 100) / total_bytes));
+
+        return types.MemoryInfo{
+            .used_bytes = used_bytes,
+            .total_bytes = total_bytes,
+            .percentage = percentage,
+        };
+    }
+
+    return null;
+}
+
 /// Get memory usage
 fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
     switch (builtin.os.tag) {
         .macos => {
-            var child = std.process.Child.init(&[_][]const u8{ "vm_stat" }, allocator);
+            var child = std.process.Child.init(&[_][]const u8{"vm_stat"}, allocator);
             child.stdout_behavior = .Pipe;
             child.stderr_behavior = .Ignore;
 
@@ -196,6 +303,7 @@ fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
                 .percentage = percentage,
             };
         },
+        .windows => return getWindowsMemoryUsage(allocator),
         else => return null,
     }
 }

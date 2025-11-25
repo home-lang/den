@@ -1,20 +1,66 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// Windows environment variable cache to avoid memory leaks
+/// Uses a simple LRU-style cache with fixed size
+const WindowsEnvCache = struct {
+    const CACHE_SIZE = 32;
+    const Entry = struct {
+        key: []const u8,
+        value: []const u8,
+    };
+
+    entries: [CACHE_SIZE]?Entry = [_]?Entry{null} ** CACHE_SIZE,
+    allocator: std.heap.GeneralPurposeAllocator(.{}) = .{},
+    next_slot: usize = 0,
+
+    fn get(self: *WindowsEnvCache, key: []const u8) ?[]const u8 {
+        // First check if we already have this key cached
+        for (self.entries) |entry_opt| {
+            if (entry_opt) |entry| {
+                if (std.mem.eql(u8, entry.key, key)) {
+                    return entry.value;
+                }
+            }
+        }
+
+        // Not cached, fetch from OS
+        const value = std.process.getEnvVarOwned(self.allocator.allocator(), key) catch {
+            return null;
+        };
+        const key_copy = self.allocator.allocator().dupe(u8, key) catch {
+            self.allocator.allocator().free(value);
+            return null;
+        };
+
+        // Free old entry if slot is occupied
+        if (self.entries[self.next_slot]) |old_entry| {
+            self.allocator.allocator().free(old_entry.key);
+            self.allocator.allocator().free(old_entry.value);
+        }
+
+        // Store in cache
+        self.entries[self.next_slot] = Entry{
+            .key = key_copy,
+            .value = value,
+        };
+        self.next_slot = (self.next_slot + 1) % CACHE_SIZE;
+
+        return value;
+    }
+};
+
+/// Thread-local cache for Windows environment variables
+threadlocal var windows_env_cache: WindowsEnvCache = .{};
+
 /// Cross-platform environment variable access (returns pointer to static data - don't free)
 /// On POSIX: returns pointer to static env data
 /// On Windows: uses thread-local storage to cache values (still don't free - managed internally)
 pub fn getEnv(key: []const u8) ?[]const u8 {
     if (builtin.os.tag == .windows) {
-        // Windows: use process.getEnvVarOwned with a thread-local cache
-        // This is a workaround since Windows env vars are UTF-16
-        // For production use, callers should use getEnvAlloc
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        const value = std.process.getEnvVarOwned(gpa.allocator(), key) catch {
-            return null;
-        };
-        // NOTE: This leaks memory - use getEnvAlloc for proper cleanup
-        return value;
+        // Windows: use thread-local cache to avoid memory leaks
+        // The cache manages its own memory and reuses slots
+        return windows_env_cache.get(key);
     }
     // On POSIX systems
     return std.posix.getenv(key);
