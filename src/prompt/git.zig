@@ -198,12 +198,22 @@ pub const GitModule = struct {
 
         try child.spawn();
 
-        const stdout = try child.stdout.?.readToEndAlloc(self.allocator, 10 * 1024 * 1024);
-        errdefer self.allocator.free(stdout);
+        // Read stdout manually (readToEndAlloc not available in Zig 0.16)
+        var output_buf = std.ArrayList(u8).empty;
+        errdefer output_buf.deinit(self.allocator);
+
+        if (child.stdout) |stdout_pipe| {
+            var read_buf: [4096]u8 = undefined;
+            while (true) {
+                const n = stdout_pipe.read(&read_buf) catch break;
+                if (n == 0) break;
+                try output_buf.appendSlice(self.allocator, read_buf[0..n]);
+            }
+        }
 
         _ = try child.wait();
 
-        return stdout;
+        return try output_buf.toOwnedSlice(self.allocator);
     }
 
     /// Find git repository root from a given path

@@ -3735,7 +3735,7 @@ fn completeBun(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
     }
 
     // Try to read package.json and extract scripts
-    const package_json = std.fs.cwd().readFileAlloc(allocator, "package.json", 1024 * 1024) catch null;
+    const package_json = std.fs.cwd().readFileAlloc("package.json", allocator, std.Io.Limit.limited(1024 * 1024)) catch null;
     if (package_json) |json_content| {
         defer allocator.free(json_content);
 
@@ -3856,7 +3856,7 @@ fn completeNpm(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
     }
 
     // Try to read package.json and extract scripts
-    const package_json = std.fs.cwd().readFileAlloc(allocator, "package.json", 1024 * 1024) catch null;
+    const package_json = std.fs.cwd().readFileAlloc("package.json", allocator, std.Io.Limit.limited(1024 * 1024)) catch null;
     if (package_json) |json_content| {
         defer allocator.free(json_content);
 

@@ -3,6 +3,12 @@ const git_mod = @import("git.zig");
 const GitInfo = git_mod.GitInfo;
 const GitModule = git_mod.GitModule;
 
+/// Helper to get milliseconds since some reference point
+fn getMilliTimestamp() i64 {
+    const now = std.time.Instant.now() catch return 0;
+    return @intCast(now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000));
+}
+
 /// Async git status fetcher with caching and timeout support
 pub const AsyncGitFetcher = struct {
     allocator: std.mem.Allocator,
@@ -73,7 +79,7 @@ pub const AsyncGitFetcher = struct {
     /// Returns cached data immediately if available, otherwise returns empty GitInfo
     /// and starts background fetch
     pub fn getInfo(self: *AsyncGitFetcher, cwd: []const u8) !GitInfo {
-        const now = std.time.milliTimestamp();
+        const now = getMilliTimestamp();
 
         // Check cache first
         self.cache_mutex.lock();
@@ -93,8 +99,8 @@ pub const AsyncGitFetcher = struct {
         }
 
         // Try to wait a bit for the result (with timeout)
-        const start = std.time.milliTimestamp();
-        while (std.time.milliTimestamp() - start < self.timeout_ms) {
+        const start = getMilliTimestamp();
+        while (getMilliTimestamp() - start < self.timeout_ms) {
             if (!self.fetch_in_progress.load(.acquire)) {
                 // Fetch completed, check cache again
                 self.cache_mutex.lock();
@@ -167,7 +173,7 @@ pub const AsyncGitFetcher = struct {
         self.cached_info = CachedGitInfo{
             .info = git_info,
             .cwd = cwd_copy,
-            .timestamp = std.time.milliTimestamp(),
+            .timestamp = getMilliTimestamp(),
             .allocator = self.allocator,
         };
     }
