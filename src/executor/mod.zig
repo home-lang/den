@@ -563,7 +563,7 @@ pub const Executor = struct {
         if (std.mem.eql(u8, command.name, "echo")) {
             return try self.builtinEcho(command);
         } else if (std.mem.eql(u8, command.name, "pwd")) {
-            return try self.builtinPwd();
+            return try self.builtinPwd(command);
         } else if (std.mem.eql(u8, command.name, "cd")) {
             return try self.builtinCd(command);
         } else if (std.mem.eql(u8, command.name, "env")) {
@@ -676,21 +676,196 @@ pub const Executor = struct {
 
     fn builtinEcho(self: *Executor, command: *types.ParsedCommand) !i32 {
         _ = self;
+
+        var no_newline = false;
+        var interpret_escapes = false;
+        var arg_start: usize = 0;
+
+        // Parse flags (only at the beginning)
         for (command.args, 0..) |arg, i| {
-            try IO.print("{s}", .{arg});
-            if (i < command.args.len - 1) {
+            if (arg.len > 0 and arg[0] == '-' and arg.len > 1) {
+                var valid_flag = true;
+                var temp_no_newline = no_newline;
+                var temp_interpret = interpret_escapes;
+
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'n' => temp_no_newline = true,
+                        'e' => temp_interpret = true,
+                        'E' => temp_interpret = false,
+                        else => {
+                            valid_flag = false;
+                            break;
+                        },
+                    }
+                }
+
+                if (valid_flag) {
+                    no_newline = temp_no_newline;
+                    interpret_escapes = temp_interpret;
+                    arg_start = i + 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Print arguments
+        for (command.args[arg_start..], 0..) |arg, i| {
+            if (interpret_escapes) {
+                try printWithEscapes(arg);
+            } else {
+                try IO.print("{s}", .{arg});
+            }
+            if (i < command.args[arg_start..].len - 1) {
                 try IO.print(" ", .{});
             }
         }
-        try IO.print("\n", .{});
+
+        if (!no_newline) {
+            try IO.print("\n", .{});
+        }
         return 0;
     }
 
-    fn builtinPwd(self: *Executor) !i32 {
-        _ = self;
+    /// Helper function to print string with escape sequence interpretation
+    fn printWithEscapes(s: []const u8) !void {
+        var i: usize = 0;
+        while (i < s.len) {
+            if (s[i] == '\\' and i + 1 < s.len) {
+                switch (s[i + 1]) {
+                    'n' => {
+                        try IO.print("\n", .{});
+                        i += 2;
+                    },
+                    't' => {
+                        try IO.print("\t", .{});
+                        i += 2;
+                    },
+                    'r' => {
+                        try IO.print("\r", .{});
+                        i += 2;
+                    },
+                    '\\' => {
+                        try IO.print("\\", .{});
+                        i += 2;
+                    },
+                    'a' => {
+                        try IO.print("\x07", .{}); // Bell
+                        i += 2;
+                    },
+                    'b' => {
+                        try IO.print("\x08", .{}); // Backspace
+                        i += 2;
+                    },
+                    'f' => {
+                        try IO.print("\x0c", .{}); // Form feed
+                        i += 2;
+                    },
+                    'v' => {
+                        try IO.print("\x0b", .{}); // Vertical tab
+                        i += 2;
+                    },
+                    'e' => {
+                        try IO.print("\x1b", .{}); // Escape
+                        i += 2;
+                    },
+                    '0' => {
+                        // Octal escape \0nnn
+                        var val: u8 = 0;
+                        var j: usize = i + 2;
+                        var count: usize = 0;
+                        while (j < s.len and count < 3) : (j += 1) {
+                            if (s[j] >= '0' and s[j] <= '7') {
+                                val = val * 8 + (s[j] - '0');
+                                count += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        if (count > 0) {
+                            try IO.print("{c}", .{val});
+                            i = j;
+                        } else {
+                            try IO.print("{c}", .{s[i]});
+                            i += 1;
+                        }
+                    },
+                    'x' => {
+                        // Hex escape \xHH
+                        if (i + 3 < s.len) {
+                            const hex = s[i + 2 .. i + 4];
+                            if (std.fmt.parseInt(u8, hex, 16)) |val| {
+                                try IO.print("{c}", .{val});
+                                i += 4;
+                            } else |_| {
+                                try IO.print("{c}", .{s[i]});
+                                i += 1;
+                            }
+                        } else {
+                            try IO.print("{c}", .{s[i]});
+                            i += 1;
+                        }
+                    },
+                    else => {
+                        try IO.print("{c}", .{s[i]});
+                        i += 1;
+                    },
+                }
+            } else {
+                try IO.print("{c}", .{s[i]});
+                i += 1;
+            }
+        }
+    }
+
+    fn builtinPwd(self: *Executor, command: *types.ParsedCommand) !i32 {
+        var use_physical = false;
+
+        // Parse flags
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "-P")) {
+                use_physical = true;
+            } else if (std.mem.eql(u8, arg, "-L")) {
+                use_physical = false;
+            } else if (arg.len > 0 and arg[0] == '-') {
+                try IO.eprint("den: pwd: {s}: invalid option\n", .{arg});
+                return 1;
+            }
+        }
+
+        // Get current directory
         var buf: [std.fs.max_path_bytes]u8 = undefined;
-        const cwd = try std.posix.getcwd(&buf);
-        try IO.print("{s}\n", .{cwd});
+
+        if (use_physical) {
+            // -P: Physical path (resolve symlinks)
+            const cwd = std.posix.getcwd(&buf) catch |err| {
+                try IO.eprint("den: pwd: error getting current directory: {}\n", .{err});
+                return 1;
+            };
+            try IO.print("{s}\n", .{cwd});
+        } else {
+            // -L: Logical path (default) - use PWD env var if set and valid
+            if (self.environment.get("PWD")) |pwd| {
+                // Verify the PWD env var points to current directory
+                var real_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const real_cwd = std.posix.getcwd(&real_buf) catch null;
+
+                if (real_cwd) |_| {
+                    // PWD exists, use it (trust the logical path)
+                    try IO.print("{s}\n", .{pwd});
+                    return 0;
+                }
+            }
+            // Fallback to physical path if PWD not set or invalid
+            const cwd = std.posix.getcwd(&buf) catch |err| {
+                try IO.eprint("den: pwd: error getting current directory: {}\n", .{err});
+                return 1;
+            };
+            try IO.print("{s}\n", .{cwd});
+        }
         return 0;
     }
 
@@ -746,13 +921,54 @@ pub const Executor = struct {
     }
 
     fn builtinExport(self: *Executor, command: *types.ParsedCommand) !i32 {
-        // export VAR=value or export VAR
+        // export VAR=value or export VAR or export -p
         if (command.args.len == 0) {
             // No args - print all exported variables (same as env for now)
             return try self.builtinEnv();
         }
 
-        for (command.args) |arg| {
+        // Check for -p flag (print in reusable format)
+        if (command.args.len == 1 and std.mem.eql(u8, command.args[0], "-p")) {
+            // Print all variables in export format
+            var iter = self.environment.iterator();
+            while (iter.next()) |entry| {
+                // Escape value for shell reuse
+                try IO.print("export {s}=\"", .{entry.key_ptr.*});
+                for (entry.value_ptr.*) |c| {
+                    switch (c) {
+                        '"' => try IO.print("\\\"", .{}),
+                        '\\' => try IO.print("\\\\", .{}),
+                        '$' => try IO.print("\\$", .{}),
+                        '`' => try IO.print("\\`", .{}),
+                        '\n' => try IO.print("\\n", .{}),
+                        else => try IO.print("{c}", .{c}),
+                    }
+                }
+                try IO.print("\"\n", .{});
+            }
+            return 0;
+        }
+
+        // Check for -n flag (unexport)
+        var arg_start: usize = 0;
+        var unexport_mode = false;
+        if (command.args.len > 0 and std.mem.eql(u8, command.args[0], "-n")) {
+            unexport_mode = true;
+            arg_start = 1;
+        }
+
+        if (unexport_mode) {
+            // -n: Remove variables from environment
+            for (command.args[arg_start..]) |arg| {
+                if (self.environment.fetchRemove(arg)) |kv| {
+                    self.allocator.free(kv.key);
+                    self.allocator.free(kv.value);
+                }
+            }
+            return 0;
+        }
+
+        for (command.args[arg_start..]) |arg| {
             // Parse VAR=value format
             if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
                 const var_name = arg[0..eq_pos];
@@ -1043,13 +1259,51 @@ pub const Executor = struct {
         }
 
         const utils = @import("../utils.zig");
+
+        // Parse flags
+        var show_all = false;      // -a: show all matches
+        var type_only = false;     // -t: show type only (builtin, file, alias, etc.)
+        var path_only = false;     // -p: show path only (for external commands)
+        var arg_start: usize = 0;
+
+        for (command.args, 0..) |arg, i| {
+            if (arg.len > 0 and arg[0] == '-' and arg.len > 1) {
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'a' => show_all = true,
+                        't' => type_only = true,
+                        'p' => path_only = true,
+                        else => {
+                            try IO.eprint("den: type: -{c}: invalid option\n", .{c});
+                            return 1;
+                        },
+                    }
+                }
+                arg_start = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        if (arg_start >= command.args.len) {
+            try IO.eprint("den: type: missing argument\n", .{});
+            return 1;
+        }
+
         var found_all = true;
 
-        for (command.args) |cmd_name| {
+        for (command.args[arg_start..]) |cmd_name| {
+            var found_any = false;
+
             // Check if it's a builtin
             if (self.isBuiltin(cmd_name)) {
-                try IO.print("{s} is a shell builtin\n", .{cmd_name});
-                continue;
+                found_any = true;
+                if (type_only) {
+                    try IO.print("builtin\n", .{});
+                } else if (!path_only) {
+                    try IO.print("{s} is a shell builtin\n", .{cmd_name});
+                }
+                if (!show_all) continue;
             }
 
             // Check if it's in PATH
@@ -1059,11 +1313,50 @@ pub const Executor = struct {
             };
             defer path_list.deinit();
 
-            if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
-                defer self.allocator.free(exec_path);
-                try IO.print("{s} is {s}\n", .{ cmd_name, exec_path });
+            if (show_all) {
+                // Show all matches in PATH
+                for (path_list.paths.items) |path_dir| {
+                    const full_path = std.fs.path.join(self.allocator, &[_][]const u8{ path_dir, cmd_name }) catch continue;
+                    defer self.allocator.free(full_path);
+
+                    // Check if file exists and is executable
+                    std.fs.accessAbsolute(full_path, .{}) catch continue;
+
+                    if (builtin.os.tag != .windows) {
+                        const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
+                        defer file.close();
+                        const stat = file.stat() catch continue;
+                        if (stat.mode & 0o111 == 0) continue;
+                    }
+
+                    found_any = true;
+                    if (type_only) {
+                        try IO.print("file\n", .{});
+                    } else if (path_only) {
+                        try IO.print("{s}\n", .{full_path});
+                    } else {
+                        try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
+                    }
+                }
             } else {
-                try IO.print("den: type: {s}: not found\n", .{cmd_name});
+                // Just find first match
+                if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
+                    defer self.allocator.free(exec_path);
+                    found_any = true;
+                    if (type_only) {
+                        try IO.print("file\n", .{});
+                    } else if (path_only) {
+                        try IO.print("{s}\n", .{exec_path});
+                    } else {
+                        try IO.print("{s} is {s}\n", .{ cmd_name, exec_path });
+                    }
+                }
+            }
+
+            if (!found_any) {
+                if (!type_only and !path_only) {
+                    try IO.print("den: type: {s}: not found\n", .{cmd_name});
+                }
                 found_all = false;
             }
         }
@@ -2041,7 +2334,40 @@ pub const Executor = struct {
             return 1;
         }
 
+        // Check for -l flag (list signals)
+        if (std.mem.eql(u8, command.args[0], "-l") or std.mem.eql(u8, command.args[0], "--list")) {
+            if (builtin.os.tag == .windows) {
+                try IO.print("Signals on Windows (only TERM/KILL are supported):\n", .{});
+                try IO.print(" 9) KILL     15) TERM\n", .{});
+            } else {
+                try IO.print(" 1) HUP      2) INT      3) QUIT     4) ILL\n", .{});
+                try IO.print(" 5) TRAP     6) ABRT     7) BUS      8) FPE\n", .{});
+                try IO.print(" 9) KILL    10) USR1    11) SEGV    12) USR2\n", .{});
+                try IO.print("13) PIPE    14) ALRM    15) TERM    16) STKFLT\n", .{});
+                try IO.print("17) CHLD    18) CONT    19) STOP    20) TSTP\n", .{});
+                try IO.print("21) TTIN    22) TTOU    23) URG     24) XCPU\n", .{});
+                try IO.print("25) XFSZ    26) VTALRM  27) PROF    28) WINCH\n", .{});
+                try IO.print("29) IO      30) PWR     31) SYS\n", .{});
+            }
+            return 0;
+        }
+
+        // Check for -s flag (specify signal by name)
         var start_idx: usize = 0;
+        var explicit_signal: ?u8 = null;
+        if (std.mem.eql(u8, command.args[0], "-s")) {
+            if (command.args.len < 2) {
+                try IO.eprint("den: kill: -s requires a signal name\n", .{});
+                return 1;
+            }
+            const sig_name = command.args[1];
+            explicit_signal = signalFromName(sig_name);
+            if (explicit_signal == null) {
+                try IO.eprint("den: kill: invalid signal: {s}\n", .{sig_name});
+                return 1;
+            }
+            start_idx = 2;
+        }
 
         if (builtin.os.tag == .windows) {
             // Windows: parse optional signal flag but only support TERM/KILL (both terminate)
@@ -2106,29 +2432,24 @@ pub const Executor = struct {
         }
 
         // POSIX implementation
-        var signal: u8 = std.posix.SIG.TERM;
+        var signal: u8 = explicit_signal orelse std.posix.SIG.TERM;
 
-        // Parse signal if provided
-        if (command.args[0].len > 0 and command.args[0][0] == '-') {
-            const sig_str = command.args[0][1..];
+        // Parse signal if provided (and not already set via -s)
+        if (explicit_signal == null and start_idx < command.args.len and
+            command.args[start_idx].len > 0 and command.args[start_idx][0] == '-')
+        {
+            const sig_str = command.args[start_idx][1..];
             if (sig_str.len > 0) {
                 // Try to parse as number
                 signal = std.fmt.parseInt(u8, sig_str, 10) catch blk: {
                     // Try to parse as signal name
-                    if (std.mem.eql(u8, sig_str, "HUP")) break :blk std.posix.SIG.HUP
-                    else if (std.mem.eql(u8, sig_str, "INT")) break :blk std.posix.SIG.INT
-                    else if (std.mem.eql(u8, sig_str, "QUIT")) break :blk std.posix.SIG.QUIT
-                    else if (std.mem.eql(u8, sig_str, "KILL")) break :blk std.posix.SIG.KILL
-                    else if (std.mem.eql(u8, sig_str, "TERM")) break :blk std.posix.SIG.TERM
-                    else if (std.mem.eql(u8, sig_str, "STOP")) break :blk std.posix.SIG.STOP
-                    else if (std.mem.eql(u8, sig_str, "CONT")) break :blk std.posix.SIG.CONT
-                    else {
+                    break :blk signalFromName(sig_str) orelse {
                         try IO.eprint("den: kill: invalid signal: {s}\n", .{sig_str});
                         return 1;
-                    }
+                    };
                 };
             }
-            start_idx = 1;
+            start_idx += 1;
         }
 
         if (start_idx >= command.args.len) {
@@ -2150,6 +2471,47 @@ pub const Executor = struct {
         }
 
         return 0;
+    }
+
+    /// Helper to convert signal name to signal number
+    fn signalFromName(name: []const u8) ?u8 {
+        if (builtin.os.tag == .windows) {
+            if (std.mem.eql(u8, name, "TERM") or std.mem.eql(u8, name, "KILL")) {
+                return 15; // Just return TERM, as Windows only supports terminate
+            }
+            return null;
+        }
+
+        if (std.mem.eql(u8, name, "HUP")) return std.posix.SIG.HUP
+        else if (std.mem.eql(u8, name, "INT")) return std.posix.SIG.INT
+        else if (std.mem.eql(u8, name, "QUIT")) return std.posix.SIG.QUIT
+        else if (std.mem.eql(u8, name, "ILL")) return std.posix.SIG.ILL
+        else if (std.mem.eql(u8, name, "TRAP")) return std.posix.SIG.TRAP
+        else if (std.mem.eql(u8, name, "ABRT")) return std.posix.SIG.ABRT
+        else if (std.mem.eql(u8, name, "BUS")) return std.posix.SIG.BUS
+        else if (std.mem.eql(u8, name, "FPE")) return std.posix.SIG.FPE
+        else if (std.mem.eql(u8, name, "KILL")) return std.posix.SIG.KILL
+        else if (std.mem.eql(u8, name, "USR1")) return std.posix.SIG.USR1
+        else if (std.mem.eql(u8, name, "SEGV")) return std.posix.SIG.SEGV
+        else if (std.mem.eql(u8, name, "USR2")) return std.posix.SIG.USR2
+        else if (std.mem.eql(u8, name, "PIPE")) return std.posix.SIG.PIPE
+        else if (std.mem.eql(u8, name, "ALRM")) return std.posix.SIG.ALRM
+        else if (std.mem.eql(u8, name, "TERM")) return std.posix.SIG.TERM
+        else if (std.mem.eql(u8, name, "CHLD")) return std.posix.SIG.CHLD
+        else if (std.mem.eql(u8, name, "CONT")) return std.posix.SIG.CONT
+        else if (std.mem.eql(u8, name, "STOP")) return std.posix.SIG.STOP
+        else if (std.mem.eql(u8, name, "TSTP")) return std.posix.SIG.TSTP
+        else if (std.mem.eql(u8, name, "TTIN")) return std.posix.SIG.TTIN
+        else if (std.mem.eql(u8, name, "TTOU")) return std.posix.SIG.TTOU
+        else if (std.mem.eql(u8, name, "URG")) return std.posix.SIG.URG
+        else if (std.mem.eql(u8, name, "XCPU")) return std.posix.SIG.XCPU
+        else if (std.mem.eql(u8, name, "XFSZ")) return std.posix.SIG.XFSZ
+        else if (std.mem.eql(u8, name, "VTALRM")) return std.posix.SIG.VTALRM
+        else if (std.mem.eql(u8, name, "PROF")) return std.posix.SIG.PROF
+        else if (std.mem.eql(u8, name, "WINCH")) return std.posix.SIG.WINCH
+        else if (std.mem.eql(u8, name, "IO")) return std.posix.SIG.IO
+        else if (std.mem.eql(u8, name, "SYS")) return std.posix.SIG.SYS
+        else return null;
     }
 
     fn builtinTrap(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
