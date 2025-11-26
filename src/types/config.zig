@@ -10,6 +10,39 @@ pub const DenConfig = struct {
     completion: CompletionConfig = .{},
     theme: ThemeConfig = .{},
     expansion: ExpansionConfig = .{},
+    aliases: AliasConfig = .{},
+    keybindings: KeybindingConfig = .{},
+};
+
+/// Alias configuration - predefined shell aliases
+pub const AliasConfig = struct {
+    /// Enable loading aliases from config
+    enabled: bool = true,
+    /// Custom aliases map (loaded at runtime)
+    custom: ?[]const AliasEntry = null,
+
+    pub const AliasEntry = struct {
+        name: []const u8,
+        command: []const u8,
+    };
+};
+
+/// Keybinding configuration
+pub const KeybindingConfig = struct {
+    /// Editing mode: emacs or vi
+    mode: EditMode = .emacs,
+    /// Custom keybindings
+    custom: ?[]const KeybindEntry = null,
+
+    pub const EditMode = enum {
+        emacs,
+        vi,
+    };
+
+    pub const KeybindEntry = struct {
+        key: []const u8,
+        action: []const u8,
+    };
 };
 
 pub const PromptConfig = struct {

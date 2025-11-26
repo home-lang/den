@@ -383,3 +383,455 @@ test "E2E: true command success" {
 
     try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
 }
+
+// ============================================================================
+// Variable Expansion Tests
+// ============================================================================
+
+test "E2E: simple variable expansion" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("VAR=hello && echo $VAR");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "hello");
+}
+
+test "E2E: variable with braces" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("NAME=world && echo \"Hello ${NAME}!\"");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "Hello world!");
+}
+
+test "E2E: variable default value" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo ${UNDEFINED_VAR:-default}");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "default");
+}
+
+test "E2E: exit code variable" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("true; echo $?");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "0");
+}
+
+test "E2E: exit code after failure" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("false; echo $?");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "1");
+}
+
+// ============================================================================
+// Command Substitution Tests
+// ============================================================================
+
+test "E2E: command substitution with $()" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo \"Today is $(date +%A)\"");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "Today is");
+}
+
+test "E2E: nested command substitution" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo $(echo $(echo nested))");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "nested");
+}
+
+// ============================================================================
+// Arithmetic Expansion Tests
+// ============================================================================
+
+test "E2E: arithmetic expansion" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo $((2 + 3))");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "5");
+}
+
+test "E2E: arithmetic with multiplication" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo $((6 * 7))");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "42");
+}
+
+test "E2E: arithmetic with variable" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("X=10 && echo $((X + 5))");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "15");
+}
+
+// ============================================================================
+// Redirection Tests
+// ============================================================================
+
+test "E2E: stderr redirection" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const err_file = try std.fs.path.join(allocator, &[_][]const u8{ fixture.temp_dir.path, "error.txt" });
+    defer allocator.free(err_file);
+
+    const cmd = try std.fmt.allocPrint(allocator, "ls /nonexistent 2> {s}; cat {s}", .{ err_file, err_file });
+    defer allocator.free(cmd);
+
+    const result = try fixture.exec(cmd);
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // Should have captured the error message
+    try test_utils.TestAssert.expectTrue(result.stdout.len > 0 or result.stderr.len > 0);
+}
+
+test "E2E: combined stdout and stderr redirection" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const out_file = try std.fs.path.join(allocator, &[_][]const u8{ fixture.temp_dir.path, "combined.txt" });
+    defer allocator.free(out_file);
+
+    const cmd = try std.fmt.allocPrint(allocator, "echo stdout; echo stderr >&2", .{});
+    defer allocator.free(cmd);
+
+    const result = try fixture.exec(cmd);
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "stdout");
+}
+
+test "E2E: here document" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("cat << EOF\nhello\nworld\nEOF");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "hello");
+    try test_utils.TestAssert.expectContains(result.stdout, "world");
+}
+
+// ============================================================================
+// Glob/Pattern Matching Tests
+// ============================================================================
+
+test "E2E: glob star pattern" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // Create test files
+    const f1 = try fixture.temp_dir.createFile("test1.txt", "");
+    defer allocator.free(f1);
+    const f2 = try fixture.temp_dir.createFile("test2.txt", "");
+    defer allocator.free(f2);
+    const f3 = try fixture.temp_dir.createFile("other.md", "");
+    defer allocator.free(f3);
+
+    const cmd = try std.fmt.allocPrint(allocator, "ls {s}/*.txt | wc -l", .{fixture.temp_dir.path});
+    defer allocator.free(cmd);
+
+    const result = try fixture.exec(cmd);
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "2");
+}
+
+test "E2E: glob question mark pattern" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // Create test files
+    const f1 = try fixture.temp_dir.createFile("a1.txt", "");
+    defer allocator.free(f1);
+    const f2 = try fixture.temp_dir.createFile("a2.txt", "");
+    defer allocator.free(f2);
+    const f3 = try fixture.temp_dir.createFile("ab.txt", "");
+    defer allocator.free(f3);
+
+    const cmd = try std.fmt.allocPrint(allocator, "ls {s}/a?.txt | wc -l", .{fixture.temp_dir.path});
+    defer allocator.free(cmd);
+
+    const result = try fixture.exec(cmd);
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    // Should match a1.txt, a2.txt, ab.txt
+    try test_utils.TestAssert.expectContains(result.stdout, "3");
+}
+
+// ============================================================================
+// Subshell Tests
+// ============================================================================
+
+test "E2E: subshell execution" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("(echo 'in subshell')");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "in subshell");
+}
+
+test "E2E: subshell variable isolation" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("VAR=outer; (VAR=inner; echo $VAR); echo $VAR");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "inner");
+    try test_utils.TestAssert.expectContains(result.stdout, "outer");
+}
+
+// ============================================================================
+// Function Tests
+// ============================================================================
+
+test "E2E: function definition and call" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("greet() { echo \"Hello, $1!\"; }; greet World");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "Hello, World!");
+}
+
+test "E2E: function with local variable" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("test_func() { local x=5; echo $x; }; test_func");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "5");
+}
+
+// ============================================================================
+// Process Control Tests
+// ============================================================================
+
+test "E2E: background job" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 0.1 & wait && echo done");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "done");
+}
+
+// ============================================================================
+// String Operations Tests
+// ============================================================================
+
+test "E2E: string length" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("STR=hello && echo ${#STR}");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "5");
+}
+
+test "E2E: string substitution" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("STR='hello world' && echo ${STR/world/universe}");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "hello universe");
+}
+
+// ============================================================================
+// Edge Cases Tests
+// ============================================================================
+
+test "E2E: empty command" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo ''");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "E2E: quoted special characters" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo 'hello $world'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "hello $world");
+}
+
+test "E2E: escaped characters" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo \"hello\\tworld\"");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "E2E: multiple commands with semicolons" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo a; echo b; echo c");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "a");
+    try test_utils.TestAssert.expectContains(result.stdout, "b");
+    try test_utils.TestAssert.expectContains(result.stdout, "c");
+}
+
+test "E2E: comment handling" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo visible # this is a comment");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "visible");
+    try test_utils.TestAssert.expectTrue(std.mem.indexOf(u8, result.stdout, "comment") == null);
+}

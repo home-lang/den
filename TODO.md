@@ -22,10 +22,10 @@
   - [x] Pipeline tests (`tests/test_pipeline.zig`) - 30 tests
   - [x] Chaining tests (`tests/test_chaining.zig`) - 35 tests
   - [x] Scripting tests (`tests/test_scripting.zig`) - 42 tests
-- [ ] **E2E tests**
-  - [ ] CLI tests (`test/cli-wrapper.ts`)
-  - [ ] REPL tests
-  - [ ] Shell integration tests (`test/shell.test.ts`)
+- [x] **E2E tests**
+  - [x] CLI tests (`tests/test_e2e.zig`) - 50 tests
+  - [x] REPL tests (`tests/test_repl.zig`) - 35 tests
+  - [x] Shell integration tests (`tests/test_shell_integration.zig`) - 46 tests
   - [ ] Performance tests (`test/performance.test.ts`)
 - [ ] **Regression tests**
   - [ ] Parser regression tests (`test/parser-regression.test.ts`)
@@ -59,53 +59,53 @@
 
 ## 🟡 Medium Priority - Missing Features
 
-### 4. Configuration System (Phase 3)
-- [ ] Integrate `zig-config` library for JSONC parsing
-- [ ] Config file search logic (current dir → home dir)
-- [ ] Support `den.jsonc` config file format
+### 4. Configuration System (Phase 3) ✅ Partial
+- [x] Integrate `zig-config` library for JSONC parsing
+- [x] Config file search logic (current dir → home dir)
+- [x] Support `den.jsonc` config file format
 - [ ] Support `package.jsonc` config file format
 - [ ] Config validation with error messages
 - [ ] Config override via CLI flags (`--config <path>`)
 - [ ] Config reload mechanism
 - [ ] Config hot-reload
-- [ ] Port default config from TypeScript version
-  - [ ] Default aliases (140+ aliases)
+- [x] Port default config from TypeScript version
+  - [x] Default aliases (~35 aliases in den.jsonc)
   - [ ] Default environment variables
-  - [ ] Default prompt format
-  - [ ] Default theme
-  - [ ] Default history settings
-  - [ ] Default completion settings
+  - [x] Default prompt format
+  - [x] Default theme
+  - [x] Default history settings
+  - [x] Default completion settings
 
-### 5. Advanced REPL Features (Phase 9)
-- [ ] **Cursor Movement**
-  - [ ] Left/right arrow keys
-  - [ ] Ctrl+A (home), Ctrl+E (end)
-  - [ ] Ctrl+B (backward char), Ctrl+F (forward char)
-  - [ ] Alt+B (backward word), Alt+F (forward word)
-- [ ] **Auto-suggestions**
-  - [ ] Inline suggestion rendering
-  - [ ] Suggestion from history
-  - [ ] Suggestion from completions
+### 5. Advanced REPL Features (Phase 9) ✅ Mostly Complete
+- [x] **Cursor Movement** (in `src/utils/terminal.zig`)
+  - [x] Left/right arrow keys
+  - [x] Ctrl+A (home), Ctrl+E (end)
+  - [x] Ctrl+B (backward char), Ctrl+F (forward char)
+  - [x] Alt+B (backward word), Alt+F (forward word)
+- [x] **Auto-suggestions**
+  - [x] Inline suggestion rendering
+  - [x] Suggestion from history
+  - [x] Suggestion from completions
   - [ ] Typo correction (fuzzy matching)
-  - [ ] Suggestion accept (Right arrow, End, Ctrl+E)
-  - [ ] Partial suggestion accept (Alt+F)
-- [ ] **Syntax Highlighting** (real-time)
-  - [ ] Command highlighting (builtin, alias, external)
-  - [ ] Keyword highlighting
-  - [ ] String highlighting
-  - [ ] Operator highlighting
+  - [x] Suggestion accept (Right arrow, End, Ctrl+E)
+  - [x] Partial suggestion accept (Alt+F)
+- [x] **Syntax Highlighting** (toggle available)
+  - [x] Command highlighting (builtin, alias, external)
+  - [x] Keyword highlighting
+  - [x] String highlighting
+  - [x] Operator highlighting
   - [ ] Error highlighting (invalid syntax)
-  - [ ] Path highlighting
-  - [ ] Variable highlighting
-- [ ] **History Navigation**
-  - [ ] Up/down arrow keys for history
-  - [ ] History browsing state
-  - [ ] Temporary line preservation
-- [ ] **Reverse Search**
-  - [ ] Ctrl+R reverse search trigger
-  - [ ] Incremental search display
-  - [ ] Search result highlighting
-  - [ ] Search result cycling (Ctrl+R repeatedly)
+  - [x] Path highlighting
+  - [x] Variable highlighting
+- [x] **History Navigation**
+  - [x] Up/down arrow keys for history
+  - [x] History browsing state
+  - [x] Temporary line preservation
+- [x] **Reverse Search**
+  - [x] Ctrl+R reverse search trigger
+  - [x] Incremental search display
+  - [x] Search result highlighting
+  - [x] Search result cycling (Ctrl+R repeatedly)
 - [ ] **Multi-line Input**
   - [ ] Line continuation detection (`\` at EOL)
   - [ ] Unclosed quote detection
@@ -408,11 +408,11 @@ Many builtins are implemented but missing flags/options:
 
 | Category | Total Items | Priority |
 |----------|-------------|----------|
-| Testing Infrastructure | ~40 (unit ✅, integration ✅, e2e pending) | 🔴 Critical |
+| Testing Infrastructure | ~40 (unit ✅, integration ✅, e2e ✅) | 🔴 Critical |
 | Signal Handling | 4/4 ✅ | 🔴 Critical |
 | Cross-Platform | 8 | 🔴 Critical |
-| Configuration System | 15 | 🟡 Medium |
-| Advanced REPL | 25 | 🟡 Medium |
+| Configuration System | 15 (10 ✅) | 🟡 Medium |
+| Advanced REPL | 25 (22 ✅) | 🟡 Medium |
 | History Expansion | 12 | 🟡 Medium |
 | Completion | 15 | 🟡 Medium |
 | Arithmetic/Expansion | 20 | 🟡 Medium |
@@ -476,3 +476,19 @@ The following features are production-ready:
   - test_pipeline.zig (30 tests - pipe operations, multi-stage, error handling)
   - test_chaining.zig (35 tests - &&, ||, ; operators, grouping)
   - test_scripting.zig (42 tests - if/else, for, while, until, case, functions)
+- Configuration System:
+  - JSONC parsing with comment removal and trailing comma handling
+  - Config file search: ./den.jsonc → config/ → .config/ → ~/.config/
+  - Config-driven aliases (35 default aliases in den.jsonc)
+  - Shell loads aliases from config on startup
+- Advanced REPL (already implemented in src/utils/terminal.zig):
+  - Full cursor movement (arrows, Ctrl+A/E/B/F, Alt+B/F)
+  - History navigation with substring matching
+  - Reverse search (Ctrl+R) with cycling
+  - Tab completion with arrow key navigation
+  - Inline suggestions with Right arrow acceptance
+  - 50-state undo stack
+- E2E Tests (131 total tests):
+  - test_e2e.zig (50 tests) - Variable expansion, command substitution, arithmetic, redirections, globs, subshells, functions, process control, string operations, edge cases
+  - test_repl.zig (35 tests) - Multi-line scripts, variable state, history, input handling, prompts, line continuation, job control, traps, shell options, source command, special variables
+  - test_shell_integration.zig (46 tests) - Environment integration, signal handling, process groups, file descriptors, working directory, exit codes, script mode, quoting, chaining, glob/expansion, builtins, error handling, IPC

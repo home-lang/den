@@ -474,6 +474,96 @@ pub fn build(b: *std.Build) void {
     const e2e_test_step = b.step("test-e2e", "Run end-to-end tests");
     e2e_test_step.dependOn(&run_e2e_tests.step);
 
+    // REPL tests
+    const repl_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_repl.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const repl_tests = b.addTest(.{
+        .root_module = repl_test_module,
+    });
+
+    const run_repl_tests = b.addRunArtifact(repl_tests);
+    const repl_test_step = b.step("test-repl", "Run REPL tests");
+    repl_test_step.dependOn(&run_repl_tests.step);
+
+    // Shell integration tests
+    const shell_integration_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_shell_integration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const shell_integration_tests = b.addTest(.{
+        .root_module = shell_integration_test_module,
+    });
+
+    const run_shell_integration_tests = b.addRunArtifact(shell_integration_tests);
+    const shell_integration_test_step = b.step("test-shell-integration", "Run shell integration tests");
+    shell_integration_test_step.dependOn(&run_shell_integration_tests.step);
+
+    // Operator regression tests
+    const operators_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_operators.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const operators_tests = b.addTest(.{
+        .root_module = operators_test_module,
+    });
+
+    const run_operators_tests = b.addRunArtifact(operators_tests);
+    const operators_test_step = b.step("test-operators", "Run operator regression tests");
+    operators_test_step.dependOn(&run_operators_tests.step);
+
+    // Shell options tests (pipefail, xtrace, nounset, errexit)
+    const shell_options_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_shell_options.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const shell_options_tests = b.addTest(.{
+        .root_module = shell_options_test_module,
+    });
+
+    const run_shell_options_tests = b.addRunArtifact(shell_options_tests);
+    const shell_options_test_step = b.step("test-shell-options", "Run shell options tests");
+    shell_options_test_step.dependOn(&run_shell_options_tests.step);
+
+    // History expansion tests
+    const history_expansion_test_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/history_expansion.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const history_expansion_tests = b.addTest(.{
+        .root_module = history_expansion_test_module,
+    });
+
+    const run_history_expansion_tests = b.addRunArtifact(history_expansion_tests);
+    const history_expansion_test_step = b.step("test-history-expansion", "Run history expansion tests");
+    history_expansion_test_step.dependOn(&run_history_expansion_tests.step);
+
+    // Context completion tests
+    const context_completion_test_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/context_completion.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const context_completion_tests = b.addTest(.{
+        .root_module = context_completion_test_module,
+    });
+
+    const run_context_completion_tests = b.addRunArtifact(context_completion_tests);
+    const context_completion_test_step = b.step("test-context-completion", "Run context-aware completion tests");
+    context_completion_test_step.dependOn(&run_context_completion_tests.step);
+
     // Builtin tests
     const builtin_test_module = b.createModule(.{
         .root_source_file = b.path("tests/test_builtins.zig"),
@@ -646,6 +736,12 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_pipeline_tests.step);
     all_tests_step.dependOn(&run_chaining_tests.step);
     all_tests_step.dependOn(&run_scripting_tests.step);
+    all_tests_step.dependOn(&run_repl_tests.step);
+    all_tests_step.dependOn(&run_shell_integration_tests.step);
+    all_tests_step.dependOn(&run_operators_tests.step);
+    all_tests_step.dependOn(&run_shell_options_tests.step);
+    all_tests_step.dependOn(&run_history_expansion_tests.step);
+    all_tests_step.dependOn(&run_context_completion_tests.step);
 
     // ========================================
     // Profiling and Benchmarks

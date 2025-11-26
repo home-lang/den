@@ -73,5 +73,60 @@
       "exec": 500,
       "arithmetic": 500
     }
+  },
+
+  // Alias configuration
+  "aliases": {
+    "enabled": true,
+    "custom": [
+      // Navigation
+      { "name": "..", "command": "cd .." },
+      { "name": "...", "command": "cd ../.." },
+      { "name": "....", "command": "cd ../../.." },
+      { "name": "-", "command": "cd -" },
+
+      // List files
+      { "name": "l", "command": "ls -lah" },
+      { "name": "la", "command": "ls -lAh" },
+      { "name": "ll", "command": "ls -lh" },
+      { "name": "ls", "command": "ls --color=auto" },
+
+      // Git shortcuts
+      { "name": "g", "command": "git" },
+      { "name": "ga", "command": "git add" },
+      { "name": "gaa", "command": "git add --all" },
+      { "name": "gb", "command": "git branch" },
+      { "name": "gc", "command": "git commit -v" },
+      { "name": "gcm", "command": "git commit -m" },
+      { "name": "gco", "command": "git checkout" },
+      { "name": "gd", "command": "git diff" },
+      { "name": "gf", "command": "git fetch" },
+      { "name": "gl", "command": "git pull" },
+      { "name": "gp", "command": "git push" },
+      { "name": "gst", "command": "git status" },
+      { "name": "glog", "command": "git log --oneline --graph" },
+
+      // Safety
+      { "name": "rm", "command": "rm -i" },
+      { "name": "cp", "command": "cp -i" },
+      { "name": "mv", "command": "mv -i" },
+
+      // Misc
+      { "name": "c", "command": "clear" },
+      { "name": "h", "command": "history" },
+      { "name": "j", "command": "jobs -l" },
+      { "name": "grep", "command": "grep --color=auto" },
+      { "name": "df", "command": "df -h" },
+      { "name": "du", "command": "du -h" },
+      { "name": "free", "command": "free -h" },
+      { "name": "ports", "command": "netstat -tulanp" },
+      { "name": "path", "command": "echo $PATH | tr ':' '\\n'" }
+    ]
+  },
+
+  // Keybinding configuration
+  "keybindings": {
+    "mode": "emacs",
+    "custom": null
   }
 }

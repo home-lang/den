@@ -30,6 +30,8 @@ const GitModule = @import("prompt/git.zig").GitModule;
 const AsyncGitFetcher = @import("prompt/async_git.zig").AsyncGitFetcher;
 const ansi = @import("utils/ansi.zig");
 const signals = @import("utils/signals.zig");
+const HistoryExpansion = @import("utils/history_expansion.zig").HistoryExpansion;
+const ContextCompletion = @import("utils/context_completion.zig").ContextCompletion;
 
 /// Extract exit status from wait status (cross-platform)
 fn getExitStatus(status: u32) i32 {
@@ -79,6 +81,7 @@ pub const Shell = struct {
     history: [1000]?[]const u8,
     history_count: usize,
     history_file_path: []const u8,
+    history_expander: HistoryExpansion,
     dir_stack: [32]?[]const u8,
     dir_stack_count: usize,
     positional_params: [64]?[]const u8,
@@ -163,6 +166,7 @@ pub const Shell = struct {
             .history = [_]?[]const u8{null} ** 1000,
             .history_count = 0,
             .history_file_path = history_path_owned,
+            .history_expander = HistoryExpansion.init(allocator),
             .dir_stack = [_]?[]const u8{null} ** 32,
             .dir_stack_count = 0,
             .positional_params = [_]?[]const u8{null} ** 64,
@@ -199,6 +203,11 @@ pub const Shell = struct {
         // Load history from file
         shell.loadHistory() catch {
             // Ignore errors loading history (file might not exist yet)
+        };
+
+        // Load aliases from config
+        shell.loadAliasesFromConfig() catch {
+            // Ignore errors loading aliases
         };
 
         // Execute shell_init hooks
@@ -484,18 +493,36 @@ pub const Shell = struct {
 
             if (trimmed.len == 0) continue;
 
-            // Add to history (before execution)
-            try self.addToHistory(trimmed);
+            // Expand history references (!, !!, !N, !-N, !string, ^old^new)
+            const maybe_expanded = self.history_expander.expand(trimmed, &self.history, self.history_count) catch |err| {
+                IO.eprint("History expansion error: {}\n", .{err}) catch {};
+                // On error, continue with original command
+                try self.addToHistory(trimmed);
+                try self.executeCommand(trimmed);
+                continue;
+            };
+            defer self.allocator.free(maybe_expanded.text);
+
+            // Use expanded command
+            const command = maybe_expanded.text;
+
+            // If expanded, show the expanded command
+            if (maybe_expanded.expanded) {
+                try IO.print("{s}\n", .{command});
+            }
+
+            // Add to history (the expanded command)
+            try self.addToHistory(command);
 
             // Handle exit command
-            if (std.mem.eql(u8, trimmed, "exit")) {
+            if (std.mem.eql(u8, command, "exit")) {
                 try IO.print("Goodbye from Den!\n", .{});
                 self.running = false;
                 break; // Exit loop and let deinit() handle cleanup
             }
 
             // Execute command
-            try self.executeCommand(trimmed);
+            try self.executeCommand(command);
         }
     }
 
@@ -1415,6 +1442,21 @@ pub const Shell = struct {
                     self.history[self.history_count] = cmd_copy;
                     self.history_count += 1;
                 }
+            }
+        }
+    }
+
+    /// Load aliases from configuration
+    fn loadAliasesFromConfig(self: *Shell) !void {
+        // Check if aliases are enabled in config
+        if (!self.config.aliases.enabled) return;
+
+        // Load custom aliases from config
+        if (self.config.aliases.custom) |custom_aliases| {
+            for (custom_aliases) |alias_entry| {
+                const name_copy = try self.allocator.dupe(u8, alias_entry.name);
+                const cmd_copy = try self.allocator.dupe(u8, alias_entry.command);
+                try self.aliases.put(name_copy, cmd_copy);
             }
         }
     }
@@ -3528,6 +3570,7 @@ fn refreshPromptCallback(editor: *LineEditor) !void {
 
 fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
     var completion = Completion.init(allocator);
+    var ctx_completion = ContextCompletion.init(allocator);
 
     // If input is empty, show nothing
     if (input.len == 0) {
@@ -3555,6 +3598,37 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
         return completion.completeCommand(prefix);
     }
 
+    // Check for environment variable completion ($...)
+    if (prefix.len > 0 and prefix[0] == '$') {
+        const env_prefix = if (prefix.len > 1) prefix[1..] else "";
+        const items = try ctx_completion.completeEnvVars(env_prefix);
+        if (items.len > 0) {
+            var results = try allocator.alloc([]const u8, items.len);
+            for (items, 0..) |item, i| {
+                results[i] = try std.fmt.allocPrint(allocator, "${s}", .{item.text});
+                allocator.free(item.text);
+            }
+            allocator.free(items);
+            return results;
+        }
+        allocator.free(items);
+    }
+
+    // Check for option/flag completion (-...)
+    if (prefix.len > 0 and prefix[0] == '-') {
+        const items = try ctx_completion.completeOptions(command, prefix);
+        if (items.len > 0) {
+            var results = try allocator.alloc([]const u8, items.len);
+            for (items, 0..) |item, i| {
+                results[i] = try allocator.dupe(u8, item.text);
+                allocator.free(item.text);
+            }
+            allocator.free(items);
+            return results;
+        }
+        allocator.free(items);
+    }
+
     // For cd command, only complete directories
     if (std.mem.eql(u8, command, "cd")) {
         return completion.completeDirectory(prefix);
@@ -3573,6 +3647,21 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
     // For npm command, show scripts, commands, and files
     if (std.mem.eql(u8, command, "npm")) {
         return try completeNpm(allocator, prefix);
+    }
+
+    // For yarn command, show scripts, commands, and files
+    if (std.mem.eql(u8, command, "yarn")) {
+        return try completeYarn(allocator, input, prefix);
+    }
+
+    // For pnpm command, show scripts, commands, and files
+    if (std.mem.eql(u8, command, "pnpm")) {
+        return try completePnpm(allocator, input, prefix);
+    }
+
+    // For docker command, show containers, images, subcommands
+    if (std.mem.eql(u8, command, "docker")) {
+        return try completeDocker(allocator, input, prefix);
     }
 
     // Otherwise, try file completion
@@ -3949,6 +4038,149 @@ fn completeNpm(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
         }
         if (!is_dup) {
             try results.append(allocator, try allocator.dupe(u8, file));
+        }
+    }
+
+    return try results.toOwnedSlice(allocator);
+}
+
+/// Get completions for yarn command (scripts, commands, files)
+fn completeYarn(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
+    _ = input;
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Yarn built-in commands
+    const yarn_commands = [_][]const u8{
+        "add", "audit", "autoclean", "bin", "cache", "config",
+        "create", "dedupe", "dlx", "exec", "explain", "info",
+        "init", "install", "link", "node", "npm", "pack",
+        "patch", "patch-commit", "plugin", "rebuild", "remove",
+        "run", "search", "set", "stage", "start", "test",
+        "unlink", "unplug", "up", "upgrade", "upgrade-interactive",
+        "version", "why", "workspace", "workspaces",
+    };
+
+    // Add matching yarn commands
+    for (yarn_commands) |cmd| {
+        if (std.mem.startsWith(u8, cmd, prefix)) {
+            const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+            try results.append(allocator, marked_cmd);
+        }
+    }
+
+    // Try to read package.json scripts
+    var ctx_completion = ContextCompletion.init(allocator);
+    const script_items = try ctx_completion.completeNpmScripts(prefix);
+    for (script_items) |item| {
+        const marked_name = try std.fmt.allocPrint(allocator, "\x02{s}", .{item.text});
+        try results.append(allocator, marked_name);
+        allocator.free(item.text);
+    }
+    allocator.free(script_items);
+
+    return try results.toOwnedSlice(allocator);
+}
+
+/// Get completions for pnpm command (scripts, commands, files)
+fn completePnpm(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
+    _ = input;
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // pnpm built-in commands
+    const pnpm_commands = [_][]const u8{
+        "add", "audit", "bin", "config", "create", "dedupe",
+        "dlx", "env", "exec", "fetch", "import", "init",
+        "install", "install-test", "link", "list", "outdated",
+        "pack", "patch", "patch-commit", "prune", "publish",
+        "rebuild", "recursive", "remove", "root", "run",
+        "server", "setup", "start", "store", "test", "unlink",
+        "update", "why",
+    };
+
+    // Add matching pnpm commands
+    for (pnpm_commands) |cmd| {
+        if (std.mem.startsWith(u8, cmd, prefix)) {
+            const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+            try results.append(allocator, marked_cmd);
+        }
+    }
+
+    // Try to read package.json scripts
+    var ctx_completion = ContextCompletion.init(allocator);
+    const script_items = try ctx_completion.completeNpmScripts(prefix);
+    for (script_items) |item| {
+        const marked_name = try std.fmt.allocPrint(allocator, "\x02{s}", .{item.text});
+        try results.append(allocator, marked_name);
+        allocator.free(item.text);
+    }
+    allocator.free(script_items);
+
+    return try results.toOwnedSlice(allocator);
+}
+
+/// Get completions for docker command (containers, images, subcommands)
+fn completeDocker(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Parse to find the docker subcommand
+    var tokens = std.mem.tokenizeScalar(u8, input, ' ');
+    _ = tokens.next(); // Skip "docker"
+    const subcommand = tokens.next(); // Get subcommand (if any)
+
+    // Docker subcommands
+    const docker_commands = [_][]const u8{
+        "attach", "build", "commit", "compose", "container", "cp",
+        "create", "diff", "events", "exec", "export", "history",
+        "image", "images", "import", "info", "inspect", "kill",
+        "load", "login", "logout", "logs", "network", "node",
+        "pause", "plugin", "port", "ps", "pull", "push", "rename",
+        "restart", "rm", "rmi", "run", "save", "search", "service",
+        "stack", "start", "stats", "stop", "swarm", "system",
+        "tag", "top", "trust", "unpause", "update", "version",
+        "volume", "wait",
+    };
+
+    // If no subcommand yet, show docker subcommands
+    if (subcommand == null or (subcommand != null and std.mem.eql(u8, subcommand.?, prefix))) {
+        for (docker_commands) |cmd| {
+            if (std.mem.startsWith(u8, cmd, prefix)) {
+                const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+                try results.append(allocator, marked_cmd);
+            }
+        }
+        return try results.toOwnedSlice(allocator);
+    }
+
+    // Container-related subcommands
+    const container_commands = [_][]const u8{ "start", "stop", "restart", "rm", "logs", "exec", "attach", "kill", "pause", "unpause" };
+    for (container_commands) |container_cmd| {
+        if (std.mem.eql(u8, subcommand.?, container_cmd)) {
+            var ctx_completion = ContextCompletion.init(allocator);
+            const items = try ctx_completion.completeDockerContainers(prefix);
+            for (items) |item| {
+                try results.append(allocator, try allocator.dupe(u8, item.text));
+                allocator.free(item.text);
+            }
+            allocator.free(items);
+            return try results.toOwnedSlice(allocator);
+        }
+    }
+
+    // Image-related subcommands
+    const image_commands = [_][]const u8{ "run", "pull", "push", "rmi", "tag", "save", "load" };
+    for (image_commands) |image_cmd| {
+        if (std.mem.eql(u8, subcommand.?, image_cmd)) {
+            var ctx_completion = ContextCompletion.init(allocator);
+            const items = try ctx_completion.completeDockerImages(prefix);
+            for (items) |item| {
+                try results.append(allocator, try allocator.dupe(u8, item.text));
+                allocator.free(item.text);
+            }
+            allocator.free(items);
+            return try results.toOwnedSlice(allocator);
         }
     }
 
