@@ -38,11 +38,11 @@
   - [ ] Expansion fuzzing
   - [ ] Input handling fuzzing
 
-### 2. Signal Handling (Partial)
-- [ ] Handle SIGTERM gracefully (clean shutdown)
-- [ ] Handle SIGWINCH properly (terminal resize redraw)
-- [ ] Clean up resources on abnormal exit
-- [ ] Signal-safe I/O operations
+### 2. Signal Handling ✅
+- [x] Handle SIGTERM gracefully (clean shutdown)
+- [x] Handle SIGWINCH properly (terminal resize redraw)
+- [x] Clean up resources on abnormal exit
+- [x] Signal-safe I/O operations
 
 ### 3. Cross-Platform Support
 - [ ] **Windows support** (deferred but important)
@@ -332,14 +332,14 @@
   - [ ] Platform detection (Linux, macOS, Windows, BSD)
   - [ ] Architecture detection
 
-### 17. Logging & Debugging (Phase 1)
-- [ ] Implement logging infrastructure (debug, info, warn, error levels)
-- [ ] Add structured logging support
-- [ ] Create debug output utilities
-- [ ] Implement error formatting
-- [ ] Add stack trace utilities
-- [ ] Create assertion macros
-- [ ] Add timing/profiling utilities
+### 17. Logging & Debugging (Phase 1) ✅
+- [x] Implement logging infrastructure (debug, info, warn, error levels)
+- [x] Add structured logging support
+- [x] Create debug output utilities
+- [x] Implement error formatting
+- [x] Add stack trace utilities
+- [x] Create assertion macros
+- [x] Add timing/profiling utilities
 
 ### 18. Memory Management (Phase 1)
 - [ ] Design allocator strategy (GPA, Arena, Pool allocators)
@@ -408,7 +408,7 @@ Many builtins are implemented but missing flags/options:
 | Category | Total Items | Priority |
 |----------|-------------|----------|
 | Testing Infrastructure | ~40 | 🔴 Critical |
-| Signal Handling | 4 | 🔴 Critical |
+| Signal Handling | 4/4 ✅ | 🔴 Critical |
 | Cross-Platform | 8 | 🔴 Critical |
 | Configuration System | 15 | 🟡 Medium |
 | Advanced REPL | 25 | 🟡 Medium |
@@ -422,7 +422,8 @@ Many builtins are implemented but missing flags/options:
 | Documentation | 20 | 🟢 Low |
 | Performance | 25 | 🟢 Low |
 | Foundation Libraries | 12 | 🟢 Low |
-| Logging/Memory | 15 | 🟢 Low |
+| Logging & Debugging | 7/7 ✅ | 🟢 Low |
+| Memory Management | 6 | 🟢 Low |
 | Builtin Enhancements | 25 | 🔧 Improvement |
 | Code Quality | 5 | 🔧 Improvement |
 | CI/CD | 5 | 🔧 Improvement |
@@ -456,5 +457,10 @@ The following features are production-ready:
 
 ---
 
-*Last updated: November 2025*
+*Last updated: November 26, 2025*
 *Based on codebase analysis and ROADMAP.md review*
+
+**Recent completions:**
+- Signal Handling (SIGTERM, SIGWINCH, clean exit, signal-safe I/O)
+- Logging & Debugging infrastructure
+- Zig 0.16 API compatibility fixes
