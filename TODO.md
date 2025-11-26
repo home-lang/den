@@ -7,7 +7,7 @@
 
 ## 🔴 Critical / High Priority
 
-### 1. Testing Infrastructure (Partial ✅)
+### 1. Testing Infrastructure ✅
 - [x] **Port remaining unit tests** from TypeScript version
   - [x] Expansion tests (447+ existing test blocks)
   - [x] Redirection tests (existing in codebase)
@@ -27,17 +27,17 @@
   - [x] REPL tests (`tests/test_repl.zig`) - 35 tests
   - [x] Shell integration tests (`tests/test_shell_integration.zig`) - 46 tests
   - [ ] Performance tests (`test/performance.test.ts`)
-- [ ] **Regression tests**
-  - [ ] Parser regression tests (`test/parser-regression.test.ts`)
-  - [ ] Operator tests (`test/operators.test.ts`)
-  - [ ] Pipefail tests (`test/pipefail.test.ts`)
-  - [ ] Xtrace tests (`test/xtrace-flag.test.ts`)
-  - [ ] Nounset tests (`test/nounset-flag.test.ts`)
-- [ ] **Fuzzing**
-  - [ ] Parser fuzzing
-  - [ ] Completion fuzzing
-  - [ ] Expansion fuzzing
-  - [ ] Input handling fuzzing
+- [x] **Regression tests** ✅
+  - [x] Parser regression tests (`tests/test_parser_regression.zig`) - 60+ tests
+  - [x] Operator tests (`tests/test_operators.zig`) - 44 tests
+  - [x] Pipefail tests (`tests/test_shell_options.zig`) - included
+  - [x] Xtrace tests (`tests/test_shell_options.zig`) - included
+  - [x] Nounset tests (`tests/test_shell_options.zig`) - included
+- [x] **Fuzzing** ✅
+  - [x] Parser fuzzing (`src/parser/test_fuzz.zig`, `test_fuzz_simple.zig`)
+  - [x] Completion fuzzing (`tests/test_fuzzing.zig`)
+  - [x] Expansion fuzzing (`tests/test_fuzzing.zig`)
+  - [x] Input handling fuzzing (`tests/test_fuzzing.zig`)
 
 ### 2. Signal Handling ✅
 - [x] Handle SIGTERM gracefully (clean shutdown)
@@ -417,7 +417,7 @@ Many builtins are implemented but missing flags/options:
 
 | Category | Total Items | Priority |
 |----------|-------------|----------|
-| Testing Infrastructure | ~40 (unit ✅, integration ✅, e2e ✅) | 🔴 Critical |
+| Testing Infrastructure | ~40 ✅ (unit ✅, integration ✅, e2e ✅, regression ✅, fuzzing ✅) | 🔴 Critical |
 | Signal Handling | 4/4 ✅ | 🔴 Critical |
 | Cross-Platform | 9/11 ✅ (Windows abstraction complete) | 🔴 Critical |
 | Configuration System | 15 (10 ✅) | 🟡 Medium |
@@ -508,3 +508,10 @@ The following features are production-ready:
   - test_e2e.zig (50 tests) - Variable expansion, command substitution, arithmetic, redirections, globs, subshells, functions, process control, string operations, edge cases
   - test_repl.zig (35 tests) - Multi-line scripts, variable state, history, input handling, prompts, line continuation, job control, traps, shell options, source command, special variables
   - test_shell_integration.zig (46 tests) - Environment integration, signal handling, process groups, file descriptors, working directory, exit codes, script mode, quoting, chaining, glob/expansion, builtins, error handling, IPC
+- Regression Tests & Fuzzing Infrastructure:
+  - test_parser_regression.zig (60+ tests) - Edge cases, quoting, operators, redirections, command substitution, unicode, security
+  - test_operators.zig (44 tests) - &&, ||, |, ;, &, redirections, grouping, negation
+  - test_shell_options.zig (25+ tests) - set -e, -u, -x, -o pipefail, -n, -v, -f, -C
+  - test_fuzzing.zig (30+ tests) - Variable expansion, glob, brace expansion, pipelines, grouping, unicode
+  - src/parser/test_fuzz.zig - Parser fuzzing with random inputs
+  - src/parser/test_fuzz_simple.zig - Simple tokenizer fuzzing

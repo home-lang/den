@@ -534,6 +534,36 @@ pub fn build(b: *std.Build) void {
     const shell_options_test_step = b.step("test-shell-options", "Run shell options tests");
     shell_options_test_step.dependOn(&run_shell_options_tests.step);
 
+    // Parser regression tests
+    const parser_regression_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_parser_regression.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const parser_regression_tests = b.addTest(.{
+        .root_module = parser_regression_test_module,
+    });
+
+    const run_parser_regression_tests = b.addRunArtifact(parser_regression_tests);
+    const parser_regression_test_step = b.step("test-parser-regression", "Run parser regression tests");
+    parser_regression_test_step.dependOn(&run_parser_regression_tests.step);
+
+    // Comprehensive fuzzing tests (completion, expansion, input handling)
+    const fuzzing_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_fuzzing.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const fuzzing_tests = b.addTest(.{
+        .root_module = fuzzing_test_module,
+    });
+
+    const run_fuzzing_tests = b.addRunArtifact(fuzzing_tests);
+    const fuzzing_test_step = b.step("test-fuzzing", "Run comprehensive fuzzing tests");
+    fuzzing_test_step.dependOn(&run_fuzzing_tests.step);
+
     // History expansion tests
     const history_expansion_test_module = b.createModule(.{
         .root_source_file = b.path("src/utils/history_expansion.zig"),
@@ -758,6 +788,8 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_history_expansion_tests.step);
     all_tests_step.dependOn(&run_context_completion_tests.step);
     all_tests_step.dependOn(&run_process_tests.step);
+    all_tests_step.dependOn(&run_parser_regression_tests.step);
+    all_tests_step.dependOn(&run_fuzzing_tests.step);
 
     // ========================================
     // Profiling and Benchmarks
