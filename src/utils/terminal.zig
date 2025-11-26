@@ -266,6 +266,7 @@ pub const LineEditor = struct {
     length: usize = 0,
     terminal: Terminal = .{},
     prompt: []const u8 = "",
+    ps2_prompt: []const u8 = "> ", // Continuation prompt for multi-line input
     history: ?*[1000]?[]const u8 = null,
     history_count: ?*usize = null,
     history_index: ?usize = null,
@@ -293,6 +294,9 @@ pub const LineEditor = struct {
     undo_stack: [50]UndoState = undefined,
     undo_stack_size: usize = 0,
     undo_index: usize = 0, // Current position in undo stack
+    // Multi-line input support
+    multiline_buffer: ?std.ArrayList(u8) = null, // Accumulated multi-line input
+    in_multiline: bool = false, // Currently in multi-line mode
 
     const UndoState = struct {
         buffer: [4096]u8,
@@ -318,6 +322,78 @@ pub const LineEditor = struct {
 
     pub fn setPromptRefreshFn(self: *LineEditor, refresh_fn: *const fn (*LineEditor) anyerror!void) void {
         self.prompt_refresh_fn = refresh_fn;
+    }
+
+    pub fn setPs2Prompt(self: *LineEditor, ps2: []const u8) void {
+        self.ps2_prompt = ps2;
+    }
+
+    /// Check if input is incomplete and needs continuation
+    /// Returns true if:
+    /// - Line ends with backslash (line continuation)
+    /// - Unclosed single or double quotes
+    /// - Unclosed parentheses, brackets, or braces
+    pub fn isIncomplete(input: []const u8) bool {
+        if (input.len == 0) return false;
+
+        // Check for backslash continuation at end of line
+        // A trailing backslash (not escaped) indicates continuation
+        var trailing_backslashes: usize = 0;
+        var i: usize = input.len;
+        while (i > 0) {
+            i -= 1;
+            if (input[i] == '\\') {
+                trailing_backslashes += 1;
+            } else {
+                break;
+            }
+        }
+        // Odd number of backslashes at end means continuation
+        if (trailing_backslashes % 2 == 1) return true;
+
+        // Check for unclosed quotes and brackets
+        var in_single_quote = false;
+        var in_double_quote = false;
+        var paren_depth: i32 = 0;
+        var brace_depth: i32 = 0;
+        var bracket_depth: i32 = 0;
+
+        i = 0;
+        while (i < input.len) : (i += 1) {
+            const c = input[i];
+
+            // Handle escape sequences (only in double quotes or unquoted)
+            if (c == '\\' and !in_single_quote and i + 1 < input.len) {
+                i += 1; // Skip escaped character
+                continue;
+            }
+
+            // Handle quotes
+            if (c == '\'' and !in_double_quote) {
+                in_single_quote = !in_single_quote;
+                continue;
+            }
+            if (c == '"' and !in_single_quote) {
+                in_double_quote = !in_double_quote;
+                continue;
+            }
+
+            // Only count brackets outside quotes
+            if (!in_single_quote and !in_double_quote) {
+                switch (c) {
+                    '(' => paren_depth += 1,
+                    ')' => paren_depth -= 1,
+                    '{' => brace_depth += 1,
+                    '}' => brace_depth -= 1,
+                    '[' => bracket_depth += 1,
+                    ']' => bracket_depth -= 1,
+                    else => {},
+                }
+            }
+        }
+
+        // Input is incomplete if any quotes are unclosed or brackets unbalanced
+        return in_single_quote or in_double_quote or paren_depth > 0 or brace_depth > 0 or bracket_depth > 0;
     }
 
     /// Read a line with editing support
@@ -404,8 +480,52 @@ pub const LineEditor = struct {
                         continue;
                     }
 
+                    // Get current line content
+                    const current_line = self.buffer[0..self.length];
+
+                    // Build complete input (accumulated + current line)
+                    var complete_input: []const u8 = undefined;
+
+                    if (self.multiline_buffer) |*mlb| {
+                        // Add newline and current line to accumulated buffer
+                        try mlb.append(self.allocator, '\n');
+                        try mlb.appendSlice(self.allocator, current_line);
+                        complete_input = mlb.items;
+                    } else {
+                        complete_input = current_line;
+                    }
+
+                    // Check if input is incomplete (needs continuation)
+                    if (isIncomplete(complete_input)) {
+                        // Initialize multiline buffer if not already done
+                        if (self.multiline_buffer == null) {
+                            self.multiline_buffer = .{};
+                            try self.multiline_buffer.?.appendSlice(self.allocator, current_line);
+                        }
+                        self.in_multiline = true;
+
+                        // Move to next line and show PS2 prompt
+                        try self.writeBytes("\r\n");
+                        try self.writeBytes(self.ps2_prompt);
+
+                        // Reset buffer for next line input
+                        self.length = 0;
+                        self.cursor = 0;
+                        continue;
+                    }
+
+                    // Input is complete - return it
                     try self.writeBytes("\r\n");
                     try self.terminal.disableRawMode();
+
+                    // Return the complete multi-line input or single line
+                    if (self.multiline_buffer) |*mlb| {
+                        const result = try self.allocator.dupe(u8, mlb.items);
+                        mlb.deinit(self.allocator);
+                        self.multiline_buffer = null;
+                        self.in_multiline = false;
+                        return result;
+                    }
 
                     if (self.length == 0) return try self.allocator.dupe(u8, "");
                     return try self.allocator.dupe(u8, self.buffer[0..self.length]);
@@ -426,6 +546,14 @@ pub const LineEditor = struct {
                     if (self.completion_list != null) {
                         try self.clearCompletionDisplay();
                     }
+
+                    // Clear multi-line buffer if in multi-line mode
+                    if (self.multiline_buffer) |*mlb| {
+                        mlb.deinit(self.allocator);
+                        self.multiline_buffer = null;
+                        self.in_multiline = false;
+                    }
+
                     try self.writeBytes("^C\r\n");
                     try self.terminal.disableRawMode();
                     return error.Interrupted;
@@ -2035,7 +2163,129 @@ pub const LineEditor = struct {
             self.allocator.free(query);
             self.history_search_query = null;
         }
+        // Clean up multiline buffer
+        if (self.multiline_buffer) |*mlb| {
+            mlb.deinit(self.allocator);
+            self.multiline_buffer = null;
+            self.in_multiline = false;
+        }
         self.clearCompletionState();
         self.clearSuggestion();
     }
 };
+
+// ============================================
+// Multi-line Input Tests
+// ============================================
+
+test "isIncomplete: trailing backslash" {
+    // Single trailing backslash means continuation
+    try std.testing.expect(LineEditor.isIncomplete("echo hello \\"));
+    try std.testing.expect(LineEditor.isIncomplete("ls -la \\"));
+    try std.testing.expect(LineEditor.isIncomplete("\\"));
+}
+
+test "isIncomplete: escaped backslash" {
+    // Double backslash is escaped, not continuation
+    try std.testing.expect(!LineEditor.isIncomplete("echo hello \\\\"));
+    try std.testing.expect(!LineEditor.isIncomplete("path\\\\"));
+}
+
+test "isIncomplete: triple backslash" {
+    // Triple backslash = escaped + continuation
+    try std.testing.expect(LineEditor.isIncomplete("echo \\\\\\"));
+}
+
+test "isIncomplete: unclosed single quote" {
+    try std.testing.expect(LineEditor.isIncomplete("echo 'hello"));
+    try std.testing.expect(LineEditor.isIncomplete("echo 'hello world"));
+    try std.testing.expect(LineEditor.isIncomplete("'"));
+}
+
+test "isIncomplete: closed single quote" {
+    try std.testing.expect(!LineEditor.isIncomplete("echo 'hello'"));
+    try std.testing.expect(!LineEditor.isIncomplete("echo 'hello world'"));
+    try std.testing.expect(!LineEditor.isIncomplete("''"));
+}
+
+test "isIncomplete: unclosed double quote" {
+    try std.testing.expect(LineEditor.isIncomplete("echo \"hello"));
+    try std.testing.expect(LineEditor.isIncomplete("echo \"hello world"));
+    try std.testing.expect(LineEditor.isIncomplete("\""));
+}
+
+test "isIncomplete: closed double quote" {
+    try std.testing.expect(!LineEditor.isIncomplete("echo \"hello\""));
+    try std.testing.expect(!LineEditor.isIncomplete("echo \"hello world\""));
+    try std.testing.expect(!LineEditor.isIncomplete("\"\""));
+}
+
+test "isIncomplete: escaped quote in double quotes" {
+    // \" inside double quotes is escaped, not a closer
+    try std.testing.expect(LineEditor.isIncomplete("echo \"hello \\\""));
+    try std.testing.expect(!LineEditor.isIncomplete("echo \"hello \\\"\""));
+}
+
+test "isIncomplete: quote inside other quote type" {
+    // Single quote inside double quotes doesn't count
+    try std.testing.expect(!LineEditor.isIncomplete("echo \"it's good\""));
+    // Double quote inside single quotes doesn't count
+    try std.testing.expect(!LineEditor.isIncomplete("echo 'he said \"hi\"'"));
+}
+
+test "isIncomplete: unclosed parentheses" {
+    try std.testing.expect(LineEditor.isIncomplete("(echo hello"));
+    try std.testing.expect(LineEditor.isIncomplete("((echo hello)"));
+    try std.testing.expect(LineEditor.isIncomplete("("));
+}
+
+test "isIncomplete: closed parentheses" {
+    try std.testing.expect(!LineEditor.isIncomplete("(echo hello)"));
+    try std.testing.expect(!LineEditor.isIncomplete("((echo hello))"));
+    try std.testing.expect(!LineEditor.isIncomplete("()"));
+}
+
+test "isIncomplete: unclosed braces" {
+    try std.testing.expect(LineEditor.isIncomplete("{echo hello"));
+    try std.testing.expect(LineEditor.isIncomplete("{{echo hello}"));
+    try std.testing.expect(LineEditor.isIncomplete("{"));
+}
+
+test "isIncomplete: closed braces" {
+    try std.testing.expect(!LineEditor.isIncomplete("{echo hello}"));
+    try std.testing.expect(!LineEditor.isIncomplete("{{echo hello}}"));
+    try std.testing.expect(!LineEditor.isIncomplete("{}"));
+}
+
+test "isIncomplete: unclosed brackets" {
+    try std.testing.expect(LineEditor.isIncomplete("[test -f file"));
+    try std.testing.expect(LineEditor.isIncomplete("[[test -f file]"));
+    try std.testing.expect(LineEditor.isIncomplete("["));
+}
+
+test "isIncomplete: closed brackets" {
+    try std.testing.expect(!LineEditor.isIncomplete("[test -f file]"));
+    try std.testing.expect(!LineEditor.isIncomplete("[[test -f file]]"));
+    try std.testing.expect(!LineEditor.isIncomplete("[]"));
+}
+
+test "isIncomplete: brackets inside quotes" {
+    try std.testing.expect(!LineEditor.isIncomplete("echo \"[not a bracket\""));
+    try std.testing.expect(!LineEditor.isIncomplete("echo '(not a paren)'"));
+    try std.testing.expect(!LineEditor.isIncomplete("echo \"{not a brace}\""));
+}
+
+test "isIncomplete: empty input" {
+    try std.testing.expect(!LineEditor.isIncomplete(""));
+}
+
+test "isIncomplete: complete input" {
+    try std.testing.expect(!LineEditor.isIncomplete("echo hello world"));
+    try std.testing.expect(!LineEditor.isIncomplete("ls -la"));
+    try std.testing.expect(!LineEditor.isIncomplete("git status"));
+}
+
+test "isIncomplete: nested structures" {
+    try std.testing.expect(LineEditor.isIncomplete("echo \"$(cmd"));
+    try std.testing.expect(!LineEditor.isIncomplete("echo \"$(cmd)\""));
+}

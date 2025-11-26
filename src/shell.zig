@@ -91,6 +91,11 @@ pub const Shell = struct {
     // Shell options
     option_errexit: bool, // set -e: exit on error
     option_errtrace: bool, // set -E: inherit ERR trap
+    option_xtrace: bool, // set -x: print commands before execution
+    option_nounset: bool, // set -u: error on unset variable
+    option_pipefail: bool, // set -o pipefail: pipeline returns rightmost non-zero exit
+    option_noexec: bool, // set -n: read commands but don't execute (syntax check)
+    option_verbose: bool, // set -v: print input lines as read
     current_line: usize, // For error reporting
     // Script management
     script_manager: ScriptManager,
@@ -175,6 +180,11 @@ pub const Shell = struct {
             .last_arg = "",
             .option_errexit = false,
             .option_errtrace = false,
+            .option_xtrace = false,
+            .option_nounset = false,
+            .option_pipefail = false,
+            .option_noexec = false,
+            .option_verbose = false,
             .current_line = 0,
             .script_manager = ScriptManager.init(allocator),
             .function_manager = FunctionManager.init(allocator),

@@ -235,12 +235,25 @@ pub const Executor = struct {
 
         // Wait for all children
         var last_status: i32 = 0;
+        var pipefail_status: i32 = 0;
         for (0..commands.len) |i| {
             const term = try children_buffer[i].wait();
-            last_status = switch (term) {
+            const status: i32 = switch (term) {
                 .Exited => |code| code,
                 else => 1,
             };
+            last_status = status;
+            // For pipefail: track rightmost non-zero exit status
+            if (status != 0) {
+                pipefail_status = status;
+            }
+        }
+
+        // Handle pipefail option
+        if (self.shell) |shell| {
+            if (shell.option_pipefail and pipefail_status != 0) {
+                return pipefail_status;
+            }
         }
 
         return last_status;
@@ -305,9 +318,22 @@ pub const Executor = struct {
 
         // Wait for all children
         var last_status: i32 = 0;
+        var pipefail_status: i32 = 0;
         for (pids_buffer[0..commands.len]) |pid| {
             const result = std.posix.waitpid(pid, 0);
-            last_status = @intCast(std.posix.W.EXITSTATUS(result.status));
+            const status: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+            last_status = status;
+            // For pipefail: track rightmost non-zero exit status
+            if (status != 0) {
+                pipefail_status = status;
+            }
+        }
+
+        // Handle pipefail option
+        if (self.shell) |shell| {
+            if (shell.option_pipefail and pipefail_status != 0) {
+                return pipefail_status;
+            }
         }
 
         return last_status;
@@ -414,6 +440,10 @@ pub const Executor = struct {
                         if (redir.kind == .herestring) {
                             // For herestring, expand variables and use the content
                             var expansion = Expansion.init(self.allocator, self.environment, 0);
+                            // Set nounset option if enabled in shell
+                            if (self.shell) |shell| {
+                                expansion.option_nounset = shell.option_nounset;
+                            }
                             const expanded = expansion.expand(redir.target) catch redir.target;
                             // Add newline for herestring
                             var buf: [4096]u8 = undefined;
@@ -470,6 +500,23 @@ pub const Executor = struct {
     }
 
     pub fn executeCommand(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // Handle set -x (xtrace): print command before execution
+        if (self.shell) |shell| {
+            if (shell.option_xtrace) {
+                // Print command with + prefix (like bash)
+                try IO.eprint("+ {s}", .{command.name});
+                for (command.args) |arg| {
+                    try IO.eprint(" {s}", .{arg});
+                }
+                try IO.eprint("\n", .{});
+            }
+
+            // Handle set -n (noexec): don't execute, just return success
+            if (shell.option_noexec) {
+                return 0;
+            }
+        }
+
         // Check if it's a builtin
         if (self.isBuiltin(command.name)) {
             // If builtin has redirections, handle appropriately per OS
@@ -1018,24 +1065,28 @@ pub const Executor = struct {
                 if (self.shell) |shell| {
                     if (std.mem.eql(u8, option, "e")) {
                         shell.option_errexit = enable;
-                        if (enable) {
-                            try IO.print("errexit enabled (exit on error)\n", .{});
-                        } else {
-                            try IO.print("errexit disabled\n", .{});
-                        }
                     } else if (std.mem.eql(u8, option, "E")) {
                         shell.option_errtrace = enable;
-                        if (enable) {
-                            try IO.print("errtrace enabled (ERR trap inheritance)\n", .{});
-                        } else {
-                            try IO.print("errtrace disabled\n", .{});
-                        }
+                    } else if (std.mem.eql(u8, option, "x")) {
+                        shell.option_xtrace = enable;
+                    } else if (std.mem.eql(u8, option, "u")) {
+                        shell.option_nounset = enable;
+                    } else if (std.mem.eql(u8, option, "n")) {
+                        shell.option_noexec = enable;
+                    } else if (std.mem.eql(u8, option, "v")) {
+                        shell.option_verbose = enable;
                     } else if (std.mem.eql(u8, option, "o")) {
-                        // set -o option_name
-                        if (command.args.len > 1) {
-                            try IO.eprint("den: set: -o requires option name\n", .{});
-                            return 1;
-                        }
+                        // set -o option_name / set +o option_name
+                        // Need to check next argument for the option name
+                        // For now, just list options if no argument
+                        try IO.print("Current option settings:\n", .{});
+                        try IO.print("errexit        {s}\n", .{if (shell.option_errexit) "on" else "off"});
+                        try IO.print("errtrace       {s}\n", .{if (shell.option_errtrace) "on" else "off"});
+                        try IO.print("xtrace         {s}\n", .{if (shell.option_xtrace) "on" else "off"});
+                        try IO.print("nounset        {s}\n", .{if (shell.option_nounset) "on" else "off"});
+                        try IO.print("pipefail       {s}\n", .{if (shell.option_pipefail) "on" else "off"});
+                        try IO.print("noexec         {s}\n", .{if (shell.option_noexec) "on" else "off"});
+                        try IO.print("verbose        {s}\n", .{if (shell.option_verbose) "on" else "off"});
                     } else {
                         try IO.eprint("den: set: unknown option: {s}\n", .{arg});
                         return 1;

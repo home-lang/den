@@ -564,6 +564,21 @@ pub fn build(b: *std.Build) void {
     const fuzzing_test_step = b.step("test-fuzzing", "Run comprehensive fuzzing tests");
     fuzzing_test_step.dependOn(&run_fuzzing_tests.step);
 
+    // Terminal tests (multi-line input, isIncomplete function)
+    const terminal_test_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/terminal.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const terminal_tests = b.addTest(.{
+        .root_module = terminal_test_module,
+    });
+
+    const run_terminal_tests = b.addRunArtifact(terminal_tests);
+    const terminal_test_step = b.step("test-terminal", "Run terminal and multi-line input tests");
+    terminal_test_step.dependOn(&run_terminal_tests.step);
+
     // History expansion tests
     const history_expansion_test_module = b.createModule(.{
         .root_source_file = b.path("src/utils/history_expansion.zig"),
@@ -790,6 +805,7 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_process_tests.step);
     all_tests_step.dependOn(&run_parser_regression_tests.step);
     all_tests_step.dependOn(&run_fuzzing_tests.step);
+    all_tests_step.dependOn(&run_terminal_tests.step);
 
     // ========================================
     // Profiling and Benchmarks

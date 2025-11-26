@@ -109,41 +109,46 @@
   - [x] Incremental search display
   - [x] Search result highlighting
   - [x] Search result cycling (Ctrl+R repeatedly)
-- [ ] **Multi-line Input**
-  - [ ] Line continuation detection (`\` at EOL)
-  - [ ] Unclosed quote detection
-  - [ ] Multi-line prompt (PS2)
-  - [ ] Multi-line editing
+- [x] **Multi-line Input** ✅
+  - [x] Line continuation detection (`\` at EOL)
+  - [x] Unclosed quote detection
+  - [x] Multi-line prompt (PS2)
+  - [x] Multi-line editing
+  - [x] Unclosed parentheses/brackets/braces detection
+  - **Implementation**: `src/utils/terminal.zig` (isIncomplete function, multiline_buffer)
 
-### 6. History Expansion (Phase 10)
-- [ ] `!!` (last command)
-- [ ] `!N` (command N)
-- [ ] `!-N` (Nth previous command)
-- [ ] `!string` (last command starting with string)
-- [ ] `!?string` (last command containing string)
-- [ ] `^old^new` (replace in last command)
-- [ ] `!#` (current command line)
-- [ ] Word designators (`:0`, `:1`, `:$`, `:*`)
+### 6. History Expansion (Phase 10) ✅
+- [x] `!!` (last command)
+- [x] `!N` (command N)
+- [x] `!-N` (Nth previous command)
+- [x] `!string` (last command starting with string)
+- [x] `!?string` (last command containing string)
+- [x] `^old^new` (replace in last command)
+- [ ] `!#` (current command line - needs context)
+- [x] Word designators (`:0`, `:1`, `:$`, `:*`, `:^`, `:n-m`)
+- [x] `!$` (last argument)
+- [x] `!*` (all arguments)
 - [ ] Fuzzy search
 - [ ] Regex search
 - [ ] Search result ranking
+- **Implementation**: `src/utils/history_expansion.zig` (856 lines)
 
-### 7. Context-Aware Completion (Phase 11)
-- [ ] Argument position detection
-- [ ] Option/flag completion (e.g., `ls -<TAB>`)
+### 7. Context-Aware Completion (Phase 11) ✅
+- [x] Argument position detection
+- [x] Option/flag completion (`ls -<TAB>`, `grep -<TAB>`, `find -<TAB>`, `curl -<TAB>`)
 - [ ] Variable name completion
-- [ ] Environment variable completion
+- [x] Environment variable completion (`$<TAB>`)
 - [ ] Hostname completion
 - [ ] Username completion
-- [ ] **Command-Specific Completion**
-  - [ ] Git completion (branches, tags, remotes, files)
-  - [ ] npm completion (scripts, packages)
-  - [ ] Bun completion (scripts, commands)
-  - [ ] Docker completion (containers, images, commands)
+- [x] **Command-Specific Completion**
+  - [x] Git completion (branches, tags, remotes, files, subcommands)
+  - [x] npm/bun/yarn/pnpm completion (scripts, subcommands)
+  - [x] Docker completion (containers, images, subcommands)
   - [ ] kubectl completion
   - [ ] Custom completion registration
 - [ ] Completion caching with TTL
 - [ ] Completion configuration (enable/disable, case sensitivity, max suggestions)
+- **Implementation**: `src/utils/context_completion.zig` (893 lines)
 
 ### 8. Arithmetic Expansion (Incomplete)
 - [ ] Comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`)
@@ -178,12 +183,16 @@
   - [ ] LRU cache for command substitutions
   - [ ] LRU cache for glob results
 
-### 10. Execution Options
-- [ ] `set -x` (xtrace - print commands before execution)
-- [ ] `set -u` (nounset - error on unset variable)
-- [ ] `set -o pipefail` (pipeline failure detection)
-- [ ] `set -n` (noexec - parse only, don't execute)
-- [ ] `set -v` (verbose - print input lines)
+### 10. Execution Options ✅
+- [x] `set -x` (xtrace - print commands before execution)
+- [x] `set -u` (nounset - error on unset variable)
+- [x] `set -o pipefail` (pipeline failure detection)
+- [x] `set -n` (noexec - parse only, don't execute)
+- [x] `set -v` (verbose - print input lines)
+- [x] `set -e` (errexit - exit on error) - already implemented
+- [x] `set -E` (errtrace - inherit ERR trap) - already implemented
+- [x] `set -o` (list all options)
+- **Implementation**: `src/shell.zig` (option fields), `src/executor/mod.zig` (builtinSet, executeCommand, pipelines)
 
 ### 11. Scripting Engine (Phase 14 - Partial)
 - [ ] **Control Flow Enhancements**
@@ -421,11 +430,11 @@ Many builtins are implemented but missing flags/options:
 | Signal Handling | 4/4 ✅ | 🔴 Critical |
 | Cross-Platform | 9/11 ✅ (Windows abstraction complete) | 🔴 Critical |
 | Configuration System | 15 (10 ✅) | 🟡 Medium |
-| Advanced REPL | 25 (22 ✅) | 🟡 Medium |
-| History Expansion | 12 | 🟡 Medium |
-| Completion | 15 | 🟡 Medium |
+| Advanced REPL | 25 (25 ✅) | 🟡 Medium |
+| History Expansion | 12 (10 ✅) | 🟡 Medium |
+| Completion | 15 (10 ✅) | 🟡 Medium |
 | Arithmetic/Expansion | 20 | 🟡 Medium |
-| Execution Options | 5 | 🟡 Medium |
+| Execution Options | 8/8 ✅ | 🟡 Medium |
 | Scripting Engine | 20 | 🟡 Medium |
 | Custom Hooks | 6 | 🟡 Medium |
 | Extended Builtins | 30 | 🟢 Low |
@@ -515,3 +524,33 @@ The following features are production-ready:
   - test_fuzzing.zig (30+ tests) - Variable expansion, glob, brace expansion, pipelines, grouping, unicode
   - src/parser/test_fuzz.zig - Parser fuzzing with random inputs
   - src/parser/test_fuzz_simple.zig - Simple tokenizer fuzzing
+- History Expansion (fully implemented):
+  - src/utils/history_expansion.zig (856 lines)
+  - `!!`, `!N`, `!-N`, `!string`, `!?string?`, `^old^new`
+  - `!$`, `!*`, word designators (`:0`, `:1`, `:$`, `:*`, `:^`, `:n-m`)
+  - Integrated in shell.zig
+- Context-Aware Completion (fully implemented):
+  - src/utils/context_completion.zig (893 lines)
+  - Git completion (branches, tags, remotes, files, subcommands)
+  - npm/bun/yarn/pnpm completion (scripts, subcommands)
+  - Docker completion (containers, images, subcommands)
+  - Environment variable completion ($TAB)
+  - Option/flag completion (ls, grep, find, curl)
+- Multi-line Input (fully implemented):
+  - src/utils/terminal.zig (isIncomplete function, multiline_buffer)
+  - Line continuation detection (`\` at EOL)
+  - Unclosed quote detection (single and double)
+  - Unclosed brackets/parentheses/braces detection
+  - PS2 prompt for continuation lines
+  - Ctrl+C cancels multi-line input
+  - 20+ unit tests for isIncomplete function
+- Execution Options (fully implemented):
+  - src/shell.zig (option fields: errexit, errtrace, xtrace, nounset, pipefail, noexec, verbose)
+  - src/executor/mod.zig (builtinSet handles all options)
+  - `set -x` prints commands before execution with `+ ` prefix
+  - `set -u` errors on unset variable in expansion
+  - `set -o pipefail` returns rightmost non-zero exit in pipeline
+  - `set -n` parses but doesn't execute (syntax check mode)
+  - `set -v` verbose mode
+  - `set -e/-E` were already implemented
+  - `set -o` lists all option settings

@@ -13,6 +13,7 @@ pub const Expansion = struct {
     last_background_pid: i32, // $!
     last_arg: []const u8, // $_
     shell: ?*anyopaque, // Optional shell reference for function local vars
+    option_nounset: bool, // set -u: error on unset variable
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), last_exit_code: i32) Expansion {
         return .{
@@ -25,6 +26,7 @@ pub const Expansion = struct {
             .last_background_pid = 0,
             .last_arg = "",
             .shell = null,
+            .option_nounset = false,
         };
     }
 
@@ -47,6 +49,7 @@ pub const Expansion = struct {
             .last_background_pid = last_background_pid,
             .last_arg = last_arg,
             .shell = null,
+            .option_nounset = false,
         };
     }
 
@@ -70,6 +73,7 @@ pub const Expansion = struct {
             .last_background_pid = last_background_pid,
             .last_arg = last_arg,
             .shell = shell,
+            .option_nounset = false,
         };
     }
 
@@ -620,7 +624,18 @@ pub const Expansion = struct {
             return ExpansionResult{ .value = result, .consumed = end };
         }
 
-        // Variable not found - return empty string
+        // Variable not found
+        // If nounset is enabled, return an error
+        if (self.option_nounset) {
+            // Print error message to stderr using posix write
+            const posix = std.posix;
+            var buf: [256]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "den: {s}: unbound variable\n", .{var_name}) catch "den: unbound variable\n";
+            _ = posix.write(posix.STDERR_FILENO, msg) catch {};
+            return error.UnboundVariable;
+        }
+
+        // Return empty string (default behavior)
         return ExpansionResult{ .value = "", .consumed = end };
     }
 
