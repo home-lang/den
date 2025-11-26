@@ -322,7 +322,7 @@ pub fn killProcess(pid: ProcessId, signal: u8) !void {
 }
 
 fn killProcessPosix(pid: std.posix.pid_t, signal: u8) !void {
-    try std.posix.kill(pid, signal);
+    try std.posix.kill(pid, @enumFromInt(signal));
 }
 
 fn killProcessWindows(handle: std.os.windows.HANDLE) !void {
@@ -339,7 +339,7 @@ pub fn terminateProcess(pid: ProcessId) !void {
         // Best we can do is TerminateProcess or send Ctrl+C via GenerateConsoleCtrlEvent
         try killProcessWindows(pid);
     } else {
-        try killProcessPosix(pid, std.posix.SIG.TERM);
+        try killProcessPosix(pid, @intFromEnum(std.posix.SIG.TERM));
     }
 }
 
@@ -348,7 +348,7 @@ pub fn forceKillProcess(pid: ProcessId) !void {
     if (builtin.os.tag == .windows) {
         try killProcessWindows(pid);
     } else {
-        try killProcessPosix(pid, std.posix.SIG.KILL);
+        try killProcessPosix(pid, @intFromEnum(std.posix.SIG.KILL));
     }
 }
 
@@ -359,7 +359,7 @@ pub fn stopProcess(pid: ProcessId) !void {
         // Could use SuspendThread but that requires thread handles
         return error.NotSupported;
     } else {
-        try killProcessPosix(pid, std.posix.SIG.STOP);
+        try killProcessPosix(pid, @intFromEnum(std.posix.SIG.STOP));
     }
 }
 
@@ -369,7 +369,7 @@ pub fn continueProcess(pid: ProcessId) !void {
         // Windows doesn't have SIGCONT equivalent
         return error.NotSupported;
     } else {
-        try killProcessPosix(pid, std.posix.SIG.CONT);
+        try killProcessPosix(pid, @intFromEnum(std.posix.SIG.CONT));
     }
 }
 

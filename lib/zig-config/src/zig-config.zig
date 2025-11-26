@@ -95,7 +95,11 @@ fn tryLoadFromPath(comptime T: type, allocator: std.mem.Allocator, path: []const
         allocator.free(json);
         return null;
     };
-    defer parsed.deinit();
+    // Note: We do NOT call parsed.deinit() here because the value
+    // contains slices that point to memory owned by the parsed arena.
+    // The caller must keep the config result alive for the duration of use.
+    // The json_source is freed by ConfigResult.deinit().
+    // TODO: Consider deep-copying all slice fields to avoid this lifetime issue.
 
     return ConfigResult(T){
         .value = parsed.value,

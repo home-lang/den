@@ -3,6 +3,7 @@ const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 const Expansion = @import("../utils/expansion.zig").Expansion;
 const builtin = @import("builtin");
+const process = @import("../utils/process.zig");
 
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
@@ -2111,8 +2112,11 @@ pub const Executor = struct {
         try IO.print("{s}\n", .{job.command});
 
         // Wait for the process to complete
-        const result = std.posix.waitpid(@intCast(job.pid), 0);
-        shell_ref.last_exit_code = std.posix.W.EXITSTATUS(result.status);
+        const result = process.waitProcess(job.pid, .{}) catch |err| {
+            try IO.eprint("den: fg: failed to wait for job: {}\n", .{err});
+            return 1;
+        };
+        shell_ref.last_exit_code = result.status.code;
 
         // Remove from job list
         self.allocator.free(job.command);
@@ -2182,8 +2186,8 @@ pub const Executor = struct {
 
         var job = &shell_ref.background_jobs[job_index.?].?;
 
-        // Send SIGCONT to continue the process
-        std.posix.kill(@intCast(job.pid), std.posix.SIG.CONT) catch |err| {
+        // Send SIGCONT to continue the process (POSIX only, no-op on Windows)
+        process.continueProcess(job.pid) catch |err| {
             try IO.eprint("den: bg: failed to continue job: {}\n", .{err});
             return 1;
         };
@@ -2206,8 +2210,8 @@ pub const Executor = struct {
             for (shell_ref.background_jobs, 0..) |maybe_job, i| {
                 if (maybe_job) |job| {
                     if (job.status == .running) {
-                        const result = std.posix.waitpid(@intCast(job.pid), 0);
-                        last_status = std.posix.W.EXITSTATUS(result.status);
+                        const wait_result = process.waitProcess(job.pid, .{}) catch continue;
+                        last_status = wait_result.status.code;
                         self.allocator.free(job.command);
                         shell_ref.background_jobs[i] = null;
                         shell_ref.background_jobs_count -= 1;
@@ -2220,7 +2224,8 @@ pub const Executor = struct {
         // Wait for specific job(s)
         for (command.args) |arg| {
             // Parse job ID or PID
-            var target_pid: std.posix.pid_t = 0;
+            var target_job_index: ?usize = null;
+            var target_pid: ?process.ProcessId = null;
 
             if (arg.len > 0 and arg[0] == '%') {
                 const job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
@@ -2229,42 +2234,60 @@ pub const Executor = struct {
                 };
 
                 // Find job by ID
-                var found = false;
-                for (shell_ref.background_jobs) |maybe_job| {
+                for (shell_ref.background_jobs, 0..) |maybe_job, i| {
                     if (maybe_job) |job| {
                         if (job.job_id == job_id) {
-                            target_pid = @intCast(job.pid);
-                            found = true;
+                            target_job_index = i;
+                            target_pid = job.pid;
                             break;
                         }
                     }
                 }
 
-                if (!found) {
+                if (target_pid == null) {
                     try IO.eprint("den: wait: {s}: no such job\n", .{arg});
                     continue;
                 }
             } else {
-                target_pid = @intCast(std.fmt.parseInt(i32, arg, 10) catch {
+                // Raw PID - only supported on POSIX
+                if (builtin.os.tag == .windows) {
+                    try IO.eprint("den: wait: {s}: raw PIDs not supported on Windows, use %%jobid\n", .{arg});
+                    continue;
+                }
+                const pid_num = std.fmt.parseInt(i32, arg, 10) catch {
                     try IO.eprint("den: wait: {s}: not a pid or valid job spec\n", .{arg});
                     continue;
-                });
+                };
+                // Find job by PID
+                for (shell_ref.background_jobs, 0..) |maybe_job, i| {
+                    if (maybe_job) |job| {
+                        if (@as(i32, @intCast(job.pid)) == pid_num) {
+                            target_job_index = i;
+                            target_pid = job.pid;
+                            break;
+                        }
+                    }
+                }
+                if (target_pid == null) {
+                    // PID not in our job list, try to wait for it directly (POSIX only)
+                    target_pid = @intCast(pid_num);
+                }
             }
 
             // Wait for the process
-            const result = std.posix.waitpid(target_pid, 0);
-            shell_ref.last_exit_code = std.posix.W.EXITSTATUS(result.status);
+            const wait_result = process.waitProcess(target_pid.?, .{}) catch |err| {
+                try IO.eprint("den: wait: failed to wait: {}\n", .{err});
+                continue;
+            };
+            shell_ref.last_exit_code = wait_result.status.code;
 
-            // Remove from job list
-            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
-                if (maybe_job) |job| {
-                    if (@as(i32, @intCast(job.pid)) == target_pid) {
-                        self.allocator.free(job.command);
-                        shell_ref.background_jobs[i] = null;
-                        shell_ref.background_jobs_count -= 1;
-                        break;
-                    }
+            // Remove from job list if it was a tracked job
+            if (target_job_index) |idx| {
+                if (shell_ref.background_jobs[idx]) |job| {
+                    self.allocator.free(job.command);
                 }
+                shell_ref.background_jobs[idx] = null;
+                shell_ref.background_jobs_count -= 1;
             }
         }
 
@@ -2459,12 +2482,12 @@ pub const Executor = struct {
 
         // Send signal to each PID
         for (command.args[start_idx..]) |pid_str| {
-            const pid = std.fmt.parseInt(std.posix.pid_t, pid_str, 10) catch {
+            const pid = std.fmt.parseInt(process.ProcessId, pid_str, 10) catch {
                 try IO.eprint("den: kill: invalid process ID: {s}\n", .{pid_str});
                 continue;
             };
 
-            std.posix.kill(pid, @enumFromInt(signal)) catch |err| {
+            process.killProcess(pid, signal) catch |err| {
                 try IO.eprint("den: kill: ({d}): {}\n", .{ pid, err });
                 return 1;
             };

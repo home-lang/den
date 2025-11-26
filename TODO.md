@@ -45,12 +45,15 @@
 - [x] Clean up resources on abnormal exit
 - [x] Signal-safe I/O operations
 
-### 3. Cross-Platform Support
-- [ ] **Windows support** (deferred but important)
-  - [ ] Windows process API (CreateProcess instead of fork/exec)
-  - [ ] Windows environment handling (UTF-16)
-  - [ ] Job objects instead of process groups
-  - [ ] Windows signal handling equivalent
+### 3. Cross-Platform Support ✅ Partial
+- [x] **Windows support** (abstraction layer complete)
+  - [x] Windows process API (CreateProcess via std.process.Child)
+  - [x] Cross-platform process abstractions (`src/utils/process.zig`)
+  - [x] Cross-platform job control (`src/executor/job_control.zig`)
+  - [x] Windows environment handling (env.zig with thread-local cache)
+  - [x] Windows executable detection (.exe, .com, .bat, .cmd, .ps1)
+  - [x] Process groups replaced with job management on Windows
+  - [x] Windows signal handling equivalent (TerminateProcess)
 - [ ] **Linux support** (partial)
   - [ ] Test on various Linux distributions
   - [ ] Ensure all system modules work (battery, memory detection)
@@ -315,23 +318,29 @@
   - [ ] Track performance over time
   - [ ] Set performance targets
 
-### 16. Foundation Libraries (Phase 4 - Incomplete)
+### 16. Foundation Libraries (Phase 4 - Partial) ✅
 - [ ] **ANSI/Terminal**
   - [ ] Handle Windows console API differences
-- [ ] **Terminal I/O**
-  - [ ] Non-blocking I/O
-  - [ ] Signal-safe I/O
+- [x] **Terminal I/O**
+  - [x] Non-blocking I/O (in terminal.zig)
+  - [x] Signal-safe I/O (in io.zig)
 - [ ] **File System**
   - [ ] Path normalization
   - [ ] Recursive directory walking
-  - [ ] Cross-platform path handling
-- [ ] **Process Management**
-  - [ ] Process group management
-  - [ ] Handle Windows CreateProcess API
-- [ ] **Environment**
-  - [ ] PATH parsing
-  - [ ] Platform detection (Linux, macOS, Windows, BSD)
-  - [ ] Architecture detection
+  - [x] Cross-platform path handling (glob.zig path separators)
+- [x] **Process Management** (`src/utils/process.zig`)
+  - [x] ProcessId/FileHandle type abstractions
+  - [x] Cross-platform pipe creation
+  - [x] Cross-platform process waiting
+  - [x] Cross-platform process termination
+  - [x] Process group management (POSIX) / stubs (Windows)
+  - [x] Handle Windows CreateProcess API (via std.process.Child)
+- [x] **Environment** (`src/utils/env.zig`)
+  - [x] PATH parsing with PathList
+  - [x] Cross-platform executable search
+  - [x] Platform detection (Linux, macOS, Windows, BSD, etc.)
+  - [x] Architecture detection (x86_64, aarch64, arm, etc.)
+  - [x] Windows environment cache (thread-local)
 
 ### 17. Logging & Debugging (Phase 1) ✅
 - [x] Implement logging infrastructure (debug, info, warn, error levels)
@@ -410,7 +419,7 @@ Many builtins are implemented but missing flags/options:
 |----------|-------------|----------|
 | Testing Infrastructure | ~40 (unit ✅, integration ✅, e2e ✅) | 🔴 Critical |
 | Signal Handling | 4/4 ✅ | 🔴 Critical |
-| Cross-Platform | 8 | 🔴 Critical |
+| Cross-Platform | 9/11 ✅ (Windows abstraction complete) | 🔴 Critical |
 | Configuration System | 15 (10 ✅) | 🟡 Medium |
 | Advanced REPL | 25 (22 ✅) | 🟡 Medium |
 | History Expansion | 12 | 🟡 Medium |
@@ -422,7 +431,7 @@ Many builtins are implemented but missing flags/options:
 | Extended Builtins | 30 | 🟢 Low |
 | Documentation | 20 | 🟢 Low |
 | Performance | 25 | 🟢 Low |
-| Foundation Libraries | 12 | 🟢 Low |
+| Foundation Libraries | 12 (9 ✅) | 🟢 Low |
 | Logging & Debugging | 7/7 ✅ | 🟢 Low |
 | Memory Management | 6 | 🟢 Low |
 | Builtin Enhancements | 25 | 🔧 Improvement |
@@ -462,6 +471,13 @@ The following features are production-ready:
 *Based on codebase analysis and ROADMAP.md review*
 
 **Recent completions:**
+- Cross-Platform Support:
+  - `src/utils/process.zig` - ProcessId, FileHandle, Pipe abstractions for Windows/POSIX
+  - `src/executor/job_control.zig` - Cross-platform job management
+  - Windows executable detection (.exe, .com, .bat, .cmd, .ps1)
+  - Integrated process abstractions into executor builtins (fg, bg, wait, kill)
+  - Fixed zig-config use-after-free bug causing config loading segfault
+  - Added `-c "command"` CLI flag support
 - Signal Handling (SIGTERM, SIGWINCH, clean exit, signal-safe I/O)
 - Logging & Debugging infrastructure
 - Zig 0.16 API compatibility fixes

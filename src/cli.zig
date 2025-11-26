@@ -22,6 +22,7 @@ pub const Command = enum {
     version, // Show version
     help, // Show help
     script, // Execute script file (implicit)
+    command_string, // -c "command" - run command string
 };
 
 pub const CliArgs = struct {
@@ -126,6 +127,13 @@ pub fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
             .args = &[_][]const u8{},
             .allocator = allocator,
         };
+    } else if (std.mem.eql(u8, first_arg, "-c")) {
+        // -c "command" - run command string
+        return CliArgs{
+            .command = .command_string,
+            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .allocator = allocator,
+        };
     } else {
         // Assume it's a script file
         return CliArgs{
@@ -150,6 +158,7 @@ pub fn execute(cli_args: CliArgs) !void {
         .version => try showVersion(),
         .help => try showHelp(),
         .script => try runScript(cli_args.allocator, cli_args.args),
+        .command_string => try runCommandString(cli_args.allocator, cli_args.args),
     }
 }
 
@@ -470,6 +479,21 @@ fn runScript(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer den_shell.deinit();
 
     try den_shell.runScript(script_path, "den", script_args);
+}
+
+/// Run command string (-c "command")
+fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    if (args.len == 0) {
+        std.debug.print("Error: -c requires a command string\n", .{});
+        return error.MissingCommandString;
+    }
+
+    const command = args[0];
+
+    var den_shell = try shell.Shell.init(allocator);
+    defer den_shell.deinit();
+
+    try den_shell.executeCommand(command);
 }
 
 // Tests
