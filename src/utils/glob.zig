@@ -1,4 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+/// Platform-specific path separator
+const path_sep = if (builtin.os.tag == .windows) '\\' else '/';
+const path_sep_str = if (builtin.os.tag == .windows) "\\" else "/";
 
 /// Glob pattern matching and expansion
 pub const Glob = struct {
@@ -68,12 +73,12 @@ pub const Glob = struct {
                 break; // Too many matches
             }
 
-            // Build full path
+            // Build full path using platform-specific separator
             var path_buf: [std.fs.max_path_bytes]u8 = undefined;
             const full_path = if (std.mem.eql(u8, dir_path, ".")) blk: {
                 break :blk try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
             } else blk: {
-                break :blk try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name });
+                break :blk try std.fmt.bufPrint(&path_buf, "{s}" ++ path_sep_str ++ "{s}", .{ dir_path, entry.name });
             };
 
             matches_buffer[match_count] = try self.allocator.dupe(u8, full_path);

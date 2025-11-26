@@ -564,6 +564,21 @@ pub fn build(b: *std.Build) void {
     const context_completion_test_step = b.step("test-context-completion", "Run context-aware completion tests");
     context_completion_test_step.dependOn(&run_context_completion_tests.step);
 
+    // Cross-platform process tests
+    const process_test_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/process.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const process_tests = b.addTest(.{
+        .root_module = process_test_module,
+    });
+
+    const run_process_tests = b.addRunArtifact(process_tests);
+    const process_test_step = b.step("test-process", "Run cross-platform process tests");
+    process_test_step.dependOn(&run_process_tests.step);
+
     // Builtin tests
     const builtin_test_module = b.createModule(.{
         .root_source_file = b.path("tests/test_builtins.zig"),
@@ -742,6 +757,7 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_shell_options_tests.step);
     all_tests_step.dependOn(&run_history_expansion_tests.step);
     all_tests_step.dependOn(&run_context_completion_tests.step);
+    all_tests_step.dependOn(&run_process_tests.step);
 
     // ========================================
     // Profiling and Benchmarks

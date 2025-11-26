@@ -287,27 +287,77 @@ pub const PathList = struct {
         return false;
     }
 
+    /// Windows executable extensions (checked in order)
+    const windows_exe_extensions = [_][]const u8{ ".exe", ".com", ".bat", ".cmd", ".ps1" };
+
     /// Find executable in PATH
     pub fn findExecutable(self: *const PathList, allocator: std.mem.Allocator, name: []const u8) !?[]const u8 {
         for (self.paths.items) |path_dir| {
-            const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path_dir, name });
-            defer allocator.free(full_path);
+            if (builtin.os.tag == .windows) {
+                // On Windows, check for executable extensions
+                // First, try the name as-is (might already have extension)
+                if (try self.checkWindowsExecutable(allocator, path_dir, name)) |result| {
+                    return result;
+                }
 
-            // Check if file exists and is accessible
-            std.fs.accessAbsolute(full_path, .{}) catch continue;
+                // If no extension, try common executable extensions
+                if (std.mem.indexOfScalar(u8, name, '.') == null) {
+                    for (windows_exe_extensions) |ext| {
+                        var name_with_ext_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        const name_with_ext = std.fmt.bufPrint(&name_with_ext_buf, "{s}{s}", .{ name, ext }) catch continue;
+                        if (try self.checkWindowsExecutable(allocator, path_dir, name_with_ext)) |result| {
+                            return result;
+                        }
+                    }
+                }
+            } else {
+                // On Unix, check if executable via mode bits
+                const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path_dir, name });
+                defer allocator.free(full_path);
 
-            // On Unix, check if executable
-            if (builtin.os.tag != .windows) {
+                // Check if file exists and is accessible
+                std.fs.accessAbsolute(full_path, .{}) catch continue;
+
                 const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
                 defer file.close();
 
                 const stat = file.stat() catch continue;
                 if (stat.mode & 0o111 == 0) continue; // Not executable
-            }
 
-            return try allocator.dupe(u8, full_path);
+                return try allocator.dupe(u8, full_path);
+            }
         }
 
+        return null;
+    }
+
+    /// Check if a file exists and is an executable on Windows
+    fn checkWindowsExecutable(self: *const PathList, allocator: std.mem.Allocator, path_dir: []const u8, name: []const u8) !?[]const u8 {
+        _ = self;
+        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path_dir, name });
+        errdefer allocator.free(full_path);
+
+        // Check if file exists
+        std.fs.accessAbsolute(full_path, .{}) catch {
+            allocator.free(full_path);
+            return null;
+        };
+
+        // Verify it has a valid executable extension
+        const has_valid_ext = blk: {
+            for (windows_exe_extensions) |ext| {
+                if (std.ascii.endsWithIgnoreCase(full_path, ext)) {
+                    break :blk true;
+                }
+            }
+            break :blk false;
+        };
+
+        if (has_valid_ext) {
+            return full_path;
+        }
+
+        allocator.free(full_path);
         return null;
     }
 
