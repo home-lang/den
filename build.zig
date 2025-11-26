@@ -549,6 +549,51 @@ pub fn build(b: *std.Build) void {
     const completion_test_step = b.step("test-completion", "Run completion tests");
     completion_test_step.dependOn(&run_completion_tests.step);
 
+    // Pipeline integration tests
+    const pipeline_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_pipeline.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const pipeline_tests = b.addTest(.{
+        .root_module = pipeline_test_module,
+    });
+
+    const run_pipeline_tests = b.addRunArtifact(pipeline_tests);
+    const pipeline_test_step = b.step("test-pipeline", "Run pipeline integration tests");
+    pipeline_test_step.dependOn(&run_pipeline_tests.step);
+
+    // Chaining integration tests
+    const chaining_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_chaining.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const chaining_tests = b.addTest(.{
+        .root_module = chaining_test_module,
+    });
+
+    const run_chaining_tests = b.addRunArtifact(chaining_tests);
+    const chaining_test_step = b.step("test-chaining", "Run chaining integration tests");
+    chaining_test_step.dependOn(&run_chaining_tests.step);
+
+    // Scripting integration tests
+    const scripting_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_scripting.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const scripting_tests = b.addTest(.{
+        .root_module = scripting_test_module,
+    });
+
+    const run_scripting_tests = b.addRunArtifact(scripting_tests);
+    const scripting_test_step = b.step("test-scripting", "Run scripting integration tests");
+    scripting_test_step.dependOn(&run_scripting_tests.step);
+
     // CLI tests
     const cli_module = b.createModule(.{
         .root_source_file = b.path("src/cli.zig"),
@@ -598,6 +643,9 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_alias_tests.step);
     all_tests_step.dependOn(&run_job_control_tests.step);
     all_tests_step.dependOn(&run_completion_tests.step);
+    all_tests_step.dependOn(&run_pipeline_tests.step);
+    all_tests_step.dependOn(&run_chaining_tests.step);
+    all_tests_step.dependOn(&run_scripting_tests.step);
 
     // ========================================
     // Profiling and Benchmarks

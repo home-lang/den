@@ -97,7 +97,7 @@ test "alias: alias with pipe" {
     var fixture = try test_utils.ShellFixture.init(allocator);
     defer fixture.deinit();
 
-    const result = try fixture.exec("alias countlines='wc -l' && echo -e 'a\\nb\\nc' | countlines");
+    const result = try fixture.exec("alias countlines='wc -l' && printf 'a\\nb\\nc\\n' | countlines");
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 

@@ -18,10 +18,10 @@
   - [x] Alias tests (`tests/test_alias.zig`) - 15+ tests
   - [x] Job control tests (`tests/test_job_control.zig`) - 15+ tests
   - [x] Test utilities (`tests/test_utils.zig`) - ShellFixture, TempDir, etc.
-- [ ] **Integration tests**
-  - [ ] Pipeline tests (`test/pipeline-redirections.test.ts`)
-  - [ ] Chaining tests (`test/chaining-basic.test.ts`)
-  - [ ] Scripting tests (`test/scripting.test.ts`)
+- [x] **Integration tests**
+  - [x] Pipeline tests (`tests/test_pipeline.zig`) - 30 tests
+  - [x] Chaining tests (`tests/test_chaining.zig`) - 35 tests
+  - [x] Scripting tests (`tests/test_scripting.zig`) - 42 tests
 - [ ] **E2E tests**
   - [ ] CLI tests (`test/cli-wrapper.ts`)
   - [ ] REPL tests
@@ -408,7 +408,7 @@ Many builtins are implemented but missing flags/options:
 
 | Category | Total Items | Priority |
 |----------|-------------|----------|
-| Testing Infrastructure | ~40 (unit tests ✅, integration/e2e pending) | 🔴 Critical |
+| Testing Infrastructure | ~40 (unit ✅, integration ✅, e2e pending) | 🔴 Critical |
 | Signal Handling | 4/4 ✅ | 🔴 Critical |
 | Cross-Platform | 8 | 🔴 Critical |
 | Configuration System | 15 | 🟡 Medium |
@@ -472,3 +472,7 @@ The following features are production-ready:
   - test_alias.zig (create, overwrite, unalias, chained aliases)
   - test_job_control.zig (background jobs, wait, kill, disown)
   - test_utils.zig (ShellFixture, TempDir, TestAssert helpers)
+- Testing Infrastructure - Integration Tests:
+  - test_pipeline.zig (30 tests - pipe operations, multi-stage, error handling)
+  - test_chaining.zig (35 tests - &&, ||, ; operators, grouping)
+  - test_scripting.zig (42 tests - if/else, for, while, until, case, functions)
