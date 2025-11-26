@@ -29,6 +29,7 @@ pub const CliArgs = struct {
     command: Command,
     args: []const []const u8,
     allocator: std.mem.Allocator,
+    config_path: ?[]const u8 = null, // Custom config path from --config flag
 
     pub fn deinit(self: *CliArgs) void {
         _ = self;
@@ -55,91 +56,137 @@ pub fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
 
     const argv = argv_buffer[0..argv_count];
 
+    // Parse global flags first (--config)
+    var config_path: ?[]const u8 = null;
+    var remaining_argv_buffer: [64][]const u8 = undefined;
+    var remaining_count: usize = 0;
+    var i: usize = 0;
+
+    while (i < argv.len) {
+        const arg = argv[i];
+        if (std.mem.eql(u8, arg, "--config")) {
+            // Next argument is the config path
+            if (i + 1 < argv.len) {
+                config_path = argv[i + 1];
+                i += 2;
+                continue;
+            } else {
+                std.debug.print("Error: --config requires a path argument\n", .{});
+                return error.MissingConfigPath;
+            }
+        } else if (std.mem.startsWith(u8, arg, "--config=")) {
+            // --config=path format
+            config_path = arg["--config=".len..];
+            i += 1;
+            continue;
+        }
+        if (remaining_count < remaining_argv_buffer.len) {
+            remaining_argv_buffer[remaining_count] = arg;
+            remaining_count += 1;
+        }
+        i += 1;
+    }
+
+    const remaining_argv = remaining_argv_buffer[0..remaining_count];
+
     // No arguments = interactive shell
-    if (argv.len == 0) {
+    if (remaining_argv.len == 0) {
         return CliArgs{
             .command = .interactive,
             .args = &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     }
 
-    const first_arg = argv[0];
+    const first_arg = remaining_argv[0];
 
     // Check for subcommands
     if (std.mem.eql(u8, first_arg, "shell")) {
         return CliArgs{
             .command = .shell,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "exec")) {
         return CliArgs{
             .command = .exec,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "complete")) {
         return CliArgs{
             .command = .complete,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "completion")) {
         return CliArgs{
             .command = .completion,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "dev-setup")) {
         return CliArgs{
             .command = .dev_setup,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "setup")) {
         return CliArgs{
             .command = .setup,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "set-shell")) {
         return CliArgs{
             .command = .set_shell,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "uninstall")) {
         return CliArgs{
             .command = .uninstall,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "version") or std.mem.eql(u8, first_arg, "--version") or std.mem.eql(u8, first_arg, "-v")) {
         return CliArgs{
             .command = .version,
             .args = &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "help") or std.mem.eql(u8, first_arg, "--help") or std.mem.eql(u8, first_arg, "-h")) {
         return CliArgs{
             .command = .help,
             .args = &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else if (std.mem.eql(u8, first_arg, "-c")) {
         // -c "command" - run command string
         return CliArgs{
             .command = .command_string,
-            .args = if (argv.len > 1) argv[1..] else &[_][]const u8{},
+            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
+            .config_path = config_path,
         };
     } else {
         // Assume it's a script file
         return CliArgs{
             .command = .script,
-            .args = argv,
+            .args = remaining_argv,
             .allocator = allocator,
+            .config_path = config_path,
         };
     }
 }
@@ -147,8 +194,8 @@ pub fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
 /// Execute the CLI command
 pub fn execute(cli_args: CliArgs) !void {
     switch (cli_args.command) {
-        .interactive, .shell => try runInteractiveShell(cli_args.allocator),
-        .exec => try execCommand(cli_args.allocator, cli_args.args),
+        .interactive, .shell => try runInteractiveShell(cli_args.allocator, cli_args.config_path),
+        .exec => try execCommand(cli_args.allocator, cli_args.args, cli_args.config_path),
         .complete => try getCompletions(cli_args.allocator, cli_args.args),
         .completion => try generateCompletion(cli_args.allocator, cli_args.args),
         .dev_setup => try devSetup(cli_args.allocator),
@@ -157,20 +204,20 @@ pub fn execute(cli_args: CliArgs) !void {
         .uninstall => try uninstall(cli_args.allocator),
         .version => try showVersion(),
         .help => try showHelp(),
-        .script => try runScript(cli_args.allocator, cli_args.args),
-        .command_string => try runCommandString(cli_args.allocator, cli_args.args),
+        .script => try runScript(cli_args.allocator, cli_args.args, cli_args.config_path),
+        .command_string => try runCommandString(cli_args.allocator, cli_args.args, cli_args.config_path),
     }
 }
 
 /// Start interactive shell
-fn runInteractiveShell(allocator: std.mem.Allocator) !void {
-    var den_shell = try shell.Shell.init(allocator);
+fn runInteractiveShell(allocator: std.mem.Allocator, config_path: ?[]const u8) !void {
+    var den_shell = try shell.Shell.initWithConfig(allocator, config_path);
     defer den_shell.deinit();
     try den_shell.run();
 }
 
 /// Execute a single command
-fn execCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn execCommand(allocator: std.mem.Allocator, args: []const []const u8, config_path: ?[]const u8) !void {
     if (args.len == 0) {
         std.debug.print("Error: 'exec' requires a command argument\n", .{});
         std.debug.print("Usage: den exec <command>\n", .{});
@@ -195,7 +242,7 @@ fn execCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     const command = buf[0..pos];
 
-    var den_shell = try shell.Shell.init(allocator);
+    var den_shell = try shell.Shell.initWithConfig(allocator, config_path);
     defer den_shell.deinit();
 
     // Execute the command
@@ -447,6 +494,8 @@ fn showHelp() !void {
         \\Options:
         \\  -h, --help                Show help
         \\  -v, --version             Show version
+        \\  -c <command>              Execute command string
+        \\  --config <path>           Use custom config file
         \\
         \\Completion:
         \\  den completion bash       Generate Bash completion script
@@ -458,6 +507,7 @@ fn showHelp() !void {
         \\  den exec echo "Hello, World!"            # Execute command
         \\  den script.sh                            # Run script file
         \\  den setup                                # Install Den
+        \\  den --config ~/custom.jsonc              # Use custom config
         \\  den completion bash > /etc/bash_completion.d/den   # Install Bash completion
         \\
         \\For more information, visit: https://github.com/stackblitz/den
@@ -466,7 +516,7 @@ fn showHelp() !void {
 }
 
 /// Run script file
-fn runScript(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn runScript(allocator: std.mem.Allocator, args: []const []const u8, config_path: ?[]const u8) !void {
     if (args.len == 0) {
         std.debug.print("Error: script file required\n", .{});
         return error.MissingScriptFile;
@@ -475,14 +525,14 @@ fn runScript(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const script_path = args[0];
     const script_args = if (args.len > 1) args[1..] else &[_][]const u8{};
 
-    var den_shell = try shell.Shell.init(allocator);
+    var den_shell = try shell.Shell.initWithConfig(allocator, config_path);
     defer den_shell.deinit();
 
     try den_shell.runScript(script_path, "den", script_args);
 }
 
 /// Run command string (-c "command")
-fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, config_path: ?[]const u8) !void {
     if (args.len == 0) {
         std.debug.print("Error: -c requires a command string\n", .{});
         return error.MissingCommandString;
@@ -490,7 +540,7 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8) !voi
 
     const command = args[0];
 
-    var den_shell = try shell.Shell.init(allocator);
+    var den_shell = try shell.Shell.initWithConfig(allocator, config_path);
     defer den_shell.deinit();
 
     try den_shell.executeCommand(command);

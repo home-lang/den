@@ -25,7 +25,12 @@ pub const ContextCompletion = struct {
             .docker_container => try self.completeDockerContainers(context.prefix),
             .docker_image => try self.completeDockerImages(context.prefix),
             .docker_subcommand => try self.completeDockerSubcommands(context.prefix),
+            .kubectl_subcommand => try self.completeKubectlSubcommands(context.prefix),
+            .kubectl_resource => try self.completeKubectlResources(context.prefix),
+            .kubectl_namespace => try self.completeKubectlNamespaces(context.prefix),
             .environment_variable => try self.completeEnvVars(context.prefix),
+            .variable_name => try self.completeVariableNames(context.prefix),
+            .hostname => try self.completeHostnames(context.prefix),
             .option_flag => try self.completeOptions(context.command, context.prefix),
             .unknown => &[_]CompletionItem{},
         };
@@ -48,7 +53,12 @@ pub const ContextCompletion = struct {
         docker_container,
         docker_image,
         docker_subcommand,
+        kubectl_subcommand,
+        kubectl_resource,
+        kubectl_namespace,
         environment_variable,
+        variable_name,
+        hostname,
         option_flag,
         unknown,
     };
@@ -229,6 +239,70 @@ pub const ContextCompletion = struct {
                     return .{
                         .kind = .docker_image,
                         .command = "docker",
+                        .prefix = current_word,
+                    };
+                }
+            }
+        }
+
+        // kubectl context
+        if (std.mem.eql(u8, cmd, "kubectl") or std.mem.eql(u8, cmd, "k")) {
+            if (word_count == 1 or (word_count == 2 and !std.mem.endsWith(u8, trimmed, " "))) {
+                return .{
+                    .kind = .kubectl_subcommand,
+                    .command = "kubectl",
+                    .prefix = if (word_count > 1) words[1] else "",
+                };
+            }
+
+            if (word_count >= 2) {
+                const subcmd = words[1];
+
+                // Resource operations
+                if (std.mem.eql(u8, subcmd, "get") or
+                    std.mem.eql(u8, subcmd, "describe") or
+                    std.mem.eql(u8, subcmd, "delete") or
+                    std.mem.eql(u8, subcmd, "edit") or
+                    std.mem.eql(u8, subcmd, "apply") or
+                    std.mem.eql(u8, subcmd, "create"))
+                {
+                    // Check for -n flag for namespace completion
+                    if (current_word.len > 0 and word_count >= 3) {
+                        const prev_word = words[word_count - 2];
+                        if (std.mem.eql(u8, prev_word, "-n") or std.mem.eql(u8, prev_word, "--namespace")) {
+                            return .{
+                                .kind = .kubectl_namespace,
+                                .command = "kubectl",
+                                .prefix = current_word,
+                            };
+                        }
+                    }
+                    return .{
+                        .kind = .kubectl_resource,
+                        .command = "kubectl",
+                        .prefix = current_word,
+                    };
+                }
+
+                // Namespace selection
+                if (std.mem.eql(u8, subcmd, "-n") or std.mem.eql(u8, subcmd, "--namespace")) {
+                    return .{
+                        .kind = .kubectl_namespace,
+                        .command = "kubectl",
+                        .prefix = if (word_count > 2) current_word else "",
+                    };
+                }
+            }
+        }
+
+        // ssh/scp hostname completion
+        if (std.mem.eql(u8, cmd, "ssh") or std.mem.eql(u8, cmd, "scp") or std.mem.eql(u8, cmd, "rsync")) {
+            if (word_count >= 2) {
+                // Check if current word might be a hostname
+                if (!std.mem.startsWith(u8, current_word, "-")) {
+                    return .{
+                        .kind = .hostname,
+                        .command = cmd,
                         .prefix = current_word,
                     };
                 }
@@ -785,6 +859,333 @@ pub const ContextCompletion = struct {
     };
 
     // ========================================================================
+    // kubectl Completions
+    // ========================================================================
+
+    fn completeKubectlSubcommands(self: *ContextCompletion, prefix: []const u8) ![]CompletionItem {
+        const subcommands = [_]struct { name: []const u8, desc: []const u8 }{
+            .{ .name = "get", .desc = "Display resources" },
+            .{ .name = "describe", .desc = "Show details" },
+            .{ .name = "create", .desc = "Create resource" },
+            .{ .name = "apply", .desc = "Apply configuration" },
+            .{ .name = "delete", .desc = "Delete resources" },
+            .{ .name = "edit", .desc = "Edit resource" },
+            .{ .name = "logs", .desc = "Print pod logs" },
+            .{ .name = "exec", .desc = "Execute in container" },
+            .{ .name = "port-forward", .desc = "Forward ports" },
+            .{ .name = "cp", .desc = "Copy files" },
+            .{ .name = "run", .desc = "Run image" },
+            .{ .name = "expose", .desc = "Expose as service" },
+            .{ .name = "scale", .desc = "Scale resources" },
+            .{ .name = "rollout", .desc = "Manage rollouts" },
+            .{ .name = "set", .desc = "Set values" },
+            .{ .name = "label", .desc = "Update labels" },
+            .{ .name = "annotate", .desc = "Update annotations" },
+            .{ .name = "config", .desc = "Modify kubeconfig" },
+            .{ .name = "cluster-info", .desc = "Cluster info" },
+            .{ .name = "top", .desc = "Resource usage" },
+            .{ .name = "auth", .desc = "Authorization" },
+            .{ .name = "debug", .desc = "Debug cluster" },
+            .{ .name = "diff", .desc = "Diff configurations" },
+            .{ .name = "kustomize", .desc = "Kustomize build" },
+            .{ .name = "wait", .desc = "Wait for condition" },
+        };
+
+        var items_buf: [32]CompletionItem = undefined;
+        var count: usize = 0;
+
+        for (subcommands) |cmd| {
+            if (std.mem.startsWith(u8, cmd.name, prefix)) {
+                if (count >= items_buf.len) break;
+                items_buf[count] = .{
+                    .text = try self.allocator.dupe(u8, cmd.name),
+                    .description = cmd.desc,
+                    .kind = .command,
+                };
+                count += 1;
+            }
+        }
+
+        const items = try self.allocator.alloc(CompletionItem, count);
+        @memcpy(items, items_buf[0..count]);
+        return items;
+    }
+
+    fn completeKubectlResources(self: *ContextCompletion, prefix: []const u8) ![]CompletionItem {
+        const resources = [_]struct { name: []const u8, desc: []const u8 }{
+            .{ .name = "pods", .desc = "Pod resources" },
+            .{ .name = "pod", .desc = "Pod resource" },
+            .{ .name = "po", .desc = "Pod (short)" },
+            .{ .name = "services", .desc = "Service resources" },
+            .{ .name = "service", .desc = "Service resource" },
+            .{ .name = "svc", .desc = "Service (short)" },
+            .{ .name = "deployments", .desc = "Deployment resources" },
+            .{ .name = "deployment", .desc = "Deployment resource" },
+            .{ .name = "deploy", .desc = "Deployment (short)" },
+            .{ .name = "replicasets", .desc = "ReplicaSet resources" },
+            .{ .name = "rs", .desc = "ReplicaSet (short)" },
+            .{ .name = "statefulsets", .desc = "StatefulSet resources" },
+            .{ .name = "sts", .desc = "StatefulSet (short)" },
+            .{ .name = "daemonsets", .desc = "DaemonSet resources" },
+            .{ .name = "ds", .desc = "DaemonSet (short)" },
+            .{ .name = "configmaps", .desc = "ConfigMap resources" },
+            .{ .name = "cm", .desc = "ConfigMap (short)" },
+            .{ .name = "secrets", .desc = "Secret resources" },
+            .{ .name = "namespaces", .desc = "Namespace resources" },
+            .{ .name = "ns", .desc = "Namespace (short)" },
+            .{ .name = "nodes", .desc = "Node resources" },
+            .{ .name = "no", .desc = "Node (short)" },
+            .{ .name = "ingresses", .desc = "Ingress resources" },
+            .{ .name = "ing", .desc = "Ingress (short)" },
+            .{ .name = "persistentvolumes", .desc = "PV resources" },
+            .{ .name = "pv", .desc = "PV (short)" },
+            .{ .name = "persistentvolumeclaims", .desc = "PVC resources" },
+            .{ .name = "pvc", .desc = "PVC (short)" },
+            .{ .name = "jobs", .desc = "Job resources" },
+            .{ .name = "cronjobs", .desc = "CronJob resources" },
+            .{ .name = "cj", .desc = "CronJob (short)" },
+            .{ .name = "events", .desc = "Event resources" },
+            .{ .name = "all", .desc = "All resources" },
+        };
+
+        var items_buf: [64]CompletionItem = undefined;
+        var count: usize = 0;
+
+        for (resources) |res| {
+            if (std.mem.startsWith(u8, res.name, prefix)) {
+                if (count >= items_buf.len) break;
+                items_buf[count] = .{
+                    .text = try self.allocator.dupe(u8, res.name),
+                    .description = res.desc,
+                    .kind = .command,
+                };
+                count += 1;
+            }
+        }
+
+        const items = try self.allocator.alloc(CompletionItem, count);
+        @memcpy(items, items_buf[0..count]);
+        return items;
+    }
+
+    fn completeKubectlNamespaces(self: *ContextCompletion, prefix: []const u8) ![]CompletionItem {
+        var items_buf: [64]CompletionItem = undefined;
+        var count: usize = 0;
+
+        // Try to get namespaces from kubectl
+        const result = self.runCommand(&[_][]const u8{ "kubectl", "get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}" }) catch "";
+        defer if (result.len > 0) self.allocator.free(result);
+
+        if (result.len > 0) {
+            var ns_iter = std.mem.splitScalar(u8, result, ' ');
+            while (ns_iter.next()) |ns| {
+                const trimmed = std.mem.trim(u8, ns, " \t\n");
+                if (trimmed.len > 0 and std.mem.startsWith(u8, trimmed, prefix)) {
+                    if (count >= items_buf.len) break;
+                    items_buf[count] = .{
+                        .text = try self.allocator.dupe(u8, trimmed),
+                        .description = "namespace",
+                        .kind = .command,
+                    };
+                    count += 1;
+                }
+            }
+        }
+
+        // Add common namespaces as fallback
+        if (count == 0) {
+            const common_ns = [_][]const u8{ "default", "kube-system", "kube-public", "kube-node-lease" };
+            for (common_ns) |ns| {
+                if (std.mem.startsWith(u8, ns, prefix)) {
+                    if (count >= items_buf.len) break;
+                    items_buf[count] = .{
+                        .text = try self.allocator.dupe(u8, ns),
+                        .description = "namespace",
+                        .kind = .command,
+                    };
+                    count += 1;
+                }
+            }
+        }
+
+        const items = try self.allocator.alloc(CompletionItem, count);
+        @memcpy(items, items_buf[0..count]);
+        return items;
+    }
+
+    // ========================================================================
+    // Variable Name Completions
+    // ========================================================================
+
+    fn completeVariableNames(self: *ContextCompletion, prefix: []const u8) ![]CompletionItem {
+        var items_buf: [128]CompletionItem = undefined;
+        var count: usize = 0;
+
+        // Shell special variables
+        const special_vars = [_]struct { name: []const u8, desc: []const u8 }{
+            .{ .name = "?", .desc = "Last exit status" },
+            .{ .name = "$", .desc = "Current PID" },
+            .{ .name = "!", .desc = "Last background PID" },
+            .{ .name = "_", .desc = "Last argument" },
+            .{ .name = "0", .desc = "Script name" },
+            .{ .name = "#", .desc = "Argument count" },
+            .{ .name = "@", .desc = "All arguments" },
+            .{ .name = "*", .desc = "All arguments (single)" },
+            .{ .name = "-", .desc = "Shell options" },
+            .{ .name = "RANDOM", .desc = "Random number" },
+            .{ .name = "SECONDS", .desc = "Seconds since start" },
+            .{ .name = "LINENO", .desc = "Line number" },
+            .{ .name = "PPID", .desc = "Parent PID" },
+            .{ .name = "IFS", .desc = "Field separator" },
+            .{ .name = "PS1", .desc = "Primary prompt" },
+            .{ .name = "PS2", .desc = "Secondary prompt" },
+            .{ .name = "HISTSIZE", .desc = "History size" },
+            .{ .name = "HISTFILE", .desc = "History file" },
+        };
+
+        for (special_vars) |v| {
+            if (std.mem.startsWith(u8, v.name, prefix)) {
+                if (count >= items_buf.len) break;
+                items_buf[count] = .{
+                    .text = try self.allocator.dupe(u8, v.name),
+                    .description = v.desc,
+                    .kind = .env_variable,
+                };
+                count += 1;
+            }
+        }
+
+        const items = try self.allocator.alloc(CompletionItem, count);
+        @memcpy(items, items_buf[0..count]);
+        return items;
+    }
+
+    // ========================================================================
+    // Hostname Completions
+    // ========================================================================
+
+    fn completeHostnames(self: *ContextCompletion, prefix: []const u8) ![]CompletionItem {
+        var items_buf: [128]CompletionItem = undefined;
+        var count: usize = 0;
+
+        // Try to read known hosts from ~/.ssh/known_hosts
+        const home = std.posix.getenv("HOME") orelse "";
+        if (home.len > 0) {
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const known_hosts_path = std.fmt.bufPrint(&path_buf, "{s}/.ssh/known_hosts", .{home}) catch "";
+
+            if (known_hosts_path.len > 0) {
+                const file = std.fs.cwd().openFile(known_hosts_path, .{}) catch null;
+                if (file) |f| {
+                    defer f.close();
+
+                    var buf: [8192]u8 = undefined;
+                    var total_read: usize = 0;
+                    while (total_read < buf.len) {
+                        const n = f.read(buf[total_read..]) catch break;
+                        if (n == 0) break;
+                        total_read += n;
+                    }
+
+                    var line_iter = std.mem.splitScalar(u8, buf[0..total_read], '\n');
+                    while (line_iter.next()) |line| {
+                        // Skip hashed hosts (start with |)
+                        if (line.len == 0 or line[0] == '#' or line[0] == '|') continue;
+
+                        // Extract hostname (first field, comma-separated for multiple names)
+                        const space_pos = std.mem.indexOfScalar(u8, line, ' ');
+                        if (space_pos) |pos| {
+                            const host_field = line[0..pos];
+                            var host_iter = std.mem.splitScalar(u8, host_field, ',');
+                            while (host_iter.next()) |host| {
+                                // Remove [host]:port format
+                                var hostname = host;
+                                if (std.mem.startsWith(u8, hostname, "[")) {
+                                    if (std.mem.indexOfScalar(u8, hostname, ']')) |bracket| {
+                                        hostname = hostname[1..bracket];
+                                    }
+                                }
+
+                                if (std.mem.startsWith(u8, hostname, prefix)) {
+                                    if (count >= items_buf.len) break;
+                                    // Check for duplicates
+                                    var is_dup = false;
+                                    for (items_buf[0..count]) |item| {
+                                        if (std.mem.eql(u8, item.text, hostname)) {
+                                            is_dup = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!is_dup) {
+                                        items_buf[count] = .{
+                                            .text = try self.allocator.dupe(u8, hostname),
+                                            .description = "known host",
+                                            .kind = .command,
+                                        };
+                                        count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also try ~/.ssh/config for Host entries
+            const config_path = std.fmt.bufPrint(&path_buf, "{s}/.ssh/config", .{home}) catch "";
+            if (config_path.len > 0) {
+                const file = std.fs.cwd().openFile(config_path, .{}) catch null;
+                if (file) |f| {
+                    defer f.close();
+
+                    var buf: [8192]u8 = undefined;
+                    var total_read: usize = 0;
+                    while (total_read < buf.len) {
+                        const n = f.read(buf[total_read..]) catch break;
+                        if (n == 0) break;
+                        total_read += n;
+                    }
+
+                    var line_iter = std.mem.splitScalar(u8, buf[0..total_read], '\n');
+                    while (line_iter.next()) |line| {
+                        const trimmed = std.mem.trim(u8, line, " \t");
+                        if (std.mem.startsWith(u8, trimmed, "Host ") or std.mem.startsWith(u8, trimmed, "Host\t")) {
+                            const host_part = std.mem.trim(u8, trimmed["Host".len..], " \t");
+                            // Skip patterns with wildcards
+                            if (std.mem.indexOf(u8, host_part, "*") != null) continue;
+                            if (std.mem.indexOf(u8, host_part, "?") != null) continue;
+
+                            if (std.mem.startsWith(u8, host_part, prefix)) {
+                                if (count >= items_buf.len) break;
+                                // Check for duplicates
+                                var is_dup = false;
+                                for (items_buf[0..count]) |item| {
+                                    if (std.mem.eql(u8, item.text, host_part)) {
+                                        is_dup = true;
+                                        break;
+                                    }
+                                }
+                                if (!is_dup) {
+                                    items_buf[count] = .{
+                                        .text = try self.allocator.dupe(u8, host_part),
+                                        .description = "ssh config",
+                                        .kind = .command,
+                                    };
+                                    count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        const items = try self.allocator.alloc(CompletionItem, count);
+        @memcpy(items, items_buf[0..count]);
+        return items;
+    }
+
+    // ========================================================================
     // Helper Functions
     // ========================================================================
 
@@ -832,7 +1233,10 @@ pub const CompletionKind = enum {
     npm_script,
     docker_container,
     docker_image,
+    kubectl_resource,
+    kubectl_namespace,
     env_variable,
+    hostname,
     option_flag,
 };
 

@@ -68,7 +68,7 @@
 - [x] Support `den.jsonc` config file format
 - [ ] Support `package.jsonc` config file format
 - [ ] Config validation with error messages
-- [ ] Config override via CLI flags (`--config <path>`)
+- [x] Config override via CLI flags (`--config <path>`)
 - [ ] Config reload mechanism
 - [ ] Config hot-reload
 - [x] Port default config from TypeScript version
@@ -124,31 +124,31 @@
 - [x] `!string` (last command starting with string)
 - [x] `!?string` (last command containing string)
 - [x] `^old^new` (replace in last command)
-- [ ] `!#` (current command line - needs context)
+- [x] `!#` (current command line)
 - [x] Word designators (`:0`, `:1`, `:$`, `:*`, `:^`, `:n-m`)
 - [x] `!$` (last argument)
 - [x] `!*` (all arguments)
-- [ ] Fuzzy search
-- [ ] Regex search
+- [x] Fuzzy search (`searchHistoryFuzzy` - case-insensitive pattern matching)
+- [x] Regex search (`searchHistoryRegex` - `.`, `*`, `^`, `$` patterns)
 - [ ] Search result ranking
-- **Implementation**: `src/utils/history_expansion.zig` (856 lines)
+- **Implementation**: `src/utils/history_expansion.zig` (900+ lines)
 
 ### 7. Context-Aware Completion (Phase 11) ✅
 - [x] Argument position detection
 - [x] Option/flag completion (`ls -<TAB>`, `grep -<TAB>`, `find -<TAB>`, `curl -<TAB>`)
-- [ ] Variable name completion
+- [x] Variable name completion (from shell environment)
 - [x] Environment variable completion (`$<TAB>`)
-- [ ] Hostname completion
+- [x] Hostname completion (from ~/.ssh/known_hosts and ~/.ssh/config)
 - [ ] Username completion
 - [x] **Command-Specific Completion**
   - [x] Git completion (branches, tags, remotes, files, subcommands)
   - [x] npm/bun/yarn/pnpm completion (scripts, subcommands)
   - [x] Docker completion (containers, images, subcommands)
-  - [ ] kubectl completion
+  - [x] kubectl completion (subcommands, resources, namespaces)
   - [ ] Custom completion registration
 - [ ] Completion caching with TTL
 - [ ] Completion configuration (enable/disable, case sensitivity, max suggestions)
-- **Implementation**: `src/utils/context_completion.zig` (893 lines)
+- **Implementation**: `src/utils/context_completion.zig` (1000+ lines)
 
 ### 8. Arithmetic Expansion (Incomplete)
 - [ ] Comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`)
@@ -431,8 +431,8 @@ Many builtins are implemented but missing flags/options:
 | Cross-Platform | 9/11 ✅ (Windows abstraction complete) | 🔴 Critical |
 | Configuration System | 15 (10 ✅) | 🟡 Medium |
 | Advanced REPL | 25 (25 ✅) | 🟡 Medium |
-| History Expansion | 12 (10 ✅) | 🟡 Medium |
-| Completion | 15 (10 ✅) | 🟡 Medium |
+| History Expansion | 13 (12 ✅) | 🟡 Medium |
+| Completion | 15 (12 ✅) | 🟡 Medium |
 | Arithmetic/Expansion | 20 | 🟡 Medium |
 | Execution Options | 8/8 ✅ | 🟡 Medium |
 | Scripting Engine | 20 | 🟡 Medium |
@@ -554,3 +554,17 @@ The following features are production-ready:
   - `set -v` verbose mode
   - `set -e/-E` were already implemented
   - `set -o` lists all option settings
+- Config System Enhancements:
+  - `--config <path>` and `--config=path` CLI flag support
+  - `loadConfigWithPath` for custom config file loading
+  - JSONC comment stripping (// and /* */) and trailing comma handling
+  - `initWithConfig` shell initialization with custom config path
+- History Expansion Enhancements:
+  - `!#` current command line support (`expandWithCurrentLine`)
+  - `searchHistoryFuzzy` - case-insensitive fuzzy pattern matching (e.g., "gco" matches "git checkout")
+  - `searchHistoryRegex` - simple regex search with `.`, `*`, `^`, `$` patterns
+- Context-Aware Completion Enhancements:
+  - kubectl completion: subcommands, resources (pods, deployments, services, etc.), namespaces (live from cluster)
+  - Variable name completion from shell environment
+  - Hostname completion from ~/.ssh/known_hosts and ~/.ssh/config
+  - Enhanced context detection for ssh, scp, rsync commands

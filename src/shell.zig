@@ -128,8 +128,14 @@ pub const Shell = struct {
     async_git: AsyncGitFetcher,
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
+        return initWithConfig(allocator, null);
+    }
+
+    /// Initialize shell with a custom config path
+    /// If config_path is provided, it takes priority over default search paths
+    pub fn initWithConfig(allocator: std.mem.Allocator, config_path: ?[]const u8) !Shell {
         // Load configuration from files and environment variables
-        const config = config_loader.loadConfig(allocator) catch types.DenConfig{};
+        const config = config_loader.loadConfigWithPath(allocator, config_path) catch types.DenConfig{};
 
         // Initialize environment from system
         var env = std.StringHashMap([]const u8).init(allocator);

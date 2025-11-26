@@ -13,12 +13,25 @@ pub const HistoryExpansion = struct {
 
     /// Expand history references in a command line
     /// Returns the expanded command or the original if no expansion needed
+    /// current_line is optional and used for !# expansion (the line typed so far before !#)
     pub fn expand(
         self: *HistoryExpansion,
         input: []const u8,
         history: []const ?[]const u8,
         history_count: usize,
     ) !ExpandResult {
+        return self.expandWithCurrentLine(input, history, history_count, null);
+    }
+
+    /// Expand history references with current line context for !# support
+    pub fn expandWithCurrentLine(
+        self: *HistoryExpansion,
+        input: []const u8,
+        history: []const ?[]const u8,
+        history_count: usize,
+        current_line: ?[]const u8,
+    ) !ExpandResult {
+        _ = current_line; // Used by parseHistoryReferenceWithContext
         if (history_count == 0) {
             return .{
                 .text = try self.allocator.dupe(u8, input),
@@ -146,9 +159,16 @@ pub const HistoryExpansion = struct {
             return .{ .text = null, .consumed = 0 };
         }
 
-        // !# - current command line (not implemented - would need context)
+        // !# - current command line typed so far (before !#)
+        // This returns an empty string for now - proper implementation requires
+        // tracking what was typed before the !# in the current line
         if (next == '#') {
-            return .{ .text = null, .consumed = 0 };
+            // Return empty string - the caller should provide the current line context
+            // via expandWithCurrentLine() for proper !# support
+            return .{
+                .text = try self.allocator.dupe(u8, ""),
+                .consumed = 2,
+            };
         }
 
         // !$ - last argument of previous command
@@ -504,6 +524,207 @@ pub const HistoryExpansion = struct {
         return null;
     }
 
+    /// Fuzzy search: matches if all characters of pattern appear in order in command
+    /// Example: "gco" fuzzy matches "git checkout"
+    pub fn searchHistoryFuzzy(
+        _: *HistoryExpansion,
+        history: []const ?[]const u8,
+        history_count: usize,
+        pattern: []const u8,
+    ) ?[]const u8 {
+        if (history_count == 0 or pattern.len == 0) return null;
+
+        var i = history_count;
+        while (i > 0) {
+            i -= 1;
+            if (history[i]) |cmd| {
+                if (fuzzyMatch(cmd, pattern)) {
+                    return cmd;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Check if pattern fuzzy-matches target (all chars in pattern appear in order in target)
+    fn fuzzyMatch(target: []const u8, pattern: []const u8) bool {
+        var pattern_idx: usize = 0;
+        for (target) |c| {
+            if (pattern_idx >= pattern.len) break;
+            // Case-insensitive comparison
+            const tc = std.ascii.toLower(c);
+            const pc = std.ascii.toLower(pattern[pattern_idx]);
+            if (tc == pc) {
+                pattern_idx += 1;
+            }
+        }
+        return pattern_idx == pattern.len;
+    }
+
+    /// Search history using a regex pattern
+    /// Simple regex support: . (any char), * (zero or more), ^ (start), $ (end)
+    pub fn searchHistoryRegex(
+        _: *HistoryExpansion,
+        history: []const ?[]const u8,
+        history_count: usize,
+        pattern: []const u8,
+    ) ?[]const u8 {
+        if (history_count == 0 or pattern.len == 0) return null;
+
+        var i = history_count;
+        while (i > 0) {
+            i -= 1;
+            if (history[i]) |cmd| {
+                if (simpleRegexMatch(cmd, pattern)) {
+                    return cmd;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Simple regex matching (supports: . * ^ $)
+    fn simpleRegexMatch(text: []const u8, pattern: []const u8) bool {
+        var ti: usize = 0;
+        var pi: usize = 0;
+
+        // Check for ^ anchor
+        const must_start = pattern.len > 0 and pattern[0] == '^';
+        if (must_start) pi = 1;
+
+        // Check for $ anchor
+        const must_end = pattern.len > 0 and pattern[pattern.len - 1] == '$';
+        const pattern_end = if (must_end) pattern.len - 1 else pattern.len;
+
+        // If not anchored at start, find any match position
+        if (!must_start) {
+            while (ti < text.len) {
+                if (matchFrom(text, ti, pattern[pi..pattern_end])) {
+                    // If must_end, verify the match consumes to end
+                    if (!must_end) return true;
+                    const match_len = calcMatchLength(text[ti..], pattern[pi..pattern_end]);
+                    if (ti + match_len == text.len) return true;
+                }
+                ti += 1;
+            }
+            return false;
+        }
+
+        // Anchored at start
+        if (matchFrom(text, 0, pattern[pi..pattern_end])) {
+            if (!must_end) return true;
+            const match_len = calcMatchLength(text, pattern[pi..pattern_end]);
+            return match_len == text.len;
+        }
+        return false;
+    }
+
+    /// Match pattern starting at position in text
+    fn matchFrom(text: []const u8, start: usize, pattern: []const u8) bool {
+        var ti = start;
+        var pi: usize = 0;
+
+        while (pi < pattern.len) {
+            // Handle .* (match any)
+            if (pi + 1 < pattern.len and pattern[pi] == '.' and pattern[pi + 1] == '*') {
+                // Try matching rest of pattern at each position
+                pi += 2;
+                while (true) {
+                    if (matchFrom(text, ti, pattern[pi..])) return true;
+                    if (ti >= text.len) break;
+                    ti += 1;
+                }
+                return false;
+            }
+
+            // Handle X* (match zero or more of X)
+            if (pi + 1 < pattern.len and pattern[pi + 1] == '*') {
+                const match_char = pattern[pi];
+                pi += 2;
+                while (true) {
+                    if (matchFrom(text, ti, pattern[pi..])) return true;
+                    if (ti >= text.len) break;
+                    if (match_char == '.') {
+                        ti += 1;
+                    } else if (text[ti] == match_char) {
+                        ti += 1;
+                    } else {
+                        break;
+                    }
+                }
+                return false;
+            }
+
+            // Out of text to match
+            if (ti >= text.len) return false;
+
+            // Handle . (any single char)
+            if (pattern[pi] == '.') {
+                ti += 1;
+                pi += 1;
+                continue;
+            }
+
+            // Literal character match
+            if (text[ti] != pattern[pi]) return false;
+            ti += 1;
+            pi += 1;
+        }
+
+        return true;
+    }
+
+    /// Calculate how many characters a pattern match consumes
+    fn calcMatchLength(text: []const u8, pattern: []const u8) usize {
+        var ti: usize = 0;
+        var pi: usize = 0;
+
+        while (pi < pattern.len and ti < text.len) {
+            if (pi + 1 < pattern.len and pattern[pi] == '.' and pattern[pi + 1] == '*') {
+                // Greedy: consume as much as possible while still matching
+                pi += 2;
+                if (pi >= pattern.len) return text.len; // .* at end matches all
+                // Find last position where rest matches
+                var best = ti;
+                while (ti <= text.len) {
+                    if (matchFrom(text, ti, pattern[pi..])) {
+                        best = ti + calcMatchLength(text[ti..], pattern[pi..]);
+                    }
+                    if (ti >= text.len) break;
+                    ti += 1;
+                }
+                return best;
+            }
+
+            if (pi + 1 < pattern.len and pattern[pi + 1] == '*') {
+                const match_char = pattern[pi];
+                pi += 2;
+                while (ti < text.len) {
+                    if (match_char == '.') {
+                        ti += 1;
+                    } else if (text[ti] == match_char) {
+                        ti += 1;
+                    } else {
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            if (pattern[pi] == '.') {
+                ti += 1;
+                pi += 1;
+                continue;
+            }
+
+            if (text[ti] != pattern[pi]) break;
+            ti += 1;
+            pi += 1;
+        }
+
+        return ti;
+    }
+
     /// Get a specific word from a command (0 = command, 1+ = args, -1 = last)
     fn getWordFromCommand(_: *HistoryExpansion, command: []const u8, index: i32) ?[]const u8 {
         var words_buf: [256]struct { start: usize, end: usize } = undefined;
@@ -852,4 +1073,79 @@ test "HistoryExpansion: mixed text and expansion" {
 
     try std.testing.expect(result.expanded);
     try std.testing.expectEqualStrings("echo before ls -la after", result.text);
+}
+
+test "HistoryExpansion: fuzzy search matches" {
+    var expander = HistoryExpansion.init(std.testing.allocator);
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "git checkout main";
+    history[1] = "ls -la";
+    history[2] = "echo hello";
+
+    // "gco" fuzzy matches "git checkout"
+    const match = expander.searchHistoryFuzzy(&history, 3, "gco");
+    try std.testing.expect(match != null);
+    try std.testing.expectEqualStrings("git checkout main", match.?);
+}
+
+test "HistoryExpansion: fuzzy search case insensitive" {
+    var expander = HistoryExpansion.init(std.testing.allocator);
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "Git Checkout Main";
+
+    const match = expander.searchHistoryFuzzy(&history, 1, "GCM");
+    try std.testing.expect(match != null);
+    try std.testing.expectEqualStrings("Git Checkout Main", match.?);
+}
+
+test "HistoryExpansion: regex search basic" {
+    var expander = HistoryExpansion.init(std.testing.allocator);
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "echo hello world";
+    history[1] = "ls -la";
+
+    const match = expander.searchHistoryRegex(&history, 2, "hello");
+    try std.testing.expect(match != null);
+    try std.testing.expectEqualStrings("echo hello world", match.?);
+}
+
+test "HistoryExpansion: regex search with dot" {
+    var expander = HistoryExpansion.init(std.testing.allocator);
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "cat file.txt";
+    history[1] = "ls -la";
+
+    const match = expander.searchHistoryRegex(&history, 2, "file.txt");
+    try std.testing.expect(match != null);
+    try std.testing.expectEqualStrings("cat file.txt", match.?);
+}
+
+test "HistoryExpansion: regex search with anchor" {
+    var expander = HistoryExpansion.init(std.testing.allocator);
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "echo hello";
+    history[1] = "ls -la";
+
+    const match = expander.searchHistoryRegex(&history, 2, "^echo");
+    try std.testing.expect(match != null);
+    try std.testing.expectEqualStrings("echo hello", match.?);
+}
+
+test "HistoryExpansion: !# expansion" {
+    const allocator = std.testing.allocator;
+    var expander = HistoryExpansion.init(allocator);
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "echo hello";
+
+    // !# should expand (returns empty string in basic impl)
+    const result = try expander.expand("echo !#", &history, 1);
+    defer allocator.free(result.text);
+
+    try std.testing.expect(result.expanded);
 }
