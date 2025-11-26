@@ -474,6 +474,81 @@ pub fn build(b: *std.Build) void {
     const e2e_test_step = b.step("test-e2e", "Run end-to-end tests");
     e2e_test_step.dependOn(&run_e2e_tests.step);
 
+    // Builtin tests
+    const builtin_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_builtins.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const builtin_tests = b.addTest(.{
+        .root_module = builtin_test_module,
+    });
+
+    const run_builtin_tests = b.addRunArtifact(builtin_tests);
+    const builtin_test_step = b.step("test-builtins", "Run builtin command tests");
+    builtin_test_step.dependOn(&run_builtin_tests.step);
+
+    // History tests
+    const history_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_history.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const history_tests = b.addTest(.{
+        .root_module = history_test_module,
+    });
+
+    const run_history_tests = b.addRunArtifact(history_tests);
+    const history_test_step = b.step("test-history", "Run history tests");
+    history_test_step.dependOn(&run_history_tests.step);
+
+    // Alias tests
+    const alias_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_alias.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const alias_tests = b.addTest(.{
+        .root_module = alias_test_module,
+    });
+
+    const run_alias_tests = b.addRunArtifact(alias_tests);
+    const alias_test_step = b.step("test-alias", "Run alias tests");
+    alias_test_step.dependOn(&run_alias_tests.step);
+
+    // Job control tests
+    const job_control_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_job_control.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const job_control_tests = b.addTest(.{
+        .root_module = job_control_test_module,
+    });
+
+    const run_job_control_tests = b.addRunArtifact(job_control_tests);
+    const job_control_test_step = b.step("test-job-control", "Run job control tests");
+    job_control_test_step.dependOn(&run_job_control_tests.step);
+
+    // Completion tests
+    const completion_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_completion.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const completion_tests = b.addTest(.{
+        .root_module = completion_test_module,
+    });
+
+    const run_completion_tests = b.addRunArtifact(completion_tests);
+    const completion_test_step = b.step("test-completion", "Run completion tests");
+    completion_test_step.dependOn(&run_completion_tests.step);
+
     // CLI tests
     const cli_module = b.createModule(.{
         .root_source_file = b.path("src/cli.zig"),
@@ -518,6 +593,11 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_integration_e2e_tests.step);
     all_tests_step.dependOn(&run_e2e_tests.step);
     all_tests_step.dependOn(&run_cli_tests.step);
+    all_tests_step.dependOn(&run_builtin_tests.step);
+    all_tests_step.dependOn(&run_history_tests.step);
+    all_tests_step.dependOn(&run_alias_tests.step);
+    all_tests_step.dependOn(&run_job_control_tests.step);
+    all_tests_step.dependOn(&run_completion_tests.step);
 
     // ========================================
     // Profiling and Benchmarks

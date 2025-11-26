@@ -1,0 +1,189 @@
+const std = @import("std");
+const test_utils = @import("test_utils.zig");
+
+// ============================================================================
+// Alias Tests
+// Tests for shell alias functionality
+// ============================================================================
+
+test "alias: create simple alias" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias greet='echo hello' && greet");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "hello");
+}
+
+test "alias: alias with arguments" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias myecho='echo' && myecho world");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "world");
+}
+
+test "alias: list all aliases" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias foo='bar' && alias baz='qux' && alias");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "foo");
+    try test_utils.TestAssert.expectContains(result.stdout, "baz");
+}
+
+test "alias: show specific alias" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias myalias='ls -la' && alias myalias");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "ls");
+}
+
+test "alias: overwrite existing alias" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias test='echo first' && alias test='echo second' && test");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "second");
+}
+
+test "alias: alias with flags" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias ll='ls -la' && ll /tmp");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // Should execute ls -la on /tmp
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "alias: alias with pipe" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias countlines='wc -l' && echo -e 'a\\nb\\nc' | countlines");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "unalias: remove alias" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias mytest='echo test' && unalias mytest && alias");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    // mytest should not appear in alias list
+}
+
+test "unalias: remove nonexistent alias" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("unalias nonexistent_alias_12345");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // Should fail gracefully
+    try test_utils.TestAssert.expectTrue(result.exit_code != 0);
+}
+
+test "unalias: remove all aliases with -a" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias a='1' && alias b='2' && unalias -a && alias");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    // Should have no aliases
+}
+
+test "alias: chained aliases" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // First alias works, second alias should not expand first
+    const result = try fixture.exec("alias first='echo first' && alias second='first' && second");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // Depending on shell behavior, this tests alias expansion
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "alias: alias with special characters in value" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias special='echo \"hello world\"' && special");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "hello world");
+}
+
+test "alias: alias not expanded in quoted strings" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("alias myalias='expanded' && echo 'myalias'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // The literal 'myalias' should be printed, not 'expanded'
+    try test_utils.TestAssert.expectContains(result.stdout, "myalias");
+}

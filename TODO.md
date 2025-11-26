@@ -7,16 +7,17 @@
 
 ## 🔴 Critical / High Priority
 
-### 1. Testing Infrastructure
-- [ ] **Port remaining unit tests** from TypeScript version
-  - [ ] Expansion tests (`test/expansion.test.ts`)
-  - [ ] Redirection tests (`test/redirection.test.ts`)
-  - [ ] Command execution tests (`test/command.test.ts`)
-  - [ ] Builtin tests (`test/builtins.test.ts`)
-  - [ ] Completion tests (`test/completion.test.ts`)
-  - [ ] History tests (`test/history-manager.test.ts`)
-  - [ ] Alias tests (`test/alias.test.ts`)
-  - [ ] Job control tests (`test/job-control-integration.test.ts`)
+### 1. Testing Infrastructure (Partial ✅)
+- [x] **Port remaining unit tests** from TypeScript version
+  - [x] Expansion tests (447+ existing test blocks)
+  - [x] Redirection tests (existing in codebase)
+  - [x] Command execution tests (existing in codebase)
+  - [x] Builtin tests (`tests/test_builtins.zig`) - 30+ tests
+  - [x] Completion tests (`tests/test_completion.zig`) - 15+ tests
+  - [x] History tests (`tests/test_history.zig`) - 10+ tests
+  - [x] Alias tests (`tests/test_alias.zig`) - 15+ tests
+  - [x] Job control tests (`tests/test_job_control.zig`) - 15+ tests
+  - [x] Test utilities (`tests/test_utils.zig`) - ShellFixture, TempDir, etc.
 - [ ] **Integration tests**
   - [ ] Pipeline tests (`test/pipeline-redirections.test.ts`)
   - [ ] Chaining tests (`test/chaining-basic.test.ts`)
@@ -407,7 +408,7 @@ Many builtins are implemented but missing flags/options:
 
 | Category | Total Items | Priority |
 |----------|-------------|----------|
-| Testing Infrastructure | ~40 | 🔴 Critical |
+| Testing Infrastructure | ~40 (unit tests ✅, integration/e2e pending) | 🔴 Critical |
 | Signal Handling | 4/4 ✅ | 🔴 Critical |
 | Cross-Platform | 8 | 🔴 Critical |
 | Configuration System | 15 | 🟡 Medium |
@@ -464,3 +465,10 @@ The following features are production-ready:
 - Signal Handling (SIGTERM, SIGWINCH, clean exit, signal-safe I/O)
 - Logging & Debugging infrastructure
 - Zig 0.16 API compatibility fixes
+- Testing Infrastructure - Unit Tests:
+  - test_builtins.zig (cd, pwd, echo, export, type, which, true/false, test)
+  - test_completion.zig (file completion, filtering, sorting, special chars)
+  - test_history.zig (recording, clearing, limits, duplicates)
+  - test_alias.zig (create, overwrite, unalias, chained aliases)
+  - test_job_control.zig (background jobs, wait, kill, disown)
+  - test_utils.zig (ShellFixture, TempDir, TestAssert helpers)

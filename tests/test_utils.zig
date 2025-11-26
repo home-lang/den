@@ -3,6 +3,12 @@ const std = @import("std");
 /// Test utilities for Den shell tests
 /// Provides helpers for temporary files, process mocking, and test assertions
 
+/// Helper to get millisecond timestamp for Zig 0.16 compatibility
+fn getMilliTimestamp() i64 {
+    const now = std.time.Instant.now() catch return 0;
+    return @intCast(now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000));
+}
+
 /// Temporary directory manager for tests
 pub const TempDir = struct {
     path: []const u8,
@@ -10,7 +16,7 @@ pub const TempDir = struct {
 
     pub fn init(allocator: std.mem.Allocator) !TempDir {
         // Generate unique name
-        var random = std.Random.DefaultPrng.init(@intCast(std.time.milliTimestamp()));
+        var random = std.Random.DefaultPrng.init(@intCast(getMilliTimestamp()));
         const rand_num = random.random().int(u32);
         const unique_name = try std.fmt.allocPrint(allocator, "den_test_{d}", .{rand_num});
         defer allocator.free(unique_name);
@@ -59,7 +65,18 @@ pub const TempDir = struct {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
-        return try file.readToEndAlloc(self.allocator, 1024 * 1024);
+        // Manual read for Zig 0.16 compatibility
+        var result = std.ArrayList(u8).empty;
+        errdefer result.deinit(self.allocator);
+
+        var read_buf: [4096]u8 = undefined;
+        while (true) {
+            const n = file.read(&read_buf) catch break;
+            if (n == 0) break;
+            try result.appendSlice(self.allocator, read_buf[0..n]);
+        }
+
+        return try result.toOwnedSlice(self.allocator);
     }
 };
 
@@ -244,19 +261,28 @@ pub const ShellFixture = struct {
             try child.spawn();
         }
 
-        // Use fixed buffers instead of ArrayList
-        var stdout_buf: [1024 * 1024]u8 = undefined;
-        var stderr_buf: [1024 * 1024]u8 = undefined;
+        // Read output using ArrayList for Zig 0.16 compatibility
+        var stdout_list = std.ArrayList(u8).empty;
+        errdefer stdout_list.deinit(self.allocator);
+        var stderr_list = std.ArrayList(u8).empty;
+        errdefer stderr_list.deinit(self.allocator);
 
-        var stdout_len: usize = 0;
-        var stderr_len: usize = 0;
+        var read_buf: [4096]u8 = undefined;
 
         if (child.stdout) |stdout| {
-            stdout_len = try stdout.readAll(&stdout_buf);
+            while (true) {
+                const n = stdout.read(&read_buf) catch break;
+                if (n == 0) break;
+                try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
+            }
         }
 
         if (child.stderr) |stderr| {
-            stderr_len = try stderr.readAll(&stderr_buf);
+            while (true) {
+                const n = stderr.read(&read_buf) catch break;
+                if (n == 0) break;
+                try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
+            }
         }
 
         const term = try child.wait();
@@ -265,8 +291,8 @@ pub const ShellFixture = struct {
             else => 1,
         };
 
-        const stdout_owned = try self.allocator.dupe(u8, stdout_buf[0..stdout_len]);
-        const stderr_owned = try self.allocator.dupe(u8, stderr_buf[0..stderr_len]);
+        const stdout_owned = try stdout_list.toOwnedSlice(self.allocator);
+        const stderr_owned = try stderr_list.toOwnedSlice(self.allocator);
 
         return .{
             .stdout = stdout_owned,
@@ -293,16 +319,22 @@ pub fn runCommand(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
 
     try child.spawn();
 
-    var stdout_buf: [1024 * 1024]u8 = undefined;
-    var stdout_len: usize = 0;
+    // Read output using ArrayList for Zig 0.16 compatibility
+    var stdout_list = std.ArrayList(u8).empty;
+    errdefer stdout_list.deinit(allocator);
 
+    var read_buf: [4096]u8 = undefined;
     if (child.stdout) |stdout| {
-        stdout_len = try stdout.readAll(&stdout_buf);
+        while (true) {
+            const n = stdout.read(&read_buf) catch break;
+            if (n == 0) break;
+            try stdout_list.appendSlice(allocator, read_buf[0..n]);
+        }
     }
 
     _ = try child.wait();
 
-    return try allocator.dupe(u8, stdout_buf[0..stdout_len]);
+    return try stdout_list.toOwnedSlice(allocator);
 }
 
 // Tests for test utilities
