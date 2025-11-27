@@ -766,6 +766,21 @@ pub fn build(b: *std.Build) void {
     const cli_test_step = b.step("test-cli", "Run CLI tests");
     cli_test_step.dependOn(&run_cli_tests.step);
 
+    // Performance tests
+    const performance_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_performance.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const performance_tests = b.addTest(.{
+        .root_module = performance_test_module,
+    });
+
+    const run_performance_tests = b.addRunArtifact(performance_tests);
+    const performance_test_step = b.step("test-performance", "Run performance benchmark tests");
+    performance_test_step.dependOn(&run_performance_tests.step);
+
     // All tests combined (main test suite)
     const all_tests_step = b.step("test-all", "Run all test suites");
     all_tests_step.dependOn(&run_unit_tests.step);
@@ -806,6 +821,7 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_parser_regression_tests.step);
     all_tests_step.dependOn(&run_fuzzing_tests.step);
     all_tests_step.dependOn(&run_terminal_tests.step);
+    all_tests_step.dependOn(&run_performance_tests.step);
 
     // ========================================
     // Profiling and Benchmarks
