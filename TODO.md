@@ -150,20 +150,25 @@
 - [ ] Completion configuration (enable/disable, case sensitivity, max suggestions)
 - **Implementation**: `src/utils/context_completion.zig` (1000+ lines)
 
-### 8. Arithmetic Expansion (Incomplete)
-- [ ] Comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`)
-- [ ] Logical operators (`&&`, `||`, `!`)
-- [ ] Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
-- [ ] Ternary operator (`? :`)
-- [ ] Variable references in expressions
+### 8. Arithmetic Expansion ✅ Complete
+- [x] Basic operators (`+`, `-`, `*`, `/`, `%`, `**`)
+- [x] Comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`)
+- [x] Logical operators (`&&`, `||`, `!`)
+- [x] Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
+- [x] Ternary operator (`? :`)
+- [x] Variable references in expressions
+- [x] Hex (0x...), octal (0...) and binary (0b...) number literals
 - [ ] Integer overflow handling
 - [ ] Expression caching
+- **Implementation**: `src/utils/arithmetic.zig` (530+ lines, 11 tests)
 
-### 9. Expansion Features (Incomplete)
-- [ ] **Tilde Expansion**
-  - [ ] `~user` (user's home directory)
-  - [ ] `~+` (current working directory)
-  - [ ] `~-` (previous working directory)
+### 9. Expansion Features (Partial)
+- [x] **Tilde Expansion** ✅
+  - [x] `~` (current user's home directory)
+  - [x] `~user` (user's home directory via passwd lookup)
+  - [x] `~+` (current working directory - PWD)
+  - [x] `~-` (previous working directory - OLDPWD)
+  - **Implementation**: `src/utils/expansion.zig` (`expandTilde` function, `getUserHomeDir`)
 - [ ] **Brace Expansion**
   - [ ] Nested brace expansion
   - [ ] Zero-padding support (`{01..10}`)
@@ -433,7 +438,8 @@ Many builtins are implemented but missing flags/options:
 | Advanced REPL | 25 (25 ✅) | 🟡 Medium |
 | History Expansion | 13 (12 ✅) | 🟡 Medium |
 | Completion | 15 (12 ✅) | 🟡 Medium |
-| Arithmetic/Expansion | 20 | 🟡 Medium |
+| Arithmetic Expansion | 9 (7 ✅) | 🟡 Medium |
+| Expansion Features | 15 (5 ✅ - tilde done) | 🟡 Medium |
 | Execution Options | 8/8 ✅ | 🟡 Medium |
 | Scripting Engine | 20 | 🟡 Medium |
 | Custom Hooks | 6 | 🟡 Medium |
@@ -461,9 +467,9 @@ The following features are production-ready:
 - **Job Control**: Background jobs, fg, bg, jobs, kill, wait, disown
 - **Variable Expansion**: `$VAR`, `${VAR}`, `${VAR:-default}`, special vars (`$?`, `$$`, `$!`, `$_`, `$0-$9`, `$@`, `$*`, `$#`)
 - **Command Substitution**: `$(command)` and backticks
-- **Arithmetic Expansion**: Basic operators (`+`, `-`, `*`, `/`, `%`, `**`)
+- **Arithmetic Expansion**: Full operators (`+`, `-`, `*`, `/`, `%`, `**`, comparisons, logical, bitwise, ternary)
 - **Brace Expansion**: Sequences `{1..10}`, lists `{foo,bar,baz}`
-- **Tilde Expansion**: `~` for home directory
+- **Tilde Expansion**: `~`, `~user`, `~+`, `~-` for directories
 - **Glob Expansion**: `*`, `?`, `[abc]`, `**`
 - **History**: Persistent history with search
 - **Tab Completion**: Commands, files, paths
@@ -476,7 +482,7 @@ The following features are production-ready:
 
 ---
 
-*Last updated: November 26, 2025*
+*Last updated: November 27, 2025*
 *Based on codebase analysis and ROADMAP.md review*
 
 **Recent completions:**
@@ -581,3 +587,13 @@ The following features are production-ready:
   - Cross-compilation verified for x86_64-linux, x86_64-linux-gnu, aarch64-linux
   - System modules (battery, memory) properly conditionally compiled
   - Build step added: `zig build test-performance`
+- Arithmetic Expansion (fully implemented):
+  - src/utils/arithmetic.zig (530+ lines, 11 tests)
+  - All operators: `+`, `-`, `*`, `/`, `%`, `**`, comparisons, logical, bitwise, ternary
+  - Variable references in expressions
+  - Hex (0x), octal (0), and binary (0b) number literals
+- Tilde Expansion Enhancements:
+  - `~user` - user's home directory via POSIX getpwnam()
+  - `~+` - current working directory (PWD)
+  - `~-` - previous working directory (OLDPWD)
+  - 4 new unit tests for tilde expansion

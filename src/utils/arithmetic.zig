@@ -462,7 +462,7 @@ const Parser = struct {
 
         const start = self.pos;
 
-        // Handle hex (0x...) and octal (0...)
+        // Handle hex (0x...), binary (0b...) and octal (0...)
         if (self.pos + 1 < self.input.len and self.input[self.pos] == '0') {
             if (self.input[self.pos + 1] == 'x' or self.input[self.pos + 1] == 'X') {
                 // Hexadecimal
@@ -473,6 +473,15 @@ const Parser = struct {
                 }
                 if (hex_start == self.pos) return error.InvalidNumber;
                 return std.fmt.parseInt(i64, self.input[hex_start..self.pos], 16) catch error.InvalidNumber;
+            } else if (self.input[self.pos + 1] == 'b' or self.input[self.pos + 1] == 'B') {
+                // Binary
+                self.pos += 2;
+                const bin_start = self.pos;
+                while (self.pos < self.input.len and (self.input[self.pos] == '0' or self.input[self.pos] == '1')) {
+                    self.pos += 1;
+                }
+                if (bin_start == self.pos) return error.InvalidNumber;
+                return std.fmt.parseInt(i64, self.input[bin_start..self.pos], 2) catch error.InvalidNumber;
             } else if (std.ascii.isDigit(self.input[self.pos + 1])) {
                 // Octal
                 self.pos += 1;

@@ -791,6 +791,7 @@ pub const Expansion = struct {
     }
 
     /// Expand tilde (~) to home directory
+    /// Supports: ~, ~user, ~+, ~-, ~+N, ~-N
     fn expandTilde(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 1 or input[0] != '~') {
             return ExpansionResult{ .value = "~", .consumed = 1 };
@@ -817,17 +818,52 @@ pub const Expansion = struct {
                 break :blk try self.allocator.dupe(u8, "~");
             }
         } else blk: {
-            // ~username - expand to specified user's home
-            const username = input[1..end];
+            const suffix = input[1..end];
 
-            // Try to get user's home directory (simplified - would need pwd.h for full implementation)
-            // For now, just handle current user
+            // ~+ - current working directory (PWD)
+            if (std.mem.eql(u8, suffix, "+")) {
+                if (self.environment.get("PWD")) |pwd| {
+                    break :blk try self.allocator.dupe(u8, pwd);
+                } else if (env_utils.getEnv("PWD")) |pwd| {
+                    break :blk try self.allocator.dupe(u8, pwd);
+                } else {
+                    // Try to get cwd as fallback
+                    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+                    if (std.fs.cwd().realpath(".", &cwd_buf)) |path| {
+                        break :blk try self.allocator.dupe(u8, path);
+                    } else |_| {
+                        break :blk try self.allocator.dupe(u8, "~+");
+                    }
+                }
+            }
+
+            // ~- - previous working directory (OLDPWD)
+            if (std.mem.eql(u8, suffix, "-")) {
+                if (self.environment.get("OLDPWD")) |oldpwd| {
+                    break :blk try self.allocator.dupe(u8, oldpwd);
+                } else if (env_utils.getEnv("OLDPWD")) |oldpwd| {
+                    break :blk try self.allocator.dupe(u8, oldpwd);
+                } else {
+                    // OLDPWD not set
+                    break :blk try self.allocator.dupe(u8, "~-");
+                }
+            }
+
+            // ~username - expand to specified user's home directory
+            const username = suffix;
+
+            // First check if it's the current user
             if (self.environment.get("USER")) |current_user| {
                 if (std.mem.eql(u8, username, current_user)) {
                     if (self.environment.get("HOME")) |home| {
                         break :blk try self.allocator.dupe(u8, home);
                     }
                 }
+            }
+
+            // Try to look up user's home directory using getpwnam
+            if (getUserHomeDir(username)) |home_dir| {
+                break :blk try self.allocator.dupe(u8, home_dir);
             }
 
             // If we can't resolve, return unchanged
@@ -840,6 +876,31 @@ pub const Expansion = struct {
         };
     }
 };
+
+/// Get user's home directory from passwd database
+/// Uses POSIX getpwnam for lookup
+fn getUserHomeDir(username: []const u8) ?[]const u8 {
+    const builtin = @import("builtin");
+    // Only available on POSIX systems
+    if (builtin.os.tag == .windows) {
+        return null;
+    }
+
+    // Create null-terminated username
+    var name_buf: [256]u8 = undefined;
+    if (username.len >= name_buf.len) return null;
+    @memcpy(name_buf[0..username.len], username);
+    name_buf[username.len] = 0;
+
+    const passwd = std.c.getpwnam(@ptrCast(&name_buf));
+    if (passwd) |pw| {
+        // The field is 'dir' in Zig's std.c.passwd struct
+        if (pw.dir) |dir| {
+            return std.mem.span(dir);
+        }
+    }
+    return null;
+}
 
 test "expand simple variable" {
     const allocator = std.testing.allocator;
@@ -900,4 +961,66 @@ test "expand special variables" {
     const result = try exp.expand("Exit code: $?");
     defer allocator.free(result);
     try std.testing.expectEqualStrings("Exit code: 42", result);
+}
+
+test "expand tilde home" {
+    const allocator = std.testing.allocator;
+
+    var env = std.StringHashMap([]const u8).init(allocator);
+    defer env.deinit();
+
+    try env.put("HOME", "/home/testuser");
+
+    var exp = Expansion.init(allocator, &env, 0);
+
+    const result = try exp.expand("~/documents");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("/home/testuser/documents", result);
+}
+
+test "expand tilde+ PWD" {
+    const allocator = std.testing.allocator;
+
+    var env = std.StringHashMap([]const u8).init(allocator);
+    defer env.deinit();
+
+    try env.put("PWD", "/var/www");
+
+    var exp = Expansion.init(allocator, &env, 0);
+
+    const result = try exp.expand("~+/subdir");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("/var/www/subdir", result);
+}
+
+test "expand tilde- OLDPWD" {
+    const allocator = std.testing.allocator;
+
+    var env = std.StringHashMap([]const u8).init(allocator);
+    defer env.deinit();
+
+    try env.put("OLDPWD", "/tmp/previous");
+
+    var exp = Expansion.init(allocator, &env, 0);
+
+    const result = try exp.expand("~-/file.txt");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("/tmp/previous/file.txt", result);
+}
+
+test "expand tilde user" {
+    const allocator = std.testing.allocator;
+
+    var env = std.StringHashMap([]const u8).init(allocator);
+    defer env.deinit();
+
+    try env.put("USER", "testuser");
+    try env.put("HOME", "/home/testuser");
+
+    var exp = Expansion.init(allocator, &env, 0);
+
+    // Current user should expand to HOME
+    const result = try exp.expand("~testuser/docs");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("/home/testuser/docs", result);
 }
