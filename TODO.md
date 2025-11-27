@@ -237,28 +237,28 @@
 ## 🟢 Low Priority - Extended Features
 
 ### 13. Extended Builtins (Phase 13)
-- [ ] **Navigation Helpers**
-  - [ ] `bookmark` - Bookmark management
+- [x] **Navigation Helpers**
+  - [x] `bookmark` - Bookmark management ✅
 - [ ] **Developer Tools**
   - [ ] `reload` - Reload configuration
   - [ ] `code` - Open in VS Code
   - [ ] `pstorm` - Open in PhpStorm
   - [ ] `library` - Library management
   - [ ] `show` / `hide` - Show/hide files (macOS)
-- [ ] **System Helpers**
+- [x] **System Helpers**
   - [x] `ip` - Display public IP info ✅
   - [x] `localip` - Show local IP ✅
-  - [ ] `reloaddns` - Reload DNS cache
-  - [ ] `emptytrash` - Empty trash (macOS)
+  - [x] `reloaddns` - Reload DNS cache (macOS) ✅
+  - [x] `emptytrash` - Empty trash (macOS) ✅
   - [x] `copyssh` - Copy SSH key to clipboard ✅
   - [ ] `ft` - Fuzzy file finder
   - [x] `web` - Open URL in browser ✅
-- [ ] **Productivity**
+- [x] **Productivity**
   - [x] `shrug` - Print shrug emoticon ✅
-  - [ ] `wip` - Work-in-progress git helper
+  - [x] `wip` - Work-in-progress git helper ✅
   - [x] `calc` - Calculator with functions ✅
   - [x] `json` - JSON utilities (parse, format, query) ✅
-  - [ ] `http` - HTTP requests
+  - [x] `http` - HTTP requests ✅
 - [ ] **Advanced Tools**
   - [ ] `find` - Fuzzy file finder (interactive)
   - [x] `tree` - Directory tree ✅
@@ -388,8 +388,8 @@
 ### 20. Builtin Command Enhancements
 Many builtins are implemented but missing flags/options:
 
-- [ ] **cd**: CDPATH support, directory stack integration
-- [ ] **pwd**: `-L` (logical path), `-P` (physical path)
+- [x] **cd**: CDPATH support, `cd -` (OLDPWD), OLDPWD tracking ✅
+- [x] **pwd**: `-L` (logical path), `-P` (physical path) ✅
 - [ ] **pushd/popd**: `+N`/`-N` rotation
 - [ ] **dirs**: `-c` (clear), `-l` (long), `-p` (one per line), `-v` (with indices)
 - [ ] **echo**: `-e` (escape sequences), `-E` (disable escapes)
@@ -409,7 +409,7 @@ Many builtins are implemented but missing flags/options:
 - [ ] **time**: `-p` (POSIX format)
 - [ ] **trap**: `-l` (list signals), `-p` (show traps), ERR/EXIT/DEBUG/RETURN pseudo-signals
 - [ ] **timeout**: `-s signal`, `-k duration`
-- [ ] **read**: `-r` (raw), `-p prompt`, `-a array`, `-t timeout`, `-n nchars`, `-d delim`, `-s` (silent)
+- [x] **read**: `-r` (raw), `-p prompt` ✅ (partial - `-a`, `-t`, `-n`, `-d`, `-s` not yet)
 - [ ] **test**: `[[ ]]` extended test (pattern matching, regex)
 
 ### 21. Code Quality
@@ -444,7 +444,7 @@ Many builtins are implemented but missing flags/options:
 | Execution Options | 8/8 ✅ | 🟡 Medium |
 | Scripting Engine | 20 | 🟡 Medium |
 | Custom Hooks | 6 | 🟡 Medium |
-| Extended Builtins | 30 (7 ✅) | 🟢 Low |
+| Extended Builtins | 30 (14 ✅) | 🟢 Low |
 | Documentation | 20 | 🟢 Low |
 | Performance | 25 | 🟢 Low |
 | Foundation Libraries | 12 (9 ✅) | 🟢 Low |
