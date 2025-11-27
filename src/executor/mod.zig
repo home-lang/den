@@ -4,9 +4,32 @@ const IO = @import("../utils/io.zig").IO;
 const Expansion = @import("../utils/expansion.zig").Expansion;
 const builtin = @import("builtin");
 const process = @import("../utils/process.zig");
+const TypoCorrection = @import("../utils/typo_correction.zig").TypoCorrection;
+const env_utils = @import("../utils/env.zig");
 
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
+
+// C library extern declarations for environment manipulation
+const libc_env = struct {
+    extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+    extern "c" fn unsetenv(name: [*:0]const u8) c_int;
+};
+
+// Get environ from C - returns the current environment pointer (updated by setenv/unsetenv)
+fn getCEnviron() [*:null]const ?[*:0]const u8 {
+    // On Darwin/macOS, environ is available via _NSGetEnviron()
+    // On other platforms, we can directly access extern environ
+    if (builtin.os.tag == .macos) {
+        // macOS uses _NSGetEnviron() function which returns ***char (pointer to environ)
+        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
+        return @ptrCast(NSGetEnviron().*);
+    } else {
+        // Linux and other POSIX systems - environ is a global variable
+        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
+        return @ptrCast(c_environ.*);
+    }
+}
 
 // Windows process access rights (for job control)
 const PROCESS_TERMINATE: u32 = 0x0001;
@@ -369,7 +392,8 @@ pub const Executor = struct {
         argv[argv_len] = null;
 
         // Exec (no fork - we're already in child)
-        _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), @ptrCast(std.os.environ.ptr)) catch {
+        // Use C's environ directly which is updated by setenv/unsetenv
+        _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), getCEnviron()) catch {
             IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
             std.posix.exit(127);
         };
@@ -593,7 +617,7 @@ pub const Executor = struct {
         _ = self;
         const builtins = [_][]const u8{
             "cd", "pwd", "echo", "exit", "env", "export", "set", "unset",
-            "true", "false", "test", "[", "alias", "unalias", "which",
+            "true", "false", "test", "[", "[[", "alias", "unalias", "which",
             "type", "help", "read", "printf", "source", ".", "history",
             "pushd", "popd", "dirs", "eval", "exec", "command", "builtin",
             "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
@@ -601,7 +625,8 @@ pub const Executor = struct {
             "watch", "tree", "grep", "find", "calc", "json", "ls",
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
-            "reloaddns", "emptytrash", "wip", "bookmark"
+            "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
+            "show", "hide",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -617,7 +642,7 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "cd")) {
             return try self.builtinCd(command);
         } else if (std.mem.eql(u8, command.name, "env")) {
-            return try self.builtinEnv();
+            return try self.builtinEnvCmd(command);
         } else if (std.mem.eql(u8, command.name, "export")) {
             return try self.builtinExport(command);
         } else if (std.mem.eql(u8, command.name, "set")) {
@@ -630,6 +655,8 @@ pub const Executor = struct {
             return try self.builtinFalse();
         } else if (std.mem.eql(u8, command.name, "test") or std.mem.eql(u8, command.name, "[")) {
             return try self.builtinTest(command);
+        } else if (std.mem.eql(u8, command.name, "[[")) {
+            return try self.builtinExtendedTest(command);
         } else if (std.mem.eql(u8, command.name, "which")) {
             return try self.builtinWhich(command);
         } else if (std.mem.eql(u8, command.name, "type")) {
@@ -740,6 +767,14 @@ pub const Executor = struct {
             return try self.builtinWip(command);
         } else if (std.mem.eql(u8, command.name, "bookmark")) {
             return try self.builtinBookmark(command);
+        } else if (std.mem.eql(u8, command.name, "code")) {
+            return try self.builtinCode(command);
+        } else if (std.mem.eql(u8, command.name, "pstorm")) {
+            return try self.builtinPstorm(command);
+        } else if (std.mem.eql(u8, command.name, "show")) {
+            return try self.builtinShow(command);
+        } else if (std.mem.eql(u8, command.name, "hide")) {
+            return try self.builtinHide(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -1061,6 +1096,207 @@ pub const Executor = struct {
         return 0;
     }
 
+    /// env command with VAR=value support
+    /// Usage: env [-i] [-u name] [name=value]... [command [args]...]
+    fn builtinEnvCmd(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
+        // No args - just print environment
+        if (command.args.len == 0) {
+            return try self.builtinEnv();
+        }
+
+        // Parse flags and VAR=value assignments
+        var ignore_env = false;
+        var unset_vars = std.ArrayList([]const u8).empty;
+        defer unset_vars.deinit(self.allocator);
+        var env_overrides = std.ArrayList(struct { key: []const u8, value: []const u8 }).empty;
+        defer env_overrides.deinit(self.allocator);
+
+        var cmd_start: ?usize = null;
+        var i: usize = 0;
+
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+
+            if (arg.len > 0 and arg[0] == '-') {
+                // Parse flags
+                if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--ignore-environment")) {
+                    ignore_env = true;
+                } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--unset")) {
+                    // Next arg is the var name to unset
+                    if (i + 1 < command.args.len) {
+                        i += 1;
+                        try unset_vars.append(self.allocator, command.args[i]);
+                    } else {
+                        try IO.eprint("env: option requires an argument -- 'u'\n", .{});
+                        return 1;
+                    }
+                } else if (std.mem.eql(u8, arg, "--")) {
+                    // End of options
+                    cmd_start = i + 1;
+                    break;
+                } else if (std.mem.eql(u8, arg, "--help")) {
+                    try IO.print("Usage: env [-i] [-u name] [name=value]... [command [args]...]\n", .{});
+                    try IO.print("  -i, --ignore-environment  Start with empty environment\n", .{});
+                    try IO.print("  -u, --unset=NAME          Unset variable NAME\n", .{});
+                    return 0;
+                } else {
+                    try IO.eprint("env: invalid option -- '{s}'\n", .{arg});
+                    return 1;
+                }
+            } else if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
+                // VAR=value assignment (but only if key is valid - starts with letter/underscore)
+                if (eq_pos > 0 and (std.ascii.isAlphabetic(arg[0]) or arg[0] == '_')) {
+                    const key = arg[0..eq_pos];
+                    const value = arg[eq_pos + 1 ..];
+                    try env_overrides.append(self.allocator, .{ .key = key, .value = value });
+                } else {
+                    // Looks like a command (e.g., "/usr/bin/foo=bar" or "=foo")
+                    cmd_start = i;
+                    break;
+                }
+            } else {
+                // This is the command to execute
+                cmd_start = i;
+                break;
+            }
+        }
+
+        // If no command specified, just print modified environment
+        if (cmd_start == null) {
+            if (ignore_env) {
+                // Only print overrides
+                for (env_overrides.items) |override| {
+                    try IO.print("{s}={s}\n", .{ override.key, override.value });
+                }
+            } else {
+                // Print modified environment
+                var iter = self.environment.iterator();
+                while (iter.next()) |entry| {
+                    // Skip if unset
+                    var is_unset = false;
+                    for (unset_vars.items) |unset_var| {
+                        if (std.mem.eql(u8, entry.key_ptr.*, unset_var)) {
+                            is_unset = true;
+                            break;
+                        }
+                    }
+                    if (is_unset) continue;
+
+                    // Check if overridden
+                    var is_overridden = false;
+                    for (env_overrides.items) |override| {
+                        if (std.mem.eql(u8, entry.key_ptr.*, override.key)) {
+                            is_overridden = true;
+                            break;
+                        }
+                    }
+                    if (!is_overridden) {
+                        try IO.print("{s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                    }
+                }
+                // Print overrides
+                for (env_overrides.items) |override| {
+                    try IO.print("{s}={s}\n", .{ override.key, override.value });
+                }
+            }
+            return 0;
+        }
+
+        // Execute command with modified environment
+        // Save original OS env values to restore later
+        var saved_os_env = std.StringHashMap(?[]const u8).init(self.allocator);
+        defer {
+            // Free any allocated values
+            var iter = saved_os_env.iterator();
+            while (iter.next()) |entry| {
+                if (entry.value_ptr.*) |v| {
+                    self.allocator.free(v);
+                }
+            }
+            saved_os_env.deinit();
+        }
+
+        // Apply unsets to OS environment
+        for (unset_vars.items) |unset_var| {
+            // Save original OS env value
+            const original = std.posix.getenv(unset_var);
+            if (original) |orig| {
+                try saved_os_env.put(unset_var, try self.allocator.dupe(u8, orig));
+            } else {
+                try saved_os_env.put(unset_var, null);
+            }
+            // Unset in OS environment
+            const unset_var_z = try self.allocator.dupeZ(u8, unset_var);
+            defer self.allocator.free(unset_var_z);
+            _ = libc_env.unsetenv(unset_var_z.ptr);
+        }
+
+        // Apply overrides to OS environment
+        for (env_overrides.items) |override| {
+            // Save original OS env value
+            if (!saved_os_env.contains(override.key)) {
+                const original = std.posix.getenv(override.key);
+                if (original) |orig| {
+                    try saved_os_env.put(override.key, try self.allocator.dupe(u8, orig));
+                } else {
+                    try saved_os_env.put(override.key, null);
+                }
+            }
+            // Set in OS environment
+            const key_z = try self.allocator.dupeZ(u8, override.key);
+            defer self.allocator.free(key_z);
+            const value_z = try self.allocator.dupeZ(u8, override.value);
+            defer self.allocator.free(value_z);
+            _ = libc_env.setenv(key_z.ptr, value_z.ptr, 1);
+        }
+
+        // Build new command from remaining args
+        const start = cmd_start.?; // We know it's set if we got here
+        const cmd_name = command.args[start];
+        const cmd_args: [][]const u8 = if (start + 1 < command.args.len)
+            @constCast(command.args[start + 1 ..])
+        else
+            @constCast(&[_][]const u8{});
+
+        // Create a new ParsedCommand for the actual command
+        var new_cmd = types.ParsedCommand{
+            .name = cmd_name,
+            .args = cmd_args,
+            .redirections = @constCast(command.redirections),
+        };
+
+        // Execute the command
+        const result = self.executeCommand(&new_cmd) catch |err| {
+            // Restore OS environment on error
+            self.restoreOsEnv(&saved_os_env);
+            return err;
+        };
+
+        // Restore OS environment
+        self.restoreOsEnv(&saved_os_env);
+
+        return result;
+    }
+
+    fn restoreOsEnv(self: *Executor, saved_os_env: *std.StringHashMap(?[]const u8)) void {
+        var iter = saved_os_env.iterator();
+        while (iter.next()) |entry| {
+            const key = entry.key_ptr.*;
+            const key_z = self.allocator.dupeZ(u8, key) catch continue;
+            defer self.allocator.free(key_z);
+
+            if (entry.value_ptr.*) |original_value| {
+                // Restore original value
+                const value_z = self.allocator.dupeZ(u8, original_value) catch continue;
+                defer self.allocator.free(value_z);
+                _ = libc_env.setenv(key_z.ptr, value_z.ptr, 1);
+            } else {
+                // Was not set originally, unset it
+                _ = libc_env.unsetenv(key_z.ptr);
+            }
+        }
+    }
+
     fn builtinExport(self: *Executor, command: *types.ParsedCommand) !i32 {
         // export VAR=value or export VAR or export -p
         if (command.args.len == 0) {
@@ -1363,6 +1599,275 @@ pub const Executor = struct {
         return 2;
     }
 
+    /// Extended test builtin [[ ]] with pattern matching and regex support
+    fn builtinExtendedTest(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // Remove trailing ]] if present
+        var args = command.args;
+        if (args.len > 0 and std.mem.eql(u8, args[args.len - 1], "]]")) {
+            args = args[0 .. args.len - 1];
+        }
+
+        if (args.len == 0) return 1; // Empty test is false
+
+        // Handle compound expressions with && and ||
+        // First, check for these operators at the top level
+        var i: usize = 0;
+        var last_result: bool = true;
+        var pending_op: ?enum { and_op, or_op } = null;
+
+        while (i < args.len) {
+            // Find the next && or || or end of args
+            var expr_end = i;
+            var paren_depth: u32 = 0;
+            while (expr_end < args.len) {
+                const arg = args[expr_end];
+                if (std.mem.eql(u8, arg, "(")) {
+                    paren_depth += 1;
+                } else if (std.mem.eql(u8, arg, ")")) {
+                    if (paren_depth > 0) paren_depth -= 1;
+                } else if (paren_depth == 0) {
+                    if (std.mem.eql(u8, arg, "&&") or std.mem.eql(u8, arg, "||")) {
+                        break;
+                    }
+                }
+                expr_end += 1;
+            }
+
+            // Evaluate the sub-expression
+            const sub_result = try self.evaluateExtendedTestExpr(args[i..expr_end]);
+
+            // Apply pending operator
+            if (pending_op) |op| {
+                switch (op) {
+                    .and_op => last_result = last_result and sub_result,
+                    .or_op => last_result = last_result or sub_result,
+                }
+            } else {
+                last_result = sub_result;
+            }
+
+            // Short-circuit evaluation
+            if (expr_end < args.len) {
+                const op_str = args[expr_end];
+                if (std.mem.eql(u8, op_str, "&&")) {
+                    if (!last_result) return 1; // Short-circuit: false && ... = false
+                    pending_op = .and_op;
+                } else if (std.mem.eql(u8, op_str, "||")) {
+                    if (last_result) return 0; // Short-circuit: true || ... = true
+                    pending_op = .or_op;
+                }
+                i = expr_end + 1;
+            } else {
+                break;
+            }
+        }
+
+        return if (last_result) 0 else 1;
+    }
+
+    /// Evaluate a single extended test expression (without && / ||)
+    fn evaluateExtendedTestExpr(self: *Executor, args: [][]const u8) !bool {
+        if (args.len == 0) return false;
+
+        // Handle negation
+        if (args.len >= 1 and std.mem.eql(u8, args[0], "!")) {
+            return !(try self.evaluateExtendedTestExpr(args[1..]));
+        }
+
+        // Handle parentheses
+        if (args.len >= 2 and std.mem.eql(u8, args[0], "(")) {
+            // Find matching close paren
+            var depth: u32 = 1;
+            var close_idx: usize = 1;
+            while (close_idx < args.len and depth > 0) {
+                if (std.mem.eql(u8, args[close_idx], "(")) depth += 1;
+                if (std.mem.eql(u8, args[close_idx], ")")) depth -= 1;
+                if (depth > 0) close_idx += 1;
+            }
+            if (close_idx < args.len) {
+                return try self.evaluateExtendedTestExpr(args[1..close_idx]);
+            }
+        }
+
+        // Single argument - test if non-empty string
+        if (args.len == 1) {
+            return args[0].len > 0;
+        }
+
+        // Two arguments - unary operators
+        if (args.len == 2) {
+            const op = args[0];
+            const arg = args[1];
+
+            if (std.mem.eql(u8, op, "-z")) {
+                return arg.len == 0;
+            } else if (std.mem.eql(u8, op, "-n")) {
+                return arg.len > 0;
+            } else if (std.mem.eql(u8, op, "-f")) {
+                const file = std.fs.cwd().openFile(arg, .{}) catch return false;
+                defer file.close();
+                const stat = file.stat() catch return false;
+                return stat.kind == .file;
+            } else if (std.mem.eql(u8, op, "-d")) {
+                var dir = std.fs.cwd().openDir(arg, .{}) catch return false;
+                dir.close();
+                return true;
+            } else if (std.mem.eql(u8, op, "-e")) {
+                std.fs.cwd().access(arg, .{}) catch return false;
+                return true;
+            } else if (std.mem.eql(u8, op, "-r")) {
+                const file = std.fs.cwd().openFile(arg, .{}) catch return false;
+                file.close();
+                return true;
+            } else if (std.mem.eql(u8, op, "-w")) {
+                const file = std.fs.cwd().openFile(arg, .{ .mode = .write_only }) catch return false;
+                file.close();
+                return true;
+            } else if (std.mem.eql(u8, op, "-x")) {
+                if (builtin.os.tag == .windows) {
+                    std.fs.cwd().access(arg, .{}) catch return false;
+                    return true;
+                }
+                const file = std.fs.cwd().openFile(arg, .{}) catch return false;
+                defer file.close();
+                const stat = file.stat() catch return false;
+                return stat.mode & 0o111 != 0;
+            } else if (std.mem.eql(u8, op, "-s")) {
+                // True if file exists and has size > 0
+                const file = std.fs.cwd().openFile(arg, .{}) catch return false;
+                defer file.close();
+                const stat = file.stat() catch return false;
+                return stat.size > 0;
+            } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
+                // True if file is a symlink
+                const stat = std.fs.cwd().statFile(arg) catch return false;
+                return stat.kind == .sym_link;
+            }
+        }
+
+        // Three arguments - binary operators
+        if (args.len == 3) {
+            const left = args[0];
+            const op = args[1];
+            const right = args[2];
+
+            // String comparison with pattern matching
+            if (std.mem.eql(u8, op, "==") or std.mem.eql(u8, op, "=")) {
+                // Pattern matching: right side can contain * and ?
+                return self.matchGlobPattern(left, right);
+            } else if (std.mem.eql(u8, op, "!=")) {
+                return !self.matchGlobPattern(left, right);
+            } else if (std.mem.eql(u8, op, "=~")) {
+                // Regex matching
+                return self.matchRegex(left, right);
+            } else if (std.mem.eql(u8, op, "<")) {
+                // Lexicographic comparison
+                return std.mem.lessThan(u8, left, right);
+            } else if (std.mem.eql(u8, op, ">")) {
+                // Lexicographic comparison
+                return std.mem.lessThan(u8, right, left);
+            } else if (std.mem.eql(u8, op, "-eq")) {
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+                return left_num == right_num;
+            } else if (std.mem.eql(u8, op, "-ne")) {
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+                return left_num != right_num;
+            } else if (std.mem.eql(u8, op, "-lt")) {
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+                return left_num < right_num;
+            } else if (std.mem.eql(u8, op, "-le")) {
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+                return left_num <= right_num;
+            } else if (std.mem.eql(u8, op, "-gt")) {
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+                return left_num > right_num;
+            } else if (std.mem.eql(u8, op, "-ge")) {
+                const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+                const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+                return left_num >= right_num;
+            } else if (std.mem.eql(u8, op, "-nt")) {
+                // Newer than (file modification time)
+                const left_stat = std.fs.cwd().statFile(left) catch return false;
+                const right_stat = std.fs.cwd().statFile(right) catch return false;
+                // Compare nanoseconds directly (Zig 0.16 Timestamp has single nanoseconds field)
+                return left_stat.mtime.nanoseconds > right_stat.mtime.nanoseconds;
+            } else if (std.mem.eql(u8, op, "-ot")) {
+                // Older than (file modification time)
+                const left_stat = std.fs.cwd().statFile(left) catch return false;
+                const right_stat = std.fs.cwd().statFile(right) catch return false;
+                return left_stat.mtime.nanoseconds < right_stat.mtime.nanoseconds;
+            } else if (std.mem.eql(u8, op, "-ef")) {
+                // Same file (same inode)
+                const left_stat = std.fs.cwd().statFile(left) catch return false;
+                const right_stat = std.fs.cwd().statFile(right) catch return false;
+                return left_stat.inode == right_stat.inode;
+            }
+        }
+
+        return false;
+    }
+
+    /// Simple glob pattern matching for [[ == ]]
+    fn matchGlobPattern(self: *Executor, str: []const u8, pattern: []const u8) bool {
+        _ = self;
+        return globMatch(str, pattern);
+    }
+
+    /// Simple regex matching for [[ =~ ]]
+    /// Supports: ^ (start anchor), $ (end anchor), . (any char), simple literal matching
+    fn matchRegex(self: *Executor, str: []const u8, pattern: []const u8) bool {
+        _ = self;
+        if (pattern.len == 0) return true;
+
+        const anchored_start = pattern[0] == '^';
+        const anchored_end = pattern.len > 0 and pattern[pattern.len - 1] == '$';
+
+        var actual_pattern = pattern;
+        if (anchored_start) actual_pattern = actual_pattern[1..];
+        if (anchored_end and actual_pattern.len > 0) actual_pattern = actual_pattern[0 .. actual_pattern.len - 1];
+
+        if (actual_pattern.len == 0) {
+            // ^$ matches empty string only
+            return str.len == 0;
+        }
+
+        // Simple approach: try to find pattern in string
+        if (anchored_start and anchored_end) {
+            // Must match entire string
+            return simplePatternMatch(str, actual_pattern);
+        } else if (anchored_start) {
+            // Must match at start
+            return str.len >= actual_pattern.len and simplePatternMatch(str[0..actual_pattern.len], actual_pattern);
+        } else if (anchored_end) {
+            // Must match at end
+            if (str.len < actual_pattern.len) return false;
+            return simplePatternMatch(str[str.len - actual_pattern.len ..], actual_pattern);
+        } else {
+            // Find anywhere in string
+            if (str.len < actual_pattern.len) return false;
+            var i: usize = 0;
+            while (i <= str.len - actual_pattern.len) : (i += 1) {
+                if (simplePatternMatch(str[i .. i + actual_pattern.len], actual_pattern)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    fn simplePatternMatch(str: []const u8, pattern: []const u8) bool {
+        if (str.len != pattern.len) return false;
+        for (str, pattern) |s, p| {
+            if (p != '.' and s != p) return false;
+        }
+        return true;
+    }
+
     fn builtinWhich(self: *Executor, command: *types.ParsedCommand) !i32 {
         if (command.args.len == 0) {
             try IO.eprint("den: which: missing argument\n", .{});
@@ -1371,12 +1876,34 @@ pub const Executor = struct {
 
         const utils = @import("../utils.zig");
         var found_all = true;
+        var show_all = false;
+        var arg_start: usize = 0;
 
-        for (command.args) |cmd_name| {
+        // Parse flags
+        for (command.args, 0..) |arg, i| {
+            if (arg.len > 0 and arg[0] == '-') {
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'a' => show_all = true,
+                        else => {},
+                    }
+                }
+                arg_start = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        if (arg_start >= command.args.len) {
+            try IO.eprint("den: which: missing argument\n", .{});
+            return 1;
+        }
+
+        for (command.args[arg_start..]) |cmd_name| {
             // Check if it's a builtin
             if (self.isBuiltin(cmd_name)) {
                 try IO.print("{s}: shell builtin command\n", .{cmd_name});
-                continue;
+                if (!show_all) continue;
             }
 
             // Parse PATH and find executable
@@ -1386,11 +1913,29 @@ pub const Executor = struct {
             };
             defer path_list.deinit();
 
-            if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
-                defer self.allocator.free(exec_path);
-                try IO.print("{s}\n", .{exec_path});
+            if (show_all) {
+                // Find all matches
+                const all_paths = try path_list.findAllExecutables(self.allocator, cmd_name);
+                defer {
+                    for (all_paths) |p| self.allocator.free(p);
+                    self.allocator.free(all_paths);
+                }
+
+                if (all_paths.len == 0 and !self.isBuiltin(cmd_name)) {
+                    found_all = false;
+                } else {
+                    for (all_paths) |exec_path| {
+                        try IO.print("{s}\n", .{exec_path});
+                    }
+                }
             } else {
-                found_all = false;
+                // Find first match only
+                if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
+                    defer self.allocator.free(exec_path);
+                    try IO.print("{s}\n", .{exec_path});
+                } else {
+                    found_all = false;
+                }
             }
         }
 
@@ -4388,10 +4933,87 @@ pub const Executor = struct {
     }
 
     fn executeExternal(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // Check if command exists before forking to provide better error messages
+        if (!self.commandExistsInPath(command.name)) {
+            try IO.eprint("den: {s}: command not found\n", .{command.name});
+
+            // Try to provide typo correction suggestions
+            var tc = TypoCorrection.init(self.allocator);
+            if (tc.formatSuggestionMessage(command.name)) |maybe_msg| {
+                if (maybe_msg) |suggestion_msg| {
+                    defer self.allocator.free(suggestion_msg);
+                    try IO.eprint("{s}\n", .{suggestion_msg});
+                }
+            } else |_| {}
+
+            return 127; // Standard "command not found" exit code
+        }
+
         if (builtin.os.tag == .windows) {
             return try self.executeExternalWindows(command);
         }
         return try self.executeExternalPosix(command);
+    }
+
+    /// Check if a command exists in PATH or as an absolute/relative path
+    fn commandExistsInPath(self: *Executor, cmd: []const u8) bool {
+        _ = self;
+
+        // If command contains a slash, it's a path - check directly
+        if (std.mem.indexOf(u8, cmd, "/") != null or
+            (builtin.os.tag == .windows and std.mem.indexOf(u8, cmd, "\\") != null))
+        {
+            const stat = std.fs.cwd().statFile(cmd) catch return false;
+            // Check if it's executable (Unix) or just exists (Windows)
+            if (builtin.os.tag == .windows) {
+                return stat.kind == .file;
+            }
+            return (stat.mode & 0o111) != 0;
+        }
+
+        // Search in PATH
+        const path = env_utils.getEnv("PATH") orelse return false;
+        var path_iter = std.mem.splitScalar(u8, path, if (builtin.os.tag == .windows) ';' else ':');
+
+        while (path_iter.next()) |dir_path| {
+            if (dir_path.len == 0) continue;
+
+            // Try to open the directory and check for the file
+            var dir = std.fs.cwd().openDir(dir_path, .{}) catch continue;
+            defer dir.close();
+
+            const stat = dir.statFile(cmd) catch continue;
+
+            // Check if it's executable
+            if (builtin.os.tag == .windows) {
+                // On Windows, also check common extensions
+                if (stat.kind == .file) return true;
+            } else {
+                if ((stat.mode & 0o111) != 0) return true;
+            }
+        }
+
+        // On Windows, also try with common extensions
+        if (builtin.os.tag == .windows) {
+            const extensions = [_][]const u8{ ".exe", ".cmd", ".bat", ".com" };
+            for (extensions) |ext| {
+                var buf: [512]u8 = undefined;
+                const cmd_with_ext = std.fmt.bufPrint(&buf, "{s}{s}", .{ cmd, ext }) catch continue;
+
+                path_iter = std.mem.splitScalar(u8, path, ';');
+                while (path_iter.next()) |dir_path| {
+                    if (dir_path.len == 0) continue;
+
+                    var dir = std.fs.cwd().openDir(dir_path, .{}) catch continue;
+                    defer dir.close();
+
+                    _ = dir.statFile(cmd_with_ext) catch continue;
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     fn executeExternalWindows(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -4485,7 +5107,8 @@ pub const Executor = struct {
                 std.posix.exit(1);
             };
 
-            _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), @ptrCast(std.os.environ.ptr)) catch {
+            // Use C's environ directly which is updated by setenv/unsetenv
+            _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), getCEnviron()) catch {
                 // If execvpe returns, it failed
                 IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
                 std.posix.exit(127);
@@ -4544,7 +5167,8 @@ pub const Executor = struct {
                 std.posix.exit(1);
             };
 
-            _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), @ptrCast(std.os.environ.ptr)) catch {
+            // Use C's environ directly which is updated by setenv/unsetenv
+            _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), getCEnviron()) catch {
                 // If execvpe returns, it failed
                 IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
                 std.posix.exit(127);
@@ -5402,4 +6026,295 @@ pub const Executor = struct {
 
         return 0;
     }
+
+    /// Open file or directory in VS Code
+    fn builtinCode(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (builtin.os.tag != .macos) {
+            try IO.eprint("code: only supported on macOS\n", .{});
+            return 1;
+        }
+
+        // Get path - use current directory if not specified
+        const path = if (command.args.len > 0) command.args[0] else ".";
+
+        // Execute: open -a "Visual Studio Code" <path>
+        const argv = [_]?[*:0]const u8{
+            "open",
+            "-a",
+            "Visual Studio Code",
+            try self.allocator.dupeZ(u8, path),
+            null,
+        };
+        defer self.allocator.free(std.mem.span(argv[3].?));
+
+        const pid = try std.posix.fork();
+        if (pid == 0) {
+            _ = std.posix.execvpeZ("open", @ptrCast(&argv), getCEnviron()) catch {
+                std.posix.exit(127);
+            };
+            unreachable;
+        } else {
+            const result = std.posix.waitpid(pid, 0);
+            return @intCast(std.posix.W.EXITSTATUS(result.status));
+        }
+    }
+
+    /// Open file or directory in PhpStorm
+    fn builtinPstorm(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (builtin.os.tag != .macos) {
+            try IO.eprint("pstorm: only supported on macOS\n", .{});
+            return 1;
+        }
+
+        // Get path - use current directory if not specified
+        const path = if (command.args.len > 0) command.args[0] else ".";
+
+        // Execute: open -a "PhpStorm" <path>
+        const argv = [_]?[*:0]const u8{
+            "open",
+            "-a",
+            "PhpStorm",
+            try self.allocator.dupeZ(u8, path),
+            null,
+        };
+        defer self.allocator.free(std.mem.span(argv[3].?));
+
+        const pid = try std.posix.fork();
+        if (pid == 0) {
+            _ = std.posix.execvpeZ("open", @ptrCast(&argv), getCEnviron()) catch {
+                std.posix.exit(127);
+            };
+            unreachable;
+        } else {
+            const result = std.posix.waitpid(pid, 0);
+            return @intCast(std.posix.W.EXITSTATUS(result.status));
+        }
+    }
+
+    /// Show hidden files (macOS) - removes hidden attribute
+    fn builtinShow(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (builtin.os.tag != .macos) {
+            try IO.eprint("show: only supported on macOS\n", .{});
+            return 1;
+        }
+
+        if (command.args.len == 0) {
+            try IO.eprint("show: usage: show <file>...\n", .{});
+            return 1;
+        }
+
+        var exit_code: i32 = 0;
+        for (command.args) |file| {
+            // Execute: chflags nohidden <file>
+            const file_z = try self.allocator.dupeZ(u8, file);
+            defer self.allocator.free(file_z);
+
+            const argv = [_]?[*:0]const u8{
+                "chflags",
+                "nohidden",
+                file_z,
+                null,
+            };
+
+            const pid = try std.posix.fork();
+            if (pid == 0) {
+                _ = std.posix.execvpeZ("chflags", @ptrCast(&argv), getCEnviron()) catch {
+                    std.posix.exit(127);
+                };
+                unreachable;
+            } else {
+                const result = std.posix.waitpid(pid, 0);
+                const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+                if (code != 0) {
+                    try IO.eprint("show: failed to show {s}\n", .{file});
+                    exit_code = code;
+                }
+            }
+        }
+        return exit_code;
+    }
+
+    /// Hide files (macOS) - sets hidden attribute
+    fn builtinHide(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (builtin.os.tag != .macos) {
+            try IO.eprint("hide: only supported on macOS\n", .{});
+            return 1;
+        }
+
+        if (command.args.len == 0) {
+            try IO.eprint("hide: usage: hide <file>...\n", .{});
+            return 1;
+        }
+
+        var exit_code: i32 = 0;
+        for (command.args) |file| {
+            // Execute: chflags hidden <file>
+            const file_z = try self.allocator.dupeZ(u8, file);
+            defer self.allocator.free(file_z);
+
+            const argv = [_]?[*:0]const u8{
+                "chflags",
+                "hidden",
+                file_z,
+                null,
+            };
+
+            const pid = try std.posix.fork();
+            if (pid == 0) {
+                _ = std.posix.execvpeZ("chflags", @ptrCast(&argv), getCEnviron()) catch {
+                    std.posix.exit(127);
+                };
+                unreachable;
+            } else {
+                const result = std.posix.waitpid(pid, 0);
+                const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+                if (code != 0) {
+                    try IO.eprint("hide: failed to hide {s}\n", .{file});
+                    exit_code = code;
+                }
+            }
+        }
+        return exit_code;
+    }
 };
+
+/// Simple glob pattern matching for [[ == ]] operator
+fn globMatch(str: []const u8, pattern: []const u8) bool {
+    var s_idx: usize = 0;
+    var p_idx: usize = 0;
+    var star_idx: ?usize = null;
+    var match_idx: usize = 0;
+
+    while (s_idx < str.len) {
+        if (p_idx < pattern.len and (pattern[p_idx] == '?' or pattern[p_idx] == str[s_idx])) {
+            s_idx += 1;
+            p_idx += 1;
+        } else if (p_idx < pattern.len and pattern[p_idx] == '*') {
+            star_idx = p_idx;
+            match_idx = s_idx;
+            p_idx += 1;
+        } else if (star_idx) |si| {
+            p_idx = si + 1;
+            match_idx += 1;
+            s_idx = match_idx;
+        } else {
+            return false;
+        }
+    }
+
+    while (p_idx < pattern.len and pattern[p_idx] == '*') {
+        p_idx += 1;
+    }
+
+    return p_idx == pattern.len;
+}
+
+/// Simple regex matching at a specific position
+fn regexMatchAt(str: []const u8, s_start: usize, pattern: []const u8, p_start: usize, anchored_end: bool) bool {
+    var s_idx = s_start;
+    var p_idx = p_start;
+
+    while (p_idx < pattern.len) {
+        const pat_char = pattern[p_idx];
+
+        // Check for quantifiers (look ahead)
+        const has_quantifier = p_idx + 1 < pattern.len and
+            (pattern[p_idx + 1] == '*' or pattern[p_idx + 1] == '+' or pattern[p_idx + 1] == '?');
+
+        if (has_quantifier) {
+            const quantifier = pattern[p_idx + 1];
+            const min_matches: usize = if (quantifier == '+') 1 else 0;
+            const max_matches: usize = if (quantifier == '?') 1 else std.math.maxInt(usize);
+
+            // Count matches
+            var matches: usize = 0;
+            while (s_idx + matches < str.len and matches < max_matches) {
+                if (matchChar(str[s_idx + matches], pat_char)) {
+                    matches += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Try different match counts (greedy backtracking)
+            var try_matches = matches;
+            while (try_matches >= min_matches) : (try_matches -= 1) {
+                if (regexMatchAt(str, s_idx + try_matches, pattern, p_idx + 2, anchored_end)) {
+                    return true;
+                }
+                if (try_matches == 0) break;
+            }
+            return false;
+        }
+
+        // Handle character class [...]
+        if (pat_char == '[') {
+            const class_end = findCharClassEnd(pattern, p_idx);
+            if (class_end == null) return false;
+            if (s_idx >= str.len) return false;
+            if (!matchCharClass(str[s_idx], pattern[p_idx + 1 .. class_end.?])) {
+                return false;
+            }
+            s_idx += 1;
+            p_idx = class_end.? + 1;
+            continue;
+        }
+
+        // Normal character match
+        if (s_idx >= str.len) return false;
+        if (!matchChar(str[s_idx], pat_char)) return false;
+        s_idx += 1;
+        p_idx += 1;
+    }
+
+    // Check end anchor
+    if (anchored_end) {
+        return s_idx == str.len;
+    }
+    return true;
+}
+
+fn matchChar(c: u8, pat: u8) bool {
+    if (pat == '.') return true;
+    return c == pat;
+}
+
+fn findCharClassEnd(pattern: []const u8, start: usize) ?usize {
+    var i = start + 1;
+    if (i < pattern.len and pattern[i] == '^') i += 1;
+    if (i < pattern.len and pattern[i] == ']') i += 1; // ] as first char is literal
+
+    while (i < pattern.len) {
+        if (pattern[i] == ']') return i;
+        i += 1;
+    }
+    return null;
+}
+
+fn matchCharClass(c: u8, class: []const u8) bool {
+    var negate = false;
+    var i: usize = 0;
+
+    if (class.len > 0 and class[0] == '^') {
+        negate = true;
+        i = 1;
+    }
+
+    var matched = false;
+    while (i < class.len) {
+        // Check for range (e.g., a-z)
+        if (i + 2 < class.len and class[i + 1] == '-') {
+            if (c >= class[i] and c <= class[i + 2]) {
+                matched = true;
+            }
+            i += 3;
+        } else {
+            if (c == class[i]) {
+                matched = true;
+            }
+            i += 1;
+        }
+    }
+
+    return if (negate) !matched else matched;
+}

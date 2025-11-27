@@ -331,6 +331,63 @@ pub const PathList = struct {
         return null;
     }
 
+    /// Find all executables with given name in PATH (for `which -a`)
+    pub fn findAllExecutables(self: *const PathList, allocator: std.mem.Allocator, name: []const u8) ![][]const u8 {
+        var results = std.ArrayList([]const u8).empty;
+        errdefer {
+            for (results.items) |item| allocator.free(item);
+            results.deinit(allocator);
+        }
+
+        for (self.paths.items) |path_dir| {
+            if (builtin.os.tag == .windows) {
+                // On Windows, check for executable extensions
+                if (try self.checkWindowsExecutable(allocator, path_dir, name)) |result| {
+                    try results.append(allocator, result);
+                }
+                // If no extension, try common executable extensions
+                if (std.mem.indexOfScalar(u8, name, '.') == null) {
+                    for (windows_exe_extensions) |ext| {
+                        var name_with_ext_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        const name_with_ext = std.fmt.bufPrint(&name_with_ext_buf, "{s}{s}", .{ name, ext }) catch continue;
+                        if (try self.checkWindowsExecutable(allocator, path_dir, name_with_ext)) |result| {
+                            try results.append(allocator, result);
+                        }
+                    }
+                }
+            } else {
+                // On Unix, check if executable via mode bits
+                const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path_dir, name });
+
+                // Check if file exists and is accessible
+                std.fs.accessAbsolute(full_path, .{}) catch {
+                    allocator.free(full_path);
+                    continue;
+                };
+
+                const file = std.fs.openFileAbsolute(full_path, .{}) catch {
+                    allocator.free(full_path);
+                    continue;
+                };
+                defer file.close();
+
+                const stat = file.stat() catch {
+                    allocator.free(full_path);
+                    continue;
+                };
+
+                if (stat.mode & 0o111 == 0) {
+                    allocator.free(full_path);
+                    continue;
+                }
+
+                try results.append(allocator, full_path);
+            }
+        }
+
+        return results.toOwnedSlice(allocator);
+    }
+
     /// Check if a file exists and is an executable on Windows
     fn checkWindowsExecutable(self: *const PathList, allocator: std.mem.Allocator, path_dir: []const u8, name: []const u8) !?[]const u8 {
         _ = self;

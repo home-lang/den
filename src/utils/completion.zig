@@ -1,12 +1,154 @@
 const std = @import("std");
 const env_utils = @import("env.zig");
 
+/// Completion cache with TTL support
+pub const CompletionCache = struct {
+    const CacheEntry = struct {
+        results: [][]const u8,
+        timestamp: i64, // milliseconds since epoch
+    };
+
+    allocator: std.mem.Allocator,
+    entries: std.StringHashMap(CacheEntry),
+    ttl_ms: u32,
+    max_entries: u32,
+
+    pub fn init(allocator: std.mem.Allocator, ttl_ms: u32, max_entries: u32) CompletionCache {
+        return .{
+            .allocator = allocator,
+            .entries = std.StringHashMap(CacheEntry).init(allocator),
+            .ttl_ms = ttl_ms,
+            .max_entries = max_entries,
+        };
+    }
+
+    pub fn deinit(self: *CompletionCache) void {
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            // Free cached results
+            for (entry.value_ptr.results) |result| {
+                self.allocator.free(result);
+            }
+            self.allocator.free(entry.value_ptr.results);
+            // Free the key
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.entries.deinit();
+    }
+
+    fn getCurrentTimeMs() i64 {
+        // Use Instant for timestamp since milliTimestamp was removed in Zig 0.16
+        const instant = std.time.Instant.now() catch return 0;
+        // Convert seconds to milliseconds
+        return @as(i64, instant.timestamp.sec) * 1000;
+    }
+
+    pub fn get(self: *CompletionCache, key: []const u8) ?[][]const u8 {
+        if (self.entries.get(key)) |entry| {
+            const now = getCurrentTimeMs();
+            const age = now - entry.timestamp;
+
+            // Check if entry has expired
+            if (age > self.ttl_ms) {
+                // Entry expired, remove it
+                if (self.entries.fetchRemove(key)) |removed| {
+                    for (removed.value.results) |result| {
+                        self.allocator.free(result);
+                    }
+                    self.allocator.free(removed.value.results);
+                    self.allocator.free(removed.key);
+                }
+                return null;
+            }
+
+            return entry.results;
+        }
+        return null;
+    }
+
+    pub fn put(self: *CompletionCache, key: []const u8, results: [][]const u8) !void {
+        // Check if we need to evict entries
+        if (self.entries.count() >= self.max_entries) {
+            self.evictOldest();
+        }
+
+        // Remove existing entry if present
+        if (self.entries.fetchRemove(key)) |old| {
+            for (old.value.results) |result| {
+                self.allocator.free(result);
+            }
+            self.allocator.free(old.value.results);
+            self.allocator.free(old.key);
+        }
+
+        // Duplicate key and results
+        const key_copy = try self.allocator.dupe(u8, key);
+        errdefer self.allocator.free(key_copy);
+
+        const results_copy = try self.allocator.alloc([]const u8, results.len);
+        errdefer self.allocator.free(results_copy);
+
+        for (results, 0..) |result, i| {
+            results_copy[i] = try self.allocator.dupe(u8, result);
+        }
+
+        try self.entries.put(key_copy, .{
+            .results = results_copy,
+            .timestamp = getCurrentTimeMs(),
+        });
+    }
+
+    fn evictOldest(self: *CompletionCache) void {
+        var oldest_key: ?[]const u8 = null;
+        var oldest_time: i64 = std.math.maxInt(i64);
+
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.timestamp < oldest_time) {
+                oldest_time = entry.value_ptr.timestamp;
+                oldest_key = entry.key_ptr.*;
+            }
+        }
+
+        if (oldest_key) |key| {
+            if (self.entries.fetchRemove(key)) |removed| {
+                for (removed.value.results) |result| {
+                    self.allocator.free(result);
+                }
+                self.allocator.free(removed.value.results);
+                self.allocator.free(removed.key);
+            }
+        }
+    }
+
+    pub fn clear(self: *CompletionCache) void {
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            for (entry.value_ptr.results) |result| {
+                self.allocator.free(result);
+            }
+            self.allocator.free(entry.value_ptr.results);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.entries.clearRetainingCapacity();
+    }
+
+    pub fn count(self: *CompletionCache) usize {
+        return self.entries.count();
+    }
+};
+
 /// Tab completion utilities
 pub const Completion = struct {
     allocator: std.mem.Allocator,
+    cache: ?*CompletionCache,
 
     pub fn init(allocator: std.mem.Allocator) Completion {
-        return .{ .allocator = allocator };
+        return .{ .allocator = allocator, .cache = null };
+    }
+
+    pub fn initWithCache(allocator: std.mem.Allocator, cache: *CompletionCache) Completion {
+        return .{ .allocator = allocator, .cache = cache };
     }
 
     /// Escape special characters in a filename for shell use
@@ -48,8 +190,25 @@ pub const Completion = struct {
         return result;
     }
 
-    /// Find command completions from PATH
+    /// Find command completions from PATH (with caching)
     pub fn completeCommand(self: *Completion, prefix: []const u8) ![][]const u8 {
+        // Check cache first
+        const cache_key = blk: {
+            var key_buf: [512]u8 = undefined;
+            break :blk try std.fmt.bufPrint(&key_buf, "cmd:{s}", .{prefix});
+        };
+
+        if (self.cache) |cache| {
+            if (cache.get(cache_key)) |cached_results| {
+                // Return a copy of cached results
+                const result = try self.allocator.alloc([]const u8, cached_results.len);
+                for (cached_results, 0..) |r, i| {
+                    result[i] = try self.allocator.dupe(u8, r);
+                }
+                return result;
+            }
+        }
+
         var matches_buffer: [256][]const u8 = undefined;
         var match_count: usize = 0;
 
@@ -101,6 +260,12 @@ pub const Completion = struct {
         // Allocate and return results
         const result = try self.allocator.alloc([]const u8, match_count);
         @memcpy(result, matches_buffer[0..match_count]);
+
+        // Store in cache
+        if (self.cache) |cache| {
+            cache.put(cache_key, result) catch {};
+        }
+
         return result;
     }
 
@@ -550,6 +715,172 @@ pub const Completion = struct {
         return null;
     }
 
+    /// Complete usernames for ~username expansion
+    /// Returns list of usernames matching the prefix
+    pub fn completeUsername(self: *Completion, prefix: []const u8) ![][]const u8 {
+        var matches_buffer: [128][]const u8 = undefined;
+        var match_count: usize = 0;
+
+        // The prefix should start with ~ and optionally have partial username
+        const username_prefix = if (prefix.len > 0 and prefix[0] == '~')
+            prefix[1..]
+        else if (prefix.len == 0)
+            ""
+        else
+            return &[_][]const u8{};
+
+        // Read /etc/passwd on Unix-like systems
+        if (@import("builtin").os.tag != .windows) {
+            const passwd_file = std.fs.openFileAbsolute("/etc/passwd", .{}) catch {
+                // Fall back to just current user
+                return try self.completeCurrentUserOnly(username_prefix);
+            };
+            defer passwd_file.close();
+
+            // Read passwd file content
+            var content = std.ArrayList(u8).empty;
+            defer content.deinit(self.allocator);
+
+            var buf: [4096]u8 = undefined;
+            while (true) {
+                const n = passwd_file.read(&buf) catch break;
+                if (n == 0) break;
+                content.appendSlice(self.allocator, buf[0..n]) catch break;
+            }
+
+            // Parse lines
+            var lines_iter = std.mem.splitScalar(u8, content.items, '\n');
+            while (lines_iter.next()) |line| {
+                // passwd format: username:password:uid:gid:gecos:home:shell
+                var fields = std.mem.splitScalar(u8, line, ':');
+                const username = fields.next() orelse continue;
+
+                if (username.len == 0) continue;
+
+                // Skip system users (typically uid < 1000 on Linux, < 500 on macOS)
+                // But include root for convenience
+                const uid_str = blk: {
+                    _ = fields.next(); // skip password
+                    break :blk fields.next() orelse continue;
+                };
+                const uid = std.fmt.parseInt(u32, uid_str, 10) catch continue;
+
+                // Include users with uid >= 500 (macOS) or named "root"
+                const is_normal_user = uid >= 500 or std.mem.eql(u8, username, "root");
+                if (!is_normal_user) continue;
+
+                // Check if username matches prefix
+                if (std.mem.startsWith(u8, username, username_prefix)) {
+                    if (match_count >= matches_buffer.len) break;
+
+                    // Check for duplicates
+                    var is_dup = false;
+                    for (matches_buffer[0..match_count]) |existing| {
+                        if (std.mem.eql(u8, existing, username)) {
+                            is_dup = true;
+                            break;
+                        }
+                    }
+
+                    if (!is_dup) {
+                        // Return with ~ prefix
+                        var name_buf: [256]u8 = undefined;
+                        const with_tilde = std.fmt.bufPrint(&name_buf, "~{s}", .{username}) catch continue;
+                        matches_buffer[match_count] = try self.allocator.dupe(u8, with_tilde);
+                        match_count += 1;
+                    }
+                }
+            }
+        } else {
+            // Windows: just return current user
+            return try self.completeCurrentUserOnly(username_prefix);
+        }
+
+        // Sort matches
+        self.sortMatches(matches_buffer[0..match_count]);
+
+        // Allocate and return results
+        const result = try self.allocator.alloc([]const u8, match_count);
+        @memcpy(result, matches_buffer[0..match_count]);
+        return result;
+    }
+
+    /// Helper to get just the current user for systems without /etc/passwd
+    fn completeCurrentUserOnly(self: *Completion, prefix: []const u8) ![][]const u8 {
+        // Get current username from environment
+        const username = env_utils.getEnv("USER") orelse env_utils.getEnv("USERNAME") orelse return &[_][]const u8{};
+
+        if (std.mem.startsWith(u8, username, prefix)) {
+            var name_buf: [256]u8 = undefined;
+            const with_tilde = try std.fmt.bufPrint(&name_buf, "~{s}", .{username});
+
+            const result = try self.allocator.alloc([]const u8, 1);
+            result[0] = try self.allocator.dupe(u8, with_tilde);
+            return result;
+        }
+
+        return &[_][]const u8{};
+    }
+
+    /// Expand ~username to home directory path
+    pub fn expandUsername(self: *Completion, username_with_tilde: []const u8) !?[]const u8 {
+        if (username_with_tilde.len == 0 or username_with_tilde[0] != '~') {
+            return null;
+        }
+
+        // Just ~ means current user
+        if (username_with_tilde.len == 1) {
+            const home = env_utils.getEnv("HOME") orelse return null;
+            return try self.allocator.dupe(u8, home);
+        }
+
+        const username = username_with_tilde[1..];
+
+        // Check if current user
+        const current_user = env_utils.getEnv("USER") orelse "";
+        if (std.mem.eql(u8, username, current_user)) {
+            const home = env_utils.getEnv("HOME") orelse return null;
+            return try self.allocator.dupe(u8, home);
+        }
+
+        // Look up in /etc/passwd
+        if (@import("builtin").os.tag != .windows) {
+            const passwd_file = std.fs.openFileAbsolute("/etc/passwd", .{}) catch return null;
+            defer passwd_file.close();
+
+            // Read passwd file content
+            var content = std.ArrayList(u8).empty;
+            defer content.deinit(self.allocator);
+
+            var buf: [4096]u8 = undefined;
+            while (true) {
+                const n = passwd_file.read(&buf) catch break;
+                if (n == 0) break;
+                content.appendSlice(self.allocator, buf[0..n]) catch break;
+            }
+
+            // Parse lines
+            var lines_iter = std.mem.splitScalar(u8, content.items, '\n');
+            while (lines_iter.next()) |line| {
+                var fields = std.mem.splitScalar(u8, line, ':');
+                const entry_username = fields.next() orelse continue;
+
+                if (std.mem.eql(u8, entry_username, username)) {
+                    // Skip password, uid, gid, gecos
+                    _ = fields.next();
+                    _ = fields.next();
+                    _ = fields.next();
+                    _ = fields.next();
+
+                    const home_dir = fields.next() orelse continue;
+                    return try self.allocator.dupe(u8, home_dir);
+                }
+            }
+        }
+
+        return null;
+    }
+
     /// Try to expand a single path segment
     /// Returns the expanded segment if unique, null otherwise
     fn expandSegment(self: *Completion, dir_path: []const u8, segment: []const u8) !?[]const u8 {
@@ -650,5 +981,99 @@ test "mid-word path expansion - relative path" {
         std.debug.print("\nExpanded '{s}' to '{s}'\n", .{test_path, path});
         try std.testing.expect(std.mem.indexOf(u8, path, "testdir") != null);
         try std.testing.expect(std.mem.indexOf(u8, path, "subdir") != null);
+    }
+}
+
+test "username completion - current user" {
+    const allocator = std.testing.allocator;
+    var comp = Completion.init(allocator);
+
+    // Complete ~
+    const results = try comp.completeUsername("~");
+    defer {
+        for (results) |r| allocator.free(r);
+        if (results.len > 0) allocator.free(results);
+    }
+
+    // Should find at least the current user
+    try std.testing.expect(results.len > 0);
+    // All results should start with ~
+    for (results) |r| {
+        try std.testing.expect(r.len > 0 and r[0] == '~');
+    }
+}
+
+test "username completion - with prefix" {
+    const allocator = std.testing.allocator;
+    var comp = Completion.init(allocator);
+
+    // Complete ~ro (should match root on most Unix systems)
+    const results = try comp.completeUsername("~ro");
+    defer {
+        for (results) |r| allocator.free(r);
+        if (results.len > 0) allocator.free(results);
+    }
+
+    // Check if root is in results (it should be on most systems)
+    var found_root = false;
+    for (results) |r| {
+        if (std.mem.eql(u8, r, "~root")) {
+            found_root = true;
+            break;
+        }
+    }
+    // root should be available on Unix systems
+    if (@import("builtin").os.tag != .windows) {
+        try std.testing.expect(found_root);
+    }
+}
+
+test "username expansion - tilde only" {
+    const allocator = std.testing.allocator;
+    var comp = Completion.init(allocator);
+
+    // Just ~ should expand to HOME
+    const expanded = try comp.expandUsername("~");
+    if (expanded) |home| {
+        defer allocator.free(home);
+        try std.testing.expect(home.len > 0);
+        // Home should be an absolute path
+        try std.testing.expect(home[0] == '/');
+    }
+}
+
+test "username expansion - current user" {
+    const allocator = std.testing.allocator;
+    var comp = Completion.init(allocator);
+
+    // Get current username
+    const username = env_utils.getEnv("USER") orelse return;
+
+    // ~username should expand to HOME
+    var buf: [256]u8 = undefined;
+    const with_tilde = try std.fmt.bufPrint(&buf, "~{s}", .{username});
+
+    const expanded = try comp.expandUsername(with_tilde);
+    if (expanded) |home| {
+        defer allocator.free(home);
+        try std.testing.expect(home.len > 0);
+        try std.testing.expect(home[0] == '/');
+    }
+}
+
+test "username expansion - root user" {
+    const allocator = std.testing.allocator;
+    var comp = Completion.init(allocator);
+
+    // ~root should expand to /root or /var/root on most Unix systems
+    const expanded = try comp.expandUsername("~root");
+
+    if (@import("builtin").os.tag != .windows) {
+        if (expanded) |home| {
+            defer allocator.free(home);
+            try std.testing.expect(home.len > 0);
+            // Should contain "root"
+            try std.testing.expect(std.mem.indexOf(u8, home, "root") != null);
+        }
     }
 }

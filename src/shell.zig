@@ -11,6 +11,8 @@ const Glob = @import("utils/glob.zig").Glob;
 const BraceExpander = @import("utils/brace.zig").BraceExpander;
 const ScriptManager = @import("scripting/script_manager.zig").ScriptManager;
 const FunctionManager = @import("scripting/functions.zig").FunctionManager;
+const ControlFlowParser = @import("scripting/control_flow.zig").ControlFlowParser;
+const ControlFlowExecutor = @import("scripting/control_flow.zig").ControlFlowExecutor;
 const PluginRegistry = @import("plugins/interface.zig").PluginRegistry;
 const PluginManager = @import("plugins/manager.zig").PluginManager;
 const HookType = @import("plugins/interface.zig").HookType;
@@ -159,6 +161,32 @@ pub const Shell = struct {
         const path = std.process.getEnvVarOwned(allocator, "PATH") catch
             try allocator.dupe(u8, "/usr/bin:/bin");
         try env.put("PATH", path);
+
+        // Load default environment variables from config
+        if (config.environment.enabled) {
+            // First, set defaults (only if not already set in system env)
+            for (types.EnvironmentConfig.defaults) |default_var| {
+                const existing = std.process.getEnvVarOwned(allocator, default_var.name) catch null;
+                if (existing == null) {
+                    const value_copy = try allocator.dupe(u8, default_var.value);
+                    try env.put(default_var.name, value_copy);
+                } else {
+                    try env.put(default_var.name, existing.?);
+                }
+            }
+
+            // Then, apply custom environment from config (these override defaults)
+            if (config.environment.variables) |custom_vars| {
+                for (custom_vars) |env_var| {
+                    const value_copy = try allocator.dupe(u8, env_var.value);
+                    // Free old value if exists
+                    if (env.get(env_var.name)) |old_val| {
+                        allocator.free(old_val);
+                    }
+                    try env.put(env_var.name, value_copy);
+                }
+            }
+        }
 
         // Build history file path: ~/.den_history
         var history_path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -934,6 +962,13 @@ pub const Shell = struct {
         // Check for array assignment first
         if (isArrayAssignment(input)) {
             try self.executeArrayAssignment(input);
+            return;
+        }
+
+        // Check for C-style for loop: for ((init; cond; update)); do ... done
+        const trimmed_input = std.mem.trim(u8, input, &std.ascii.whitespace);
+        if (std.mem.startsWith(u8, trimmed_input, "for ((")) {
+            try self.executeCStyleForLoopOneline(input);
             return;
         }
 
@@ -3665,6 +3700,406 @@ pub const Shell = struct {
             }
         }
         self.last_exit_code = 0;
+    }
+
+    /// Execute a one-line C-style for loop: for ((init; cond; update)); do cmd1; cmd2; done
+    fn executeCStyleForLoopOneline(self: *Shell, input: []const u8) !void {
+        const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+
+        // Find "for ((" and "))"
+        if (!std.mem.startsWith(u8, trimmed, "for ((")) {
+            try IO.eprint("den: syntax error: expected 'for ((...))\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Find the closing ))
+        const expr_start = 6; // After "for (("
+        const expr_end_rel = std.mem.indexOf(u8, trimmed[expr_start..], "))") orelse {
+            try IO.eprint("den: syntax error: missing '))'n", .{});
+            self.last_exit_code = 1;
+            return;
+        };
+        const expr = trimmed[expr_start..][0..expr_end_rel];
+
+        // Parse init; condition; update
+        var parts: [3]?[]const u8 = .{ null, null, null };
+        var parts_count: usize = 0;
+        var part_iter = std.mem.splitSequence(u8, expr, ";");
+        while (part_iter.next()) |part| : (parts_count += 1) {
+            if (parts_count >= 3) break;
+            const trimmed_part = std.mem.trim(u8, part, &std.ascii.whitespace);
+            if (trimmed_part.len > 0) {
+                parts[parts_count] = trimmed_part;
+            }
+        }
+
+        // Find "do" and "done" to extract body
+        const after_parens = trimmed[expr_start + expr_end_rel + 2 ..];
+        const trimmed_after = std.mem.trim(u8, after_parens, &std.ascii.whitespace);
+
+        // Skip optional ';' after ))
+        var body_start = trimmed_after;
+        if (body_start.len > 0 and body_start[0] == ';') {
+            body_start = std.mem.trim(u8, body_start[1..], &std.ascii.whitespace);
+        }
+
+        // Find "do" keyword
+        if (!std.mem.startsWith(u8, body_start, "do")) {
+            try IO.eprint("den: syntax error: expected 'do'\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+        body_start = std.mem.trim(u8, body_start[2..], &std.ascii.whitespace);
+
+        // Find "done" at the end
+        if (!std.mem.endsWith(u8, body_start, "done")) {
+            try IO.eprint("den: syntax error: expected 'done'\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+        const body_content = std.mem.trim(u8, body_start[0 .. body_start.len - 4], &std.ascii.whitespace);
+
+        // Split body by semicolons (respecting quotes)
+        var body_cmds = std.ArrayList([]const u8){};
+        defer body_cmds.deinit(self.allocator);
+
+        var cmd_start: usize = 0;
+        var in_single_quote = false;
+        var in_double_quote = false;
+        var i: usize = 0;
+        while (i < body_content.len) : (i += 1) {
+            const c = body_content[i];
+            if (c == '\'' and !in_double_quote) {
+                in_single_quote = !in_single_quote;
+            } else if (c == '"' and !in_single_quote) {
+                in_double_quote = !in_double_quote;
+            } else if (c == ';' and !in_single_quote and !in_double_quote) {
+                const cmd = std.mem.trim(u8, body_content[cmd_start..i], &std.ascii.whitespace);
+                if (cmd.len > 0) {
+                    try body_cmds.append(self.allocator, cmd);
+                }
+                cmd_start = i + 1;
+            }
+        }
+        // Don't forget the last command
+        const last_cmd = std.mem.trim(u8, body_content[cmd_start..], &std.ascii.whitespace);
+        if (last_cmd.len > 0) {
+            try body_cmds.append(self.allocator, last_cmd);
+        }
+
+        // Execute the C-style for loop inline
+        // 1. Execute initialization
+        if (parts[0]) |init_stmt| {
+            self.executeArithmeticStatement(init_stmt);
+        }
+
+        // 2. Loop while condition is true
+        var iteration_count: usize = 0;
+        const max_iterations: usize = 100000; // Safety limit
+        while (iteration_count < max_iterations) : (iteration_count += 1) {
+            // Check condition
+            if (parts[1]) |cond| {
+                if (!self.evaluateArithmeticCondition(cond)) break;
+            }
+
+            // Execute body commands - directly using a simple method that avoids recursion
+            for (body_cmds.items) |cmd| {
+                self.executeCStyleLoopBodyCommand(cmd) catch {};
+            }
+
+            // Execute update
+            if (parts[2]) |update| {
+                self.executeArithmeticStatement(update);
+            }
+        }
+
+        self.last_exit_code = 0;
+    }
+
+    /// Execute a command in the body of a C-style for loop
+    /// This is a simplified execution that avoids recursive calls to executeCommand
+    fn executeCStyleLoopBodyCommand(self: *Shell, cmd: []const u8) !void {
+        const trimmed = std.mem.trim(u8, cmd, &std.ascii.whitespace);
+        if (trimmed.len == 0) return;
+
+        // Collect positional params for the expander - unwrap optionals
+        var positional_params_slice: [64][]const u8 = undefined;
+        var param_count: usize = 0;
+        for (self.positional_params) |maybe_param| {
+            if (maybe_param) |param| {
+                positional_params_slice[param_count] = param;
+                param_count += 1;
+            }
+        }
+
+        // Variable expansion using Expansion
+        var expander = Expansion.initWithShell(
+            self.allocator,
+            &self.environment,
+            self.last_exit_code,
+            positional_params_slice[0..param_count],
+            self.shell_name,
+            self.last_background_pid,
+            self.last_arg,
+            self,
+        );
+        const expanded = try expander.expand(trimmed);
+        defer self.allocator.free(expanded);
+
+        // Handle echo command directly (most common case in loops)
+        if (std.mem.startsWith(u8, expanded, "echo ")) {
+            const args_str = std.mem.trim(u8, expanded[5..], &std.ascii.whitespace);
+            try IO.println("{s}", .{args_str});
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Handle printf command
+        if (std.mem.startsWith(u8, expanded, "printf ")) {
+            // Forward to the builtin handler
+            var args_list = std.ArrayList([]const u8){};
+            defer args_list.deinit(self.allocator);
+
+            var iter = std.mem.tokenizeAny(u8, expanded[7..], " \t");
+            while (iter.next()) |arg| {
+                try args_list.append(self.allocator, arg);
+            }
+
+            self.handlePrintfBuiltin(args_list.items);
+            return;
+        }
+
+        // Handle variable assignment: VAR=value
+        if (std.mem.indexOf(u8, expanded, "=")) |eq_pos| {
+            // Check it's a simple assignment (no spaces before =)
+            const potential_var = expanded[0..eq_pos];
+            var is_valid_var = potential_var.len > 0;
+            for (potential_var) |c| {
+                if (!std.ascii.isAlphanumeric(c) and c != '_') {
+                    is_valid_var = false;
+                    break;
+                }
+            }
+            if (is_valid_var) {
+                const value = expanded[eq_pos + 1 ..];
+                self.setArithVariable(potential_var, value);
+                self.last_exit_code = 0;
+                return;
+            }
+        }
+
+        // For other commands, execute as external process
+        self.executeExternalInLoop(expanded) catch |err| {
+            self.last_exit_code = 1;
+            return err;
+        };
+    }
+
+    /// Execute an external command in a loop context (simplified)
+    fn executeExternalInLoop(self: *Shell, cmd: []const u8) !void {
+        // Tokenize the command
+        var args_list = std.ArrayList([]const u8){};
+        defer args_list.deinit(self.allocator);
+
+        var iter = std.mem.tokenizeAny(u8, cmd, " \t");
+        while (iter.next()) |arg| {
+            try args_list.append(self.allocator, arg);
+        }
+
+        if (args_list.items.len == 0) return;
+
+        // Fork and exec
+        const pid = std.posix.fork() catch |err| {
+            try IO.eprint("den: fork failed: {}\n", .{err});
+            return error.ForkFailed;
+        };
+
+        if (pid == 0) {
+            // Child process
+            const cmd_name = args_list.items[0];
+
+            // Create null-terminated args
+            var argv: [64:null]?[*:0]const u8 = .{null} ** 64;
+            for (args_list.items, 0..) |arg, idx| {
+                if (idx >= 63) break;
+                argv[idx] = @ptrCast(arg.ptr);
+            }
+
+            // Try to exec
+            const envp = std.c.environ;
+            _ = std.c.execvpe(@ptrCast(cmd_name.ptr), &argv, envp);
+
+            // If exec failed
+            std.posix.exit(127);
+        } else {
+            // Parent process - wait for child
+            const result = std.posix.waitpid(pid, 0);
+            self.last_exit_code = getExitStatus(result.status);
+        }
+    }
+
+    /// Execute arithmetic statement (like i=0 or i++)
+    fn executeArithmeticStatement(self: *Shell, stmt: []const u8) void {
+        const trimmed = std.mem.trim(u8, stmt, &std.ascii.whitespace);
+        if (trimmed.len == 0) return;
+
+        // Handle i++ and i--
+        if (std.mem.endsWith(u8, trimmed, "++")) {
+            const var_name = trimmed[0 .. trimmed.len - 2];
+            const current = self.getVariableValueForArith(var_name);
+            const num = std.fmt.parseInt(i64, current, 10) catch 0;
+            var buf: [32]u8 = undefined;
+            const new_val = std.fmt.bufPrint(&buf, "{d}", .{num + 1}) catch return;
+            self.setArithVariable(var_name, new_val);
+            return;
+        }
+        if (std.mem.endsWith(u8, trimmed, "--")) {
+            const var_name = trimmed[0 .. trimmed.len - 2];
+            const current = self.getVariableValueForArith(var_name);
+            const num = std.fmt.parseInt(i64, current, 10) catch 0;
+            var buf: [32]u8 = undefined;
+            const new_val = std.fmt.bufPrint(&buf, "{d}", .{num - 1}) catch return;
+            self.setArithVariable(var_name, new_val);
+            return;
+        }
+
+        // Handle assignment: var=expr
+        if (std.mem.indexOf(u8, trimmed, "=")) |eq_pos| {
+            const var_name = std.mem.trim(u8, trimmed[0..eq_pos], &std.ascii.whitespace);
+            const expr = std.mem.trim(u8, trimmed[eq_pos + 1 ..], &std.ascii.whitespace);
+
+            // Evaluate the expression
+            const value = self.evaluateArithmeticExpr(expr);
+            var buf: [32]u8 = undefined;
+            const val_str = std.fmt.bufPrint(&buf, "{d}", .{value}) catch return;
+            self.setArithVariable(var_name, val_str);
+        }
+    }
+
+    /// Set a variable for arithmetic operations
+    fn setArithVariable(self: *Shell, name: []const u8, value: []const u8) void {
+        // Dupe the key and value to ensure proper lifetime
+        const key = self.allocator.dupe(u8, name) catch return;
+        const val = self.allocator.dupe(u8, value) catch {
+            self.allocator.free(key);
+            return;
+        };
+
+        // Free old value if exists
+        if (self.environment.get(name)) |old_val| {
+            self.allocator.free(old_val);
+        }
+
+        // Put new value (may need to remove old key first)
+        _ = self.environment.remove(name);
+        self.environment.put(key, val) catch {
+            self.allocator.free(key);
+            self.allocator.free(val);
+        };
+    }
+
+    /// Evaluate arithmetic condition (returns true if non-zero)
+    fn evaluateArithmeticCondition(self: *Shell, cond: []const u8) bool {
+        const trimmed = std.mem.trim(u8, cond, &std.ascii.whitespace);
+        if (trimmed.len == 0) return true; // Empty condition is always true
+
+        // Handle comparison operators
+        if (std.mem.indexOf(u8, trimmed, "<=")) |pos| {
+            const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+            const right = self.evaluateArithmeticExpr(trimmed[pos + 2 ..]);
+            return left <= right;
+        }
+        if (std.mem.indexOf(u8, trimmed, ">=")) |pos| {
+            const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+            const right = self.evaluateArithmeticExpr(trimmed[pos + 2 ..]);
+            return left >= right;
+        }
+        if (std.mem.indexOf(u8, trimmed, "!=")) |pos| {
+            const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+            const right = self.evaluateArithmeticExpr(trimmed[pos + 2 ..]);
+            return left != right;
+        }
+        if (std.mem.indexOf(u8, trimmed, "==")) |pos| {
+            const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+            const right = self.evaluateArithmeticExpr(trimmed[pos + 2 ..]);
+            return left == right;
+        }
+        if (std.mem.indexOf(u8, trimmed, "<")) |pos| {
+            const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+            const right = self.evaluateArithmeticExpr(trimmed[pos + 1 ..]);
+            return left < right;
+        }
+        if (std.mem.indexOf(u8, trimmed, ">")) |pos| {
+            const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+            const right = self.evaluateArithmeticExpr(trimmed[pos + 1 ..]);
+            return left > right;
+        }
+
+        // Otherwise, evaluate as expression and check if non-zero
+        return self.evaluateArithmeticExpr(trimmed) != 0;
+    }
+
+    /// Evaluate arithmetic expression
+    fn evaluateArithmeticExpr(self: *Shell, expr: []const u8) i64 {
+        const trimmed = std.mem.trim(u8, expr, &std.ascii.whitespace);
+        if (trimmed.len == 0) return 0;
+
+        // Handle addition
+        if (std.mem.lastIndexOf(u8, trimmed, "+")) |pos| {
+            if (pos > 0 and pos < trimmed.len - 1) {
+                const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+                const right = self.evaluateArithmeticExpr(trimmed[pos + 1 ..]);
+                return left + right;
+            }
+        }
+
+        // Handle subtraction (be careful with negative numbers)
+        var i: usize = trimmed.len;
+        while (i > 0) {
+            i -= 1;
+            if (trimmed[i] == '-' and i > 0) {
+                const left = self.evaluateArithmeticExpr(trimmed[0..i]);
+                const right = self.evaluateArithmeticExpr(trimmed[i + 1 ..]);
+                return left - right;
+            }
+        }
+
+        // Handle multiplication
+        if (std.mem.lastIndexOf(u8, trimmed, "*")) |pos| {
+            if (pos > 0 and pos < trimmed.len - 1) {
+                const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+                const right = self.evaluateArithmeticExpr(trimmed[pos + 1 ..]);
+                return left * right;
+            }
+        }
+
+        // Handle division
+        if (std.mem.lastIndexOf(u8, trimmed, "/")) |pos| {
+            if (pos > 0 and pos < trimmed.len - 1) {
+                const left = self.evaluateArithmeticExpr(trimmed[0..pos]);
+                const right = self.evaluateArithmeticExpr(trimmed[pos + 1 ..]);
+                if (right == 0) return 0;
+                return @divTrunc(left, right);
+            }
+        }
+
+        // Try to parse as number
+        if (std.fmt.parseInt(i64, trimmed, 10)) |num| {
+            return num;
+        } else |_| {}
+
+        // Otherwise, treat as variable name
+        const val = self.getVariableValueForArith(trimmed);
+        return std.fmt.parseInt(i64, val, 10) catch 0;
+    }
+
+    /// Get variable value (helper for arithmetic)
+    fn getVariableValueForArith(self: *Shell, name: []const u8) []const u8 {
+        if (self.environment.get(name)) |val| {
+            return val;
+        }
+        return "0";
     }
 
     /// Check if input is an array assignment: name=(value1 value2 ...)

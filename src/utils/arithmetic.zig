@@ -1,22 +1,146 @@
 const std = @import("std");
 
+/// LRU Cache for arithmetic expression results
+pub const ExpressionCache = struct {
+    const CacheEntry = struct {
+        key: []const u8,
+        value: i64,
+        age: u64,
+    };
+
+    const MAX_ENTRIES = 128;
+
+    allocator: std.mem.Allocator,
+    entries: std.StringHashMap(CacheEntry),
+    access_counter: u64,
+
+    pub fn init(allocator: std.mem.Allocator) ExpressionCache {
+        return .{
+            .allocator = allocator,
+            .entries = std.StringHashMap(CacheEntry).init(allocator),
+            .access_counter = 0,
+        };
+    }
+
+    pub fn deinit(self: *ExpressionCache) void {
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            self.allocator.free(entry.value_ptr.key);
+        }
+        self.entries.deinit();
+    }
+
+    /// Get a cached result if available
+    pub fn get(self: *ExpressionCache, expr: []const u8) ?i64 {
+        if (self.entries.getPtr(expr)) |entry| {
+            self.access_counter += 1;
+            entry.age = self.access_counter;
+            return entry.value;
+        }
+        return null;
+    }
+
+    /// Cache a result
+    pub fn put(self: *ExpressionCache, expr: []const u8, value: i64) !void {
+        // If at capacity, evict the oldest entry
+        if (self.entries.count() >= MAX_ENTRIES) {
+            self.evictOldest();
+        }
+
+        self.access_counter += 1;
+
+        // Check if already exists
+        if (self.entries.getPtr(expr)) |entry| {
+            entry.value = value;
+            entry.age = self.access_counter;
+            return;
+        }
+
+        // Add new entry
+        const key_copy = try self.allocator.dupe(u8, expr);
+        errdefer self.allocator.free(key_copy);
+
+        try self.entries.put(key_copy, .{
+            .key = key_copy,
+            .value = value,
+            .age = self.access_counter,
+        });
+    }
+
+    /// Evict the oldest (least recently used) entry
+    fn evictOldest(self: *ExpressionCache) void {
+        var oldest_key: ?[]const u8 = null;
+        var oldest_age: u64 = std.math.maxInt(u64);
+
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.age < oldest_age) {
+                oldest_age = entry.value_ptr.age;
+                oldest_key = entry.key_ptr.*;
+            }
+        }
+
+        if (oldest_key) |key| {
+            if (self.entries.fetchRemove(key)) |removed| {
+                self.allocator.free(removed.value.key);
+            }
+        }
+    }
+
+    /// Clear all cached entries
+    pub fn clear(self: *ExpressionCache) void {
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            self.allocator.free(entry.value_ptr.key);
+        }
+        self.entries.clearRetainingCapacity();
+    }
+
+    /// Get the number of cached entries
+    pub fn count(self: *ExpressionCache) usize {
+        return self.entries.count();
+    }
+};
+
 /// Simple arithmetic evaluator for shell arithmetic expansion
 /// Supports: +, -, *, /, %, **, <<, >>, &, |, ^, ~, !, &&, ||, <, >, <=, >=, ==, !=, ?:
 pub const Arithmetic = struct {
     allocator: std.mem.Allocator,
     variables: ?*std.StringHashMap([]const u8) = null,
+    cache: ?*ExpressionCache = null,
 
     pub fn init(allocator: std.mem.Allocator) Arithmetic {
-        return .{ .allocator = allocator, .variables = null };
+        return .{ .allocator = allocator, .variables = null, .cache = null };
     }
 
     pub fn initWithVariables(allocator: std.mem.Allocator, variables: *std.StringHashMap([]const u8)) Arithmetic {
-        return .{ .allocator = allocator, .variables = variables };
+        return .{ .allocator = allocator, .variables = variables, .cache = null };
+    }
+
+    pub fn initWithCache(allocator: std.mem.Allocator, cache: *ExpressionCache) Arithmetic {
+        return .{ .allocator = allocator, .variables = null, .cache = cache };
+    }
+
+    pub fn initWithAll(allocator: std.mem.Allocator, variables: *std.StringHashMap([]const u8), cache: *ExpressionCache) Arithmetic {
+        return .{ .allocator = allocator, .variables = variables, .cache = cache };
     }
 
     /// Evaluate an arithmetic expression and return the result
+    /// Uses cache if available (for expressions without variables)
     pub fn eval(self: *Arithmetic, expr: []const u8) !i64 {
         const trimmed = std.mem.trim(u8, expr, &std.ascii.whitespace);
+
+        // Only cache expressions without variables (they're deterministic)
+        const has_variables = self.variables != null and self.expressionHasVariables(trimmed);
+
+        // Check cache first (if no variables)
+        if (!has_variables) {
+            if (self.cache) |cache| {
+                if (cache.get(trimmed)) |cached_value| {
+                    return cached_value;
+                }
+            }
+        }
 
         // Parse and evaluate the expression
         var parser = Parser{
@@ -26,7 +150,39 @@ pub const Arithmetic = struct {
             .variables = self.variables,
         };
 
-        return try parser.parseExpression();
+        const result = try parser.parseExpression();
+
+        // Cache the result if no variables
+        if (!has_variables) {
+            if (self.cache) |cache| {
+                cache.put(trimmed, result) catch {};
+            }
+        }
+
+        return result;
+    }
+
+    /// Check if expression contains variable references
+    fn expressionHasVariables(self: *Arithmetic, expr: []const u8) bool {
+        _ = self;
+        for (expr, 0..) |c, i| {
+            if (c == '$') return true;
+            // Check for bare variable names (letters/underscore not after a digit)
+            if ((std.ascii.isAlphabetic(c) or c == '_')) {
+                // Make sure it's not part of a hex/binary literal
+                if (i > 0 and (expr[i - 1] == 'x' or expr[i - 1] == 'X' or
+                    expr[i - 1] == 'b' or expr[i - 1] == 'B'))
+                {
+                    continue;
+                }
+                // Check if preceded by a digit (not a variable)
+                if (i > 0 and std.ascii.isDigit(expr[i - 1])) {
+                    continue;
+                }
+                return true;
+            }
+        }
+        return false;
     }
 };
 
@@ -38,6 +194,7 @@ const ArithmeticError = error{
     MissingColonInTernary,
     InvalidNumber,
     InvalidVariable,
+    IntegerOverflow,
 };
 
 const Parser = struct {
@@ -272,7 +429,7 @@ const Parser = struct {
         return left;
     }
 
-    // Addition/Subtraction: + -
+    // Addition/Subtraction: + - (with overflow checking)
     fn parseAddSub(self: *Parser) ArithmeticError!i64 {
         var left = try self.parseMulDiv();
 
@@ -284,11 +441,11 @@ const Parser = struct {
             if (op == '+') {
                 self.pos += 1;
                 const right = try self.parseMulDiv();
-                left = left + right;
+                left = try checkedAdd(left, right);
             } else if (op == '-') {
                 self.pos += 1;
                 const right = try self.parseMulDiv();
-                left = left - right;
+                left = try checkedSub(left, right);
             } else {
                 break;
             }
@@ -297,7 +454,7 @@ const Parser = struct {
         return left;
     }
 
-    // Multiplication/Division/Modulo: * / %
+    // Multiplication/Division/Modulo: * / % (with overflow checking)
     fn parseMulDiv(self: *Parser) ArithmeticError!i64 {
         var left = try self.parsePower();
 
@@ -313,11 +470,15 @@ const Parser = struct {
                 }
                 self.pos += 1;
                 const right = try self.parsePower();
-                left = left * right;
+                left = try checkedMul(left, right);
             } else if (op == '/') {
                 self.pos += 1;
                 const right = try self.parsePower();
                 if (right == 0) return error.DivisionByZero;
+                // Division can overflow in the case of MIN_INT / -1
+                if (left == std.math.minInt(i64) and right == -1) {
+                    return error.IntegerOverflow;
+                }
                 left = @divTrunc(left, right);
             } else if (op == '%') {
                 self.pos += 1;
@@ -518,6 +679,9 @@ const Parser = struct {
 
         if (exp < 0) return error.NegativeExponent;
         if (exp == 0) return 1;
+        if (base == 0) return 0;
+        if (base == 1) return 1;
+        if (base == -1) return if (@rem(exp, 2) == 0) 1 else -1;
 
         var result: i64 = 1;
         var b = base;
@@ -525,15 +689,36 @@ const Parser = struct {
 
         while (e > 0) {
             if (@rem(e, 2) == 1) {
-                result = result * b;
+                result = try checkedMul(result, b);
             }
-            b = b * b;
+            if (e > 1) {
+                b = try checkedMul(b, b);
+            }
             e = @divTrunc(e, 2);
         }
 
         return result;
     }
 };
+
+/// Checked arithmetic helper functions
+fn checkedAdd(a: i64, b: i64) ArithmeticError!i64 {
+    const result, const overflow = @addWithOverflow(a, b);
+    if (overflow != 0) return error.IntegerOverflow;
+    return result;
+}
+
+fn checkedSub(a: i64, b: i64) ArithmeticError!i64 {
+    const result, const overflow = @subWithOverflow(a, b);
+    if (overflow != 0) return error.IntegerOverflow;
+    return result;
+}
+
+fn checkedMul(a: i64, b: i64) ArithmeticError!i64 {
+    const result, const overflow = @mulWithOverflow(a, b);
+    if (overflow != 0) return error.IntegerOverflow;
+    return result;
+}
 
 // ============================================================================
 // Tests
@@ -719,4 +904,114 @@ test "arithmetic complex expressions" {
     try std.testing.expectEqual(@as(i64, 0), try arith.eval("(5 > 3) && (2 > 4)"));
     try std.testing.expectEqual(@as(i64, 7), try arith.eval("(1 + 2) | 4"));
     try std.testing.expectEqual(@as(i64, 20), try arith.eval("(2 + 3) << 2"));
+}
+
+test "arithmetic overflow detection" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Addition overflow
+    try std.testing.expectError(error.IntegerOverflow, arith.eval("9223372036854775807 + 1"));
+
+    // Subtraction overflow (use a large negative number that can be represented)
+    try std.testing.expectError(error.IntegerOverflow, arith.eval("-9223372036854775807 - 2"));
+
+    // Multiplication overflow
+    try std.testing.expectError(error.IntegerOverflow, arith.eval("9223372036854775807 * 2"));
+    try std.testing.expectError(error.IntegerOverflow, arith.eval("-9223372036854775807 * 2"));
+
+    // Power overflow
+    try std.testing.expectError(error.IntegerOverflow, arith.eval("2 ** 63"));
+
+    // Large numbers that don't overflow should work
+    try std.testing.expectEqual(@as(i64, std.math.maxInt(i64)), try arith.eval("9223372036854775807"));
+}
+
+test "arithmetic boundary values" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Operations near boundaries that don't overflow
+    try std.testing.expectEqual(@as(i64, std.math.maxInt(i64) - 1), try arith.eval("9223372036854775807 - 1"));
+    try std.testing.expectEqual(@as(i64, -std.math.maxInt(i64) + 1), try arith.eval("-9223372036854775807 + 1"));
+
+    // Power edge cases
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("(-1) ** 100"));
+    try std.testing.expectEqual(@as(i64, -1), try arith.eval("(-1) ** 101"));
+    try std.testing.expectEqual(@as(i64, 1), try arith.eval("1 ** 1000"));
+    try std.testing.expectEqual(@as(i64, 0), try arith.eval("0 ** 100"));
+}
+
+test "expression cache basic" {
+    const allocator = std.testing.allocator;
+    var cache = ExpressionCache.init(allocator);
+    defer cache.deinit();
+
+    // Initially empty
+    try std.testing.expectEqual(@as(usize, 0), cache.count());
+    try std.testing.expectEqual(@as(?i64, null), cache.get("2 + 2"));
+
+    // Add entry
+    try cache.put("2 + 2", 4);
+    try std.testing.expectEqual(@as(usize, 1), cache.count());
+    try std.testing.expectEqual(@as(?i64, 4), cache.get("2 + 2"));
+
+    // Add another entry
+    try cache.put("3 * 3", 9);
+    try std.testing.expectEqual(@as(usize, 2), cache.count());
+    try std.testing.expectEqual(@as(?i64, 9), cache.get("3 * 3"));
+
+    // Update existing entry
+    try cache.put("2 + 2", 5);
+    try std.testing.expectEqual(@as(usize, 2), cache.count());
+    try std.testing.expectEqual(@as(?i64, 5), cache.get("2 + 2"));
+
+    // Clear cache
+    cache.clear();
+    try std.testing.expectEqual(@as(usize, 0), cache.count());
+}
+
+test "expression cache with arithmetic" {
+    const allocator = std.testing.allocator;
+    var cache = ExpressionCache.init(allocator);
+    defer cache.deinit();
+
+    var arith = Arithmetic.initWithCache(allocator, &cache);
+
+    // First evaluation should cache
+    try std.testing.expectEqual(@as(i64, 4), try arith.eval("2 + 2"));
+    try std.testing.expectEqual(@as(usize, 1), cache.count());
+
+    // Second evaluation should use cache
+    try std.testing.expectEqual(@as(i64, 4), try arith.eval("2 + 2"));
+    try std.testing.expectEqual(@as(usize, 1), cache.count());
+
+    // Different expression adds to cache
+    try std.testing.expectEqual(@as(i64, 25), try arith.eval("5 * 5"));
+    try std.testing.expectEqual(@as(usize, 2), cache.count());
+}
+
+test "expression cache lru eviction" {
+    const allocator = std.testing.allocator;
+    var cache = ExpressionCache.init(allocator);
+    defer cache.deinit();
+
+    // Fill cache to capacity (128 entries)
+    for (0..128) |i| {
+        var buf: [32]u8 = undefined;
+        const expr = std.fmt.bufPrint(&buf, "{d} + 1", .{i}) catch unreachable;
+        try cache.put(expr, @intCast(i + 1));
+    }
+
+    try std.testing.expectEqual(@as(usize, 128), cache.count());
+
+    // Access the first entry to make it recently used
+    _ = cache.get("0 + 1");
+
+    // Add a new entry - should evict an old one (not "0 + 1")
+    try cache.put("999 + 1", 1000);
+    try std.testing.expectEqual(@as(usize, 128), cache.count());
+
+    // "0 + 1" should still be there since it was recently accessed
+    try std.testing.expectEqual(@as(?i64, 1), cache.get("0 + 1"));
 }

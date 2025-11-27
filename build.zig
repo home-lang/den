@@ -1,5 +1,20 @@
 const std = @import("std");
 
+/// Resolve dependency path - checks pantry_modules first, then falls back to local dev paths
+fn resolveDependencyPath(b: *std.Build, package_name: []const u8, entry_point: []const u8, fallback_path: []const u8) []const u8 {
+    // Check pantry_modules first (for installed dependencies)
+    const pantry_path = b.fmt("pantry_modules/{s}/{s}", .{ package_name, entry_point });
+
+    // Try to access the file to see if it exists
+    const pantry_file = std.fs.cwd().openFile(pantry_path, .{}) catch {
+        // Pantry module doesn't exist, use fallback (local dev path)
+        return fallback_path;
+    };
+    pantry_file.close();
+
+    return pantry_path;
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -9,9 +24,18 @@ pub fn build(b: *std.Build) void {
     const strip = b.option(bool, "strip", "Strip debug symbols") orelse false;
     const link_libc = b.option(bool, "link-libc", "Link against libc") orelse true;
 
+    // Resolve zig-config path using pantry
+    // Tries pantry_modules first, then falls back to local dev path
+    const zig_config_path = resolveDependencyPath(
+        b,
+        "zig-config",
+        "src/zig-config.zig",
+        "../zig-config/src/zig-config.zig", // Local development fallback
+    );
+
     // Add zig-config as a module
     const zig_config = b.addModule("zig-config", .{
-        .root_source_file = b.path("lib/zig-config/src/zig-config.zig"),
+        .root_source_file = b.path(zig_config_path),
         .target = target,
     });
 

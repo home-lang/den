@@ -1,6 +1,107 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Arithmetic = @import("arithmetic.zig").Arithmetic;
 const env_utils = @import("env.zig");
+
+/// LRU cache for variable expansion results
+pub const ExpansionCache = struct {
+    const CacheEntry = struct {
+        value: []const u8,
+        age: u64,
+    };
+
+    allocator: std.mem.Allocator,
+    entries: std.StringHashMap(CacheEntry),
+    max_entries: u32,
+    access_counter: u64,
+
+    pub fn init(allocator: std.mem.Allocator, max_entries: u32) ExpansionCache {
+        return .{
+            .allocator = allocator,
+            .entries = std.StringHashMap(CacheEntry).init(allocator),
+            .max_entries = max_entries,
+            .access_counter = 0,
+        };
+    }
+
+    pub fn deinit(self: *ExpansionCache) void {
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            self.allocator.free(entry.value_ptr.value);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.entries.deinit();
+    }
+
+    pub fn get(self: *ExpansionCache, key: []const u8) ?[]const u8 {
+        if (self.entries.getPtr(key)) |entry| {
+            // Update access time
+            self.access_counter += 1;
+            entry.age = self.access_counter;
+            return entry.value;
+        }
+        return null;
+    }
+
+    pub fn put(self: *ExpansionCache, key: []const u8, value: []const u8) !void {
+        // Check if we need to evict
+        if (self.entries.count() >= self.max_entries) {
+            self.evictOldest();
+        }
+
+        // Remove existing entry if present
+        if (self.entries.fetchRemove(key)) |old| {
+            self.allocator.free(old.value.value);
+            self.allocator.free(old.key);
+        }
+
+        // Duplicate key and value
+        const key_copy = try self.allocator.dupe(u8, key);
+        errdefer self.allocator.free(key_copy);
+
+        const value_copy = try self.allocator.dupe(u8, value);
+        errdefer self.allocator.free(value_copy);
+
+        self.access_counter += 1;
+        try self.entries.put(key_copy, .{
+            .value = value_copy,
+            .age = self.access_counter,
+        });
+    }
+
+    fn evictOldest(self: *ExpansionCache) void {
+        var oldest_key: ?[]const u8 = null;
+        var oldest_age: u64 = std.math.maxInt(u64);
+
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.age < oldest_age) {
+                oldest_age = entry.value_ptr.age;
+                oldest_key = entry.key_ptr.*;
+            }
+        }
+
+        if (oldest_key) |key| {
+            if (self.entries.fetchRemove(key)) |removed| {
+                self.allocator.free(removed.value.value);
+                self.allocator.free(removed.key);
+            }
+        }
+    }
+
+    pub fn clear(self: *ExpansionCache) void {
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            self.allocator.free(entry.value_ptr.value);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.entries.clearRetainingCapacity();
+    }
+
+    pub fn count(self: *ExpansionCache) usize {
+        return self.entries.count();
+    }
+};
 
 /// Variable expansion utilities
 pub const Expansion = struct {
@@ -112,7 +213,27 @@ pub const Expansion = struct {
                 }
             }
 
-            if (char == '`') {
+            if (char == '<' or char == '>') {
+                // Check for process substitution: <(cmd) or >(cmd)
+                if (i + 1 < input.len and input[i + 1] == '(') {
+                    const expansion_result = try self.expandProcessSubstitution(input[i..], char == '<');
+
+                    // Copy expansion result to buffer
+                    if (result_len + expansion_result.value.len > result_buffer.len) {
+                        return error.ExpansionTooLong;
+                    }
+                    @memcpy(result_buffer[result_len..result_len + expansion_result.value.len], expansion_result.value);
+                    result_len += expansion_result.value.len;
+
+                    i += expansion_result.consumed;
+                    continue;
+                }
+                // Not process substitution - treat as literal
+                if (result_len >= result_buffer.len) return error.ExpansionTooLong;
+                result_buffer[result_len] = char;
+                result_len += 1;
+                i += 1;
+            } else if (char == '`') {
                 // Backtick command substitution
                 const expansion_result = try self.expandBacktick(input[i..]);
 
@@ -888,12 +1009,125 @@ pub const Expansion = struct {
             .consumed = end,
         };
     }
+
+    /// Expand process substitution: <(cmd) or >(cmd)
+    /// Creates a pipe, forks a process to run the command, and returns /dev/fd/N
+    fn expandProcessSubstitution(self: *Expansion, input: []const u8, is_input: bool) !ExpansionResult {
+        // Process substitution is not available on Windows
+        if (builtin.os.tag == .windows) {
+            // Return the literal text on Windows
+            if (input.len < 2) {
+                return ExpansionResult{ .value = if (is_input) "<" else ">", .consumed = 1 };
+            }
+            // Find closing paren and return as literal
+            var end: usize = 2;
+            var depth: u32 = 1;
+            while (end < input.len and depth > 0) {
+                if (input[end] == '(') depth += 1 else if (input[end] == ')') depth -= 1;
+                if (depth > 0) end += 1;
+            }
+            const literal = try self.allocator.dupe(u8, input[0 .. end + 1]);
+            return ExpansionResult{ .value = literal, .consumed = end + 1 };
+        }
+
+        // Parse: <(cmd) or >(cmd)
+        if (input.len < 3 or input[1] != '(') {
+            return ExpansionResult{ .value = if (is_input) "<" else ">", .consumed = 1 };
+        }
+
+        // Find matching closing parenthesis
+        var depth: u32 = 1;
+        var end: usize = 2;
+        while (end < input.len and depth > 0) {
+            if (input[end] == '(') {
+                depth += 1;
+            } else if (input[end] == ')') {
+                depth -= 1;
+            }
+            if (depth > 0) end += 1;
+        }
+
+        if (depth != 0) {
+            // Unmatched parenthesis - return literal
+            return ExpansionResult{ .value = if (is_input) "<(" else ">(", .consumed = 2 };
+        }
+
+        const command = input[2..end];
+
+        // Create a pipe
+        const pipe_fds = std.posix.pipe() catch {
+            return ExpansionResult{ .value = "", .consumed = end + 1 };
+        };
+
+        // Fork a child process
+        const fork_result = std.posix.fork() catch {
+            std.posix.close(pipe_fds[0]);
+            std.posix.close(pipe_fds[1]);
+            return ExpansionResult{ .value = "", .consumed = end + 1 };
+        };
+
+        if (fork_result == 0) {
+            // Child process
+            if (is_input) {
+                // <(cmd) - child writes to pipe, parent reads
+                // Close read end
+                std.posix.close(pipe_fds[0]);
+                // Redirect stdout to write end of pipe
+                std.posix.dup2(pipe_fds[1], std.posix.STDOUT_FILENO) catch {
+                    std.process.exit(1);
+                };
+                std.posix.close(pipe_fds[1]);
+            } else {
+                // >(cmd) - child reads from pipe, parent writes
+                // Close write end
+                std.posix.close(pipe_fds[1]);
+                // Redirect stdin to read end of pipe
+                std.posix.dup2(pipe_fds[0], std.posix.STDIN_FILENO) catch {
+                    std.process.exit(1);
+                };
+                std.posix.close(pipe_fds[0]);
+            }
+
+            // Execute the command via sh -c
+            // Create null-terminated command string
+            var cmd_buf: [4096]u8 = undefined;
+            if (command.len >= cmd_buf.len) {
+                std.process.exit(1);
+            }
+            @memcpy(cmd_buf[0..command.len], command);
+            cmd_buf[command.len] = 0;
+
+            const argv = [_:null]?[*:0]const u8{
+                "/bin/sh",
+                "-c",
+                @ptrCast(&cmd_buf),
+                null,
+            };
+            std.posix.execveZ("/bin/sh", &argv, @ptrCast(std.os.environ.ptr)) catch {};
+            std.process.exit(127);
+        }
+
+        // Parent process
+        // Determine which fd the parent will use
+        const parent_fd = if (is_input) pipe_fds[0] else pipe_fds[1];
+        const child_fd = if (is_input) pipe_fds[1] else pipe_fds[0];
+
+        // Close the fd the child is using
+        std.posix.close(child_fd);
+
+        // Format the /dev/fd/N path
+        const fd_path = std.fmt.allocPrint(self.allocator, "/dev/fd/{d}", .{parent_fd}) catch {
+            std.posix.close(parent_fd);
+            return ExpansionResult{ .value = "", .consumed = end + 1 };
+        };
+
+        return ExpansionResult{ .value = fd_path, .consumed = end + 1 };
+    }
 };
 
 /// Get user's home directory from passwd database
 /// Uses POSIX getpwnam for lookup
 fn getUserHomeDir(username: []const u8) ?[]const u8 {
-    const builtin = @import("builtin");
     // Only available on POSIX systems
     if (builtin.os.tag == .windows) {
         return null;

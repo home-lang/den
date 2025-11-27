@@ -16,6 +16,8 @@ pub const TokenType = enum {
     redirect_fd_dup, // N>&M or N<&M for FD duplication
     heredoc, // <<
     herestring, // <<<
+    process_sub_in, // <( for process substitution input
+    process_sub_out, // >( for process substitution output
     lparen, // (
     rparen, // )
     newline,
@@ -231,6 +233,11 @@ pub const Tokenizer = struct {
                 };
             },
             '>' => {
+                // Check for >( process substitution
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '(') {
+                    // Process substitution >( - read the whole construct
+                    return try self.readProcessSubstitution(false, start_line, start_col);
+                }
                 self.pos += 1;
                 self.column += 1;
                 return Token{
@@ -241,6 +248,11 @@ pub const Tokenizer = struct {
                 };
             },
             '<' => {
+                // Check for <( process substitution
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '(') {
+                    // Process substitution <( - read the whole construct
+                    return try self.readProcessSubstitution(true, start_line, start_col);
+                }
                 self.pos += 1;
                 self.column += 1;
                 return Token{
@@ -382,6 +394,71 @@ pub const Tokenizer = struct {
         return Token{
             .type = token_type,
             .value = word,
+            .line = start_line,
+            .column = start_col,
+        };
+    }
+
+    /// Read a process substitution <(...) or >(...)
+    /// Returns the entire construct including the delimiters as the token value
+    fn readProcessSubstitution(self: *Tokenizer, is_input: bool, start_line: usize, start_col: usize) !Token {
+        const start_pos = self.pos;
+
+        // Skip the < or > and the (
+        self.pos += 2;
+        self.column += 2;
+
+        // Track nesting level of parentheses
+        var depth: u32 = 1;
+        var in_single_quote = false;
+        var in_double_quote = false;
+
+        while (self.pos < self.input.len and depth > 0) {
+            const c = self.input[self.pos];
+
+            if (in_single_quote) {
+                if (c == '\'') {
+                    in_single_quote = false;
+                }
+            } else if (in_double_quote) {
+                if (c == '"' and (self.pos == 0 or self.input[self.pos - 1] != '\\')) {
+                    in_double_quote = false;
+                }
+            } else {
+                switch (c) {
+                    '\'' => in_single_quote = true,
+                    '"' => in_double_quote = true,
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    else => {},
+                }
+            }
+
+            if (c == '\n') {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
+
+            if (depth > 0) {
+                self.pos += 1;
+            }
+        }
+
+        if (depth == 0) {
+            // Include the closing paren
+            self.pos += 1;
+            self.column += 1;
+        }
+
+        // Get the full token value including delimiters
+        const value = self.input[start_pos..self.pos];
+        const duped_value = try self.allocator.dupe(u8, value);
+
+        return Token{
+            .type = if (is_input) .process_sub_in else .process_sub_out,
+            .value = duped_value,
             .line = start_line,
             .column = start_col,
         };

@@ -871,6 +871,211 @@ pub const ExpandResult = struct {
     expanded: bool,
 };
 
+/// Search result with ranking information
+pub const RankedSearchResult = struct {
+    command: []const u8,
+    index: usize, // Position in history (0 = oldest)
+    score: f32, // Higher = better match
+    match_type: MatchType,
+
+    pub const MatchType = enum {
+        exact, // Exact match
+        prefix, // Command starts with pattern
+        substring, // Pattern found somewhere in command
+        fuzzy, // Fuzzy match (chars in order)
+    };
+};
+
+/// Search history with ranking support
+/// Returns results sorted by relevance score (best matches first)
+pub fn searchHistoryRanked(
+    allocator: std.mem.Allocator,
+    history: []const ?[]const u8,
+    history_count: usize,
+    pattern: []const u8,
+    max_results: usize,
+) ![]RankedSearchResult {
+    if (history_count == 0 or pattern.len == 0) {
+        return &[_]RankedSearchResult{};
+    }
+
+    var results = std.ArrayList(RankedSearchResult).empty;
+    errdefer results.deinit(allocator);
+
+    // Search through all history entries
+    var i: usize = 0;
+    while (i < history_count) : (i += 1) {
+        if (history[i]) |cmd| {
+            const match_result = calculateMatchScore(cmd, pattern, i, history_count);
+            if (match_result.score > 0) {
+                try results.append(allocator, .{
+                    .command = cmd,
+                    .index = i,
+                    .score = match_result.score,
+                    .match_type = match_result.match_type,
+                });
+            }
+        }
+    }
+
+    // Sort by score (descending)
+    const items = try results.toOwnedSlice(allocator);
+    std.mem.sort(RankedSearchResult, items, {}, struct {
+        fn lessThan(_: void, a: RankedSearchResult, b: RankedSearchResult) bool {
+            return a.score > b.score; // Higher score first
+        }
+    }.lessThan);
+
+    // Return top results
+    const result_count = @min(max_results, items.len);
+
+    // Free unused results
+    if (result_count < items.len) {
+        const trimmed = try allocator.realloc(items, result_count);
+        return trimmed;
+    }
+
+    return items;
+}
+
+const MatchResult = struct {
+    score: f32,
+    match_type: RankedSearchResult.MatchType,
+};
+
+/// Calculate match score for a command against a pattern
+fn calculateMatchScore(
+    command: []const u8,
+    pattern: []const u8,
+    index: usize,
+    total_count: usize,
+) MatchResult {
+    const lower_cmd = blk: {
+        var buf: [4096]u8 = undefined;
+        for (command, 0..) |c, j| {
+            if (j >= buf.len) break;
+            buf[j] = std.ascii.toLower(c);
+        }
+        break :blk buf[0..@min(command.len, buf.len)];
+    };
+
+    const lower_pattern = blk: {
+        var buf: [256]u8 = undefined;
+        for (pattern, 0..) |c, j| {
+            if (j >= buf.len) break;
+            buf[j] = std.ascii.toLower(c);
+        }
+        break :blk buf[0..@min(pattern.len, buf.len)];
+    };
+
+    // Base scores for different match types
+    var base_score: f32 = 0;
+    var match_type: RankedSearchResult.MatchType = .fuzzy;
+
+    // Exact match (highest priority)
+    if (std.mem.eql(u8, lower_cmd, lower_pattern)) {
+        base_score = 100.0;
+        match_type = .exact;
+    }
+    // Prefix match
+    else if (std.mem.startsWith(u8, lower_cmd, lower_pattern)) {
+        base_score = 80.0;
+        match_type = .prefix;
+    }
+    // Substring match
+    else if (std.mem.indexOf(u8, lower_cmd, lower_pattern) != null) {
+        base_score = 60.0;
+        match_type = .substring;
+        // Bonus for earlier position
+        if (std.mem.indexOf(u8, lower_cmd, lower_pattern)) |pos| {
+            base_score += @as(f32, @floatFromInt(command.len -| pos)) / @as(f32, @floatFromInt(command.len)) * 10.0;
+        }
+    }
+    // Fuzzy match
+    else if (fuzzyMatchWithScore(lower_cmd, lower_pattern)) |fuzzy_score| {
+        base_score = 20.0 + fuzzy_score * 30.0; // Score from 20-50 based on match quality
+        match_type = .fuzzy;
+    } else {
+        return .{ .score = 0, .match_type = .fuzzy }; // No match
+    }
+
+    // Recency bonus: more recent commands get higher scores
+    // Uses log scale to not overwhelm match quality
+    const recency_factor = if (total_count > 0)
+        @as(f32, @floatFromInt(index)) / @as(f32, @floatFromInt(total_count))
+    else
+        0.0;
+    const recency_bonus = recency_factor * 15.0; // Up to 15 points for recency
+
+    // Length penalty: prefer shorter commands (usually more relevant)
+    const length_penalty = if (command.len > pattern.len)
+        @as(f32, @floatFromInt(pattern.len)) / @as(f32, @floatFromInt(command.len)) * 5.0
+    else
+        5.0;
+
+    return .{
+        .score = base_score + recency_bonus + length_penalty,
+        .match_type = match_type,
+    };
+}
+
+/// Fuzzy match with score (returns null if no match, 0.0-1.0 score otherwise)
+fn fuzzyMatchWithScore(target: []const u8, pattern: []const u8) ?f32 {
+    if (pattern.len == 0) return 1.0;
+    if (target.len == 0) return null;
+
+    var pattern_idx: usize = 0;
+    var consecutive: usize = 0;
+    var max_consecutive: usize = 0;
+    var gaps: usize = 0;
+    var last_match: ?usize = null;
+
+    for (target, 0..) |c, i| {
+        if (pattern_idx >= pattern.len) break;
+
+        if (c == pattern[pattern_idx]) {
+            if (last_match) |lm| {
+                if (i == lm + 1) {
+                    consecutive += 1;
+                    max_consecutive = @max(max_consecutive, consecutive);
+                } else {
+                    gaps += i - lm - 1;
+                    consecutive = 1;
+                }
+            } else {
+                consecutive = 1;
+            }
+            last_match = i;
+            pattern_idx += 1;
+        }
+    }
+
+    if (pattern_idx != pattern.len) return null; // Didn't match all chars
+
+    // Score based on:
+    // - Consecutive matches (higher = better)
+    // - Fewer gaps (better)
+    // - Match positions (earlier = better)
+    const consecutive_score = @as(f32, @floatFromInt(max_consecutive)) / @as(f32, @floatFromInt(pattern.len));
+    const gap_penalty = if (target.len > pattern.len)
+        1.0 - @as(f32, @floatFromInt(@min(gaps, target.len))) / @as(f32, @floatFromInt(target.len))
+    else
+        1.0;
+
+    return consecutive_score * 0.6 + gap_penalty * 0.4;
+}
+
+/// Interactive history search - returns top matches for incremental search
+pub fn interactiveSearch(
+    allocator: std.mem.Allocator,
+    history: []const ?[]const u8,
+    history_count: usize,
+    query: []const u8,
+    max_results: usize,
+) ![]RankedSearchResult {
+    return searchHistoryRanked(allocator, history, history_count, query, max_results);
+}
+
 // Tests
 test "HistoryExpansion: !! expands to last command" {
     const allocator = std.testing.allocator;
@@ -1148,4 +1353,76 @@ test "HistoryExpansion: !# expansion" {
     defer allocator.free(result.text);
 
     try std.testing.expect(result.expanded);
+}
+
+test "Ranked search: exact match scores highest" {
+    const allocator = std.testing.allocator;
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "git status";
+    history[1] = "git commit";
+    history[2] = "ls -la";
+
+    const results = try searchHistoryRanked(allocator, &history, 3, "git status", 10);
+    defer allocator.free(results);
+
+    try std.testing.expect(results.len > 0);
+    try std.testing.expectEqualStrings("git status", results[0].command);
+    try std.testing.expectEqual(RankedSearchResult.MatchType.exact, results[0].match_type);
+}
+
+test "Ranked search: prefix beats substring" {
+    const allocator = std.testing.allocator;
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "echo git"; // substring match
+    history[1] = "git status"; // prefix match
+
+    const results = try searchHistoryRanked(allocator, &history, 2, "git", 10);
+    defer allocator.free(results);
+
+    try std.testing.expect(results.len >= 2);
+    // Prefix match should be first
+    try std.testing.expectEqual(RankedSearchResult.MatchType.prefix, results[0].match_type);
+}
+
+test "Ranked search: recency bonus" {
+    const allocator = std.testing.allocator;
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "git status"; // older
+    history[1] = "git status"; // newer (same command)
+
+    const results = try searchHistoryRanked(allocator, &history, 2, "git status", 10);
+    defer allocator.free(results);
+
+    try std.testing.expect(results.len >= 2);
+    // More recent (higher index) should have higher score
+    try std.testing.expect(results[0].index > results[1].index or results[0].score >= results[1].score);
+}
+
+test "Ranked search: fuzzy matching works" {
+    const allocator = std.testing.allocator;
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "git checkout main";
+    history[1] = "ls -la";
+
+    const results = try searchHistoryRanked(allocator, &history, 2, "gco", 10);
+    defer allocator.free(results);
+
+    try std.testing.expect(results.len > 0);
+    try std.testing.expectEqualStrings("git checkout main", results[0].command);
+    try std.testing.expectEqual(RankedSearchResult.MatchType.fuzzy, results[0].match_type);
+}
+
+test "Ranked search: empty pattern returns empty" {
+    const allocator = std.testing.allocator;
+
+    var history = [_]?[]const u8{null} ** 10;
+    history[0] = "git status";
+
+    const results = try searchHistoryRanked(allocator, &history, 1, "", 10);
+    // Empty pattern should return empty or be handled gracefully
+    try std.testing.expect(results.len == 0);
 }

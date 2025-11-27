@@ -5,12 +5,133 @@ const builtin = @import("builtin");
 const path_sep = if (builtin.os.tag == .windows) '\\' else '/';
 const path_sep_str = if (builtin.os.tag == .windows) "\\" else "/";
 
+/// LRU cache for glob expansion results
+pub const GlobCache = struct {
+    const CacheEntry = struct {
+        results: [][]const u8,
+        age: u64,
+    };
+
+    allocator: std.mem.Allocator,
+    entries: std.StringHashMap(CacheEntry),
+    max_entries: u32,
+    access_counter: u64,
+
+    pub fn init(allocator: std.mem.Allocator, max_entries: u32) GlobCache {
+        return .{
+            .allocator = allocator,
+            .entries = std.StringHashMap(CacheEntry).init(allocator),
+            .max_entries = max_entries,
+            .access_counter = 0,
+        };
+    }
+
+    pub fn deinit(self: *GlobCache) void {
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            for (entry.value_ptr.results) |result| {
+                self.allocator.free(result);
+            }
+            self.allocator.free(entry.value_ptr.results);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.entries.deinit();
+    }
+
+    pub fn get(self: *GlobCache, key: []const u8) ?[][]const u8 {
+        if (self.entries.getPtr(key)) |entry| {
+            // Update access time
+            self.access_counter += 1;
+            entry.age = self.access_counter;
+            return entry.results;
+        }
+        return null;
+    }
+
+    pub fn put(self: *GlobCache, key: []const u8, results: [][]const u8) !void {
+        // Check if we need to evict
+        if (self.entries.count() >= self.max_entries) {
+            self.evictOldest();
+        }
+
+        // Remove existing entry if present
+        if (self.entries.fetchRemove(key)) |old| {
+            for (old.value.results) |result| {
+                self.allocator.free(result);
+            }
+            self.allocator.free(old.value.results);
+            self.allocator.free(old.key);
+        }
+
+        // Duplicate key and results
+        const key_copy = try self.allocator.dupe(u8, key);
+        errdefer self.allocator.free(key_copy);
+
+        const results_copy = try self.allocator.alloc([]const u8, results.len);
+        errdefer self.allocator.free(results_copy);
+
+        for (results, 0..) |result, i| {
+            results_copy[i] = try self.allocator.dupe(u8, result);
+        }
+
+        self.access_counter += 1;
+        try self.entries.put(key_copy, .{
+            .results = results_copy,
+            .age = self.access_counter,
+        });
+    }
+
+    fn evictOldest(self: *GlobCache) void {
+        var oldest_key: ?[]const u8 = null;
+        var oldest_age: u64 = std.math.maxInt(u64);
+
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.age < oldest_age) {
+                oldest_age = entry.value_ptr.age;
+                oldest_key = entry.key_ptr.*;
+            }
+        }
+
+        if (oldest_key) |key| {
+            if (self.entries.fetchRemove(key)) |removed| {
+                for (removed.value.results) |result| {
+                    self.allocator.free(result);
+                }
+                self.allocator.free(removed.value.results);
+                self.allocator.free(removed.key);
+            }
+        }
+    }
+
+    pub fn clear(self: *GlobCache) void {
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            for (entry.value_ptr.results) |result| {
+                self.allocator.free(result);
+            }
+            self.allocator.free(entry.value_ptr.results);
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.entries.clearRetainingCapacity();
+    }
+
+    pub fn count(self: *GlobCache) usize {
+        return self.entries.count();
+    }
+};
+
 /// Glob pattern matching and expansion
 pub const Glob = struct {
     allocator: std.mem.Allocator,
+    cache: ?*GlobCache,
 
     pub fn init(allocator: std.mem.Allocator) Glob {
-        return .{ .allocator = allocator };
+        return .{ .allocator = allocator, .cache = null };
+    }
+
+    pub fn initWithCache(allocator: std.mem.Allocator, cache: *GlobCache) Glob {
+        return .{ .allocator = allocator, .cache = cache };
     }
 
     /// Expand glob pattern into list of matching files
@@ -22,6 +143,22 @@ pub const Glob = struct {
             const result = try self.allocator.alloc([]const u8, 1);
             result[0] = try self.allocator.dupe(u8, pattern);
             return result;
+        }
+
+        // Build cache key from pattern + cwd
+        var cache_key_buf: [1024]u8 = undefined;
+        const cache_key = std.fmt.bufPrint(&cache_key_buf, "{s}:{s}", .{ cwd, pattern }) catch pattern;
+
+        // Check cache first
+        if (self.cache) |cache| {
+            if (cache.get(cache_key)) |cached_results| {
+                // Return a copy of cached results
+                const result = try self.allocator.alloc([]const u8, cached_results.len);
+                for (cached_results, 0..) |r, i| {
+                    result[i] = try self.allocator.dupe(u8, r);
+                }
+                return result;
+            }
         }
 
         // Simple implementation: expand basic wildcards in current directory
@@ -98,6 +235,12 @@ pub const Glob = struct {
         // Allocate and return results
         const result = try self.allocator.alloc([]const u8, match_count);
         @memcpy(result, matches_buffer[0..match_count]);
+
+        // Store in cache
+        if (self.cache) |cache| {
+            cache.put(cache_key, result) catch {};
+        }
+
         return result;
     }
 

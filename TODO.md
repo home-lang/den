@@ -73,7 +73,7 @@
 - [ ] Config hot-reload
 - [x] Port default config from TypeScript version
   - [x] Default aliases (~35 aliases in den.jsonc)
-  - [ ] Default environment variables
+  - [x] Default environment variables
   - [x] Default prompt format
   - [x] Default theme
   - [x] Default history settings
@@ -89,7 +89,7 @@
   - [x] Inline suggestion rendering
   - [x] Suggestion from history
   - [x] Suggestion from completions
-  - [ ] Typo correction (fuzzy matching)
+  - [x] Typo correction (fuzzy matching)
   - [x] Suggestion accept (Right arrow, End, Ctrl+E)
   - [x] Partial suggestion accept (Alt+F)
 - [x] **Syntax Highlighting** (toggle available)
@@ -97,7 +97,7 @@
   - [x] Keyword highlighting
   - [x] String highlighting
   - [x] Operator highlighting
-  - [ ] Error highlighting (invalid syntax)
+  - [x] Error highlighting (invalid syntax)
   - [x] Path highlighting
   - [x] Variable highlighting
 - [x] **History Navigation**
@@ -130,7 +130,7 @@
 - [x] `!*` (all arguments)
 - [x] Fuzzy search (`searchHistoryFuzzy` - case-insensitive pattern matching)
 - [x] Regex search (`searchHistoryRegex` - `.`, `*`, `^`, `$` patterns)
-- [ ] Search result ranking
+- [x] Search result ranking
 - **Implementation**: `src/utils/history_expansion.zig` (900+ lines)
 
 ### 7. Context-Aware Completion (Phase 11) ✅
@@ -139,14 +139,14 @@
 - [x] Variable name completion (from shell environment)
 - [x] Environment variable completion (`$<TAB>`)
 - [x] Hostname completion (from ~/.ssh/known_hosts and ~/.ssh/config)
-- [ ] Username completion
+- [x] Username completion
 - [x] **Command-Specific Completion**
   - [x] Git completion (branches, tags, remotes, files, subcommands)
   - [x] npm/bun/yarn/pnpm completion (scripts, subcommands)
   - [x] Docker completion (containers, images, subcommands)
   - [x] kubectl completion (subcommands, resources, namespaces)
   - [ ] Custom completion registration
-- [ ] Completion caching with TTL
+- [x] Completion caching with TTL ✅
 - [ ] Completion configuration (enable/disable, case sensitivity, max suggestions)
 - **Implementation**: `src/utils/context_completion.zig` (1000+ lines)
 
@@ -158,8 +158,8 @@
 - [x] Ternary operator (`? :`)
 - [x] Variable references in expressions
 - [x] Hex (0x...), octal (0...) and binary (0b...) number literals
-- [ ] Integer overflow handling
-- [ ] Expression caching
+- [x] Integer overflow handling
+- [x] Expression caching
 - **Implementation**: `src/utils/arithmetic.zig` (530+ lines, 11 tests)
 
 ### 9. Expansion Features (Partial)
@@ -170,8 +170,8 @@
   - [x] `~-` (previous working directory - OLDPWD)
   - **Implementation**: `src/utils/expansion.zig` (`expandTilde` function, `getUserHomeDir`)
 - [ ] **Brace Expansion**
-  - [ ] Nested brace expansion
-  - [ ] Zero-padding support (`{01..10}`)
+  - [x] Nested brace expansion
+  - [x] Zero-padding support (`{01..10}`)
 - [ ] **Process Substitution**
   - [ ] `<(command)` (create temp file with command output)
   - [ ] `>(command)` (create temp file as command input)
@@ -182,11 +182,11 @@
   - [ ] IFS-based word splitting
   - [ ] Empty argument preservation (`""`)
   - [ ] Field splitting with configurable IFS
-- [ ] **Expansion Caching**
-  - [ ] LRU cache for variable expansions
-  - [ ] LRU cache for arithmetic results
+- [x] **Expansion Caching** ✅
+  - [x] LRU cache for variable expansions ✅
+  - [x] LRU cache for arithmetic results ✅
   - [ ] LRU cache for command substitutions
-  - [ ] LRU cache for glob results
+  - [x] LRU cache for glob results ✅
 
 ### 10. Execution Options ✅
 - [x] `set -x` (xtrace - print commands before execution)
@@ -239,12 +239,12 @@
 ### 13. Extended Builtins (Phase 13)
 - [x] **Navigation Helpers**
   - [x] `bookmark` - Bookmark management ✅
-- [ ] **Developer Tools**
-  - [ ] `reload` - Reload configuration
-  - [ ] `code` - Open in VS Code
-  - [ ] `pstorm` - Open in PhpStorm
+- [x] **Developer Tools**
+  - [x] `reload` - Reload configuration
+  - [x] `code` - Open in VS Code ✅
+  - [x] `pstorm` - Open in PhpStorm ✅
   - [ ] `library` - Library management
-  - [ ] `show` / `hide` - Show/hide files (macOS)
+  - [x] `show` / `hide` - Show/hide files (macOS) ✅
 - [x] **System Helpers**
   - [x] `ip` - Display public IP info ✅
   - [x] `localip` - Show local IP ✅
@@ -598,7 +598,7 @@ The following features are production-ready:
   - `~+` - current working directory (PWD)
   - `~-` - previous working directory (OLDPWD)
   - 4 new unit tests for tilde expansion
-- Extended Builtins (7 complete):
+- Extended Builtins (8 complete):
   - `shrug` - Print shrug emoticon (¯\_(ツ)_/¯)
   - `localip` - Show local IP address hints
   - `ip` - Display public IP info hints
@@ -606,3 +606,35 @@ The following features are production-ready:
   - `tree` - Directory tree (already implemented)
   - `calc` - Calculator with functions (already implemented)
   - `json` - JSON utilities (already implemented)
+  - `reload` - Reload shell configuration
+- REPL Enhancements:
+  - Typo correction with Damerau-Levenshtein distance for "Did you mean..." suggestions
+  - Handles transpositions as single edit (e.g., "gti" → "git")
+  - Searches PATH and shell builtins for suggestions
+- History Expansion Enhancements:
+  - Ranked search results with scoring by match type (exact > prefix > substring > fuzzy)
+  - `RankedSearchResult` struct with command, score, and match type
+  - `searchHistoryRanked()` function for ranked history search
+- Completion Enhancements:
+  - Username completion from /etc/passwd (`~user<TAB>`)
+  - `completeUsername()` and `expandUsername()` functions
+- Arithmetic Enhancements:
+  - Integer overflow handling with `@addWithOverflow`, `@subWithOverflow`, `@mulWithOverflow`
+  - Returns `IntegerOverflow` error instead of undefined behavior
+- Brace Expansion Enhancements:
+  - Zero-padding support for numeric sequences (`{01..10}` → 01, 02, ..., 10)
+  - Detects leading zeros and preserves width in output
+  - `formatZeroPadded()` helper for zero-padded number formatting
+- Extended Builtins (4 new):
+  - `code` - Open file/directory in VS Code (macOS)
+  - `pstorm` - Open file/directory in PhpStorm (macOS)
+  - `show <file>...` - Remove hidden attribute from files (macOS)
+  - `hide <file>...` - Add hidden attribute to files (macOS)
+- Completion Caching:
+  - `CompletionCache` struct with TTL support in `src/utils/completion.zig`
+  - LRU eviction when max entries exceeded
+  - Cache key includes command prefix for command completion
+- Expansion Caching:
+  - `GlobCache` LRU cache in `src/utils/glob.zig`
+  - `ExpansionCache` LRU cache in `src/utils/expansion.zig`
+  - Config limits in `ExpansionConfig.CacheLimits` (glob: 256, variable: 256)

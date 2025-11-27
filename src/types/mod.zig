@@ -10,6 +10,7 @@ pub const PromptConfig = config.PromptConfig;
 pub const HistoryConfig = config.HistoryConfig;
 pub const CompletionConfig = config.CompletionConfig;
 pub const ThemeConfig = config.ThemeConfig;
+pub const EnvironmentConfig = config.EnvironmentConfig;
 
 pub const ParsedCommand = command.ParsedCommand;
 pub const CommandType = command.CommandType;

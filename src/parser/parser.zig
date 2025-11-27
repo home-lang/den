@@ -91,7 +91,9 @@ pub const Parser = struct {
             const token = self.tokens[self.pos];
 
             switch (token.type) {
-                .word => {
+                .word, .process_sub_in, .process_sub_out => {
+                    // Process substitution tokens are treated as word arguments
+                    // The value contains the full construct like "<(echo hello)"
                     const value = try self.allocator.dupe(u8, token.value);
                     if (command_name == null) {
                         command_name = value;

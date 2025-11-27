@@ -12,6 +12,32 @@ pub const DenConfig = struct {
     expansion: ExpansionConfig = .{},
     aliases: AliasConfig = .{},
     keybindings: KeybindingConfig = .{},
+    environment: EnvironmentConfig = .{},
+};
+
+/// Environment configuration - default environment variables
+pub const EnvironmentConfig = struct {
+    /// Enable loading environment from config
+    enabled: bool = true,
+    /// Custom environment variables (loaded at startup)
+    variables: ?[]const EnvEntry = null,
+
+    pub const EnvEntry = struct {
+        name: []const u8,
+        value: []const u8,
+    };
+
+    /// Default environment variables (always set if not already defined)
+    pub const defaults = [_]EnvEntry{
+        .{ .name = "EDITOR", .value = "vim" },
+        .{ .name = "VISUAL", .value = "vim" },
+        .{ .name = "PAGER", .value = "less" },
+        .{ .name = "LESS", .value = "-R" },
+        .{ .name = "GREP_OPTIONS", .value = "--color=auto" },
+        .{ .name = "CLICOLOR", .value = "1" },
+        .{ .name = "LSCOLORS", .value = "GxFxCxDxBxegedabagaced" },
+        .{ .name = "HISTCONTROL", .value = "ignoreboth" },
+    };
 };
 
 /// Alias configuration - predefined shell aliases
@@ -117,6 +143,8 @@ pub const ExpansionConfig = struct {
         arg: u32 = 200,
         exec: u32 = 500,
         arithmetic: u32 = 500,
+        glob: u32 = 256,
+        variable: u32 = 256,
     };
 };
 
