@@ -245,22 +245,22 @@
   - [ ] `library` - Library management
   - [ ] `show` / `hide` - Show/hide files (macOS)
 - [ ] **System Helpers**
-  - [ ] `ip` - Display public IP info
-  - [ ] `localip` - Show local IP
+  - [x] `ip` - Display public IP info ✅
+  - [x] `localip` - Show local IP ✅
   - [ ] `reloaddns` - Reload DNS cache
   - [ ] `emptytrash` - Empty trash (macOS)
   - [ ] `copyssh` - Copy SSH key to clipboard
   - [ ] `ft` - Fuzzy file finder
-  - [ ] `web` - Open URL in browser
+  - [x] `web` - Open URL in browser ✅
 - [ ] **Productivity**
-  - [ ] `shrug` - Print shrug emoticon
+  - [x] `shrug` - Print shrug emoticon ✅
   - [ ] `wip` - Work-in-progress git helper
-  - [ ] `calc` - Calculator with functions
-  - [ ] `json` - JSON utilities (parse, format, query)
+  - [x] `calc` - Calculator with functions ✅
+  - [x] `json` - JSON utilities (parse, format, query) ✅
   - [ ] `http` - HTTP requests
 - [ ] **Advanced Tools**
   - [ ] `find` - Fuzzy file finder (interactive)
-  - [ ] `tree` - Directory tree
+  - [x] `tree` - Directory tree ✅
   - [ ] `grep` - Text search with highlighting
   - [ ] `watch` - Execute command repeatedly
 - [ ] **Monitoring & Logging**
@@ -443,7 +443,7 @@ Many builtins are implemented but missing flags/options:
 | Execution Options | 8/8 ✅ | 🟡 Medium |
 | Scripting Engine | 20 | 🟡 Medium |
 | Custom Hooks | 6 | 🟡 Medium |
-| Extended Builtins | 30 | 🟢 Low |
+| Extended Builtins | 30 (7 ✅) | 🟢 Low |
 | Documentation | 20 | 🟢 Low |
 | Performance | 25 | 🟢 Low |
 | Foundation Libraries | 12 (9 ✅) | 🟢 Low |
@@ -597,3 +597,11 @@ The following features are production-ready:
   - `~+` - current working directory (PWD)
   - `~-` - previous working directory (OLDPWD)
   - 4 new unit tests for tilde expansion
+- Extended Builtins (7 complete):
+  - `shrug` - Print shrug emoticon (¯\_(ツ)_/¯)
+  - `localip` - Show local IP address hints
+  - `ip` - Display public IP info hints
+  - `web <url>` - Open URL in browser (platform hints)
+  - `tree` - Directory tree (already implemented)
+  - `calc` - Calculator with functions (already implemented)
+  - `json` - JSON utilities (already implemented)

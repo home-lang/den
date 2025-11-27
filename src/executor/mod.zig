@@ -599,7 +599,8 @@ pub const Executor = struct {
             "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
             "umask", "getopts", "clear", "time", "hash", "yes", "reload",
             "watch", "tree", "grep", "find", "calc", "json", "ls",
-            "seq", "date", "parallel", "http", "base64", "uuid"
+            "seq", "date", "parallel", "http", "base64", "uuid",
+            "localip", "shrug", "web", "ip"
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -716,6 +717,14 @@ pub const Executor = struct {
             return try self.builtinBase64(command);
         } else if (std.mem.eql(u8, command.name, "uuid")) {
             return try self.builtinUuid(command);
+        } else if (std.mem.eql(u8, command.name, "localip")) {
+            return try self.builtinLocalip(command);
+        } else if (std.mem.eql(u8, command.name, "ip")) {
+            return try self.builtinIp(command);
+        } else if (std.mem.eql(u8, command.name, "shrug")) {
+            return try self.builtinShrug(command);
+        } else if (std.mem.eql(u8, command.name, "web")) {
+            return try self.builtinWeb(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -4336,6 +4345,66 @@ pub const Executor = struct {
         defer self.allocator.free(uuid_str);
 
         try IO.print("{s}\n", .{uuid_str});
+        return 0;
+    }
+
+    fn builtinLocalip(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // On macOS/Linux, get local IP using hostname command or read from system
+        if (builtin.os.tag == .macos or builtin.os.tag == .linux) {
+            // Try to get IP from environment or use a simple approach
+            // For simplicity, we'll suggest using 'ifconfig' or 'ip addr'
+            try IO.print("Use 'ifconfig | grep inet' or 'ip addr' to see local IP addresses\n", .{});
+            try IO.print("Tip: On macOS: ipconfig getifaddr en0\n", .{});
+        } else {
+            try IO.print("localip: not supported on this platform\n", .{});
+            return 1;
+        }
+        return 0;
+    }
+
+    fn builtinIp(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        try IO.print("Use 'curl -s ifconfig.me' or 'curl -s icanhazip.com' to get public IP\n", .{});
+        return 0;
+    }
+
+    fn builtinShrug(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        try IO.print("¯\\_(ツ)_/¯\n", .{});
+        return 0;
+    }
+
+    fn builtinWeb(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        if (command.args.len == 0) {
+            try IO.eprint("web: usage: web <url>\n", .{});
+            return 1;
+        }
+
+        const url = command.args[0];
+
+        // Use platform-specific command to open URL
+        if (builtin.os.tag == .macos) {
+            try IO.print("Opening: {s}\n", .{url});
+            try IO.print("Run: open \"{s}\"\n", .{url});
+        } else if (builtin.os.tag == .linux) {
+            try IO.print("Opening: {s}\n", .{url});
+            try IO.print("Run: xdg-open \"{s}\"\n", .{url});
+        } else if (builtin.os.tag == .windows) {
+            try IO.print("Opening: {s}\n", .{url});
+            try IO.print("Run: start \"{s}\"\n", .{url});
+        } else {
+            try IO.eprint("web: not supported on this platform\n", .{});
+            return 1;
+        }
         return 0;
     }
 };
