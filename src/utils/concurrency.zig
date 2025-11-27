@@ -11,6 +11,7 @@ pub const ThreadPool = struct {
     queue: JobQueue,
     shutdown: std.atomic.Value(bool),
     active_jobs: std.atomic.Value(usize),
+    started: bool,
 
     pub fn init(allocator: std.mem.Allocator, thread_count: usize) !Self {
         const actual_count = if (thread_count == 0)
@@ -18,21 +19,23 @@ pub const ThreadPool = struct {
         else
             thread_count;
 
-        var pool = Self{
+        return Self{
             .allocator = allocator,
             .threads = try allocator.alloc(std.Thread, actual_count),
             .queue = JobQueue.init(allocator),
             .shutdown = std.atomic.Value(bool).init(false),
             .active_jobs = std.atomic.Value(usize).init(0),
+            .started = false,
         };
+    }
 
-        // Start worker threads
-        for (pool.threads, 0..) |*thread, i| {
-            thread.* = try std.Thread.spawn(.{}, workerThread, .{&pool});
-            _ = i;
+    /// Start the worker threads. Must be called after the pool is in its final memory location.
+    pub fn start(self: *Self) !void {
+        if (self.started) return;
+        for (self.threads) |*thread| {
+            thread.* = try std.Thread.spawn(.{}, workerThread, .{self});
         }
-
-        return pool;
+        self.started = true;
     }
 
     pub fn deinit(self: *Self) void {
@@ -42,9 +45,11 @@ pub const ThreadPool = struct {
         // Wake all threads
         self.queue.notifyAll();
 
-        // Wait for all threads to finish
-        for (self.threads) |thread| {
-            thread.join();
+        // Wait for all threads to finish (only if started)
+        if (self.started) {
+            for (self.threads) |thread| {
+                thread.join();
+            }
         }
 
         self.allocator.free(self.threads);
@@ -52,6 +57,10 @@ pub const ThreadPool = struct {
     }
 
     pub fn submit(self: *Self, comptime func: anytype, args: anytype) !void {
+        // Auto-start threads on first submit if not already started
+        if (!self.started) {
+            try self.start();
+        }
         const Args = @TypeOf(args);
         const Context = struct {
             args: Args,
@@ -85,14 +94,18 @@ pub const ThreadPool = struct {
     }
 
     fn workerThread(pool: *Self) void {
-        while (!pool.shutdown.load(.acquire)) {
+        while (true) {
+            // Check shutdown first
+            if (pool.shutdown.load(.acquire)) break;
+
             if (pool.queue.pop()) |job| {
                 _ = pool.active_jobs.fetchAdd(1, .acq_rel);
                 job.func(job.data);
                 // Note: data is freed by the wrapper function
                 _ = pool.active_jobs.fetchSub(1, .acq_rel);
             } else {
-                pool.queue.wait();
+                // Wait for new jobs or shutdown, with shutdown check
+                pool.queue.waitWithShutdown(&pool.shutdown);
             }
         }
     }
@@ -151,6 +164,17 @@ pub const ThreadPool = struct {
 
         fn notifyAll(self: *JobQueue) void {
             self.condition.broadcast();
+        }
+
+        fn waitWithShutdown(self: *JobQueue, shutdown: *std.atomic.Value(bool)) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            // Only wait if queue is empty and not shutting down
+            while (self.queue.items.len == 0 and !shutdown.load(.acquire)) {
+                // Use timedWait to periodically check shutdown
+                self.condition.timedWait(&self.mutex, 100_000_000) catch {}; // 100ms timeout
+            }
         }
     };
 };
