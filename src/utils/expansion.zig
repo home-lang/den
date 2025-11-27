@@ -7,6 +7,7 @@ pub const Expansion = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
     arrays: ?*std.StringHashMap([][]const u8), // Array variables
+    local_vars: ?*std.StringHashMap([]const u8), // Function local variables (checked first)
     last_exit_code: i32,
     positional_params: []const []const u8, // $1, $2, etc.
     shell_name: []const u8, // $0
@@ -20,6 +21,7 @@ pub const Expansion = struct {
             .allocator = allocator,
             .environment = environment,
             .arrays = null,
+            .local_vars = null,
             .last_exit_code = last_exit_code,
             .positional_params = &[_][]const u8{},
             .shell_name = "den",
@@ -43,6 +45,7 @@ pub const Expansion = struct {
             .allocator = allocator,
             .environment = environment,
             .arrays = null,
+            .local_vars = null,
             .last_exit_code = last_exit_code,
             .positional_params = positional_params,
             .shell_name = shell_name,
@@ -67,6 +70,7 @@ pub const Expansion = struct {
             .allocator = allocator,
             .environment = environment,
             .arrays = null,
+            .local_vars = null,
             .last_exit_code = last_exit_code,
             .positional_params = positional_params,
             .shell_name = shell_name,
@@ -619,6 +623,15 @@ pub const Expansion = struct {
 
         const var_name = input[1..end];
 
+        // Check local variables first (function scope)
+        if (self.local_vars) |locals| {
+            if (locals.get(var_name)) |value| {
+                const result = try self.allocator.dupe(u8, value);
+                return ExpansionResult{ .value = result, .consumed = end };
+            }
+        }
+
+        // Then check environment variables
         if (self.environment.get(var_name)) |value| {
             const result = try self.allocator.dupe(u8, value);
             return ExpansionResult{ .value = result, .consumed = end };

@@ -126,6 +126,16 @@ pub const Shell = struct {
     prompt_context: PromptContext,
     // Async git fetcher for non-blocking prompts
     async_git: AsyncGitFetcher,
+    // REPL multiline input state (for function definitions)
+    multiline_buffer: [100]?[]const u8,
+    multiline_count: usize,
+    multiline_brace_count: i32,
+    multiline_mode: MultilineMode,
+
+    const MultilineMode = enum {
+        none,
+        function_def,
+    };
 
     pub fn init(allocator: std.mem.Allocator) !Shell {
         return initWithConfig(allocator, null);
@@ -209,6 +219,10 @@ pub const Shell = struct {
             .prompt_renderer = null,
             .prompt_context = PromptContext.init(allocator),
             .async_git = AsyncGitFetcher.init(allocator),
+            .multiline_buffer = [_]?[]const u8{null} ** 100,
+            .multiline_count = 0,
+            .multiline_brace_count = 0,
+            .multiline_mode = .none,
         };
 
         // Detect if stdin is a TTY
@@ -509,6 +523,21 @@ pub const Shell = struct {
 
             if (trimmed.len == 0) continue;
 
+            // Handle multiline input (function definitions)
+            if (self.multiline_mode != .none) {
+                // Continue collecting lines for multiline construct
+                try self.handleMultilineContinuation(trimmed);
+                continue;
+            }
+
+            // Check if this line starts a function definition
+            if (try self.checkFunctionDefinitionStart(trimmed)) {
+                // handleMultilineStart was called and either:
+                // - Function was defined (single-line) and we continue
+                // - We're now in multiline mode and will continue on next iteration
+                continue;
+            }
+
             // Expand history references (!, !!, !N, !-N, !string, ^old^new)
             const maybe_expanded = self.history_expander.expand(trimmed, &self.history, self.history_count) catch |err| {
                 IO.eprint("History expansion error: {}\n", .{err}) catch {};
@@ -554,6 +583,202 @@ pub const Shell = struct {
         }
 
         self.last_exit_code = result.exit_code;
+    }
+
+    /// Check if a line starts a function definition and handle it
+    /// Returns true if the line was handled as a function definition
+    fn checkFunctionDefinitionStart(self: *Shell, trimmed: []const u8) !bool {
+        // Check for "function name" or "name()" syntax
+        const is_function_keyword = std.mem.startsWith(u8, trimmed, "function ");
+
+        // For name() syntax, check if line contains ()
+        var is_paren_syntax = false;
+        if (std.mem.indexOf(u8, trimmed, "()")) |_| {
+            // Make sure it's not just () by itself and there's a name before
+            const paren_pos = std.mem.indexOf(u8, trimmed, "()") orelse 0;
+            if (paren_pos > 0) {
+                is_paren_syntax = true;
+            }
+        }
+
+        if (!is_function_keyword and !is_paren_syntax) {
+            return false;
+        }
+
+        // This is a function definition - start collecting
+        // Count braces in this line
+        var brace_count: i32 = 0;
+        for (trimmed) |c| {
+            if (c == '{') brace_count += 1;
+            if (c == '}') brace_count -= 1;
+        }
+
+        // Store the first line
+        if (self.multiline_count >= self.multiline_buffer.len) {
+            try IO.eprint("Function definition too long\n", .{});
+            return true;
+        }
+        self.multiline_buffer[self.multiline_count] = try self.allocator.dupe(u8, trimmed);
+        self.multiline_count += 1;
+        self.multiline_brace_count = brace_count;
+
+        if (brace_count > 0) {
+            // Incomplete - need more lines
+            self.multiline_mode = .function_def;
+            return true;
+        } else if (brace_count == 0) {
+            // Check if we have an opening brace at all
+            if (std.mem.indexOf(u8, trimmed, "{")) |open_brace| {
+                // Complete single-line function like: function foo { echo hi; }
+                // Handle single-line function directly without parser
+                const close_brace = std.mem.lastIndexOf(u8, trimmed, "}") orelse {
+                    try IO.eprint("Syntax error: missing closing brace\n", .{});
+                    self.resetMultilineState();
+                    return true;
+                };
+
+                // Extract function name
+                var func_name: []const u8 = undefined;
+                if (is_function_keyword) {
+                    const after_keyword = std.mem.trim(u8, trimmed[9..], &std.ascii.whitespace);
+                    const name_end = std.mem.indexOfAny(u8, after_keyword, " \t{") orelse after_keyword.len;
+                    func_name = after_keyword[0..name_end];
+                } else {
+                    // name() syntax
+                    const paren_pos = std.mem.indexOf(u8, trimmed, "()") orelse 0;
+                    func_name = std.mem.trim(u8, trimmed[0..paren_pos], &std.ascii.whitespace);
+                }
+
+                // Extract body (content between { and })
+                const body_content = std.mem.trim(u8, trimmed[open_brace + 1 .. close_brace], &std.ascii.whitespace);
+
+                // Create body as array of lines (split by semicolons for single-line)
+                var body_lines: [32][]const u8 = undefined;
+                var body_count: usize = 0;
+                var line_iter = std.mem.splitScalar(u8, body_content, ';');
+                while (line_iter.next()) |part| {
+                    const part_trimmed = std.mem.trim(u8, part, &std.ascii.whitespace);
+                    if (part_trimmed.len > 0) {
+                        if (body_count >= body_lines.len) break;
+                        body_lines[body_count] = try self.allocator.dupe(u8, part_trimmed);
+                        body_count += 1;
+                    }
+                }
+
+                // Define the function
+                self.function_manager.defineFunction(func_name, body_lines[0..body_count], false) catch |err| {
+                    try IO.eprint("Function definition error: {}\n", .{err});
+                    // Free the body lines we allocated
+                    for (body_lines[0..body_count]) |line_content| {
+                        self.allocator.free(line_content);
+                    }
+                    self.resetMultilineState();
+                    return true;
+                };
+
+                // Free the body lines (function_manager made its own copy)
+                for (body_lines[0..body_count]) |line_content| {
+                    self.allocator.free(line_content);
+                }
+
+                self.resetMultilineState();
+                return true;
+            } else {
+                // No brace yet - might be "function foo" and { on next line
+                self.multiline_mode = .function_def;
+                return true;
+            }
+        }
+
+        return true;
+    }
+
+    /// Handle continuation of multiline input
+    fn handleMultilineContinuation(self: *Shell, trimmed: []const u8) !void {
+        // Store the line
+        if (self.multiline_count >= self.multiline_buffer.len) {
+            try IO.eprint("Function definition too long\n", .{});
+            self.resetMultilineState();
+            return;
+        }
+        self.multiline_buffer[self.multiline_count] = try self.allocator.dupe(u8, trimmed);
+        self.multiline_count += 1;
+
+        // Update brace count
+        for (trimmed) |c| {
+            if (c == '{') self.multiline_brace_count += 1;
+            if (c == '}') self.multiline_brace_count -= 1;
+        }
+
+        // Check if function is complete
+        if (self.multiline_brace_count == 0 and self.multiline_count > 0) {
+            // Check if we ever had an opening brace
+            var had_opening_brace = false;
+            for (self.multiline_buffer[0..self.multiline_count]) |maybe_line| {
+                if (maybe_line) |line_content| {
+                    if (std.mem.indexOf(u8, line_content, "{") != null) {
+                        had_opening_brace = true;
+                        break;
+                    }
+                }
+            }
+
+            if (had_opening_brace) {
+                try self.finishFunctionDefinition();
+            }
+        }
+    }
+
+    /// Complete function definition parsing and register the function
+    fn finishFunctionDefinition(self: *Shell) !void {
+        // Collect lines into array for parser
+        var lines: [100][]const u8 = undefined;
+        var line_count: usize = 0;
+        for (self.multiline_buffer[0..self.multiline_count]) |maybe_line| {
+            if (maybe_line) |line_content| {
+                lines[line_count] = line_content;
+                line_count += 1;
+            }
+        }
+
+        // Parse the function definition
+        const FunctionParser = @import("scripting/functions.zig").FunctionParser;
+        var parser = FunctionParser.init(self.allocator);
+
+        const result = parser.parseFunction(lines[0..line_count], 0) catch |err| {
+            try IO.eprint("Function parse error: {}\n", .{err});
+            self.resetMultilineState();
+            return;
+        };
+
+        // Define the function
+        self.function_manager.defineFunction(result.name, result.body, false) catch |err| {
+            try IO.eprint("Function definition error: {}\n", .{err});
+            self.resetMultilineState();
+            return;
+        };
+
+        // Free the name that was duped by parser (function_manager made its own copy)
+        self.allocator.free(result.name);
+        for (result.body) |body_line| {
+            self.allocator.free(body_line);
+        }
+        self.allocator.free(result.body);
+
+        self.resetMultilineState();
+    }
+
+    /// Reset multiline state and free buffered lines
+    fn resetMultilineState(self: *Shell) void {
+        for (self.multiline_buffer[0..self.multiline_count]) |maybe_line| {
+            if (maybe_line) |line_content| {
+                self.allocator.free(line_content);
+            }
+        }
+        self.multiline_buffer = [_]?[]const u8{null} ** 100;
+        self.multiline_count = 0;
+        self.multiline_brace_count = 0;
+        self.multiline_mode = .none;
     }
 
     fn renderPrompt(self: *Shell) !void {
@@ -1004,13 +1229,27 @@ pub const Shell = struct {
     }
 
     fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
-        // Collect non-null positional params for the expander
+        // Collect positional params for the expander
+        // If inside a function, use function's positional params instead of shell's
         var positional_params_slice: [64][]const u8 = undefined;
         var param_count: usize = 0;
-        for (self.positional_params) |maybe_param| {
-            if (maybe_param) |param| {
-                positional_params_slice[param_count] = param;
-                param_count += 1;
+
+        if (self.function_manager.currentFrame()) |frame| {
+            // Inside a function - use function's positional params
+            var i: usize = 0;
+            while (i < frame.positional_params_count) : (i += 1) {
+                if (frame.positional_params[i]) |param| {
+                    positional_params_slice[param_count] = param;
+                    param_count += 1;
+                }
+            }
+        } else {
+            // Not inside a function - use shell's positional params
+            for (self.positional_params) |maybe_param| {
+                if (maybe_param) |param| {
+                    positional_params_slice[param_count] = param;
+                    param_count += 1;
+                }
             }
         }
 
@@ -1020,7 +1259,7 @@ pub const Shell = struct {
         else
             @intCast(self.last_background_pid);
 
-        var expander = Expansion.initWithParams(
+        var expander = Expansion.initWithShell(
             self.allocator,
             &self.environment,
             self.last_exit_code,
@@ -1028,8 +1267,13 @@ pub const Shell = struct {
             self.shell_name,
             pid_for_expansion,
             self.last_arg,
+            self,
         );
         expander.arrays = &self.arrays; // Add array support
+        // Set local vars pointer if inside a function
+        if (self.function_manager.currentFrame()) |frame| {
+            expander.local_vars = &frame.local_vars;
+        }
         var glob = Glob.init(self.allocator);
         var brace = BraceExpander.init(self.allocator);
 
@@ -2775,10 +3019,18 @@ pub const Shell = struct {
         else
             self.last_exit_code;
 
-        // Set exit code and signal return
+        // Check if we're inside a function
+        if (self.function_manager.currentFrame() != null) {
+            // Signal return from function
+            self.function_manager.requestReturn(code) catch {
+                try IO.eprint("return: can only return from a function or sourced script\n", .{});
+                self.last_exit_code = 1;
+                return;
+            };
+        }
+
+        // Set exit code
         self.last_exit_code = code;
-        // In a full implementation, this would set a flag to break out of function/script
-        // For now, just set the exit code
     }
 
     /// Builtin: break - exit from loop
@@ -2811,43 +3063,68 @@ pub const Shell = struct {
 
     /// Builtin: local - declare local variables (function scope)
     fn builtinLocal(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            // List local variables - for now, just show message
-            try IO.print("den: local: variable scoping not yet fully implemented\n", .{});
+        // Check if we're inside a function
+        if (self.function_manager.currentFrame() == null) {
+            // Outside function - use environment variables as fallback
+            if (cmd.args.len == 0) {
+                try IO.eprint("local: can only be used in a function\n", .{});
+                self.last_exit_code = 1;
+                return;
+            }
+
+            // Still set variables for compatibility
+            for (cmd.args) |arg| {
+                if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
+                    const var_name = arg[0..eq_pos];
+                    const var_value = arg[eq_pos + 1 ..];
+                    const value = try self.allocator.dupe(u8, var_value);
+                    const gop = try self.environment.getOrPut(var_name);
+                    if (gop.found_existing) {
+                        self.allocator.free(gop.value_ptr.*);
+                        gop.value_ptr.* = value;
+                    } else {
+                        const key = try self.allocator.dupe(u8, var_name);
+                        gop.key_ptr.* = key;
+                        gop.value_ptr.* = value;
+                    }
+                }
+            }
             self.last_exit_code = 0;
             return;
         }
 
-        // Parse VAR=value assignments
+        if (cmd.args.len == 0) {
+            // List local variables in current function
+            if (self.function_manager.currentFrame()) |frame| {
+                var iter = frame.local_vars.iterator();
+                while (iter.next()) |entry| {
+                    try IO.print("{s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                }
+            }
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Set local variables in function scope
         for (cmd.args) |arg| {
             if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
                 const var_name = arg[0..eq_pos];
                 const var_value = arg[eq_pos + 1 ..];
-
-                // For now, treat like regular export (full impl would track scope)
-                const value = try self.allocator.dupe(u8, var_value);
-                const gop = try self.environment.getOrPut(var_name);
-                if (gop.found_existing) {
-                    self.allocator.free(gop.value_ptr.*);
-                    gop.value_ptr.* = value;
-                } else {
-                    const key = try self.allocator.dupe(u8, var_name);
-                    gop.key_ptr.* = key;
-                    gop.value_ptr.* = value;
-                }
-                self.last_exit_code = 0;
+                self.function_manager.setLocal(var_name, var_value) catch {
+                    try IO.eprint("local: {s}: failed to set variable\n", .{var_name});
+                    self.last_exit_code = 1;
+                    return;
+                };
             } else {
-                // Variable without value - declare it
-                const gop = try self.environment.getOrPut(arg);
-                if (!gop.found_existing) {
-                    const key = try self.allocator.dupe(u8, arg);
-                    const value = try self.allocator.dupe(u8, "");
-                    gop.key_ptr.* = key;
-                    gop.value_ptr.* = value;
-                }
-                self.last_exit_code = 0;
+                // Declare empty variable
+                self.function_manager.setLocal(arg, "") catch {
+                    try IO.eprint("local: {s}: failed to set variable\n", .{arg});
+                    self.last_exit_code = 1;
+                    return;
+                };
             }
         }
+        self.last_exit_code = 0;
     }
 
     /// Builtin: declare - declare variables with attributes

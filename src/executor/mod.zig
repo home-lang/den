@@ -600,7 +600,7 @@ pub const Executor = struct {
             "umask", "getopts", "clear", "time", "hash", "yes", "reload",
             "watch", "tree", "grep", "find", "calc", "json", "ls",
             "seq", "date", "parallel", "http", "base64", "uuid",
-            "localip", "shrug", "web", "ip"
+            "localip", "shrug", "web", "ip", "return", "local", "copyssh"
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -725,6 +725,12 @@ pub const Executor = struct {
             return try self.builtinShrug(command);
         } else if (std.mem.eql(u8, command.name, "web")) {
             return try self.builtinWeb(command);
+        } else if (std.mem.eql(u8, command.name, "return")) {
+            return try self.builtinReturn(command);
+        } else if (std.mem.eql(u8, command.name, "local")) {
+            return try self.builtinLocal(command);
+        } else if (std.mem.eql(u8, command.name, "copyssh")) {
+            return try self.builtinCopyssh(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -1480,6 +1486,7 @@ pub const Executor = struct {
         try IO.print("\nUtility:\n", .{});
         try IO.print("  yes [str]         Repeatedly output string\n", .{});
         try IO.print("  reload            Reload shell configuration\n", .{});
+        try IO.print("  copyssh           Copy SSH public key to clipboard\n", .{});
 
         return 0;
     }
@@ -4405,6 +4412,176 @@ pub const Executor = struct {
             try IO.eprint("web: not supported on this platform\n", .{});
             return 1;
         }
+        return 0;
+    }
+
+    fn builtinReturn(self: *Executor, command: *types.ParsedCommand) !i32 {
+        const shell = self.shell orelse {
+            try IO.eprint("return: can only return from a function or sourced script\n", .{});
+            return 1;
+        };
+
+        // Parse return code (default 0)
+        var return_code: i32 = 0;
+        if (command.args.len > 0) {
+            return_code = std.fmt.parseInt(i32, command.args[0], 10) catch {
+                try IO.eprint("return: {s}: numeric argument required\n", .{command.args[0]});
+                return 2;
+            };
+        }
+
+        // Request return from current function
+        shell.function_manager.requestReturn(return_code) catch {
+            try IO.eprint("return: can only return from a function or sourced script\n", .{});
+            return 1;
+        };
+
+        return return_code;
+    }
+
+    fn builtinLocal(self: *Executor, command: *types.ParsedCommand) !i32 {
+        const shell = self.shell orelse {
+            try IO.eprint("local: can only be used in a function\n", .{});
+            return 1;
+        };
+
+        if (command.args.len == 0) {
+            // List local variables
+            if (shell.function_manager.currentFrame()) |frame| {
+                var iter = frame.local_vars.iterator();
+                while (iter.next()) |entry| {
+                    try IO.print("{s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                }
+            }
+            return 0;
+        }
+
+        // Set local variables
+        for (command.args) |arg| {
+            // Parse name=value or just name
+            if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
+                const name = arg[0..eq_pos];
+                const value = arg[eq_pos + 1 ..];
+                shell.function_manager.setLocal(name, value) catch {
+                    try IO.eprint("local: {s}: can only be used in a function\n", .{name});
+                    return 1;
+                };
+            } else {
+                // Just declare as empty
+                shell.function_manager.setLocal(arg, "") catch {
+                    try IO.eprint("local: {s}: can only be used in a function\n", .{arg});
+                    return 1;
+                };
+            }
+        }
+
+        return 0;
+    }
+
+    fn builtinCopyssh(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        // Get home directory
+        const home = std.posix.getenv("HOME") orelse {
+            try IO.eprint("copyssh: HOME environment variable not set\n", .{});
+            return 1;
+        };
+
+        // SSH key files to try (in order of preference)
+        const key_files = [_][]const u8{
+            "/.ssh/id_ed25519.pub",
+            "/.ssh/id_rsa.pub",
+            "/.ssh/id_ecdsa.pub",
+            "/.ssh/id_dsa.pub",
+        };
+
+        var found_key: ?[]const u8 = null;
+        var found_path: ?[]const u8 = null;
+        var key_buffer: [8192]u8 = undefined;
+
+        for (key_files) |key_suffix| {
+            // Build full path
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const full_path = std.fmt.bufPrint(&path_buf, "{s}{s}", .{ home, key_suffix }) catch continue;
+
+            // Try to open and read the key file
+            const file = std.fs.cwd().openFile(full_path, .{}) catch continue;
+            defer file.close();
+
+            const bytes_read = file.read(&key_buffer) catch continue;
+            if (bytes_read > 0) {
+                found_key = key_buffer[0..bytes_read];
+                found_path = key_suffix;
+                break;
+            }
+        }
+
+        const key_content = found_key orelse {
+            try IO.eprint("copyssh: no SSH public key found\n", .{});
+            try IO.eprint("Try generating one with: ssh-keygen -t ed25519\n", .{});
+            return 1;
+        };
+
+        // Remove trailing newline if present
+        var trimmed_key = key_content;
+        while (trimmed_key.len > 0 and (trimmed_key[trimmed_key.len - 1] == '\n' or trimmed_key[trimmed_key.len - 1] == '\r')) {
+            trimmed_key = trimmed_key[0 .. trimmed_key.len - 1];
+        }
+
+        // Copy to clipboard using platform-specific command
+        if (builtin.os.tag == .macos) {
+            // Use pbcopy on macOS
+            var child = std.process.Child.init(&[_][]const u8{"pbcopy"}, std.heap.page_allocator);
+            child.stdin_behavior = .Pipe;
+            child.stdout_behavior = .Ignore;
+            child.stderr_behavior = .Ignore;
+
+            child.spawn() catch {
+                try IO.eprint("copyssh: failed to run pbcopy\n", .{});
+                return 1;
+            };
+
+            if (child.stdin) |stdin| {
+                stdin.writeAll(trimmed_key) catch {
+                    try IO.eprint("copyssh: failed to write to pbcopy\n", .{});
+                    return 1;
+                };
+                stdin.close();
+                child.stdin = null;
+            }
+
+            _ = child.wait() catch {
+                try IO.eprint("copyssh: pbcopy failed\n", .{});
+                return 1;
+            };
+
+            try IO.print("SSH public key (~{s}) copied to clipboard\n", .{found_path.?});
+        } else if (builtin.os.tag == .linux) {
+            // Try xclip or xsel on Linux
+            var child = std.process.Child.init(&[_][]const u8{ "xclip", "-selection", "clipboard" }, std.heap.page_allocator);
+            child.stdin_behavior = .Pipe;
+            child.stdout_behavior = .Ignore;
+            child.stderr_behavior = .Ignore;
+
+            if (child.spawn()) |_| {
+                if (child.stdin) |stdin| {
+                    stdin.writeAll(trimmed_key) catch {};
+                    stdin.close();
+                    child.stdin = null;
+                }
+                _ = child.wait() catch {};
+                try IO.print("SSH public key (~{s}) copied to clipboard\n", .{found_path.?});
+            } else |_| {
+                // Fallback: just print the key
+                try IO.print("{s}\n", .{trimmed_key});
+                try IO.eprint("(xclip not found - key printed above)\n", .{});
+            }
+        } else {
+            // Fallback: just print the key
+            try IO.print("{s}\n", .{trimmed_key});
+        }
+
         return 0;
     }
 };

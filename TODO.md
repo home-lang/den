@@ -206,17 +206,18 @@
   - [ ] Multiple patterns per case statement
   - [ ] Fallthrough with `;&` and `;;&` in case
   - [ ] `select` loops (interactive menu)
-- [ ] **Functions**
-  - [ ] Function definition (`function name { ... }`, `name() { ... }`)
-  - [ ] Function call
-  - [ ] Positional parameters in functions (`$1`, `$2`, etc.)
-  - [ ] Local variables
-  - [ ] Return statement
+- [x] **Functions** ✅ (Partial)
+  - [x] Function definition (`function name { ... }`, `name() { ... }`)
+  - [x] Function call
+  - [x] Positional parameters in functions (`$1`, `$2`, etc.)
+  - [x] Local variables (`local` builtin)
+  - [x] Return statement (`return` builtin)
   - [ ] Function export
-  - [ ] Recursive functions
+  - [ ] Recursive functions (untested)
   - [ ] Function overriding
+  - **Note**: Functions work in scripts, not in REPL yet
 - [ ] **Script Execution**
-  - [ ] Script context (variables, functions, scope)
+  - [x] Script context (variables, functions, scope)
   - [ ] Script caching (parsed AST)
   - [ ] Script timeout
 - [ ] **Error Handling**
