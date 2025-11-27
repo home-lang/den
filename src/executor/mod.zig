@@ -600,7 +600,8 @@ pub const Executor = struct {
             "umask", "getopts", "clear", "time", "hash", "yes", "reload",
             "watch", "tree", "grep", "find", "calc", "json", "ls",
             "seq", "date", "parallel", "http", "base64", "uuid",
-            "localip", "shrug", "web", "ip", "return", "local", "copyssh"
+            "localip", "shrug", "web", "ip", "return", "local", "copyssh",
+            "reloaddns", "emptytrash", "wip", "bookmark"
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -731,6 +732,14 @@ pub const Executor = struct {
             return try self.builtinLocal(command);
         } else if (std.mem.eql(u8, command.name, "copyssh")) {
             return try self.builtinCopyssh(command);
+        } else if (std.mem.eql(u8, command.name, "reloaddns")) {
+            return try self.builtinReloaddns(command);
+        } else if (std.mem.eql(u8, command.name, "emptytrash")) {
+            return try self.builtinEmptytrash(command);
+        } else if (std.mem.eql(u8, command.name, "wip")) {
+            return try self.builtinWip(command);
+        } else if (std.mem.eql(u8, command.name, "bookmark")) {
+            return try self.builtinBookmark(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -942,6 +951,17 @@ pub const Executor = struct {
             return 1;
         };
 
+        // Handle special cd - (go to OLDPWD)
+        if (std.mem.eql(u8, path, "-")) {
+            if (self.environment.get("OLDPWD")) |oldpwd| {
+                path = oldpwd;
+                try IO.print("{s}\n", .{path});
+            } else {
+                try IO.eprint("den: cd: OLDPWD not set\n", .{});
+                return 1;
+            }
+        }
+
         // Expand ~name for named directories (zsh-style)
         var expanded_path: ?[]const u8 = null;
         defer if (expanded_path) |p| self.allocator.free(p);
@@ -967,12 +987,70 @@ pub const Executor = struct {
             }
         }
 
-        std.posix.chdir(path) catch |err| {
-            try IO.eprint("den: cd: {s}: {}\n", .{ path, err });
-            return 1;
-        };
+        // Save current directory as OLDPWD before changing
+        var old_cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const old_cwd = std.posix.getcwd(&old_cwd_buf) catch null;
 
-        return 0;
+        // Check if path is relative (doesn't start with / or ~ or .)
+        const is_relative = path.len > 0 and path[0] != '/' and path[0] != '~' and path[0] != '.';
+
+        // Try direct path first
+        if (std.posix.chdir(path)) |_| {
+            // Success - update OLDPWD
+            if (old_cwd) |cwd| {
+                const oldpwd_value = try self.allocator.dupe(u8, cwd);
+                const gop = try self.environment.getOrPut("OLDPWD");
+                if (gop.found_existing) {
+                    self.allocator.free(gop.value_ptr.*);
+                } else {
+                    gop.key_ptr.* = try self.allocator.dupe(u8, "OLDPWD");
+                }
+                gop.value_ptr.* = oldpwd_value;
+            }
+            return 0;
+        } else |direct_err| {
+            // If relative path and CDPATH is set, try CDPATH directories
+            if (is_relative) {
+                if (self.environment.get("CDPATH")) |cdpath| {
+                    var cdpath_path: ?[]const u8 = null;
+                    defer if (cdpath_path) |p| self.allocator.free(p);
+
+                    var iter = std.mem.splitScalar(u8, cdpath, ':');
+                    while (iter.next()) |dir| {
+                        // Build full path: dir/path
+                        const full_path = if (dir.len == 0)
+                            path // Empty entry means current directory
+                        else blk: {
+                            if (cdpath_path) |p| self.allocator.free(p);
+                            cdpath_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ dir, path });
+                            break :blk cdpath_path.?;
+                        };
+
+                        if (std.posix.chdir(full_path)) |_| {
+                            // Success via CDPATH - print directory and update OLDPWD
+                            try IO.print("{s}\n", .{full_path});
+                            if (old_cwd) |cwd| {
+                                const oldpwd_value = try self.allocator.dupe(u8, cwd);
+                                const gop = try self.environment.getOrPut("OLDPWD");
+                                if (gop.found_existing) {
+                                    self.allocator.free(gop.value_ptr.*);
+                                } else {
+                                    gop.key_ptr.* = try self.allocator.dupe(u8, "OLDPWD");
+                                }
+                                gop.value_ptr.* = oldpwd_value;
+                            }
+                            return 0;
+                        } else |_| {
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // All attempts failed
+            try IO.eprint("den: cd: {s}: {}\n", .{ path, direct_err });
+            return 1;
+        }
     }
 
     fn builtinEnv(self: *Executor) !i32 {
@@ -1577,41 +1655,142 @@ pub const Executor = struct {
     }
 
     fn builtinRead(self: *Executor, command: *types.ParsedCommand) !i32 {
-        if (command.args.len == 0) {
-            try IO.eprint("den: read: missing variable name\n", .{});
-            return 1;
+        // Parse options: -p prompt, -r (raw)
+        var prompt: ?[]const u8 = null;
+        var raw_mode = false;
+        var var_name_start: usize = 0;
+
+        var i: usize = 0;
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+            if (arg.len > 0 and arg[0] == '-' and arg.len > 1) {
+                if (std.mem.eql(u8, arg, "-p")) {
+                    // Next arg is the prompt
+                    i += 1;
+                    if (i >= command.args.len) {
+                        try IO.eprint("den: read: -p requires an argument\n", .{});
+                        return 1;
+                    }
+                    prompt = command.args[i];
+                } else if (std.mem.eql(u8, arg, "-r")) {
+                    raw_mode = true;
+                } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "-t")) {
+                    // Skip unsupported options that take arguments
+                    if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "-t")) {
+                        i += 1; // Skip the argument
+                    }
+                    // -s, -n, -t are recognized but not implemented
+                } else {
+                    try IO.eprint("den: read: invalid option: {s}\n", .{arg});
+                    return 1;
+                }
+            } else {
+                // First variable name found
+                var_name_start = i;
+                break;
+            }
         }
 
-        const var_name = command.args[0];
+        // Get variable names (remaining args after options)
+        const var_names = if (var_name_start < command.args.len)
+            command.args[var_name_start..]
+        else
+            &[_][]const u8{"REPLY"};
 
-        // Read a line from stdin using IO utility
+        // Display prompt if specified (no newline)
+        if (prompt) |p| {
+            try IO.writeBytes(p);
+        }
+
+        // Read a line from stdin
         const line_opt = try IO.readLine(self.allocator);
         if (line_opt) |line| {
             defer self.allocator.free(line);
 
-            // Store in environment (dupe again since we're freeing line)
-            const value = try self.allocator.dupe(u8, line);
-            const gop = try self.environment.getOrPut(var_name);
-            if (gop.found_existing) {
-                self.allocator.free(gop.value_ptr.*);
-                gop.value_ptr.* = value;
+            // Process line (handle backslash escapes unless -r)
+            var processed_line: []const u8 = line;
+            var processed_buf: [4096]u8 = undefined;
+
+            if (!raw_mode) {
+                // Process backslash escapes
+                var pos: usize = 0;
+                var j: usize = 0;
+                while (j < line.len and pos < processed_buf.len) {
+                    if (line[j] == '\\' and j + 1 < line.len) {
+                        // Skip the backslash and include the next char
+                        j += 1;
+                        processed_buf[pos] = line[j];
+                    } else {
+                        processed_buf[pos] = line[j];
+                    }
+                    j += 1;
+                    pos += 1;
+                }
+                processed_line = processed_buf[0..pos];
+            }
+
+            // Split by IFS if multiple variable names
+            if (var_names.len == 1) {
+                // Single variable - store entire line
+                const var_name = var_names[0];
+                const value = try self.allocator.dupe(u8, processed_line);
+                const gop = try self.environment.getOrPut(var_name);
+                if (gop.found_existing) {
+                    self.allocator.free(gop.value_ptr.*);
+                    gop.value_ptr.* = value;
+                } else {
+                    const key = try self.allocator.dupe(u8, var_name);
+                    gop.key_ptr.* = key;
+                    gop.value_ptr.* = value;
+                }
             } else {
-                const key = try self.allocator.dupe(u8, var_name);
-                gop.key_ptr.* = key;
-                gop.value_ptr.* = value;
+                // Multiple variables - split by whitespace (IFS)
+                var word_iter = std.mem.tokenizeAny(u8, processed_line, " \t");
+                var var_idx: usize = 0;
+
+                while (var_idx < var_names.len) : (var_idx += 1) {
+                    const var_name = var_names[var_idx];
+                    var value: []const u8 = "";
+
+                    if (var_idx == var_names.len - 1) {
+                        // Last variable gets rest of the line
+                        if (word_iter.next()) |first_word| {
+                            const rest_start = @intFromPtr(first_word.ptr) - @intFromPtr(processed_line.ptr);
+                            value = processed_line[rest_start..];
+                        }
+                    } else {
+                        if (word_iter.next()) |word| {
+                            value = word;
+                        }
+                    }
+
+                    const duped_value = try self.allocator.dupe(u8, value);
+                    const gop = try self.environment.getOrPut(var_name);
+                    if (gop.found_existing) {
+                        self.allocator.free(gop.value_ptr.*);
+                        gop.value_ptr.* = duped_value;
+                    } else {
+                        const key = try self.allocator.dupe(u8, var_name);
+                        gop.key_ptr.* = key;
+                        gop.value_ptr.* = duped_value;
+                    }
+                }
             }
         } else {
-            // EOF - set to empty string
-            const value = try self.allocator.dupe(u8, "");
-            const gop = try self.environment.getOrPut(var_name);
-            if (gop.found_existing) {
-                self.allocator.free(gop.value_ptr.*);
-                gop.value_ptr.* = value;
-            } else {
-                const key = try self.allocator.dupe(u8, var_name);
-                gop.key_ptr.* = key;
-                gop.value_ptr.* = value;
+            // EOF - set all variables to empty string and return 1
+            for (var_names) |var_name| {
+                const value = try self.allocator.dupe(u8, "");
+                const gop = try self.environment.getOrPut(var_name);
+                if (gop.found_existing) {
+                    self.allocator.free(gop.value_ptr.*);
+                    gop.value_ptr.* = value;
+                } else {
+                    const key = try self.allocator.dupe(u8, var_name);
+                    gop.key_ptr.* = key;
+                    gop.value_ptr.* = value;
+                }
             }
+            return 1; // EOF returns 1
         }
 
         return 0;
@@ -4580,6 +4759,259 @@ pub const Executor = struct {
         } else {
             // Fallback: just print the key
             try IO.print("{s}\n", .{trimmed_key});
+        }
+
+        return 0;
+    }
+
+    fn builtinReloaddns(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        if (builtin.os.tag != .macos) {
+            try IO.eprint("reloaddns: only supported on macOS\n", .{});
+            return 1;
+        }
+
+        // Run dscacheutil -flushcache
+        var flush_child = std.process.Child.init(&[_][]const u8{ "dscacheutil", "-flushcache" }, std.heap.page_allocator);
+        flush_child.stdin_behavior = .Ignore;
+        flush_child.stdout_behavior = .Ignore;
+        flush_child.stderr_behavior = .Pipe;
+
+        flush_child.spawn() catch {
+            try IO.eprint("reloaddns: failed to run dscacheutil\n", .{});
+            return 1;
+        };
+
+        const flush_result = flush_child.wait() catch {
+            try IO.eprint("reloaddns: dscacheutil failed\n", .{});
+            return 1;
+        };
+
+        if (flush_result.Exited != 0) {
+            try IO.eprint("reloaddns: dscacheutil returned error\n", .{});
+            return 1;
+        }
+
+        // Run killall -HUP mDNSResponder
+        var kill_child = std.process.Child.init(&[_][]const u8{ "killall", "-HUP", "mDNSResponder" }, std.heap.page_allocator);
+        kill_child.stdin_behavior = .Ignore;
+        kill_child.stdout_behavior = .Ignore;
+        kill_child.stderr_behavior = .Pipe;
+
+        kill_child.spawn() catch {
+            try IO.eprint("reloaddns: failed to run killall\n", .{});
+            return 1;
+        };
+
+        const kill_result = kill_child.wait() catch {
+            try IO.eprint("reloaddns: killall failed\n", .{});
+            return 1;
+        };
+
+        if (kill_result.Exited != 0) {
+            try IO.eprint("reloaddns: killall mDNSResponder returned error (may need sudo)\n", .{});
+            return 1;
+        }
+
+        try IO.print("DNS cache flushed successfully\n", .{});
+        return 0;
+    }
+
+    fn builtinEmptytrash(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+        _ = command;
+
+        if (builtin.os.tag != .macos) {
+            try IO.eprint("emptytrash: only supported on macOS\n", .{});
+            return 1;
+        }
+
+        // Use osascript to empty trash
+        var child = std.process.Child.init(&[_][]const u8{
+            "osascript", "-e", "tell application \"Finder\" to empty trash",
+        }, std.heap.page_allocator);
+        child.stdin_behavior = .Ignore;
+        child.stdout_behavior = .Ignore;
+        child.stderr_behavior = .Pipe;
+
+        child.spawn() catch {
+            try IO.eprint("emptytrash: failed to run osascript\n", .{});
+            return 1;
+        };
+
+        const result = child.wait() catch {
+            try IO.eprint("emptytrash: osascript failed\n", .{});
+            return 1;
+        };
+
+        if (result.Exited != 0) {
+            try IO.eprint("emptytrash: failed to empty trash\n", .{});
+            return 1;
+        }
+
+        try IO.print("Trash emptied successfully\n", .{});
+        return 0;
+    }
+
+    fn builtinWip(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        // Get custom message if provided
+        var message: []const u8 = "WIP";
+        if (command.args.len > 0) {
+            message = command.args[0];
+        }
+
+        // Run git add .
+        var add_child = std.process.Child.init(&[_][]const u8{ "git", "add", "." }, std.heap.page_allocator);
+        add_child.stdin_behavior = .Ignore;
+        add_child.stdout_behavior = .Inherit;
+        add_child.stderr_behavior = .Inherit;
+
+        add_child.spawn() catch {
+            try IO.eprint("wip: failed to run git add\n", .{});
+            return 1;
+        };
+
+        const add_result = add_child.wait() catch {
+            try IO.eprint("wip: git add failed\n", .{});
+            return 1;
+        };
+
+        if (add_result.Exited != 0) {
+            try IO.eprint("wip: git add returned error\n", .{});
+            return 1;
+        }
+
+        // Run git commit -m "message"
+        var commit_child = std.process.Child.init(&[_][]const u8{ "git", "commit", "-m", message }, std.heap.page_allocator);
+        commit_child.stdin_behavior = .Ignore;
+        commit_child.stdout_behavior = .Inherit;
+        commit_child.stderr_behavior = .Inherit;
+
+        commit_child.spawn() catch {
+            try IO.eprint("wip: failed to run git commit\n", .{});
+            return 1;
+        };
+
+        const commit_result = commit_child.wait() catch {
+            try IO.eprint("wip: git commit failed\n", .{});
+            return 1;
+        };
+
+        return @intCast(commit_result.Exited);
+    }
+
+    fn builtinBookmark(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // bookmark         - list all bookmarks
+        // bookmark name    - cd to bookmark
+        // bookmark -a name - add current dir as bookmark
+        // bookmark -d name - delete bookmark
+
+        if (command.args.len == 0) {
+            // List all bookmarks
+            if (self.shell) |shell| {
+                var iter = shell.named_dirs.iterator();
+                var count: usize = 0;
+                while (iter.next()) |entry| {
+                    try IO.print("{s} -> {s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                    count += 1;
+                }
+                if (count == 0) {
+                    try IO.print("No bookmarks set. Use 'bookmark -a name' to add one.\n", .{});
+                }
+            } else {
+                try IO.eprint("bookmark: shell not available\n", .{});
+                return 1;
+            }
+            return 0;
+        }
+
+        const first_arg = command.args[0];
+
+        if (std.mem.eql(u8, first_arg, "-a")) {
+            // Add bookmark
+            if (command.args.len < 2) {
+                try IO.eprint("bookmark: -a requires a name\n", .{});
+                return 1;
+            }
+            const name = command.args[1];
+
+            // Get current directory
+            var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const cwd = std.posix.getcwd(&cwd_buf) catch {
+                try IO.eprint("bookmark: failed to get current directory\n", .{});
+                return 1;
+            };
+
+            if (self.shell) |shell| {
+                // Add to named directories
+                const key = try self.allocator.dupe(u8, name);
+                const value = try self.allocator.dupe(u8, cwd);
+
+                const result = shell.named_dirs.fetchPut(key, value) catch {
+                    self.allocator.free(key);
+                    self.allocator.free(value);
+                    try IO.eprint("bookmark: failed to save bookmark\n", .{});
+                    return 1;
+                };
+
+                if (result) |old| {
+                    self.allocator.free(old.key);
+                    self.allocator.free(old.value);
+                }
+
+                try IO.print("Bookmark '{s}' -> {s}\n", .{ name, cwd });
+            } else {
+                try IO.eprint("bookmark: shell not available\n", .{});
+                return 1;
+            }
+            return 0;
+        }
+
+        if (std.mem.eql(u8, first_arg, "-d")) {
+            // Delete bookmark
+            if (command.args.len < 2) {
+                try IO.eprint("bookmark: -d requires a name\n", .{});
+                return 1;
+            }
+            const name = command.args[1];
+
+            if (self.shell) |shell| {
+                if (shell.named_dirs.fetchRemove(name)) |old| {
+                    self.allocator.free(old.key);
+                    self.allocator.free(old.value);
+                    try IO.print("Bookmark '{s}' removed\n", .{name});
+                } else {
+                    try IO.eprint("bookmark: '{s}' not found\n", .{name});
+                    return 1;
+                }
+            } else {
+                try IO.eprint("bookmark: shell not available\n", .{});
+                return 1;
+            }
+            return 0;
+        }
+
+        // No flag - cd to bookmark
+        const name = first_arg;
+
+        if (self.shell) |shell| {
+            if (shell.named_dirs.get(name)) |path| {
+                std.posix.chdir(path) catch |err| {
+                    try IO.eprint("bookmark: {s}: {}\n", .{ path, err });
+                    return 1;
+                };
+                try IO.print("{s}\n", .{path});
+            } else {
+                try IO.eprint("bookmark: '{s}' not found\n", .{name});
+                return 1;
+            }
+        } else {
+            try IO.eprint("bookmark: shell not available\n", .{});
+            return 1;
         }
 
         return 0;

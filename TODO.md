@@ -215,7 +215,7 @@
   - [ ] Function export
   - [ ] Recursive functions (untested)
   - [ ] Function overriding
-  - **Note**: Functions work in scripts, not in REPL yet
+  - **Note**: Functions work in both scripts and REPL (single-line and multi-line)
 - [ ] **Script Execution**
   - [x] Script context (variables, functions, scope)
   - [ ] Script caching (parsed AST)
@@ -250,7 +250,7 @@
   - [x] `localip` - Show local IP ✅
   - [ ] `reloaddns` - Reload DNS cache
   - [ ] `emptytrash` - Empty trash (macOS)
-  - [ ] `copyssh` - Copy SSH key to clipboard
+  - [x] `copyssh` - Copy SSH key to clipboard ✅
   - [ ] `ft` - Fuzzy file finder
   - [x] `web` - Open URL in browser ✅
 - [ ] **Productivity**
@@ -263,7 +263,7 @@
   - [ ] `find` - Fuzzy file finder (interactive)
   - [x] `tree` - Directory tree ✅
   - [ ] `grep` - Text search with highlighting
-  - [ ] `watch` - Execute command repeatedly
+  - [x] `watch` - Execute command repeatedly ✅
 - [ ] **Monitoring & Logging**
   - [ ] `log-tail` - Tail logs with filtering
   - [ ] `log-parse` - Parse structured logs
