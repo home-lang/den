@@ -390,10 +390,10 @@ Many builtins are implemented but missing flags/options:
 
 - [x] **cd**: CDPATH support, `cd -` (OLDPWD), OLDPWD tracking ✅
 - [x] **pwd**: `-L` (logical path), `-P` (physical path) ✅
-- [ ] **pushd/popd**: `+N`/`-N` rotation
-- [ ] **dirs**: `-c` (clear), `-l` (long), `-p` (one per line), `-v` (with indices)
-- [ ] **echo**: `-e` (escape sequences), `-E` (disable escapes)
-- [ ] **printf**: Full format string support (`%s`, `%d`, `%f`, etc.)
+- [x] **pushd/popd**: `+N`/`-N` rotation ✅
+- [x] **dirs**: `-c` (clear), `-l` (long), `-p` (one per line), `-v` (with indices) ✅
+- [x] **echo**: `-e` (escape sequences), `-E` (disable escapes) ✅
+- [x] **printf**: Full format string support (`%s`, `%d`, `%f`, etc.) ✅
 - [ ] **env**: `env VAR=value command` (temp env)
 - [ ] **export**: `-n` (unexport), `-p` (list exports)
 - [ ] **unset**: `-v` (variable), `-f` (function) flags

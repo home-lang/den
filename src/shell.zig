@@ -1057,7 +1057,7 @@ pub const Shell = struct {
         if (chain.commands.len == 1 and chain.operators.len == 0) {
             const cmd = &chain.commands[0];
             if (std.mem.eql(u8, cmd.name, "jobs")) {
-                try self.builtinJobs();
+                try self.builtinJobs(cmd);
                 self.last_exit_code = 0;
                 return;
             } else if (std.mem.eql(u8, cmd.name, "fg")) {
@@ -1501,15 +1501,58 @@ pub const Shell = struct {
     }
 
     /// Builtin: jobs - list background jobs
-    fn builtinJobs(self: *Shell) !void {
+    /// Flags: -l (show PIDs), -p (PIDs only), -r (running), -s (stopped)
+    fn builtinJobs(self: *Shell, cmd: *types.ParsedCommand) !void {
+        // Parse flags
+        var show_pids = false;
+        var pids_only = false;
+        var running_only = false;
+        var stopped_only = false;
+
+        for (cmd.args) |arg| {
+            if (arg.len > 0 and arg[0] == '-') {
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'l' => show_pids = true,
+                        'p' => pids_only = true,
+                        'r' => running_only = true,
+                        's' => stopped_only = true,
+                        else => {
+                            try IO.eprint("den: jobs: -{c}: invalid option\n", .{c});
+                            self.last_exit_code = 1;
+                            return;
+                        },
+                    }
+                }
+            }
+        }
+
         for (self.background_jobs) |maybe_job| {
             if (maybe_job) |job| {
-                const status_str = switch (job.status) {
-                    .running => "Running",
-                    .stopped => "Stopped",
-                    .done => "Done",
-                };
-                try IO.print("[{d}]  {s: <10} {s}\n", .{ job.job_id, status_str, job.command });
+                // Filter by status if requested
+                if (running_only and job.status != .running) continue;
+                if (stopped_only and job.status != .stopped) continue;
+
+                if (pids_only) {
+                    // -p: Just print the PID
+                    try IO.print("{d}\n", .{job.pid});
+                } else if (show_pids) {
+                    // -l: Show PID in output
+                    const status_str = switch (job.status) {
+                        .running => "Running",
+                        .stopped => "Stopped",
+                        .done => "Done",
+                    };
+                    try IO.print("[{d}]  {d} {s: <10} {s}\n", .{ job.job_id, job.pid, status_str, job.command });
+                } else {
+                    // Default output
+                    const status_str = switch (job.status) {
+                        .running => "Running",
+                        .stopped => "Stopped",
+                        .done => "Done",
+                    };
+                    try IO.print("[{d}]  {s: <10} {s}\n", .{ job.job_id, status_str, job.command });
+                }
             }
         }
     }
@@ -4356,6 +4399,81 @@ pub const Shell = struct {
             try IO.print("kill: not fully implemented on Windows\n", .{});
             self.last_exit_code = 0;
             return;
+        }
+
+        // Check for -l flag (list signals)
+        if (cmd.args.len >= 1) {
+            const first_arg = cmd.args[0];
+            if (std.mem.eql(u8, first_arg, "-l") or std.mem.eql(u8, first_arg, "-L")) {
+                // List all signals
+                const signal_table = [_]struct { num: u6, name: []const u8 }{
+                    .{ .num = 1, .name = "HUP" },
+                    .{ .num = 2, .name = "INT" },
+                    .{ .num = 3, .name = "QUIT" },
+                    .{ .num = 4, .name = "ILL" },
+                    .{ .num = 5, .name = "TRAP" },
+                    .{ .num = 6, .name = "ABRT" },
+                    .{ .num = 7, .name = "BUS" },
+                    .{ .num = 8, .name = "FPE" },
+                    .{ .num = 9, .name = "KILL" },
+                    .{ .num = 10, .name = "USR1" },
+                    .{ .num = 11, .name = "SEGV" },
+                    .{ .num = 12, .name = "USR2" },
+                    .{ .num = 13, .name = "PIPE" },
+                    .{ .num = 14, .name = "ALRM" },
+                    .{ .num = 15, .name = "TERM" },
+                    .{ .num = 17, .name = "CHLD" },
+                    .{ .num = 18, .name = "CONT" },
+                    .{ .num = 19, .name = "STOP" },
+                    .{ .num = 20, .name = "TSTP" },
+                    .{ .num = 21, .name = "TTIN" },
+                    .{ .num = 22, .name = "TTOU" },
+                    .{ .num = 23, .name = "URG" },
+                    .{ .num = 24, .name = "XCPU" },
+                    .{ .num = 25, .name = "XFSZ" },
+                    .{ .num = 26, .name = "VTALRM" },
+                    .{ .num = 27, .name = "PROF" },
+                    .{ .num = 28, .name = "WINCH" },
+                    .{ .num = 29, .name = "IO" },
+                    .{ .num = 30, .name = "PWR" },
+                    .{ .num = 31, .name = "SYS" },
+                };
+
+                // If a signal number is given after -l, print just that signal name
+                if (cmd.args.len >= 2) {
+                    const sig_num = std.fmt.parseInt(u6, cmd.args[1], 10) catch {
+                        try IO.eprint("den: kill: {s}: invalid signal specification\n", .{cmd.args[1]});
+                        self.last_exit_code = 1;
+                        return;
+                    };
+                    for (signal_table) |sig| {
+                        if (sig.num == sig_num) {
+                            try IO.print("{s}\n", .{sig.name});
+                            self.last_exit_code = 0;
+                            return;
+                        }
+                    }
+                    try IO.eprint("den: kill: {d}: invalid signal specification\n", .{sig_num});
+                    self.last_exit_code = 1;
+                    return;
+                }
+
+                // Print all signals
+                var col: usize = 0;
+                for (signal_table) |sig| {
+                    try IO.print("{d:>2}) SIG{s: <8}", .{ sig.num, sig.name });
+                    col += 1;
+                    if (col >= 4) {
+                        try IO.print("\n", .{});
+                        col = 0;
+                    }
+                }
+                if (col > 0) {
+                    try IO.print("\n", .{});
+                }
+                self.last_exit_code = 0;
+                return;
+            }
         }
 
         if (cmd.args.len == 0) {
