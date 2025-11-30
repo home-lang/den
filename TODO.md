@@ -67,7 +67,7 @@
 - [x] Config file search logic (current dir → home dir)
 - [x] Support `den.jsonc` config file format
 - [ ] Support `package.jsonc` config file format
-- [ ] Config validation with error messages
+- [x] Config validation with error messages ✅ (validateConfig, ConfigError, ValidationResult)
 - [x] Config override via CLI flags (`--config <path>`)
 - [ ] Config reload mechanism
 - [ ] Config hot-reload
@@ -145,7 +145,7 @@
   - [x] npm/bun/yarn/pnpm completion (scripts, subcommands)
   - [x] Docker completion (containers, images, subcommands)
   - [x] kubectl completion (subcommands, resources, namespaces)
-  - [ ] Custom completion registration
+  - [x] Custom completion registration ✅ (complete builtin with -f,-d,-c,-a,-b,-e,-u,-W,-S,-P flags)
 - [x] Completion caching with TTL ✅
 - [ ] Completion configuration (enable/disable, case sensitivity, max suggestions)
 - **Implementation**: `src/utils/context_completion.zig` (1000+ lines)
@@ -177,15 +177,15 @@
   - [ ] `>(command)` (create temp file as command input)
   - [ ] Named pipe creation
   - [ ] Cleanup on command completion
-- [ ] **Quote Removal & Word Splitting**
-  - [ ] Quote removal (after expansion)
-  - [ ] IFS-based word splitting
-  - [ ] Empty argument preservation (`""`)
-  - [ ] Field splitting with configurable IFS
+- [x] **Quote Removal & Word Splitting** ✅
+  - [x] Quote removal (removeQuotes function)
+  - [x] IFS-based word splitting (WordSplitter struct with default/custom IFS)
+  - [x] Empty argument preservation (`""`)
+  - [x] Field splitting with configurable IFS (splitFieldsIfs function)
 - [x] **Expansion Caching** ✅
   - [x] LRU cache for variable expansions ✅
   - [x] LRU cache for arithmetic results ✅
-  - [ ] LRU cache for command substitutions
+  - [x] LRU cache for command substitutions ✅ (cmd_cache in Expansion struct)
   - [x] LRU cache for glob results ✅
 
 ### 10. Execution Options ✅
@@ -396,16 +396,16 @@ Many builtins are implemented but missing flags/options:
 - [x] **printf**: Full format string support (`%s`, `%d`, `%f`, etc.) ✅
 - [ ] **env**: `env VAR=value command` (temp env)
 - [ ] **export**: `-n` (unexport), `-p` (list exports)
-- [ ] **unset**: `-v` (variable), `-f` (function) flags
-- [ ] **set**: Full option support (`-e`, `-u`, `-x`, `-o pipefail`, `-o noclobber`)
+- [x] **unset**: `-v` (variable), `-f` (function) flags ✅
+- [x] **set**: Full option support (`-e`, `-E`, `-u`, `-x`, `-n`, `-v`, `-f`, `-C`, `-o pipefail`, `-o noclobber`, `-o noglob`) ✅
 - [ ] **umask**: `-S` (symbolic), `-p` (portable)
-- [ ] **jobs**: `-l` (PIDs), `-p` (PIDs only), `-r` (running), `-s` (stopped)
-- [ ] **kill**: `-l` (list signals), `-s signal`
+- [x] **jobs**: `-l` (PIDs), `-p` (PIDs only), `-r` (running), `-s` (stopped) ✅
+- [x] **kill**: `-l` (list signals), `-s signal` ✅
 - [ ] **wait**: Wait for specific job, exit code return
-- [ ] **disown**: `-h` (keep but no SIGHUP), `-a` (all), `-r` (running)
-- [ ] **type**: `-a` (all matches), `-p` (path), `-t` (type only)
-- [ ] **which**: `-a` (all matches)
-- [ ] **hash**: `-r` (clear), `-d name` (delete), `-l` (list), `-p path name` (add)
+- [x] **disown**: `-h` (keep but no SIGHUP), `-a` (all), `-r` (running) ✅
+- [x] **type**: `-a` (all matches), `-p` (path), `-t` (type only) ✅
+- [x] **which**: `-a` (all matches) ✅
+- [x] **hash**: `-r` (clear), `-d name` (delete), `-l` (list), `-p path name` (add), `-t` (print path) ✅
 - [ ] **time**: `-p` (POSIX format)
 - [ ] **trap**: `-l` (list signals), `-p` (show traps), ERR/EXIT/DEBUG/RETURN pseudo-signals
 - [ ] **timeout**: `-s signal`, `-k duration`
@@ -450,7 +450,7 @@ Many builtins are implemented but missing flags/options:
 | Foundation Libraries | 12 (9 ✅) | 🟢 Low |
 | Logging & Debugging | 7/7 ✅ | 🟢 Low |
 | Memory Management | 6 | 🟢 Low |
-| Builtin Enhancements | 25 | 🔧 Improvement |
+| Builtin Enhancements | 25 (10 ✅) | 🔧 Improvement |
 | Code Quality | 5 | 🔧 Improvement |
 | CI/CD | 5 | 🔧 Improvement |
 
@@ -638,3 +638,9 @@ The following features are production-ready:
   - `GlobCache` LRU cache in `src/utils/glob.zig`
   - `ExpansionCache` LRU cache in `src/utils/expansion.zig`
   - Config limits in `ExpansionConfig.CacheLimits` (glob: 256, variable: 256)
+- Builtin Command Enhancements (November 2025):
+  - `disown`: Added `-h` (keep but no SIGHUP), `-a` (all jobs), `-r` (running only) flags
+  - `hash`: Added `-l` (list reusable), `-d name` (delete), `-p path name` (add specific), `-t name` (print path) flags
+  - `set`: Full option support with `-o optionname` syntax for pipefail, noclobber, noglob
+  - Added `option_noglob` and `option_noclobber` shell options
+  - `jobs`, `kill`, `type`, `which`, `unset` flags already implemented

@@ -1298,10 +1298,22 @@ pub const Executor = struct {
     }
 
     fn builtinExport(self: *Executor, command: *types.ParsedCommand) !i32 {
-        // export VAR=value or export VAR or export -p
+        // export [-fnp] [VAR[=value] ...]
         if (command.args.len == 0) {
             // No args - print all exported variables (same as env for now)
             return try self.builtinEnv();
+        }
+
+        // Check for --help
+        if (command.args.len == 1 and std.mem.eql(u8, command.args[0], "--help")) {
+            try IO.print("Usage: export [-fnp] [name[=value] ...]\n", .{});
+            try IO.print("Set export attribute for shell variables.\n\n", .{});
+            try IO.print("Options:\n", .{});
+            try IO.print("  -f    treat each NAME as a shell function\n", .{});
+            try IO.print("  -n    remove the export property from NAME\n", .{});
+            try IO.print("  -p    display all exported variables and functions\n", .{});
+            try IO.print("\nWith no NAME, display all exported variables.\n", .{});
+            return 0;
         }
 
         // Check for -p flag (print in reusable format)
@@ -1385,7 +1397,10 @@ pub const Executor = struct {
             return try self.builtinEnv();
         }
 
-        for (command.args) |arg| {
+        var arg_idx: usize = 0;
+        while (arg_idx < command.args.len) {
+            const arg = command.args[arg_idx];
+
             // Handle shell options (-e, -E, +e, +E, etc.)
             if (arg.len > 0 and (arg[0] == '-' or arg[0] == '+')) {
                 const enable = arg[0] == '-';
@@ -1404,18 +1419,51 @@ pub const Executor = struct {
                         shell.option_noexec = enable;
                     } else if (std.mem.eql(u8, option, "v")) {
                         shell.option_verbose = enable;
+                    } else if (std.mem.eql(u8, option, "f")) {
+                        shell.option_noglob = enable;
+                    } else if (std.mem.eql(u8, option, "C")) {
+                        shell.option_noclobber = enable;
                     } else if (std.mem.eql(u8, option, "o")) {
-                        // set -o option_name / set +o option_name
-                        // Need to check next argument for the option name
-                        // For now, just list options if no argument
-                        try IO.print("Current option settings:\n", .{});
-                        try IO.print("errexit        {s}\n", .{if (shell.option_errexit) "on" else "off"});
-                        try IO.print("errtrace       {s}\n", .{if (shell.option_errtrace) "on" else "off"});
-                        try IO.print("xtrace         {s}\n", .{if (shell.option_xtrace) "on" else "off"});
-                        try IO.print("nounset        {s}\n", .{if (shell.option_nounset) "on" else "off"});
-                        try IO.print("pipefail       {s}\n", .{if (shell.option_pipefail) "on" else "off"});
-                        try IO.print("noexec         {s}\n", .{if (shell.option_noexec) "on" else "off"});
-                        try IO.print("verbose        {s}\n", .{if (shell.option_verbose) "on" else "off"});
+                        // set -o [option_name] / set +o [option_name]
+                        if (arg_idx + 1 < command.args.len) {
+                            // Next arg is the option name
+                            const opt_name = command.args[arg_idx + 1];
+                            if (std.mem.eql(u8, opt_name, "errexit")) {
+                                shell.option_errexit = enable;
+                            } else if (std.mem.eql(u8, opt_name, "errtrace")) {
+                                shell.option_errtrace = enable;
+                            } else if (std.mem.eql(u8, opt_name, "xtrace")) {
+                                shell.option_xtrace = enable;
+                            } else if (std.mem.eql(u8, opt_name, "nounset")) {
+                                shell.option_nounset = enable;
+                            } else if (std.mem.eql(u8, opt_name, "pipefail")) {
+                                shell.option_pipefail = enable;
+                            } else if (std.mem.eql(u8, opt_name, "noexec")) {
+                                shell.option_noexec = enable;
+                            } else if (std.mem.eql(u8, opt_name, "verbose")) {
+                                shell.option_verbose = enable;
+                            } else if (std.mem.eql(u8, opt_name, "noglob")) {
+                                shell.option_noglob = enable;
+                            } else if (std.mem.eql(u8, opt_name, "noclobber")) {
+                                shell.option_noclobber = enable;
+                            } else {
+                                try IO.eprint("den: set: {s}: invalid option name\n", .{opt_name});
+                                return 1;
+                            }
+                            arg_idx += 1; // Skip the option name
+                        } else {
+                            // No option name, list all options
+                            try IO.print("Current option settings:\n", .{});
+                            try IO.print("errexit        {s}\n", .{if (shell.option_errexit) "on" else "off"});
+                            try IO.print("errtrace       {s}\n", .{if (shell.option_errtrace) "on" else "off"});
+                            try IO.print("xtrace         {s}\n", .{if (shell.option_xtrace) "on" else "off"});
+                            try IO.print("nounset        {s}\n", .{if (shell.option_nounset) "on" else "off"});
+                            try IO.print("pipefail       {s}\n", .{if (shell.option_pipefail) "on" else "off"});
+                            try IO.print("noexec         {s}\n", .{if (shell.option_noexec) "on" else "off"});
+                            try IO.print("verbose        {s}\n", .{if (shell.option_verbose) "on" else "off"});
+                            try IO.print("noglob         {s}\n", .{if (shell.option_noglob) "on" else "off"});
+                            try IO.print("noclobber      {s}\n", .{if (shell.option_noclobber) "on" else "off"});
+                        }
                     } else {
                         try IO.eprint("den: set: unknown option: {s}\n", .{arg});
                         return 1;
@@ -1447,23 +1495,81 @@ pub const Executor = struct {
                 try IO.eprint("den: set: {s}: not a valid identifier\n", .{arg});
                 return 1;
             }
+            arg_idx += 1;
         }
 
         return 0;
     }
 
     fn builtinUnset(self: *Executor, command: *types.ParsedCommand) !i32 {
-        // unset VAR - remove variable from environment
+        // unset [-fv] [name ...]
+        // -f: unset functions only
+        // -v: unset variables only (default)
         if (command.args.len == 0) {
             try IO.eprint("den: unset: not enough arguments\n", .{});
             return 1;
         }
 
-        for (command.args) |var_name| {
-            if (self.environment.fetchRemove(var_name)) |entry| {
-                // Free the removed key and value
-                self.allocator.free(entry.key);
-                self.allocator.free(entry.value);
+        var unset_functions = false;
+        var unset_variables = true;
+        var arg_start: usize = 0;
+
+        // Parse flags
+        for (command.args, 0..) |arg, i| {
+            if (arg.len > 0 and arg[0] == '-') {
+                if (std.mem.eql(u8, arg, "-f")) {
+                    unset_functions = true;
+                    unset_variables = false;
+                    arg_start = i + 1;
+                } else if (std.mem.eql(u8, arg, "-v")) {
+                    unset_variables = true;
+                    unset_functions = false;
+                    arg_start = i + 1;
+                } else if (std.mem.eql(u8, arg, "-fv") or std.mem.eql(u8, arg, "-vf")) {
+                    unset_variables = true;
+                    unset_functions = true;
+                    arg_start = i + 1;
+                } else if (std.mem.eql(u8, arg, "--help")) {
+                    try IO.print("Usage: unset [-fv] name [...]\n", .{});
+                    try IO.print("Remove NAME from the shell environment.\n\n", .{});
+                    try IO.print("Options:\n", .{});
+                    try IO.print("  -f    treat each NAME as a shell function\n", .{});
+                    try IO.print("  -v    treat each NAME as a shell variable (default)\n", .{});
+                    return 0;
+                } else if (std.mem.eql(u8, arg, "--")) {
+                    arg_start = i + 1;
+                    break;
+                } else {
+                    try IO.eprint("den: unset: invalid option -- '{s}'\n", .{arg});
+                    return 1;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if (arg_start >= command.args.len) {
+            try IO.eprint("den: unset: not enough arguments\n", .{});
+            return 1;
+        }
+
+        // Unset variables
+        if (unset_variables) {
+            for (command.args[arg_start..]) |var_name| {
+                if (self.environment.fetchRemove(var_name)) |entry| {
+                    // Free the removed key and value
+                    self.allocator.free(entry.key);
+                    self.allocator.free(entry.value);
+                }
+            }
+        }
+
+        // Unset functions
+        if (unset_functions) {
+            if (self.shell) |shell| {
+                for (command.args[arg_start..]) |func_name| {
+                    shell.function_manager.removeFunction(func_name);
+                }
             }
         }
 
@@ -3516,20 +3622,57 @@ pub const Executor = struct {
             return 1;
         };
 
-        // If no arguments, disown all jobs
-        if (command.args.len == 0) {
+        // Parse flags: -h (keep but no SIGHUP), -a (all), -r (running only)
+        var no_hup = false; // -h: Mark for no SIGHUP but keep in job table
+        var all_jobs = false; // -a: All jobs
+        var running_only = false; // -r: Running jobs only
+        var arg_start: usize = 0;
+
+        for (command.args, 0..) |arg, i| {
+            if (arg.len > 0 and arg[0] == '-' and arg.len > 1 and arg[1] != '%') {
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'h' => no_hup = true,
+                        'a' => all_jobs = true,
+                        'r' => running_only = true,
+                        else => {
+                            try IO.eprint("den: disown: -{c}: invalid option\n", .{c});
+                            try IO.eprint("disown: usage: disown [-h] [-ar] [jobspec ... | pid ...]\n", .{});
+                            return 1;
+                        },
+                    }
+                }
+                arg_start = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        // If -a flag or no job specs, operate on all (or filtered) jobs
+        if (all_jobs or arg_start >= command.args.len) {
             for (shell_ref.background_jobs, 0..) |maybe_job, i| {
                 if (maybe_job) |job| {
-                    self.allocator.free(job.command);
-                    shell_ref.background_jobs[i] = null;
-                    shell_ref.background_jobs_count -= 1;
+                    // Filter by running status if -r is set
+                    if (running_only and job.status != .running) continue;
+
+                    if (no_hup) {
+                        // -h: Just mark for no SIGHUP (we don't actually send SIGHUP on exit anyway,
+                        // but this is for compatibility - job stays in table)
+                        // In practice, this is a no-op for our shell, but we acknowledge it
+                        continue;
+                    } else {
+                        // Remove from job table
+                        self.allocator.free(job.command);
+                        shell_ref.background_jobs[i] = null;
+                        shell_ref.background_jobs_count -= 1;
+                    }
                 }
             }
             return 0;
         }
 
         // Disown specific job(s)
-        for (command.args) |arg| {
+        for (command.args[arg_start..]) |arg| {
             var target_job_id: usize = 0;
 
             if (arg.len > 0 and arg[0] == '%') {
@@ -3544,15 +3687,26 @@ pub const Executor = struct {
                 };
             }
 
-            // Find and remove job
+            // Find and optionally remove job
             var found = false;
             for (shell_ref.background_jobs, 0..) |maybe_job, i| {
                 if (maybe_job) |job| {
                     if (job.job_id == target_job_id) {
-                        self.allocator.free(job.command);
-                        shell_ref.background_jobs[i] = null;
-                        shell_ref.background_jobs_count -= 1;
-                        found = true;
+                        // Filter by running status if -r is set
+                        if (running_only and job.status != .running) {
+                            found = true; // Found but skipped due to filter
+                            break;
+                        }
+
+                        if (no_hup) {
+                            // -h: Keep in job table, just mark for no SIGHUP
+                            found = true;
+                        } else {
+                            self.allocator.free(job.command);
+                            shell_ref.background_jobs[i] = null;
+                            shell_ref.background_jobs_count -= 1;
+                            found = true;
+                        }
                         break;
                     }
                 }
@@ -4096,20 +4250,110 @@ pub const Executor = struct {
         // hash with no args - list all cached paths
         if (command.args.len == 0) {
             var iter = shell_ref.command_cache.iterator();
+            var has_entries = false;
             while (iter.next()) |entry| {
                 try IO.print("{s}\t{s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                has_entries = true;
+            }
+            if (!has_entries) {
+                try IO.print("hash: hash table empty\n", .{});
             }
             return 0;
         }
 
-        // hash -r - clear hash table
-        if (std.mem.eql(u8, command.args[0], "-r")) {
-            var iter = shell_ref.command_cache.iterator();
-            while (iter.next()) |entry| {
-                self.allocator.free(entry.key_ptr.*);
-                self.allocator.free(entry.value_ptr.*);
+        // Parse flags
+        var arg_idx: usize = 0;
+        while (arg_idx < command.args.len) {
+            const arg = command.args[arg_idx];
+
+            // hash -r - clear hash table
+            if (std.mem.eql(u8, arg, "-r")) {
+                var iter = shell_ref.command_cache.iterator();
+                while (iter.next()) |entry| {
+                    self.allocator.free(entry.key_ptr.*);
+                    self.allocator.free(entry.value_ptr.*);
+                }
+                shell_ref.command_cache.clearRetainingCapacity();
+                arg_idx += 1;
+                continue;
             }
-            shell_ref.command_cache.clearRetainingCapacity();
+
+            // hash -l - list in reusable format
+            if (std.mem.eql(u8, arg, "-l")) {
+                var iter = shell_ref.command_cache.iterator();
+                while (iter.next()) |entry| {
+                    try IO.print("builtin hash -p {s} {s}\n", .{ entry.value_ptr.*, entry.key_ptr.* });
+                }
+                return 0;
+            }
+
+            // hash -d name - delete specific entry
+            if (std.mem.eql(u8, arg, "-d")) {
+                if (arg_idx + 1 >= command.args.len) {
+                    try IO.eprint("den: hash: -d: option requires an argument\n", .{});
+                    return 1;
+                }
+                const name = command.args[arg_idx + 1];
+                if (shell_ref.command_cache.fetchRemove(name)) |kv| {
+                    self.allocator.free(kv.key);
+                    self.allocator.free(kv.value);
+                } else {
+                    try IO.eprint("den: hash: {s}: not found\n", .{name});
+                    return 1;
+                }
+                arg_idx += 2;
+                continue;
+            }
+
+            // hash -p path name - add specific path for name
+            if (std.mem.eql(u8, arg, "-p")) {
+                if (arg_idx + 2 >= command.args.len) {
+                    try IO.eprint("den: hash: -p: option requires path and name arguments\n", .{});
+                    return 1;
+                }
+                const path = command.args[arg_idx + 1];
+                const name = command.args[arg_idx + 2];
+
+                // Remove old entry if exists
+                if (shell_ref.command_cache.fetchRemove(name)) |kv| {
+                    self.allocator.free(kv.key);
+                    self.allocator.free(kv.value);
+                }
+
+                // Add new entry with specified path
+                const key = try self.allocator.dupe(u8, name);
+                errdefer self.allocator.free(key);
+                const value = try self.allocator.dupe(u8, path);
+                errdefer self.allocator.free(value);
+                try shell_ref.command_cache.put(key, value);
+                arg_idx += 3;
+                continue;
+            }
+
+            // hash -t name... - print cached path for name
+            if (std.mem.eql(u8, arg, "-t")) {
+                if (arg_idx + 1 >= command.args.len) {
+                    try IO.eprint("den: hash: -t: option requires an argument\n", .{});
+                    return 1;
+                }
+                var found_all = true;
+                for (command.args[arg_idx + 1 ..]) |name| {
+                    if (shell_ref.command_cache.get(name)) |path| {
+                        try IO.print("{s}\n", .{path});
+                    } else {
+                        try IO.eprint("den: hash: {s}: not found\n", .{name});
+                        found_all = false;
+                    }
+                }
+                return if (found_all) 0 else 1;
+            }
+
+            // Not a flag, must be command name(s) to hash
+            break;
+        }
+
+        // If we only had -r flag with no commands, we're done
+        if (arg_idx >= command.args.len) {
             return 0;
         }
 
@@ -4120,7 +4364,7 @@ pub const Executor = struct {
         };
         defer path_list.deinit();
 
-        for (command.args) |cmd_name| {
+        for (command.args[arg_idx..]) |cmd_name| {
             if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
                 // Remove old entry if exists
                 if (shell_ref.command_cache.fetchRemove(cmd_name)) |kv| {

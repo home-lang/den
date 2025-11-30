@@ -116,6 +116,7 @@ pub const Expansion = struct {
     last_arg: []const u8, // $_
     shell: ?*anyopaque, // Optional shell reference for function local vars
     option_nounset: bool, // set -u: error on unset variable
+    cmd_cache: ?*ExpansionCache, // Optional cache for command substitution results
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), last_exit_code: i32) Expansion {
         return .{
@@ -130,6 +131,7 @@ pub const Expansion = struct {
             .last_arg = "",
             .shell = null,
             .option_nounset = false,
+            .cmd_cache = null,
         };
     }
 
@@ -154,6 +156,7 @@ pub const Expansion = struct {
             .last_arg = last_arg,
             .shell = null,
             .option_nounset = false,
+            .cmd_cache = null,
         };
     }
 
@@ -179,7 +182,13 @@ pub const Expansion = struct {
             .last_arg = last_arg,
             .shell = shell,
             .option_nounset = false,
+            .cmd_cache = null,
         };
+    }
+
+    /// Set the command substitution cache
+    pub fn setCommandCache(self: *Expansion, cache: *ExpansionCache) void {
+        self.cmd_cache = cache;
     }
 
     /// Expand all variables in a string
@@ -798,6 +807,14 @@ pub const Expansion = struct {
 
         const command = input[2..end];
 
+        // Check cache first (if available)
+        if (self.cmd_cache) |cache| {
+            if (cache.get(command)) |cached| {
+                const result = try self.allocator.dupe(u8, cached);
+                return ExpansionResult{ .value = result, .consumed = end + 1 };
+            }
+        }
+
         // Execute the command and capture output
         const output = self.executeCommandForSubstitution(command) catch {
             // On error, return empty string
@@ -811,6 +828,14 @@ pub const Expansion = struct {
         }
 
         const result = try self.allocator.dupe(u8, output[0..trimmed_len]);
+
+        // Cache the result (if cache is available)
+        if (self.cmd_cache) |cache| {
+            cache.put(command, result) catch {
+                // Caching failed, but that's okay - we have the result
+            };
+        }
+
         return ExpansionResult{ .value = result, .consumed = end + 1 };
     }
 
@@ -838,6 +863,14 @@ pub const Expansion = struct {
 
         const command = input[1..end];
 
+        // Check cache first (if available)
+        if (self.cmd_cache) |cache| {
+            if (cache.get(command)) |cached| {
+                const result = try self.allocator.dupe(u8, cached);
+                return ExpansionResult{ .value = result, .consumed = end + 1 };
+            }
+        }
+
         // Execute the command and capture output
         const output = self.executeCommandForSubstitution(command) catch {
             // On error, return empty string
@@ -851,6 +884,14 @@ pub const Expansion = struct {
         }
 
         const result = try self.allocator.dupe(u8, output[0..trimmed_len]);
+
+        // Cache the result (if cache is available)
+        if (self.cmd_cache) |cache| {
+            cache.put(command, result) catch {
+                // Caching failed, but that's okay - we have the result
+            };
+        }
+
         return ExpansionResult{ .value = result, .consumed = end + 1 };
     }
 
@@ -1149,6 +1190,204 @@ fn getUserHomeDir(username: []const u8) ?[]const u8 {
     return null;
 }
 
+/// IFS-based word splitting utilities
+/// Default IFS is space, tab, and newline
+pub const WordSplitter = struct {
+    allocator: std.mem.Allocator,
+    ifs: []const u8,
+
+    /// Default IFS value (space, tab, newline)
+    pub const default_ifs = " \t\n";
+
+    /// Initialize with environment lookup for IFS
+    pub fn init(allocator: std.mem.Allocator, environment: ?*std.StringHashMap([]const u8)) WordSplitter {
+        const ifs = if (environment) |env| env.get("IFS") orelse default_ifs else default_ifs;
+        return .{
+            .allocator = allocator,
+            .ifs = ifs,
+        };
+    }
+
+    /// Initialize with custom IFS value
+    pub fn initWithIfs(allocator: std.mem.Allocator, ifs: []const u8) WordSplitter {
+        return .{
+            .allocator = allocator,
+            .ifs = ifs,
+        };
+    }
+
+    /// Split a string into words based on IFS
+    /// Respects quoting: single quotes, double quotes preserve content
+    /// Empty IFS means no splitting
+    /// Returns array of word slices (caller must free the array)
+    pub fn split(self: *const WordSplitter, input: []const u8) ![][]const u8 {
+        // Empty IFS means no splitting - return entire input as one word
+        if (self.ifs.len == 0) {
+            var result = try self.allocator.alloc([]const u8, 1);
+            result[0] = input;
+            return result;
+        }
+
+        var words = std.ArrayList([]const u8).empty;
+        errdefer words.deinit(self.allocator);
+
+        var i: usize = 0;
+        while (i < input.len) {
+            // Skip leading IFS whitespace characters (space, tab, newline)
+            while (i < input.len and self.isIfsWhitespace(input[i])) {
+                i += 1;
+            }
+
+            if (i >= input.len) break;
+
+            // Check for non-whitespace IFS character (acts as delimiter)
+            if (self.isIfsNonWhitespace(input[i])) {
+                // Non-whitespace IFS chars create empty fields
+                try words.append(self.allocator, "");
+                i += 1;
+                continue;
+            }
+
+            // Start of a word
+            const word_start = i;
+            var in_single_quote = false;
+            var in_double_quote = false;
+
+            while (i < input.len) {
+                const c = input[i];
+
+                // Handle quoting
+                if (c == '\'' and !in_double_quote) {
+                    in_single_quote = !in_single_quote;
+                    i += 1;
+                    continue;
+                }
+                if (c == '"' and !in_single_quote) {
+                    in_double_quote = !in_double_quote;
+                    i += 1;
+                    continue;
+                }
+
+                // If not in quotes, check for IFS
+                if (!in_single_quote and !in_double_quote) {
+                    if (self.isIfsChar(c)) {
+                        break;
+                    }
+                }
+
+                i += 1;
+            }
+
+            // Add the word if non-empty
+            if (i > word_start) {
+                try words.append(self.allocator, input[word_start..i]);
+            }
+        }
+
+        return try words.toOwnedSlice(self.allocator);
+    }
+
+    /// Split and remove quotes from words
+    /// Returns newly allocated strings (caller must free each string and the array)
+    pub fn splitAndUnquote(self: *const WordSplitter, input: []const u8) ![][]const u8 {
+        const raw_words = try self.split(input);
+        defer self.allocator.free(raw_words);
+
+        var result = try self.allocator.alloc([]const u8, raw_words.len);
+        errdefer {
+            for (result) |word| {
+                if (word.len > 0) self.allocator.free(word);
+            }
+            self.allocator.free(result);
+        }
+
+        for (raw_words, 0..) |word, idx| {
+            result[idx] = try removeQuotes(self.allocator, word);
+        }
+
+        return result;
+    }
+
+    /// Check if character is an IFS character
+    fn isIfsChar(self: *const WordSplitter, c: u8) bool {
+        for (self.ifs) |ifs_char| {
+            if (c == ifs_char) return true;
+        }
+        return false;
+    }
+
+    /// Check if character is an IFS whitespace (space, tab, newline)
+    fn isIfsWhitespace(self: *const WordSplitter, c: u8) bool {
+        if (!self.isIfsChar(c)) return false;
+        return c == ' ' or c == '\t' or c == '\n';
+    }
+
+    /// Check if character is a non-whitespace IFS character
+    fn isIfsNonWhitespace(self: *const WordSplitter, c: u8) bool {
+        if (!self.isIfsChar(c)) return false;
+        return c != ' ' and c != '\t' and c != '\n';
+    }
+};
+
+/// Remove single and double quotes from a string
+/// Preserves content inside quotes, handles escape sequences in double quotes
+pub fn removeQuotes(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+    if (input.len == 0) {
+        return try allocator.dupe(u8, "");
+    }
+
+    var result = std.ArrayList(u8).empty;
+    errdefer result.deinit(allocator);
+
+    var i: usize = 0;
+    var in_single_quote = false;
+    var in_double_quote = false;
+
+    while (i < input.len) {
+        const c = input[i];
+
+        if (c == '\'' and !in_double_quote) {
+            // Toggle single quote mode, don't output the quote
+            in_single_quote = !in_single_quote;
+            i += 1;
+            continue;
+        }
+
+        if (c == '"' and !in_single_quote) {
+            // Toggle double quote mode, don't output the quote
+            in_double_quote = !in_double_quote;
+            i += 1;
+            continue;
+        }
+
+        // Handle escape sequences in double quotes
+        if (c == '\\' and in_double_quote and i + 1 < input.len) {
+            const next = input[i + 1];
+            // Only these characters are escaped in double quotes: $ ` " \ newline
+            if (next == '$' or next == '`' or next == '"' or next == '\\' or next == '\n') {
+                if (next != '\n') { // Escaped newline is removed entirely
+                    try result.append(allocator, next);
+                }
+                i += 2;
+                continue;
+            }
+        }
+
+        // Regular character
+        try result.append(allocator, c);
+        i += 1;
+    }
+
+    return try result.toOwnedSlice(allocator);
+}
+
+/// Split expanded value into words using IFS and apply to positional parameters
+/// This is the full POSIX field splitting algorithm
+pub fn splitFieldsIfs(allocator: std.mem.Allocator, value: []const u8, ifs: []const u8) ![][]const u8 {
+    var splitter = WordSplitter.initWithIfs(allocator, ifs);
+    return try splitter.split(value);
+}
+
 test "expand simple variable" {
     const allocator = std.testing.allocator;
 
@@ -1270,4 +1509,106 @@ test "expand tilde user" {
     const result = try exp.expand("~testuser/docs");
     defer allocator.free(result);
     try std.testing.expectEqualStrings("/home/testuser/docs", result);
+}
+
+test "IFS word splitting - default IFS" {
+    const allocator = std.testing.allocator;
+
+    var splitter = WordSplitter.initWithIfs(allocator, WordSplitter.default_ifs);
+
+    const words = try splitter.split("one  two\tthree\nfour");
+    defer allocator.free(words);
+
+    try std.testing.expectEqual(@as(usize, 4), words.len);
+    try std.testing.expectEqualStrings("one", words[0]);
+    try std.testing.expectEqualStrings("two", words[1]);
+    try std.testing.expectEqualStrings("three", words[2]);
+    try std.testing.expectEqualStrings("four", words[3]);
+}
+
+test "IFS word splitting - custom IFS" {
+    const allocator = std.testing.allocator;
+
+    var splitter = WordSplitter.initWithIfs(allocator, ":");
+
+    const words = try splitter.split("/usr/local/bin:/usr/bin:/bin");
+    defer allocator.free(words);
+
+    try std.testing.expectEqual(@as(usize, 3), words.len);
+    try std.testing.expectEqualStrings("/usr/local/bin", words[0]);
+    try std.testing.expectEqualStrings("/usr/bin", words[1]);
+    try std.testing.expectEqualStrings("/bin", words[2]);
+}
+
+test "IFS word splitting - empty IFS" {
+    const allocator = std.testing.allocator;
+
+    var splitter = WordSplitter.initWithIfs(allocator, "");
+
+    const words = try splitter.split("one two three");
+    defer allocator.free(words);
+
+    // Empty IFS means no splitting
+    try std.testing.expectEqual(@as(usize, 1), words.len);
+    try std.testing.expectEqualStrings("one two three", words[0]);
+}
+
+test "IFS word splitting - quoted content preserved" {
+    const allocator = std.testing.allocator;
+
+    var splitter = WordSplitter.initWithIfs(allocator, WordSplitter.default_ifs);
+
+    const words = try splitter.split("one 'two three' four");
+    defer allocator.free(words);
+
+    try std.testing.expectEqual(@as(usize, 3), words.len);
+    try std.testing.expectEqualStrings("one", words[0]);
+    try std.testing.expectEqualStrings("'two three'", words[1]);
+    try std.testing.expectEqualStrings("four", words[2]);
+}
+
+test "IFS word splitting - double quoted content preserved" {
+    const allocator = std.testing.allocator;
+
+    var splitter = WordSplitter.initWithIfs(allocator, WordSplitter.default_ifs);
+
+    const words = try splitter.split("one \"two three\" four");
+    defer allocator.free(words);
+
+    try std.testing.expectEqual(@as(usize, 3), words.len);
+    try std.testing.expectEqualStrings("one", words[0]);
+    try std.testing.expectEqualStrings("\"two three\"", words[1]);
+    try std.testing.expectEqualStrings("four", words[2]);
+}
+
+test "removeQuotes - single quotes" {
+    const allocator = std.testing.allocator;
+
+    const result = try removeQuotes(allocator, "'hello world'");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello world", result);
+}
+
+test "removeQuotes - double quotes" {
+    const allocator = std.testing.allocator;
+
+    const result = try removeQuotes(allocator, "\"hello world\"");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello world", result);
+}
+
+test "removeQuotes - mixed quotes" {
+    const allocator = std.testing.allocator;
+
+    const result = try removeQuotes(allocator, "hello 'single' and \"double\" world");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello single and double world", result);
+}
+
+test "removeQuotes - escape in double quotes" {
+    const allocator = std.testing.allocator;
+
+    const result = try removeQuotes(allocator, "\"hello \\\"world\\\"\"");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello \"world\"", result);
 }

@@ -34,6 +34,8 @@ const ansi = @import("utils/ansi.zig");
 const signals = @import("utils/signals.zig");
 const HistoryExpansion = @import("utils/history_expansion.zig").HistoryExpansion;
 const ContextCompletion = @import("utils/context_completion.zig").ContextCompletion;
+const CompletionRegistry = @import("utils/completion_registry.zig").CompletionRegistry;
+const CompletionSpec = @import("utils/completion_registry.zig").CompletionSpec;
 
 /// Extract exit status from wait status (cross-platform)
 fn getExitStatus(status: u32) i32 {
@@ -98,6 +100,8 @@ pub const Shell = struct {
     option_pipefail: bool, // set -o pipefail: pipeline returns rightmost non-zero exit
     option_noexec: bool, // set -n: read commands but don't execute (syntax check)
     option_verbose: bool, // set -v: print input lines as read
+    option_noglob: bool, // set -f: disable filename expansion (globbing)
+    option_noclobber: bool, // set -C: prevent overwriting files with >
     current_line: usize, // For error reporting
     // Script management
     script_manager: ScriptManager,
@@ -111,6 +115,8 @@ pub const Shell = struct {
     named_dirs: std.StringHashMap([]const u8),
     // Array variables (zsh-style arrays)
     arrays: std.StringHashMap([][]const u8),
+    // Custom completion specifications (like bash's complete)
+    completion_registry: CompletionRegistry,
     // Plugin system
     plugin_registry: PluginRegistry,
     plugin_manager: PluginManager,
@@ -231,6 +237,8 @@ pub const Shell = struct {
             .option_pipefail = false,
             .option_noexec = false,
             .option_verbose = false,
+            .option_noglob = false,
+            .option_noclobber = false,
             .current_line = 0,
             .script_manager = ScriptManager.init(allocator),
             .function_manager = FunctionManager.init(allocator),
@@ -238,6 +246,7 @@ pub const Shell = struct {
             .command_cache = std.StringHashMap([]const u8).init(allocator),
             .named_dirs = std.StringHashMap([]const u8).init(allocator),
             .arrays = std.StringHashMap([][]const u8).init(allocator),
+            .completion_registry = CompletionRegistry.init(allocator),
             .plugin_registry = PluginRegistry.init(allocator),
             .plugin_manager = PluginManager.init(allocator),
             .auto_suggest = null, // Initialized on demand
@@ -361,6 +370,9 @@ pub const Shell = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.arrays.deinit();
+
+        // Clean up completion registry
+        self.completion_registry.deinit();
 
         // Clean up background jobs - kill them first, then free memory
         self.killAllBackgroundJobs();
@@ -1862,108 +1874,266 @@ pub const Shell = struct {
         }
     }
 
-    /// Builtin: complete - show completions for a prefix
+    /// Builtin: complete - manage programmable completions (bash-style)
+    /// Usage:
+    ///   complete                    # List all completion specs
+    ///   complete -p [command]       # Print completion spec for command
+    ///   complete -r [command]       # Remove completion spec for command
+    ///   complete [-f|-d|-c|-a|-b|-e|-u] [-W wordlist] [-S suffix] [-P prefix] command
+    ///   complete <prefix>           # Show completions for prefix (legacy mode)
     fn builtinComplete(self: *Shell, cmd: *types.ParsedCommand) !void {
+        // No args - list all completions
         if (cmd.args.len == 0) {
-            try IO.eprint("den: complete: usage: complete [-c|-f] <prefix>\n", .{});
+            const commands = self.completion_registry.getCommands() catch &[_][]const u8{};
+            defer {
+                for (commands) |c| self.allocator.free(c);
+                self.allocator.free(commands);
+            }
+
+            if (commands.len == 0) {
+                try IO.print("No programmable completions defined.\n", .{});
+                try IO.print("Usage: complete [-fdc...] [-W wordlist] command\n", .{});
+            } else {
+                for (commands) |command| {
+                    if (self.completion_registry.get(command)) |spec| {
+                        try self.printCompletionSpec(command, spec);
+                    }
+                }
+            }
             return;
         }
 
-        var completion = Completion.init(self.allocator);
-        var prefix: []const u8 = undefined;
-        var is_command = false;
-        var is_file = false;
-
         // Parse flags
-        var arg_idx: usize = 0;
-        if (cmd.args.len >= 2) {
-            if (std.mem.eql(u8, cmd.args[0], "-c")) {
-                is_command = true;
-                prefix = cmd.args[1];
-                arg_idx = 2;
-            } else if (std.mem.eql(u8, cmd.args[0], "-f")) {
-                is_file = true;
-                prefix = cmd.args[1];
-                arg_idx = 2;
+        var print_mode = false;
+        var remove_mode = false;
+        var spec_options = CompletionSpec.Options{};
+        var wordlist_str: ?[]const u8 = null;
+        var target_commands = std.ArrayList([]const u8).empty;
+        defer target_commands.deinit(self.allocator);
+
+        var i: usize = 0;
+        while (i < cmd.args.len) : (i += 1) {
+            const arg = cmd.args[i];
+
+            if (arg.len > 0 and arg[0] == '-') {
+                if (std.mem.eql(u8, arg, "-p")) {
+                    print_mode = true;
+                } else if (std.mem.eql(u8, arg, "-r")) {
+                    remove_mode = true;
+                } else if (std.mem.eql(u8, arg, "-f")) {
+                    spec_options.filenames = true;
+                } else if (std.mem.eql(u8, arg, "-d")) {
+                    spec_options.directories = true;
+                } else if (std.mem.eql(u8, arg, "-c")) {
+                    spec_options.commands = true;
+                } else if (std.mem.eql(u8, arg, "-a")) {
+                    spec_options.aliases = true;
+                } else if (std.mem.eql(u8, arg, "-b")) {
+                    spec_options.builtins = true;
+                } else if (std.mem.eql(u8, arg, "-e")) {
+                    spec_options.variables = true;
+                } else if (std.mem.eql(u8, arg, "-u")) {
+                    spec_options.users = true;
+                } else if (std.mem.eql(u8, arg, "-W")) {
+                    // Next arg is wordlist
+                    if (i + 1 < cmd.args.len) {
+                        i += 1;
+                        wordlist_str = cmd.args[i];
+                        spec_options.use_wordlist = true;
+                    } else {
+                        try IO.eprint("den: complete: -W: option requires an argument\n", .{});
+                        return;
+                    }
+                } else if (std.mem.eql(u8, arg, "-S")) {
+                    // Next arg is suffix
+                    if (i + 1 < cmd.args.len) {
+                        i += 1;
+                        spec_options.suffix = try self.allocator.dupe(u8, cmd.args[i]);
+                    } else {
+                        try IO.eprint("den: complete: -S: option requires an argument\n", .{});
+                        return;
+                    }
+                } else if (std.mem.eql(u8, arg, "-P")) {
+                    // Next arg is prefix
+                    if (i + 1 < cmd.args.len) {
+                        i += 1;
+                        spec_options.prefix = try self.allocator.dupe(u8, cmd.args[i]);
+                    } else {
+                        try IO.eprint("den: complete: -P: option requires an argument\n", .{});
+                        return;
+                    }
+                } else if (std.mem.eql(u8, arg, "--help")) {
+                    try IO.print("Usage: complete [-prabcdefgu] [-W wordlist] [-S suffix] [-P prefix] [command ...]\n", .{});
+                    try IO.print("Specify how arguments are to be completed.\n\n", .{});
+                    try IO.print("Options:\n", .{});
+                    try IO.print("  -p          print existing completion specs in a reusable format\n", .{});
+                    try IO.print("  -r          remove completion spec for command\n", .{});
+                    try IO.print("  -f          filenames (default action)\n", .{});
+                    try IO.print("  -d          directory names\n", .{});
+                    try IO.print("  -c          command names\n", .{});
+                    try IO.print("  -a          alias names\n", .{});
+                    try IO.print("  -b          builtin command names\n", .{});
+                    try IO.print("  -e          environment variable names\n", .{});
+                    try IO.print("  -u          usernames\n", .{});
+                    try IO.print("  -W wordlist use words from wordlist\n", .{});
+                    try IO.print("  -S suffix   append suffix to each completion\n", .{});
+                    try IO.print("  -P prefix   prepend prefix to each completion\n", .{});
+                    return;
+                } else {
+                    // Legacy mode - treat as prefix
+                    var completion = Completion.init(self.allocator);
+                    try self.showLegacyCompletions(&completion, arg);
+                    return;
+                }
             } else {
-                prefix = cmd.args[0];
+                // Non-option argument - this is a command name
+                try target_commands.append(self.allocator, arg);
             }
-        } else {
-            prefix = cmd.args[0];
         }
 
-        // If no flag specified, try both
-        if (!is_command and !is_file) {
-            // Try command completion first
-            const cmd_matches = try completion.completeCommand(prefix);
-            defer {
-                for (cmd_matches) |match| {
-                    self.allocator.free(match);
+        // Handle print mode
+        if (print_mode) {
+            if (target_commands.items.len == 0) {
+                // Print all
+                const commands = self.completion_registry.getCommands() catch &[_][]const u8{};
+                defer {
+                    for (commands) |c| self.allocator.free(c);
+                    self.allocator.free(commands);
                 }
-                self.allocator.free(cmd_matches);
+                for (commands) |command| {
+                    if (self.completion_registry.get(command)) |spec| {
+                        try self.printCompletionSpec(command, spec);
+                    }
+                }
+            } else {
+                for (target_commands.items) |command| {
+                    if (self.completion_registry.get(command)) |spec| {
+                        try self.printCompletionSpec(command, spec);
+                    } else {
+                        try IO.eprint("den: complete: {s}: no completion specification\n", .{command});
+                    }
+                }
             }
+            return;
+        }
 
+        // Handle remove mode
+        if (remove_mode) {
+            if (target_commands.items.len == 0) {
+                // Remove all
+                const commands = self.completion_registry.getCommands() catch &[_][]const u8{};
+                defer {
+                    for (commands) |c| self.allocator.free(c);
+                    self.allocator.free(commands);
+                }
+                for (commands) |command| {
+                    _ = self.completion_registry.unregister(command);
+                }
+            } else {
+                for (target_commands.items) |command| {
+                    _ = self.completion_registry.unregister(command);
+                }
+            }
+            return;
+        }
+
+        // Register mode - need at least one command
+        if (target_commands.items.len == 0) {
+            // Legacy mode - no options, just print help
+            try IO.print("Usage: complete [-prabcdefgu] [-W wordlist] [-S suffix] [-P prefix] command\n", .{});
+            return;
+        }
+
+        // Parse wordlist if provided
+        var wordlist: ?[][]const u8 = null;
+        if (wordlist_str) |wl| {
+            var words = std.ArrayList([]const u8).empty;
+            errdefer words.deinit(self.allocator);
+
+            var word_iter = std.mem.tokenizeAny(u8, wl, " \t");
+            while (word_iter.next()) |word| {
+                try words.append(self.allocator, try self.allocator.dupe(u8, word));
+            }
+            wordlist = try words.toOwnedSlice(self.allocator);
+        }
+
+        // Register completions for each command
+        for (target_commands.items) |command| {
+            try self.completion_registry.register(command, .{
+                .command = command,
+                .options = spec_options,
+                .wordlist = wordlist,
+            });
+        }
+    }
+
+    /// Print completion spec in reusable format
+    fn printCompletionSpec(self: *Shell, command: []const u8, spec: CompletionSpec) !void {
+        _ = self;
+        try IO.print("complete", .{});
+        if (spec.options.filenames) try IO.print(" -f", .{});
+        if (spec.options.directories) try IO.print(" -d", .{});
+        if (spec.options.commands) try IO.print(" -c", .{});
+        if (spec.options.aliases) try IO.print(" -a", .{});
+        if (spec.options.builtins) try IO.print(" -b", .{});
+        if (spec.options.variables) try IO.print(" -e", .{});
+        if (spec.options.users) try IO.print(" -u", .{});
+        if (spec.wordlist) |wordlist| {
+            try IO.print(" -W \"", .{});
+            for (wordlist, 0..) |word, idx| {
+                if (idx > 0) try IO.print(" ", .{});
+                try IO.print("{s}", .{word});
+            }
+            try IO.print("\"", .{});
+        }
+        if (spec.options.suffix) |suffix| {
+            try IO.print(" -S \"{s}\"", .{suffix});
+        }
+        if (spec.options.prefix) |prefix| {
+            try IO.print(" -P \"{s}\"", .{prefix});
+        }
+        try IO.print(" {s}\n", .{command});
+    }
+
+    /// Show completions in legacy mode (for a prefix)
+    fn showLegacyCompletions(self: *Shell, completion: *Completion, prefix: []const u8) !void {
+        // Try command completion first
+        const cmd_matches = try completion.completeCommand(prefix);
+        defer {
+            for (cmd_matches) |match| {
+                self.allocator.free(match);
+            }
+            self.allocator.free(cmd_matches);
+        }
+
+        if (cmd_matches.len > 0) {
+            try IO.print("Commands:\n", .{});
+            for (cmd_matches) |match| {
+                try IO.print("  {s}\n", .{match});
+            }
+        }
+
+        // Try file completion
+        const file_matches = try completion.completeFile(prefix);
+        defer {
+            for (file_matches) |match| {
+                self.allocator.free(match);
+            }
+            self.allocator.free(file_matches);
+        }
+
+        if (file_matches.len > 0) {
             if (cmd_matches.len > 0) {
-                try IO.print("Commands:\n", .{});
-                for (cmd_matches) |match| {
-                    try IO.print("  {s}\n", .{match});
-                }
+                try IO.print("\n", .{});
             }
+            try IO.print("Files:\n", .{});
+            for (file_matches) |match| {
+                try IO.print("  {s}\n", .{match});
+            }
+        }
 
-            // Try file completion
-            const file_matches = try completion.completeFile(prefix);
-            defer {
-                for (file_matches) |match| {
-                    self.allocator.free(match);
-                }
-                self.allocator.free(file_matches);
-            }
-
-            if (file_matches.len > 0) {
-                if (cmd_matches.len > 0) {
-                    try IO.print("\n", .{});
-                }
-                try IO.print("Files:\n", .{});
-                for (file_matches) |match| {
-                    try IO.print("  {s}\n", .{match});
-                }
-            }
-
-            if (cmd_matches.len == 0 and file_matches.len == 0) {
-                try IO.print("No completions found.\n", .{});
-            }
-        } else if (is_command) {
-            const matches = try completion.completeCommand(prefix);
-            defer {
-                for (matches) |match| {
-                    self.allocator.free(match);
-                }
-                self.allocator.free(matches);
-            }
-
-            if (matches.len == 0) {
-                try IO.print("No command completions found.\n", .{});
-            } else {
-                for (matches) |match| {
-                    try IO.print("{s}\n", .{match});
-                }
-            }
-        } else if (is_file) {
-            const matches = try completion.completeFile(prefix);
-            defer {
-                for (matches) |match| {
-                    self.allocator.free(match);
-                }
-                self.allocator.free(matches);
-            }
-
-            if (matches.len == 0) {
-                try IO.print("No file completions found.\n", .{});
-            } else {
-                for (matches) |match| {
-                    try IO.print("{s}\n", .{match});
-                }
-            }
+        if (cmd_matches.len == 0 and file_matches.len == 0) {
+            try IO.print("No completions found.\n", .{});
         }
     }
 

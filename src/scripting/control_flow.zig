@@ -155,9 +155,20 @@ pub const CaseStatement = struct {
     }
 };
 
+/// Case clause terminator - determines behavior after executing a case
+pub const CaseTerminator = enum {
+    /// ;; - Normal termination, stop checking patterns
+    normal,
+    /// ;& - Fallthrough, execute next case body unconditionally
+    fallthrough,
+    /// ;;& - Continue, test next pattern(s)
+    continue_testing,
+};
+
 pub const CaseClause = struct {
     patterns: [][]const u8,
     body: [][]const u8,
+    terminator: CaseTerminator = .normal,
 };
 
 /// Control flow executor
@@ -419,21 +430,65 @@ pub const ControlFlowExecutor = struct {
         return last_exit;
     }
 
-    /// Execute case statement
+    /// Execute case statement with fallthrough support
+    /// Supports:
+    ///   ;; - normal termination (stop matching)
+    ///   ;& - fallthrough (execute next case body unconditionally)
+    ///   ;;& - continue testing (test next pattern, execute if matches)
     pub fn executeCase(self: *ControlFlowExecutor, stmt: *CaseStatement) !i32 {
         // Expand the value first
         const expanded_value = try self.expandValue(stmt.value);
         defer self.allocator.free(expanded_value);
 
-        for (stmt.cases) |case_clause| {
-            for (case_clause.patterns) |pattern| {
-                if (try self.matchPattern(expanded_value, pattern)) {
-                    return self.executeBody(case_clause.body);
+        var last_exit: i32 = 0;
+        var execute_next_unconditionally = false;
+
+        var i: usize = 0;
+        while (i < stmt.cases.len) : (i += 1) {
+            const case_clause = stmt.cases[i];
+            var matched = false;
+
+            // Check if we should execute unconditionally (due to ;& from previous case)
+            if (execute_next_unconditionally) {
+                matched = true;
+                execute_next_unconditionally = false;
+            } else {
+                // Check patterns
+                for (case_clause.patterns) |pattern| {
+                    if (try self.matchPattern(expanded_value, pattern)) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            if (matched) {
+                last_exit = self.executeBody(case_clause.body);
+
+                // Check for break/continue in body
+                if (self.break_requested or self.continue_requested) {
+                    return last_exit;
+                }
+
+                // Handle terminator
+                switch (case_clause.terminator) {
+                    .normal => {
+                        // ;; - stop matching, exit case statement
+                        return last_exit;
+                    },
+                    .fallthrough => {
+                        // ;& - execute next case body unconditionally
+                        execute_next_unconditionally = true;
+                    },
+                    .continue_testing => {
+                        // ;;& - continue testing next patterns normally
+                        // Just continue the loop, next iteration will test patterns
+                    },
                 }
             }
         }
 
-        return 0;
+        return last_exit;
     }
 
     /// Evaluate a condition (runs command and checks exit code)
@@ -882,6 +937,180 @@ pub const ControlFlowParser = struct {
                 .allocator = self.allocator,
             },
             .end = i,
+        };
+    }
+
+    /// Parse case statement: case VALUE in pattern1) body;; pattern2) body;; esac
+    /// Supports:
+    ///   ;; - normal termination
+    ///   ;& - fallthrough to next case body
+    ///   ;;& - continue testing patterns
+    pub fn parseCase(self: *ControlFlowParser, lines: [][]const u8, start: usize) !struct { stmt: CaseStatement, end: usize } {
+        const first_line = std.mem.trim(u8, lines[start], &std.ascii.whitespace);
+
+        if (!std.mem.startsWith(u8, first_line, "case ")) return error.InvalidCase;
+
+        // Parse: case VALUE in
+        const value_start = 5; // After "case "
+        const in_pos = std.mem.indexOf(u8, first_line[value_start..], " in") orelse return error.InvalidCase;
+        const value = try self.allocator.dupe(u8, std.mem.trim(u8, first_line[value_start..][0..in_pos], &std.ascii.whitespace));
+
+        var cases_buffer: [100]CaseClause = undefined;
+        var cases_count: usize = 0;
+
+        var current_patterns: [20][]const u8 = undefined;
+        var current_patterns_count: usize = 0;
+        var current_body: [100][]const u8 = undefined;
+        var current_body_count: usize = 0;
+        var in_case_body = false;
+
+        var i = start + 1;
+        while (i < lines.len) : (i += 1) {
+            const line = std.mem.trim(u8, lines[i], &std.ascii.whitespace);
+
+            // Skip empty lines and comments
+            if (line.len == 0 or line[0] == '#') continue;
+
+            // End of case statement
+            if (std.mem.eql(u8, line, "esac")) break;
+
+            // Check for case pattern line: pattern1|pattern2)
+            if (!in_case_body) {
+                // Look for pattern line ending with )
+                if (std.mem.indexOf(u8, line, ")")) |paren_pos| {
+                    const patterns_str = line[0..paren_pos];
+                    // Split patterns by |
+                    var pattern_iter = std.mem.splitScalar(u8, patterns_str, '|');
+                    while (pattern_iter.next()) |pattern| {
+                        const trimmed_pattern = std.mem.trim(u8, pattern, &std.ascii.whitespace);
+                        if (trimmed_pattern.len > 0) {
+                            if (current_patterns_count >= current_patterns.len) return error.TooManyPatterns;
+                            current_patterns[current_patterns_count] = try self.allocator.dupe(u8, trimmed_pattern);
+                            current_patterns_count += 1;
+                        }
+                    }
+                    in_case_body = true;
+
+                    // Check if there's inline body after the )
+                    const after_paren = line[paren_pos + 1 ..];
+                    const trimmed_after = std.mem.trim(u8, after_paren, &std.ascii.whitespace);
+                    if (trimmed_after.len > 0) {
+                        // Check for inline terminator
+                        const terminator_result = self.detectTerminator(trimmed_after);
+                        if (terminator_result.body.len > 0) {
+                            if (current_body_count >= current_body.len) return error.TooManyLines;
+                            current_body[current_body_count] = try self.allocator.dupe(u8, terminator_result.body);
+                            current_body_count += 1;
+                        }
+                        if (terminator_result.found) {
+                            // Complete this case clause
+                            if (cases_count >= cases_buffer.len) return error.TooManyCases;
+                            const patterns = try self.allocator.alloc([]const u8, current_patterns_count);
+                            @memcpy(patterns, current_patterns[0..current_patterns_count]);
+                            const body = try self.allocator.alloc([]const u8, current_body_count);
+                            @memcpy(body, current_body[0..current_body_count]);
+
+                            cases_buffer[cases_count] = CaseClause{
+                                .patterns = patterns,
+                                .body = body,
+                                .terminator = terminator_result.terminator,
+                            };
+                            cases_count += 1;
+
+                            // Reset for next case
+                            current_patterns_count = 0;
+                            current_body_count = 0;
+                            in_case_body = false;
+                        }
+                    }
+                }
+            } else {
+                // We're in a case body, look for terminator
+                const terminator_result = self.detectTerminator(line);
+                if (terminator_result.body.len > 0) {
+                    if (current_body_count >= current_body.len) return error.TooManyLines;
+                    current_body[current_body_count] = try self.allocator.dupe(u8, terminator_result.body);
+                    current_body_count += 1;
+                }
+                if (terminator_result.found) {
+                    // Complete this case clause
+                    if (cases_count >= cases_buffer.len) return error.TooManyCases;
+                    const patterns = try self.allocator.alloc([]const u8, current_patterns_count);
+                    @memcpy(patterns, current_patterns[0..current_patterns_count]);
+                    const body = try self.allocator.alloc([]const u8, current_body_count);
+                    @memcpy(body, current_body[0..current_body_count]);
+
+                    cases_buffer[cases_count] = CaseClause{
+                        .patterns = patterns,
+                        .body = body,
+                        .terminator = terminator_result.terminator,
+                    };
+                    cases_count += 1;
+
+                    // Reset for next case
+                    current_patterns_count = 0;
+                    current_body_count = 0;
+                    in_case_body = false;
+                } else if (!terminator_result.found and terminator_result.body.len == 0) {
+                    // Regular body line (no terminator detected by detectTerminator means it returned the line as body)
+                    if (current_body_count >= current_body.len) return error.TooManyLines;
+                    current_body[current_body_count] = try self.allocator.dupe(u8, line);
+                    current_body_count += 1;
+                }
+            }
+        }
+
+        const cases = try self.allocator.alloc(CaseClause, cases_count);
+        @memcpy(cases, cases_buffer[0..cases_count]);
+
+        return .{
+            .stmt = CaseStatement{
+                .value = value,
+                .cases = cases,
+                .allocator = self.allocator,
+            },
+            .end = i,
+        };
+    }
+
+    /// Detect case terminator in a line (;;, ;&, or ;;&)
+    /// Returns the body content before the terminator and the terminator type
+    fn detectTerminator(self: *ControlFlowParser, line: []const u8) struct { body: []const u8, terminator: CaseTerminator, found: bool } {
+        _ = self;
+
+        // Check for ;;& first (longest match)
+        if (std.mem.indexOf(u8, line, ";;&")) |pos| {
+            return .{
+                .body = std.mem.trim(u8, line[0..pos], &std.ascii.whitespace),
+                .terminator = .continue_testing,
+                .found = true,
+            };
+        }
+
+        // Check for ;& (fallthrough)
+        if (std.mem.indexOf(u8, line, ";&")) |pos| {
+            // Make sure it's not part of ;;& (already checked above)
+            return .{
+                .body = std.mem.trim(u8, line[0..pos], &std.ascii.whitespace),
+                .terminator = .fallthrough,
+                .found = true,
+            };
+        }
+
+        // Check for ;; (normal termination)
+        if (std.mem.indexOf(u8, line, ";;")) |pos| {
+            return .{
+                .body = std.mem.trim(u8, line[0..pos], &std.ascii.whitespace),
+                .terminator = .normal,
+                .found = true,
+            };
+        }
+
+        // No terminator found
+        return .{
+            .body = line,
+            .terminator = .normal,
+            .found = false,
         };
     }
 };
