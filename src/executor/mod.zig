@@ -626,7 +626,7 @@ pub const Executor = struct {
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
             "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
-            "show", "hide",
+            "show", "hide", "ft",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -729,6 +729,8 @@ pub const Executor = struct {
             return try self.builtinGrep(command);
         } else if (std.mem.eql(u8, command.name, "find")) {
             return try self.builtinFind(command);
+        } else if (std.mem.eql(u8, command.name, "ft")) {
+            return try self.builtinFt(command);
         } else if (std.mem.eql(u8, command.name, "calc")) {
             return try self.builtinCalc(command);
         } else if (std.mem.eql(u8, command.name, "json")) {
@@ -5264,6 +5266,244 @@ pub const Executor = struct {
             // Exact match
             return std.mem.eql(u8, name, pattern);
         }
+    }
+
+    /// Fuzzy file finder - ft [pattern] [-t type] [-d depth] [-n limit]
+    fn builtinFt(self: *Executor, command: *types.ParsedCommand) !i32 {
+        var pattern: ?[]const u8 = null;
+        var type_filter: ?u8 = null; // 'f' for file, 'd' for directory
+        var max_depth: usize = 10;
+        var max_results: usize = 50;
+        var start_path: []const u8 = ".";
+
+        // Parse arguments
+        var i: usize = 0;
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+            if (std.mem.eql(u8, arg, "-t") and i + 1 < command.args.len) {
+                const type_str = command.args[i + 1];
+                if (type_str.len >= 1) {
+                    type_filter = type_str[0];
+                }
+                i += 1;
+            } else if (std.mem.eql(u8, arg, "-d") and i + 1 < command.args.len) {
+                max_depth = std.fmt.parseInt(usize, command.args[i + 1], 10) catch 10;
+                i += 1;
+            } else if (std.mem.eql(u8, arg, "-n") and i + 1 < command.args.len) {
+                max_results = std.fmt.parseInt(usize, command.args[i + 1], 10) catch 50;
+                i += 1;
+            } else if (std.mem.eql(u8, arg, "-p") and i + 1 < command.args.len) {
+                start_path = command.args[i + 1];
+                i += 1;
+            } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+                try IO.print("ft - fuzzy file finder\n", .{});
+                try IO.print("Usage: ft [pattern] [-t f|d] [-d depth] [-n limit] [-p path]\n", .{});
+                try IO.print("Options:\n", .{});
+                try IO.print("  -t f|d    Filter by type (f=file, d=directory)\n", .{});
+                try IO.print("  -d N      Maximum depth (default: 10)\n", .{});
+                try IO.print("  -n N      Maximum results (default: 50)\n", .{});
+                try IO.print("  -p PATH   Start path (default: .)\n", .{});
+                try IO.print("Examples:\n", .{});
+                try IO.print("  ft main       Find files matching 'main'\n", .{});
+                try IO.print("  ft .zig -t f  Find .zig files only\n", .{});
+                try IO.print("  ft src -t d   Find directories matching 'src'\n", .{});
+                return 0;
+            } else if (arg[0] != '-') {
+                pattern = arg;
+            }
+        }
+
+        if (pattern == null) {
+            try IO.eprint("den: ft: missing pattern\n", .{});
+            try IO.eprint("Usage: ft [pattern] [-t f|d] [-d depth] [-n limit]\n", .{});
+            return 1;
+        }
+
+        // Collect matching files with scores
+        var results = std.ArrayList(FuzzyResult).empty;
+        defer {
+            for (results.items) |*item| {
+                self.allocator.free(item.path);
+            }
+            results.deinit(self.allocator);
+        }
+
+        try self.fuzzyFindRecursive(start_path, pattern.?, type_filter, max_depth, 0, &results, max_results * 2);
+
+        // Sort by score (descending)
+        std.mem.sort(FuzzyResult, results.items, {}, struct {
+            fn lessThan(_: void, a: FuzzyResult, b: FuzzyResult) bool {
+                return a.score > b.score; // Higher score first
+            }
+        }.lessThan);
+
+        // Print top results
+        const count = @min(results.items.len, max_results);
+        for (results.items[0..count]) |result| {
+            try IO.print("{s}\n", .{result.path});
+        }
+
+        if (results.items.len == 0) {
+            try IO.eprint("No matches found for '{s}'\n", .{pattern.?});
+            return 1;
+        }
+
+        return 0;
+    }
+
+    const FuzzyResult = struct {
+        path: []const u8,
+        score: u32,
+    };
+
+    fn fuzzyFindRecursive(
+        self: *Executor,
+        dir_path: []const u8,
+        pattern: []const u8,
+        type_filter: ?u8,
+        max_depth: usize,
+        current_depth: usize,
+        results: *std.ArrayList(FuzzyResult),
+        max_collect: usize,
+    ) !void {
+        if (current_depth >= max_depth) return;
+        if (results.items.len >= max_collect) return;
+
+        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch {
+            return;
+        };
+        defer dir.close();
+
+        var iter = dir.iterate();
+
+        while (try iter.next()) |entry| {
+            if (results.items.len >= max_collect) break;
+
+            // Skip hidden files and common unneeded directories
+            if (entry.name[0] == '.') continue;
+            if (std.mem.eql(u8, entry.name, "node_modules")) continue;
+            if (std.mem.eql(u8, entry.name, "target")) continue;
+            if (std.mem.eql(u8, entry.name, "zig-cache")) continue;
+            if (std.mem.eql(u8, entry.name, ".zig-cache")) continue;
+            if (std.mem.eql(u8, entry.name, "zig-out")) continue;
+            if (std.mem.eql(u8, entry.name, "__pycache__")) continue;
+            if (std.mem.eql(u8, entry.name, ".git")) continue;
+
+            // Check type filter
+            if (type_filter) |filter| {
+                if (filter == 'f' and entry.kind != .file) {
+                    if (entry.kind == .directory) {
+                        const full_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dir_path, entry.name });
+                        defer self.allocator.free(full_path);
+                        try self.fuzzyFindRecursive(full_path, pattern, type_filter, max_depth, current_depth + 1, results, max_collect);
+                    }
+                    continue;
+                }
+                if (filter == 'd' and entry.kind != .directory) continue;
+            }
+
+            // Calculate fuzzy match score
+            const score = fuzzyMatchScore(entry.name, pattern);
+            if (score > 0) {
+                const full_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dir_path, entry.name });
+                try results.append(self.allocator, .{ .path = full_path, .score = score });
+            }
+
+            // Recurse into directories
+            if (entry.kind == .directory) {
+                const full_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dir_path, entry.name });
+                defer self.allocator.free(full_path);
+                try self.fuzzyFindRecursive(full_path, pattern, type_filter, max_depth, current_depth + 1, results, max_collect);
+            }
+        }
+    }
+
+    /// Calculate fuzzy match score between filename and pattern
+    /// Returns 0 for no match, higher values for better matches
+    fn fuzzyMatchScore(name: []const u8, pattern: []const u8) u32 {
+        if (pattern.len == 0) return 0;
+        if (name.len == 0) return 0;
+
+        // Convert both to lowercase for case-insensitive matching
+        var name_lower: [256]u8 = undefined;
+        var pattern_lower: [256]u8 = undefined;
+
+        const name_len = @min(name.len, 255);
+        const pattern_len = @min(pattern.len, 255);
+
+        for (name[0..name_len], 0..) |c, idx| {
+            name_lower[idx] = std.ascii.toLower(c);
+        }
+        for (pattern[0..pattern_len], 0..) |c, idx| {
+            pattern_lower[idx] = std.ascii.toLower(c);
+        }
+
+        const name_lc = name_lower[0..name_len];
+        const pattern_lc = pattern_lower[0..pattern_len];
+
+        // Exact match (highest score)
+        if (std.mem.eql(u8, name_lc, pattern_lc)) {
+            return 1000;
+        }
+
+        // Starts with pattern (high score)
+        if (std.mem.startsWith(u8, name_lc, pattern_lc)) {
+            return 800;
+        }
+
+        // Contains pattern as substring (medium-high score)
+        if (std.mem.indexOf(u8, name_lc, pattern_lc) != null) {
+            return 600;
+        }
+
+        // Ends with pattern (medium score)
+        if (std.mem.endsWith(u8, name_lc, pattern_lc)) {
+            return 500;
+        }
+
+        // Fuzzy match: all pattern chars appear in order
+        var score: u32 = 0;
+        var name_idx: usize = 0;
+        var consecutive: u32 = 0;
+        var first_match: bool = true;
+
+        for (pattern_lc) |pc| {
+            var found = false;
+            while (name_idx < name_len) : (name_idx += 1) {
+                if (name_lc[name_idx] == pc) {
+                    found = true;
+                    score += 10;
+
+                    // Bonus for consecutive matches
+                    if (consecutive > 0) {
+                        score += consecutive * 5;
+                    }
+                    consecutive += 1;
+
+                    // Bonus for matching at start
+                    if (first_match and name_idx == 0) {
+                        score += 50;
+                    }
+
+                    // Bonus for matching after separator (., -, _, /)
+                    if (name_idx > 0) {
+                        const prev = name_lc[name_idx - 1];
+                        if (prev == '.' or prev == '-' or prev == '_' or prev == '/') {
+                            score += 30;
+                        }
+                    }
+
+                    first_match = false;
+                    name_idx += 1;
+                    break;
+                } else {
+                    consecutive = 0;
+                }
+            }
+            if (!found) return 0; // Pattern char not found
+        }
+
+        return score;
     }
 
     fn builtinCalc(self: *Executor, command: *types.ParsedCommand) !i32 {

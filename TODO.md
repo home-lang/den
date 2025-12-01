@@ -172,11 +172,11 @@
 - [ ] **Brace Expansion**
   - [x] Nested brace expansion
   - [x] Zero-padding support (`{01..10}`)
-- [ ] **Process Substitution**
-  - [ ] `<(command)` (create temp file with command output)
-  - [ ] `>(command)` (create temp file as command input)
-  - [ ] Named pipe creation
-  - [ ] Cleanup on command completion
+- [x] **Process Substitution** ✅
+  - [x] `<(command)` (create pipe with command output) ✅
+  - [x] `>(command)` (create pipe as command input) ✅
+  - [x] Pipe-based implementation using /dev/fd/N ✅
+  - [x] Cleanup handled by OS on process exit ✅
 - [x] **Quote Removal & Word Splitting** ✅
   - [x] Quote removal (removeQuotes function)
   - [x] IFS-based word splitting (WordSplitter struct with default/custom IFS)
@@ -251,7 +251,7 @@
   - [x] `reloaddns` - Reload DNS cache (macOS) ✅
   - [x] `emptytrash` - Empty trash (macOS) ✅
   - [x] `copyssh` - Copy SSH key to clipboard ✅
-  - [ ] `ft` - Fuzzy file finder
+  - [x] `ft` - Fuzzy file finder ✅
   - [x] `web` - Open URL in browser ✅
 - [x] **Productivity**
   - [x] `shrug` - Print shrug emoticon ✅
