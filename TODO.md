@@ -270,7 +270,7 @@
   - [ ] `proc-monitor` - Process monitoring
   - [x] `sys-stats` - System statistics ✅
   - [x] `netstats` - Network statistics ✅
-  - [ ] `net-check` - Network connectivity check
+  - [x] `net-check` - Network connectivity check ✅
 - [ ] **Dotfiles**
   - [ ] `dotfiles` - Dotfiles management helper
 
@@ -286,7 +286,7 @@
   - [x] Create getting started guide ✅ (docs/intro.md, docs/install.md)
   - [x] Create configuration guide ✅ (docs/config.md)
   - [x] Create builtin command reference ✅ (docs/BUILTINS.md - fully updated)
-  - [ ] Create scripting guide
+  - [x] Create scripting guide ✅ (docs/SCRIPTING.md)
   - [ ] Create plugin development guide
   - [ ] Create theme customization guide
   - [ ] Create troubleshooting guide

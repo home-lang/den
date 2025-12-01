@@ -626,7 +626,7 @@ pub const Executor = struct {
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
             "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
-            "show", "hide", "ft", "sys-stats", "netstats",
+            "show", "hide", "ft", "sys-stats", "netstats", "net-check",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -783,6 +783,8 @@ pub const Executor = struct {
             return try self.builtinSysStats(command);
         } else if (std.mem.eql(u8, command.name, "netstats")) {
             return try self.builtinNetstats(command);
+        } else if (std.mem.eql(u8, command.name, "net-check")) {
+            return try self.builtinNetCheck(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -7713,6 +7715,156 @@ pub const Executor = struct {
             } else {
                 try IO.print("  (connection info not available on this platform)\n", .{});
             }
+        }
+
+        return 0;
+    }
+
+    fn builtinNetCheck(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // Check for help
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+                try IO.print("net-check - check network connectivity\n", .{});
+                try IO.print("Usage: net-check [options] [host]\n", .{});
+                try IO.print("Options:\n", .{});
+                try IO.print("  -q, --quiet   Only return exit code (0=ok, 1=fail)\n", .{});
+                try IO.print("  -p, --port    Check specific port (e.g., -p 443)\n", .{});
+                try IO.print("\nExamples:\n", .{});
+                try IO.print("  net-check                  # Check default (google.com)\n", .{});
+                try IO.print("  net-check example.com      # Check specific host\n", .{});
+                try IO.print("  net-check -p 443 example.com  # Check port 443\n", .{});
+                return 0;
+            }
+        }
+
+        var quiet = false;
+        var port: ?[]const u8 = null;
+        var host: []const u8 = "google.com";
+        var i: usize = 0;
+
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+            if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, "--quiet")) {
+                quiet = true;
+            } else if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "--port")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    port = command.args[i];
+                }
+            } else if (arg.len > 0 and arg[0] != '-') {
+                host = arg;
+            }
+        }
+
+        if (!quiet) {
+            try IO.print("\x1b[1;36m=== Network Connectivity Check ===\x1b[0m\n\n", .{});
+        }
+
+        // Use curl or nc to check connectivity (cross-platform via external command)
+        if (port) |p| {
+            if (!quiet) {
+                try IO.print("\x1b[1;33mPort Check:\x1b[0m {s}:{s}\n", .{ host, p });
+            }
+
+            // Use nc (netcat) for port check
+            const host_z = try self.allocator.dupeZ(u8, host);
+            defer self.allocator.free(host_z);
+            const port_z = try self.allocator.dupeZ(u8, p);
+            defer self.allocator.free(port_z);
+
+            const argv = [_]?[*:0]const u8{
+                "nc",
+                "-z",
+                "-w",
+                "3",
+                host_z,
+                port_z,
+                null,
+            };
+
+            const pid = std.posix.fork() catch {
+                if (!quiet) {
+                    try IO.print("  \x1b[1;31m✗\x1b[0m Failed to fork process\n", .{});
+                }
+                return 1;
+            };
+
+            if (pid == 0) {
+                // Child: redirect stderr to /dev/null
+                const dev_null = std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+                std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
+                std.posix.dup2(dev_null.handle, std.posix.STDOUT_FILENO) catch {};
+
+                _ = std.posix.execvpeZ("nc", @ptrCast(&argv), getCEnviron()) catch {
+                    std.posix.exit(127);
+                };
+                unreachable;
+            } else {
+                const result = std.posix.waitpid(pid, 0);
+                const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+
+                if (code == 0) {
+                    if (!quiet) {
+                        try IO.print("  \x1b[1;32m✓\x1b[0m Port {s} is open\n", .{p});
+                    }
+                } else {
+                    if (!quiet) {
+                        try IO.print("  \x1b[1;31m✗\x1b[0m Port {s} is closed or unreachable\n", .{p});
+                    }
+                    return 1;
+                }
+            }
+        } else {
+            // Default: ping check
+            if (!quiet) {
+                try IO.print("\x1b[1;33mConnectivity Check:\x1b[0m {s}\n", .{host});
+            }
+
+            const host_z = try self.allocator.dupeZ(u8, host);
+            defer self.allocator.free(host_z);
+
+            // Use ping with count 1 and timeout 3 seconds
+            const argv = if (builtin.os.tag == .macos)
+                [_]?[*:0]const u8{ "ping", "-c", "1", "-t", "3", host_z, null }
+            else
+                [_]?[*:0]const u8{ "ping", "-c", "1", "-W", "3", host_z, null };
+
+            const pid = std.posix.fork() catch {
+                if (!quiet) {
+                    try IO.print("  \x1b[1;31m✗\x1b[0m Failed to fork process\n", .{});
+                }
+                return 1;
+            };
+
+            if (pid == 0) {
+                // Child: redirect output to /dev/null
+                const dev_null = std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+                std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
+                std.posix.dup2(dev_null.handle, std.posix.STDOUT_FILENO) catch {};
+
+                _ = std.posix.execvpeZ("ping", @ptrCast(&argv), getCEnviron()) catch {
+                    std.posix.exit(127);
+                };
+                unreachable;
+            } else {
+                const result = std.posix.waitpid(pid, 0);
+                const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+
+                if (code == 0) {
+                    if (!quiet) {
+                        try IO.print("  \x1b[1;32m✓\x1b[0m Host is reachable\n", .{});
+                    }
+                } else {
+                    if (!quiet) {
+                        try IO.print("  \x1b[1;31m✗\x1b[0m Host is unreachable\n", .{});
+                    }
+                    return 1;
+                }
+            }
+        }
+
+        if (!quiet) {
+            try IO.print("\n\x1b[1;32mNetwork is reachable\x1b[0m\n", .{});
         }
 
         return 0;

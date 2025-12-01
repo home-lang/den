@@ -28,6 +28,10 @@ Den Shell provides a comprehensive set of built-in commands that are optimized f
   - [localip - Show Local IP](#localip---show-local-ip)
   - [ip - Show IP Address](#ip---show-ip-address)
   - [web - Open URL in Browser](#web---open-url-in-browser)
+  - [net-check - Network Connectivity Check](#net-check---network-connectivity-check)
+- [System Commands](#system-commands)
+  - [sys-stats - System Statistics](#sys-stats---system-statistics)
+  - [netstats - Network Statistics](#netstats---network-statistics)
 - [Shell Control](#shell-control)
   - [exit - Exit Shell](#exit---exit-shell)
   - [export - Set Environment Variables](#export---set-environment-variables)
@@ -812,6 +816,153 @@ web https://github.com
 web http://localhost:3000
 # Opens local development server
 ```
+
+---
+
+### net-check - Network Connectivity Check
+
+Check network connectivity to a host, optionally testing a specific port.
+
+#### Syntax
+
+```bash
+net-check [OPTIONS] [HOST]
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-q`, `--quiet` | Only return exit code (0=ok, 1=fail) |
+| `-p`, `--port` | Check specific port connectivity |
+
+#### Examples
+
+```bash
+net-check
+# Check connectivity to google.com (default)
+# Output:
+# === Network Connectivity Check ===
+# Connectivity Check: google.com
+#   ✓ Host is reachable
+# Network is reachable
+
+net-check example.com
+# Check specific host
+
+net-check -p 443 example.com
+# Check if port 443 is open on example.com
+# Output:
+# === Network Connectivity Check ===
+# Connectivity Check: example.com
+#   ✓ Host is reachable
+# Port Check: example.com:443
+#   ✓ Port 443 is open
+# Network is reachable
+
+net-check -q google.com && echo "Online" || echo "Offline"
+# Quiet mode for scripting
+```
+
+#### Exit Codes
+
+- `0`: Host (and port if specified) is reachable
+- `1`: Connection failed
+
+#### Use Cases
+
+- **Health checks**: Verify connectivity before running network-dependent scripts
+- **Monitoring**: Quick connectivity tests in automation
+- **Debugging**: Test if specific ports are accessible
+
+---
+
+## System Commands
+
+### sys-stats - System Statistics
+
+Display system statistics including CPU, memory, disk usage, and uptime.
+
+#### Syntax
+
+```bash
+sys-stats
+```
+
+#### Example
+
+```bash
+sys-stats
+# Output:
+# === System Statistics ===
+#
+# CPU Info:
+#   Architecture: arm64
+#
+# Memory Info:
+#   Total: 16.00 GB
+#   Used: 12.34 GB
+#   Free: 3.66 GB
+#   Usage: 77.1%
+#
+# Disk Info:
+#   Total: 500.00 GB
+#   Free: 125.00 GB
+#   Used: 375.00 GB
+#   Usage: 75.0%
+#
+# System:
+#   Uptime: 5 days, 3 hours, 45 minutes
+```
+
+#### Information Displayed
+
+| Section | Details |
+|---------|---------|
+| **CPU Info** | Architecture (arm64, x86_64, etc.) |
+| **Memory Info** | Total, used, free RAM and usage percentage |
+| **Disk Info** | Total, used, free disk space for root volume |
+| **System** | System uptime in human-readable format |
+
+---
+
+### netstats - Network Statistics
+
+Display network interface information and connection statistics.
+
+#### Syntax
+
+```bash
+netstats
+```
+
+#### Example
+
+```bash
+netstats
+# Output:
+# === Network Statistics ===
+#
+# Network Interfaces:
+#   lo0: 127.0.0.1
+#   en0: 192.168.1.100
+#   en1: 10.0.0.50
+#
+# Active Connections (TCP):
+#   State: ESTABLISHED - Count: 15
+#   State: LISTEN - Count: 8
+#   State: TIME_WAIT - Count: 3
+#
+# Total TCP Connections: 26
+```
+
+#### Information Displayed
+
+| Section | Details |
+|---------|---------|
+| **Network Interfaces** | All network interfaces with their IP addresses |
+| **Active Connections** | TCP connections grouped by state |
+| **Total Connections** | Sum of all TCP connections |
 
 ---
 
