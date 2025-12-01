@@ -34,6 +34,8 @@ Den Shell provides a comprehensive set of built-in commands that are optimized f
   - [netstats - Network Statistics](#netstats---network-statistics)
   - [log-tail - Tail Log Files](#log-tail---tail-log-files)
   - [proc-monitor - Process Monitor](#proc-monitor---process-monitor)
+  - [log-parse - Parse Structured Logs](#log-parse---parse-structured-logs)
+  - [dotfiles - Dotfiles Management](#dotfiles---dotfiles-management)
 - [Shell Control](#shell-control)
   - [exit - Exit Shell](#exit---exit-shell)
   - [export - Set Environment Variables](#export---set-environment-variables)
@@ -1092,6 +1094,153 @@ proc-monitor docker
 - **Performance monitoring**: Track resource-heavy processes
 - **Debugging**: Monitor specific application processes
 - **System administration**: Check overall process health
+
+---
+
+### log-parse - Parse Structured Logs
+
+Parse and query structured log files in JSON, key-value, or CSV formats.
+
+#### Syntax
+
+```bash
+log-parse [OPTIONS] FILE
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--format FORMAT` | Log format: json, kv, csv, auto (default) |
+| `-s`, `--select FIELDS` | Select specific fields (comma-separated) |
+| `-w`, `--where EXPR` | Filter by field=value |
+| `-c`, `--count` | Only show count of matching lines |
+| `-p`, `--pretty` | Pretty print with colors |
+
+#### Supported Formats
+
+| Format | Example |
+|--------|---------|
+| **JSON** | `{"level":"INFO","msg":"Started"}` |
+| **Key-Value** | `level=INFO msg="Started"` |
+| **CSV** | `level,timestamp,message` (first line is header) |
+
+#### Examples
+
+```bash
+log-parse app.log
+# Auto-detect format and show all fields
+
+log-parse -f json server.log
+# Explicitly parse as JSON
+
+log-parse -s level,message app.log
+# Select only level and message fields
+
+log-parse -w level=ERROR app.log
+# Filter for error lines only
+
+log-parse -c -w level=ERROR app.log
+# Count number of errors
+
+log-parse -p -w level=WARN app.log
+# Pretty print warnings with colors
+```
+
+#### Color Coding
+
+When using `-p/--pretty`, log levels are color-coded:
+
+| Level | Color |
+|-------|-------|
+| ERROR, FATAL | Red |
+| WARN | Yellow |
+| INFO | Green |
+| DEBUG, TRACE | Dim |
+
+#### Use Cases
+
+- **Log analysis**: Extract specific fields from logs
+- **Error counting**: Count errors without reading full logs
+- **Structured queries**: Filter logs by specific criteria
+
+---
+
+### dotfiles - Dotfiles Management
+
+Manage your dotfiles with backup, linking, and editing capabilities.
+
+#### Syntax
+
+```bash
+dotfiles <command> [args]
+```
+
+#### Commands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List tracked dotfiles in home directory |
+| `status` | Show status of common dotfiles |
+| `link <file>` | Create symlink from current dir to home |
+| `unlink <file>` | Remove symlink |
+| `backup <file>` | Create .bak backup of dotfile |
+| `restore <file>` | Restore from .bak backup |
+| `edit <file>` | Open dotfile in $EDITOR |
+| `diff <file>` | Show diff between file and backup |
+
+#### Examples
+
+```bash
+dotfiles list
+# List all dotfiles in home directory
+
+dotfiles status
+# Show status of common dotfiles (.bashrc, .zshrc, etc.)
+
+dotfiles backup .zshrc
+# Create ~/.zshrc.bak
+
+dotfiles edit .gitconfig
+# Open ~/.gitconfig in your editor
+
+dotfiles link .vimrc
+# Create symlink: ~/.vimrc → $(pwd)/.vimrc
+
+dotfiles diff .zshrc
+# Show differences between .zshrc and .zshrc.bak
+```
+
+#### Status Indicators
+
+| Status | Meaning |
+|--------|---------|
+| `[ok]` | File exists and is normal |
+| `[symlink]` | File is a symbolic link |
+| `[modified]` | Backup exists (may have changes) |
+| `[missing]` | File doesn't exist |
+
+#### Workflow Example
+
+```bash
+# 1. Backup existing dotfile
+dotfiles backup .zshrc
+
+# 2. Make changes
+dotfiles edit .zshrc
+
+# 3. View changes
+dotfiles diff .zshrc
+
+# 4. If needed, restore backup
+dotfiles restore .zshrc
+```
+
+#### Use Cases
+
+- **Dotfile management**: Track and manage configuration files
+- **Safe editing**: Backup before making changes
+- **Symlink setup**: Link dotfiles from a central repository
 
 ---
 

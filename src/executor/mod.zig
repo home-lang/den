@@ -626,7 +626,7 @@ pub const Executor = struct {
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
             "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
-            "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor",
+            "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor", "log-parse", "dotfiles",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -789,6 +789,10 @@ pub const Executor = struct {
             return try self.builtinLogTail(command);
         } else if (std.mem.eql(u8, command.name, "proc-monitor")) {
             return try self.builtinProcMonitor(command);
+        } else if (std.mem.eql(u8, command.name, "log-parse")) {
+            return try self.builtinLogParse(command);
+        } else if (std.mem.eql(u8, command.name, "dotfiles")) {
+            return try self.builtinDotfiles(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -8248,7 +8252,803 @@ pub const Executor = struct {
 
         return 0;
     }
+
+    /// log-parse builtin - parse structured logs
+    fn builtinLogParse(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // Parse options
+        var format: enum { auto, json, kv, csv } = .auto;
+        var fields: ?[]const u8 = null;
+        var filter_field: ?[]const u8 = null;
+        var filter_value: ?[]const u8 = null;
+        var file_path: ?[]const u8 = null;
+        var show_help = false;
+        var pretty = false;
+        var count_only = false;
+
+        var i: usize = 0;
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+            if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+                show_help = true;
+            } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--format")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    const fmt = command.args[i];
+                    if (std.mem.eql(u8, fmt, "json")) format = .json
+                    else if (std.mem.eql(u8, fmt, "kv")) format = .kv
+                    else if (std.mem.eql(u8, fmt, "csv")) format = .csv
+                    else format = .auto;
+                }
+            } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--select")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    fields = command.args[i];
+                }
+            } else if (std.mem.eql(u8, arg, "-w") or std.mem.eql(u8, arg, "--where")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    const where_clause = command.args[i];
+                    // Parse field=value
+                    if (std.mem.indexOf(u8, where_clause, "=")) |eq_idx| {
+                        filter_field = where_clause[0..eq_idx];
+                        filter_value = where_clause[eq_idx + 1 ..];
+                    }
+                }
+            } else if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "--pretty")) {
+                pretty = true;
+            } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--count")) {
+                count_only = true;
+            } else if (arg.len > 0 and arg[0] != '-') {
+                file_path = arg;
+            }
+        }
+
+        if (show_help) {
+            try IO.print("log-parse - parse structured log files\n", .{});
+            try IO.print("Usage: log-parse [options] FILE\n", .{});
+            try IO.print("       cat FILE | log-parse [options]\n", .{});
+            try IO.print("\nFormats:\n", .{});
+            try IO.print("  -f, --format FORMAT  Log format: json, kv, csv, auto (default)\n", .{});
+            try IO.print("\nFiltering:\n", .{});
+            try IO.print("  -s, --select FIELDS  Select specific fields (comma-separated)\n", .{});
+            try IO.print("  -w, --where EXPR     Filter by field=value\n", .{});
+            try IO.print("  -c, --count          Only show count of matching lines\n", .{});
+            try IO.print("\nOutput:\n", .{});
+            try IO.print("  -p, --pretty         Pretty print output\n", .{});
+            try IO.print("\nExamples:\n", .{});
+            try IO.print("  log-parse app.log                    # Auto-detect format\n", .{});
+            try IO.print("  log-parse -f json server.log         # Parse JSON logs\n", .{});
+            try IO.print("  log-parse -s level,message app.log   # Select fields\n", .{});
+            try IO.print("  log-parse -w level=ERROR app.log     # Filter by level\n", .{});
+            try IO.print("  log-parse -c -w level=ERROR app.log  # Count errors\n", .{});
+            try IO.print("\nSupported formats:\n", .{});
+            try IO.print("  json: ", .{});
+            try IO.print("{s}\n", .{"{\"level\":\"INFO\",\"msg\":\"...\"}"});
+            try IO.print("  kv:   level=INFO msg=\"message here\"\n", .{});
+            try IO.print("  csv:  level,timestamp,message (first line is header)\n", .{});
+            return 0;
+        }
+
+        // Read input
+        var content_buf: [1024 * 1024]u8 = undefined; // 1MB buffer
+        var content_len: usize = 0;
+
+        if (file_path) |path| {
+            const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+                try IO.eprint("log-parse: cannot open '{s}': {}\n", .{ path, err });
+                return 1;
+            };
+            defer file.close();
+
+            while (content_len < content_buf.len) {
+                const n = file.read(content_buf[content_len..]) catch break;
+                if (n == 0) break;
+                content_len += n;
+            }
+        } else {
+            try IO.eprint("log-parse: no file specified\n", .{});
+            return 1;
+        }
+
+        const content = content_buf[0..content_len];
+
+        // Process lines
+        var line_count: usize = 0;
+        var match_count: usize = 0;
+        var csv_headers: ?[]const u8 = null;
+
+        var lines = std.mem.splitScalar(u8, content, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            line_count += 1;
+
+            // Auto-detect format on first line
+            var line_format = format;
+            if (format == .auto) {
+                if (line.len > 0 and line[0] == '{') {
+                    line_format = .json;
+                } else if (std.mem.indexOf(u8, line, "=") != null) {
+                    line_format = .kv;
+                } else if (std.mem.indexOf(u8, line, ",") != null) {
+                    line_format = .csv;
+                } else {
+                    line_format = .kv; // Default fallback
+                }
+            }
+
+            // Parse line based on format
+            var field_map: [32]struct { key: []const u8, value: []const u8 } = undefined;
+            var field_count: usize = 0;
+
+            switch (line_format) {
+                .json => {
+                    // Simple JSON parsing (key-value pairs only)
+                    var in_key = false;
+                    var in_value = false;
+                    var in_string = false;
+                    var key_start: usize = 0;
+                    var key_end: usize = 0;
+                    var value_start: usize = 0;
+
+                    for (line, 0..) |c, idx| {
+                        if (c == '"' and (idx == 0 or line[idx - 1] != '\\')) {
+                            if (!in_string) {
+                                in_string = true;
+                                if (!in_key and !in_value) {
+                                    in_key = true;
+                                    key_start = idx + 1;
+                                } else if (in_value) {
+                                    value_start = idx + 1;
+                                }
+                            } else {
+                                in_string = false;
+                                if (in_key) {
+                                    key_end = idx;
+                                } else if (in_value and field_count < field_map.len) {
+                                    field_map[field_count] = .{
+                                        .key = line[key_start..key_end],
+                                        .value = line[value_start..idx],
+                                    };
+                                    field_count += 1;
+                                    in_value = false;
+                                }
+                            }
+                        } else if (c == ':' and !in_string and in_key) {
+                            in_key = false;
+                            in_value = true;
+                        } else if ((c == ',' or c == '}') and !in_string and in_value) {
+                            // Handle non-string values
+                            if (value_start == 0) {
+                                // Find value start (skip whitespace after :)
+                                var vs: usize = key_end + 1;
+                                while (vs < idx and (line[vs] == ':' or line[vs] == ' ')) : (vs += 1) {}
+                                if (field_count < field_map.len) {
+                                    field_map[field_count] = .{
+                                        .key = line[key_start..key_end],
+                                        .value = std.mem.trim(u8, line[vs..idx], " \t"),
+                                    };
+                                    field_count += 1;
+                                }
+                            }
+                            in_value = false;
+                            value_start = 0;
+                        }
+                    }
+                },
+                .kv => {
+                    // Parse key=value format
+                    var tokens = std.mem.tokenizeScalar(u8, line, ' ');
+                    while (tokens.next()) |token| {
+                        if (std.mem.indexOf(u8, token, "=")) |eq_idx| {
+                            if (field_count < field_map.len) {
+                                var value = token[eq_idx + 1 ..];
+                                // Strip quotes if present
+                                if (value.len >= 2 and value[0] == '"' and value[value.len - 1] == '"') {
+                                    value = value[1 .. value.len - 1];
+                                }
+                                field_map[field_count] = .{
+                                    .key = token[0..eq_idx],
+                                    .value = value,
+                                };
+                                field_count += 1;
+                            }
+                        }
+                    }
+                },
+                .csv => {
+                    // Parse CSV format
+                    if (line_count == 1) {
+                        csv_headers = line;
+                        continue; // Skip header line for output
+                    }
+
+                    if (csv_headers) |headers| {
+                        var header_iter = std.mem.splitScalar(u8, headers, ',');
+                        var value_iter = std.mem.splitScalar(u8, line, ',');
+
+                        while (header_iter.next()) |header| {
+                            if (value_iter.next()) |value| {
+                                if (field_count < field_map.len) {
+                                    field_map[field_count] = .{
+                                        .key = std.mem.trim(u8, header, " \t\""),
+                                        .value = std.mem.trim(u8, value, " \t\""),
+                                    };
+                                    field_count += 1;
+                                }
+                            }
+                        }
+                    }
+                },
+                .auto => unreachable,
+            }
+
+            // Apply filter
+            if (filter_field) |ff| {
+                var matches = false;
+                for (field_map[0..field_count]) |field| {
+                    if (std.mem.eql(u8, field.key, ff)) {
+                        if (filter_value) |fv| {
+                            if (std.mem.indexOf(u8, field.value, fv) != null) {
+                                matches = true;
+                            }
+                        } else {
+                            matches = true;
+                        }
+                        break;
+                    }
+                }
+                if (!matches) continue;
+            }
+
+            match_count += 1;
+
+            if (count_only) continue;
+
+            // Output
+            if (fields) |selected| {
+                // Select specific fields
+                var field_list = std.mem.splitScalar(u8, selected, ',');
+                var first = true;
+                while (field_list.next()) |wanted| {
+                    for (field_map[0..field_count]) |field| {
+                        if (std.mem.eql(u8, field.key, wanted)) {
+                            if (!first) try IO.print(" ", .{});
+                            if (pretty) {
+                                try IO.print("\x1b[1;36m{s}\x1b[0m=\x1b[33m{s}\x1b[0m", .{ field.key, field.value });
+                            } else {
+                                try IO.print("{s}", .{field.value});
+                            }
+                            first = false;
+                            break;
+                        }
+                    }
+                }
+                try IO.print("\n", .{});
+            } else {
+                // Output all fields
+                if (pretty) {
+                    for (field_map[0..field_count], 0..) |field, idx| {
+                        if (idx > 0) try IO.print(" ", .{});
+                        // Color code common fields
+                        const color = if (std.mem.eql(u8, field.key, "level") or std.mem.eql(u8, field.key, "severity"))
+                            getLevelColor(field.value)
+                        else
+                            "\x1b[0m";
+                        try IO.print("\x1b[1;36m{s}\x1b[0m={s}{s}\x1b[0m", .{ field.key, color, field.value });
+                    }
+                    try IO.print("\n", .{});
+                } else {
+                    for (field_map[0..field_count], 0..) |field, idx| {
+                        if (idx > 0) try IO.print("\t", .{});
+                        try IO.print("{s}={s}", .{ field.key, field.value });
+                    }
+                    try IO.print("\n", .{});
+                }
+            }
+        }
+
+        if (count_only) {
+            try IO.print("{}\n", .{match_count});
+        }
+
+        _ = self;
+        return 0;
+    }
+
+    /// dotfiles builtin - manage dotfiles
+    fn builtinDotfiles(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        if (command.args.len == 0) {
+            try IO.print("dotfiles - manage your dotfiles\n", .{});
+            try IO.print("Usage: dotfiles <command> [args]\n", .{});
+            try IO.print("\nCommands:\n", .{});
+            try IO.print("  list              List tracked dotfiles\n", .{});
+            try IO.print("  status            Show status of dotfiles\n", .{});
+            try IO.print("  link <file>       Create symlink for dotfile\n", .{});
+            try IO.print("  unlink <file>     Remove symlink\n", .{});
+            try IO.print("  backup <file>     Backup a dotfile\n", .{});
+            try IO.print("  restore <file>    Restore from backup\n", .{});
+            try IO.print("  edit <file>       Edit a dotfile\n", .{});
+            try IO.print("  diff <file>       Show diff with backup\n", .{});
+            try IO.print("\nCommon dotfiles:\n", .{});
+            try IO.print("  .bashrc, .zshrc, .vimrc, .gitconfig, .tmux.conf\n", .{});
+            try IO.print("  .config/*, .ssh/config\n", .{});
+            return 0;
+        }
+
+        const subcmd = command.args[0];
+
+        if (std.mem.eql(u8, subcmd, "list")) {
+            return try dotfilesList();
+        } else if (std.mem.eql(u8, subcmd, "status")) {
+            return try dotfilesStatus();
+        } else if (std.mem.eql(u8, subcmd, "link")) {
+            if (command.args.len < 2) {
+                try IO.eprint("dotfiles link: missing file argument\n", .{});
+                return 1;
+            }
+            return try dotfilesLink(command.args[1]);
+        } else if (std.mem.eql(u8, subcmd, "unlink")) {
+            if (command.args.len < 2) {
+                try IO.eprint("dotfiles unlink: missing file argument\n", .{});
+                return 1;
+            }
+            return try dotfilesUnlink(command.args[1]);
+        } else if (std.mem.eql(u8, subcmd, "backup")) {
+            if (command.args.len < 2) {
+                try IO.eprint("dotfiles backup: missing file argument\n", .{});
+                return 1;
+            }
+            return try dotfilesBackup(command.args[1]);
+        } else if (std.mem.eql(u8, subcmd, "restore")) {
+            if (command.args.len < 2) {
+                try IO.eprint("dotfiles restore: missing file argument\n", .{});
+                return 1;
+            }
+            return try dotfilesRestore(command.args[1]);
+        } else if (std.mem.eql(u8, subcmd, "edit")) {
+            if (command.args.len < 2) {
+                try IO.eprint("dotfiles edit: missing file argument\n", .{});
+                return 1;
+            }
+            return try dotfilesEdit(command.args[1]);
+        } else if (std.mem.eql(u8, subcmd, "diff")) {
+            if (command.args.len < 2) {
+                try IO.eprint("dotfiles diff: missing file argument\n", .{});
+                return 1;
+            }
+            return try dotfilesDiff(command.args[1]);
+        } else {
+            try IO.eprint("dotfiles: unknown command '{s}'\n", .{subcmd});
+            return 1;
+        }
+    }
 };
+
+/// List common dotfiles
+fn dotfilesList() !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("dotfiles: HOME not set\n", .{});
+        return 1;
+    };
+
+    try IO.print("\x1b[1;36m=== Dotfiles ===\x1b[0m\n\n", .{});
+
+    const dotfiles = [_][]const u8{
+        ".bashrc",
+        ".bash_profile",
+        ".zshrc",
+        ".zprofile",
+        ".vimrc",
+        ".gitconfig",
+        ".gitignore_global",
+        ".tmux.conf",
+        ".inputrc",
+        ".profile",
+        ".denrc",
+    };
+
+    for (dotfiles) |dotfile| {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ home, dotfile }) catch continue;
+
+        const stat = std.fs.cwd().statFile(path) catch {
+            // File doesn't exist
+            continue;
+        };
+
+        const kind_str = switch (stat.kind) {
+            .sym_link => "\x1b[1;36m→\x1b[0m", // Symlink
+            .file => "\x1b[1;32m•\x1b[0m", // Regular file
+            else => " ",
+        };
+
+        const size_kb = stat.size / 1024;
+        if (size_kb > 0) {
+            try IO.print("{s} {s:<20} ({} KB)\n", .{ kind_str, dotfile, size_kb });
+        } else {
+            try IO.print("{s} {s:<20} ({} bytes)\n", .{ kind_str, dotfile, stat.size });
+        }
+    }
+
+    // Check .config directory
+    var config_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const config_path = std.fmt.bufPrint(&config_path_buf, "{s}/.config", .{home}) catch return 0;
+
+    var dir = std.fs.cwd().openDir(config_path, .{ .iterate = true }) catch return 0;
+    defer dir.close();
+
+    try IO.print("\n\x1b[1;33m.config/\x1b[0m\n", .{});
+
+    var iter = dir.iterate();
+    var count: usize = 0;
+    while (iter.next() catch null) |entry| {
+        if (count >= 10) {
+            try IO.print("  ... and more\n", .{});
+            break;
+        }
+        const kind_str = switch (entry.kind) {
+            .directory => "\x1b[1;34m📁\x1b[0m",
+            .file => "\x1b[1;32m📄\x1b[0m",
+            .sym_link => "\x1b[1;36m🔗\x1b[0m",
+            else => "  ",
+        };
+        try IO.print("  {s} {s}\n", .{ kind_str, entry.name });
+        count += 1;
+    }
+
+    return 0;
+}
+
+/// Show status of dotfiles
+fn dotfilesStatus() !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("dotfiles: HOME not set\n", .{});
+        return 1;
+    };
+
+    try IO.print("\x1b[1;36m=== Dotfiles Status ===\x1b[0m\n\n", .{});
+
+    const dotfiles = [_][]const u8{
+        ".bashrc",
+        ".zshrc",
+        ".vimrc",
+        ".gitconfig",
+        ".tmux.conf",
+        ".denrc",
+    };
+
+    for (dotfiles) |dotfile| {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ home, dotfile }) catch continue;
+
+        var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const backup_path = std.fmt.bufPrint(&backup_buf, "{s}/{s}.bak", .{ home, dotfile }) catch continue;
+
+        const exists = std.fs.cwd().statFile(path) catch null;
+        const backup_exists = std.fs.cwd().statFile(backup_path) catch null;
+
+        if (exists != null) {
+            const stat = exists.?;
+            const is_symlink = stat.kind == .sym_link;
+
+            if (is_symlink) {
+                try IO.print("\x1b[1;36m[symlink]\x1b[0m {s}\n", .{dotfile});
+            } else if (backup_exists != null) {
+                try IO.print("\x1b[1;33m[modified]\x1b[0m {s} (backup exists)\n", .{dotfile});
+            } else {
+                try IO.print("\x1b[1;32m[ok]\x1b[0m      {s}\n", .{dotfile});
+            }
+        } else {
+            try IO.print("\x1b[2m[missing]\x1b[0m {s}\n", .{dotfile});
+        }
+    }
+
+    return 0;
+}
+
+/// Create symlink for dotfile
+fn dotfilesLink(file: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("dotfiles: HOME not set\n", .{});
+        return 1;
+    };
+
+    var target_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const target = std.fmt.bufPrint(&target_buf, "{s}/{s}", .{ home, file }) catch {
+        try IO.eprint("dotfiles: path too long\n", .{});
+        return 1;
+    };
+
+    // Check if source file exists
+    _ = std.fs.cwd().statFile(file) catch {
+        try IO.eprint("dotfiles link: source file '{s}' not found\n", .{file});
+        return 1;
+    };
+
+    // Check if target already exists
+    if (std.fs.cwd().statFile(target)) |_| {
+        try IO.eprint("dotfiles link: '{s}' already exists\n", .{target});
+        try IO.eprint("Use 'dotfiles backup {s}' first, then try again\n", .{file});
+        return 1;
+    } else |_| {}
+
+    // Get absolute path to source
+    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cwd = std.posix.getcwd(&cwd_buf) catch {
+        try IO.eprint("dotfiles: cannot get current directory\n", .{});
+        return 1;
+    };
+
+    var abs_source_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_source = std.fmt.bufPrint(&abs_source_buf, "{s}/{s}", .{ cwd, file }) catch {
+        try IO.eprint("dotfiles: path too long\n", .{});
+        return 1;
+    };
+
+    // Create symlink
+    std.posix.symlink(abs_source, target) catch |err| {
+        try IO.eprint("dotfiles link: failed to create symlink: {}\n", .{err});
+        return 1;
+    };
+
+    try IO.print("\x1b[1;32m✓\x1b[0m Linked {s} → {s}\n", .{ target, abs_source });
+    return 0;
+}
+
+/// Remove symlink
+fn dotfilesUnlink(file: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("dotfiles: HOME not set\n", .{});
+        return 1;
+    };
+
+    var target_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const target = std.fmt.bufPrint(&target_buf, "{s}/{s}", .{ home, file }) catch {
+        try IO.eprint("dotfiles: path too long\n", .{});
+        return 1;
+    };
+
+    const stat = std.fs.cwd().statFile(target) catch {
+        try IO.eprint("dotfiles unlink: '{s}' not found\n", .{target});
+        return 1;
+    };
+
+    if (stat.kind != .sym_link) {
+        try IO.eprint("dotfiles unlink: '{s}' is not a symlink\n", .{target});
+        return 1;
+    }
+
+    std.fs.cwd().deleteFile(target) catch |err| {
+        try IO.eprint("dotfiles unlink: failed to remove: {}\n", .{err});
+        return 1;
+    };
+
+    try IO.print("\x1b[1;32m✓\x1b[0m Unlinked {s}\n", .{target});
+    return 0;
+}
+
+/// Backup a dotfile
+fn dotfilesBackup(file: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("dotfiles: HOME not set\n", .{});
+        return 1;
+    };
+
+    var source_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    const source = if (file[0] == '/')
+        file
+    else blk: {
+        const s = std.fmt.bufPrint(&source_buf, "{s}/{s}", .{ home, file }) catch {
+            try IO.eprint("dotfiles: path too long\n", .{});
+            return 1;
+        };
+        break :blk s;
+    };
+
+    const backup = std.fmt.bufPrint(&backup_buf, "{s}.bak", .{source}) catch {
+        try IO.eprint("dotfiles: path too long\n", .{});
+        return 1;
+    };
+
+    // Check if source exists
+    _ = std.fs.cwd().statFile(source) catch {
+        try IO.eprint("dotfiles backup: '{s}' not found\n", .{source});
+        return 1;
+    };
+
+    // Copy file
+    std.fs.cwd().copyFile(source, std.fs.cwd(), backup, .{}) catch |err| {
+        try IO.eprint("dotfiles backup: failed to copy: {}\n", .{err});
+        return 1;
+    };
+
+    try IO.print("\x1b[1;32m✓\x1b[0m Backed up {s} → {s}\n", .{ source, backup });
+    return 0;
+}
+
+/// Restore from backup
+fn dotfilesRestore(file: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("dotfiles: HOME not set\n", .{});
+        return 1;
+    };
+
+    var target_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    const target = if (file[0] == '/')
+        file
+    else blk: {
+        const t = std.fmt.bufPrint(&target_buf, "{s}/{s}", .{ home, file }) catch {
+            try IO.eprint("dotfiles: path too long\n", .{});
+            return 1;
+        };
+        break :blk t;
+    };
+
+    const backup = std.fmt.bufPrint(&backup_buf, "{s}.bak", .{target}) catch {
+        try IO.eprint("dotfiles: path too long\n", .{});
+        return 1;
+    };
+
+    // Check if backup exists
+    _ = std.fs.cwd().statFile(backup) catch {
+        try IO.eprint("dotfiles restore: backup '{s}' not found\n", .{backup});
+        return 1;
+    };
+
+    // Copy backup to original
+    std.fs.cwd().copyFile(backup, std.fs.cwd(), target, .{}) catch |err| {
+        try IO.eprint("dotfiles restore: failed to copy: {}\n", .{err});
+        return 1;
+    };
+
+    try IO.print("\x1b[1;32m✓\x1b[0m Restored {s} from {s}\n", .{ target, backup });
+    return 0;
+}
+
+/// Edit a dotfile
+fn dotfilesEdit(file: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("dotfiles: HOME not set\n", .{});
+        return 1;
+    };
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = if (file[0] == '/' or file[0] == '.')
+        file
+    else blk: {
+        const p = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ home, file }) catch {
+            try IO.eprint("dotfiles: path too long\n", .{});
+            return 1;
+        };
+        break :blk p;
+    };
+
+    // Get editor
+    const editor = std.posix.getenv("EDITOR") orelse std.posix.getenv("VISUAL") orelse "vim";
+
+    try IO.print("Opening {s} with {s}...\n", .{ path, editor });
+
+    // Fork and exec editor
+    const pid = std.posix.fork() catch {
+        try IO.eprint("dotfiles edit: failed to fork\n", .{});
+        return 1;
+    };
+
+    if (pid == 0) {
+        // Child process
+        var editor_buf: [256]u8 = undefined;
+        const editor_z = std.fmt.bufPrintZ(&editor_buf, "{s}", .{editor}) catch std.posix.exit(127);
+
+        var path_z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const path_z = std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path}) catch std.posix.exit(127);
+
+        const argv = [_]?[*:0]const u8{ editor_z, path_z, null };
+        _ = std.posix.execvpeZ(editor_z, @ptrCast(&argv), getCEnviron()) catch {};
+        std.posix.exit(127);
+    } else {
+        // Parent process - wait for editor
+        const result = std.posix.waitpid(pid, 0);
+        return @intCast(std.posix.W.EXITSTATUS(result.status));
+    }
+}
+
+/// Show diff with backup
+fn dotfilesDiff(file: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("dotfiles: HOME not set\n", .{});
+        return 1;
+    };
+
+    var current_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    const current = if (file[0] == '/')
+        file
+    else blk: {
+        const c = std.fmt.bufPrint(&current_buf, "{s}/{s}", .{ home, file }) catch {
+            try IO.eprint("dotfiles: path too long\n", .{});
+            return 1;
+        };
+        break :blk c;
+    };
+
+    const backup = std.fmt.bufPrint(&backup_buf, "{s}.bak", .{current}) catch {
+        try IO.eprint("dotfiles: path too long\n", .{});
+        return 1;
+    };
+
+    // Check both files exist
+    _ = std.fs.cwd().statFile(current) catch {
+        try IO.eprint("dotfiles diff: '{s}' not found\n", .{current});
+        return 1;
+    };
+
+    _ = std.fs.cwd().statFile(backup) catch {
+        try IO.eprint("dotfiles diff: backup '{s}' not found\n", .{backup});
+        return 1;
+    };
+
+    // Fork and exec diff
+    const pid = std.posix.fork() catch {
+        try IO.eprint("dotfiles diff: failed to fork\n", .{});
+        return 1;
+    };
+
+    if (pid == 0) {
+        // Child process
+        var backup_z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const backup_z = std.fmt.bufPrintZ(&backup_z_buf, "{s}", .{backup}) catch std.posix.exit(127);
+
+        var current_z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const current_z = std.fmt.bufPrintZ(&current_z_buf, "{s}", .{current}) catch std.posix.exit(127);
+
+        const argv = [_]?[*:0]const u8{ "diff", "-u", "--color=auto", backup_z, current_z, null };
+        _ = std.posix.execvpeZ("diff", @ptrCast(&argv), getCEnviron()) catch {};
+        std.posix.exit(127);
+    } else {
+        // Parent process - wait for diff
+        const result = std.posix.waitpid(pid, 0);
+        const code = std.posix.W.EXITSTATUS(result.status);
+        // diff returns 0 if same, 1 if different, 2 if error
+        if (code == 0) {
+            try IO.print("\x1b[1;32m✓\x1b[0m No differences\n", .{});
+        }
+        return @intCast(code);
+    }
+}
+
+/// Get color code for log level
+fn getLevelColor(level: []const u8) []const u8 {
+    const upper = level;
+    if (std.mem.indexOf(u8, upper, "ERROR") != null or
+        std.mem.indexOf(u8, upper, "FATAL") != null or
+        std.mem.indexOf(u8, upper, "error") != null or
+        std.mem.indexOf(u8, upper, "fatal") != null)
+    {
+        return "\x1b[1;31m"; // Red
+    } else if (std.mem.indexOf(u8, upper, "WARN") != null or
+        std.mem.indexOf(u8, upper, "warn") != null)
+    {
+        return "\x1b[1;33m"; // Yellow
+    } else if (std.mem.indexOf(u8, upper, "INFO") != null or
+        std.mem.indexOf(u8, upper, "info") != null)
+    {
+        return "\x1b[1;32m"; // Green
+    } else if (std.mem.indexOf(u8, upper, "DEBUG") != null or
+        std.mem.indexOf(u8, upper, "debug") != null or
+        std.mem.indexOf(u8, upper, "TRACE") != null or
+        std.mem.indexOf(u8, upper, "trace") != null)
+    {
+        return "\x1b[2m"; // Dim
+    }
+    return "\x1b[0m";
+}
 
 /// Print a line with custom highlight pattern (for log-tail)
 fn logTailHighlightLine(line: []const u8, pattern: []const u8) !void {

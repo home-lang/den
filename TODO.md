@@ -266,13 +266,13 @@
   - [x] `watch` - Execute command repeatedly ✅
 - [ ] **Monitoring & Logging**
   - [x] `log-tail` - Tail logs with filtering ✅
-  - [ ] `log-parse` - Parse structured logs
+  - [x] `log-parse` - Parse structured logs ✅
   - [x] `proc-monitor` - Process monitoring ✅
   - [x] `sys-stats` - System statistics ✅
   - [x] `netstats` - Network statistics ✅
   - [x] `net-check` - Network connectivity check ✅
-- [ ] **Dotfiles**
-  - [ ] `dotfiles` - Dotfiles management helper
+- [x] **Dotfiles**
+  - [x] `dotfiles` - Dotfiles management helper ✅
 
 ### 14. Documentation (Phase 21) ✅ Mostly Complete
 - [x] **Code Documentation**
