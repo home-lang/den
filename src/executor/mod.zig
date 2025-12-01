@@ -3613,7 +3613,8 @@ pub const Executor = struct {
             }
         }
 
-        return 0;
+        // Return the exit status of the last job waited for
+        return shell_ref.last_exit_code;
     }
 
     fn builtinDisown(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -4090,32 +4091,146 @@ pub const Executor = struct {
     fn builtinUmask(self: *Executor, command: *types.ParsedCommand) !i32 {
         _ = self;
 
-        if (command.args.len == 0) {
-            // Print current umask
-            if (builtin.os.tag == .windows) {
-                try IO.print("den: umask: not supported on Windows\n", .{});
-                return 1;
-            }
-
-            const current = std.c.umask(0);
-            _ = std.c.umask(current);
-            try IO.print("{o:0>4}\n", .{current});
-            return 0;
-        }
-
-        // Set umask
-        const mask_str = command.args[0];
-        const mask = std.fmt.parseInt(std.c.mode_t, mask_str, 8) catch {
-            try IO.eprint("den: umask: invalid mask: {s}\n", .{mask_str});
-            return 1;
-        };
-
         if (builtin.os.tag == .windows) {
             try IO.print("den: umask: not supported on Windows\n", .{});
             return 1;
         }
 
-        _ = std.c.umask(mask);
+        // Parse flags
+        var symbolic = false; // -S: symbolic output
+        var portable = false; // -p: portable output (can be used as input)
+        var arg_idx: usize = 0;
+
+        while (arg_idx < command.args.len) {
+            const arg = command.args[arg_idx];
+            if (arg.len > 0 and arg[0] == '-') {
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'S' => symbolic = true,
+                        'p' => portable = true,
+                        else => {
+                            try IO.eprint("den: umask: -{c}: invalid option\n", .{c});
+                            try IO.eprint("umask: usage: umask [-p] [-S] [mode]\n", .{});
+                            return 1;
+                        },
+                    }
+                }
+                arg_idx += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Get current umask
+        const current = std.c.umask(0);
+        _ = std.c.umask(current);
+
+        if (arg_idx >= command.args.len) {
+            // No mask argument - print current umask
+            if (symbolic) {
+                // Symbolic format: u=rwx,g=rx,o=rx (showing what IS allowed, not masked)
+                const perms: u9 = @truncate(~current & 0o777);
+                const u_r: u8 = if (perms & 0o400 != 0) 'r' else '-';
+                const u_w: u8 = if (perms & 0o200 != 0) 'w' else '-';
+                const u_x: u8 = if (perms & 0o100 != 0) 'x' else '-';
+                const g_r: u8 = if (perms & 0o040 != 0) 'r' else '-';
+                const g_w: u8 = if (perms & 0o020 != 0) 'w' else '-';
+                const g_x: u8 = if (perms & 0o010 != 0) 'x' else '-';
+                const o_r: u8 = if (perms & 0o004 != 0) 'r' else '-';
+                const o_w: u8 = if (perms & 0o002 != 0) 'w' else '-';
+                const o_x: u8 = if (perms & 0o001 != 0) 'x' else '-';
+                try IO.print("u={c}{c}{c},g={c}{c}{c},o={c}{c}{c}\n", .{ u_r, u_w, u_x, g_r, g_w, g_x, o_r, o_w, o_x });
+            } else if (portable) {
+                // Portable format: umask 0022
+                try IO.print("umask {o:0>4}\n", .{current});
+            } else {
+                // Default octal format
+                try IO.print("{o:0>4}\n", .{current});
+            }
+            return 0;
+        }
+
+        // Set umask
+        const mask_str = command.args[arg_idx];
+
+        // Check if it's symbolic mode (contains letters)
+        var is_symbolic_mode = false;
+        for (mask_str) |c| {
+            if (c == 'u' or c == 'g' or c == 'o' or c == 'a' or c == '+' or c == '-' or c == '=') {
+                is_symbolic_mode = true;
+                break;
+            }
+        }
+
+        if (is_symbolic_mode) {
+            // Parse symbolic mode like u=rwx,g=rx,o=rx or u+w,g-w
+            var new_mask = current;
+
+            var iter = std.mem.splitScalar(u8, mask_str, ',');
+            while (iter.next()) |part| {
+                if (part.len < 2) continue;
+
+                // Parse who (u, g, o, a)
+                var who_mask: std.c.mode_t = 0;
+                var i: usize = 0;
+                while (i < part.len and (part[i] == 'u' or part[i] == 'g' or part[i] == 'o' or part[i] == 'a')) : (i += 1) {
+                    switch (part[i]) {
+                        'u' => who_mask |= 0o700,
+                        'g' => who_mask |= 0o070,
+                        'o' => who_mask |= 0o007,
+                        'a' => who_mask |= 0o777,
+                        else => {},
+                    }
+                }
+                if (who_mask == 0) who_mask = 0o777; // default to all
+
+                if (i >= part.len) continue;
+
+                // Parse operator (+, -, =)
+                const op = part[i];
+                i += 1;
+
+                // Parse permissions (r, w, x)
+                var perm_bits: std.c.mode_t = 0;
+                while (i < part.len) : (i += 1) {
+                    switch (part[i]) {
+                        'r' => perm_bits |= 0o444,
+                        'w' => perm_bits |= 0o222,
+                        'x' => perm_bits |= 0o111,
+                        else => {},
+                    }
+                }
+
+                // Apply based on who
+                perm_bits &= who_mask;
+
+                switch (op) {
+                    '=' => {
+                        // Clear and set
+                        new_mask = (new_mask & ~who_mask) | (~perm_bits & who_mask);
+                    },
+                    '+' => {
+                        // Remove from mask (allow permission)
+                        new_mask &= ~perm_bits;
+                    },
+                    '-' => {
+                        // Add to mask (deny permission)
+                        new_mask |= perm_bits;
+                    },
+                    else => {},
+                }
+            }
+
+            _ = std.c.umask(new_mask);
+        } else {
+            // Octal mode
+            const mask = std.fmt.parseInt(std.c.mode_t, mask_str, 8) catch {
+                try IO.eprint("den: umask: {s}: invalid octal number\n", .{mask_str});
+                return 1;
+            };
+            _ = std.c.umask(mask);
+        }
+
         return 0;
     }
 
@@ -4210,7 +4325,29 @@ pub const Executor = struct {
     }
 
     fn builtinTime(self: *Executor, command: *types.ParsedCommand) !i32 {
-        if (command.args.len == 0) {
+        // Parse flags
+        var posix_format = false; // -p: POSIX format output
+        var arg_start: usize = 0;
+
+        while (arg_start < command.args.len) {
+            const arg = command.args[arg_start];
+            if (arg.len > 0 and arg[0] == '-') {
+                if (std.mem.eql(u8, arg, "-p")) {
+                    posix_format = true;
+                    arg_start += 1;
+                } else if (std.mem.eql(u8, arg, "--")) {
+                    arg_start += 1;
+                    break;
+                } else {
+                    // Unknown flag or start of command (like -c for some commands)
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if (arg_start >= command.args.len) {
             try IO.eprint("den: time: missing command\n", .{});
             return 1;
         }
@@ -4220,8 +4357,8 @@ pub const Executor = struct {
         const start_time = std.time.Instant.now() catch return 1;
 
         var new_cmd = types.ParsedCommand{
-            .name = command.args[0],
-            .args = if (command.args.len > 1) command.args[1..] else &[_][]const u8{},
+            .name = command.args[arg_start],
+            .args = if (arg_start + 1 < command.args.len) command.args[arg_start + 1 ..] else &[_][]const u8{},
             .redirections = command.redirections,
         };
 
@@ -4232,9 +4369,17 @@ pub const Executor = struct {
         const elapsed_ns = end_time.since(start_time);
         const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000_000.0;
 
-        try IO.eprint("\nreal\t{d:.3}s\n", .{elapsed_s});
-        try IO.eprint("user\t0.000s\n", .{});
-        try IO.eprint("sys\t0.000s\n", .{});
+        if (posix_format) {
+            // POSIX format: "real %f\nuser %f\nsys %f\n"
+            try IO.eprint("real {d:.2}\n", .{elapsed_s});
+            try IO.eprint("user 0.00\n", .{});
+            try IO.eprint("sys 0.00\n", .{});
+        } else {
+            // Default format with tabs
+            try IO.eprint("\nreal\t{d:.3}s\n", .{elapsed_s});
+            try IO.eprint("user\t0.000s\n", .{});
+            try IO.eprint("sys\t0.000s\n", .{});
+        }
 
         return exit_code;
     }

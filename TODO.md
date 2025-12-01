@@ -395,18 +395,18 @@ Many builtins are implemented but missing flags/options:
 - [x] **echo**: `-e` (escape sequences), `-E` (disable escapes) ✅
 - [x] **printf**: Full format string support (`%s`, `%d`, `%f`, etc.) ✅
 - [ ] **env**: `env VAR=value command` (temp env)
-- [ ] **export**: `-n` (unexport), `-p` (list exports)
+- [x] **export**: `-n` (unexport), `-p` (list exports) ✅
 - [x] **unset**: `-v` (variable), `-f` (function) flags ✅
 - [x] **set**: Full option support (`-e`, `-E`, `-u`, `-x`, `-n`, `-v`, `-f`, `-C`, `-o pipefail`, `-o noclobber`, `-o noglob`) ✅
-- [ ] **umask**: `-S` (symbolic), `-p` (portable)
+- [x] **umask**: `-S` (symbolic), `-p` (portable), symbolic mode input ✅
 - [x] **jobs**: `-l` (PIDs), `-p` (PIDs only), `-r` (running), `-s` (stopped) ✅
 - [x] **kill**: `-l` (list signals), `-s signal` ✅
-- [ ] **wait**: Wait for specific job, exit code return
+- [x] **wait**: Wait for specific job by %jobid or PID, exit code return ✅
 - [x] **disown**: `-h` (keep but no SIGHUP), `-a` (all), `-r` (running) ✅
 - [x] **type**: `-a` (all matches), `-p` (path), `-t` (type only) ✅
 - [x] **which**: `-a` (all matches) ✅
 - [x] **hash**: `-r` (clear), `-d name` (delete), `-l` (list), `-p path name` (add), `-t` (print path) ✅
-- [ ] **time**: `-p` (POSIX format)
+- [x] **time**: `-p` (POSIX format) ✅
 - [ ] **trap**: `-l` (list signals), `-p` (show traps), ERR/EXIT/DEBUG/RETURN pseudo-signals
 - [ ] **timeout**: `-s signal`, `-k duration`
 - [x] **read**: `-r` (raw), `-p prompt` ✅ (partial - `-a`, `-t`, `-n`, `-d`, `-s` not yet)
@@ -450,7 +450,7 @@ Many builtins are implemented but missing flags/options:
 | Foundation Libraries | 12 (9 ✅) | 🟢 Low |
 | Logging & Debugging | 7/7 ✅ | 🟢 Low |
 | Memory Management | 6 | 🟢 Low |
-| Builtin Enhancements | 25 (10 ✅) | 🔧 Improvement |
+| Builtin Enhancements | 25 (18 ✅) | 🔧 Improvement |
 | Code Quality | 5 | 🔧 Improvement |
 | CI/CD | 5 | 🔧 Improvement |
 
@@ -638,9 +638,13 @@ The following features are production-ready:
   - `GlobCache` LRU cache in `src/utils/glob.zig`
   - `ExpansionCache` LRU cache in `src/utils/expansion.zig`
   - Config limits in `ExpansionConfig.CacheLimits` (glob: 256, variable: 256)
-- Builtin Command Enhancements (November 2025):
+- Builtin Command Enhancements (December 2025):
   - `disown`: Added `-h` (keep but no SIGHUP), `-a` (all jobs), `-r` (running only) flags
   - `hash`: Added `-l` (list reusable), `-d name` (delete), `-p path name` (add specific), `-t name` (print path) flags
   - `set`: Full option support with `-o optionname` syntax for pipefail, noclobber, noglob
   - Added `option_noglob` and `option_noclobber` shell options
+  - `umask`: Added `-S` (symbolic output), `-p` (portable output), symbolic mode input (u=rwx,g=rx,o=rx)
+  - `time`: Added `-p` (POSIX format output)
+  - `wait`: Now returns proper exit code of waited job
+  - `export`: Already had `-n` and `-p` flags implemented
   - `jobs`, `kill`, `type`, `which`, `unset` flags already implemented
