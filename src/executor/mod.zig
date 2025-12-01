@@ -621,7 +621,7 @@ pub const Executor = struct {
             "type", "help", "read", "printf", "source", ".", "history",
             "pushd", "popd", "dirs", "eval", "exec", "command", "builtin",
             "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
-            "umask", "getopts", "clear", "time", "hash", "yes", "reload",
+            "umask", "getopts", "clear", "time", "timeout", "hash", "yes", "reload",
             "watch", "tree", "grep", "find", "calc", "json", "ls",
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
@@ -713,6 +713,8 @@ pub const Executor = struct {
             return try self.builtinClear(command);
         } else if (std.mem.eql(u8, command.name, "time")) {
             return try self.builtinTime(command);
+        } else if (std.mem.eql(u8, command.name, "timeout")) {
+            return try self.builtinTimeout(command);
         } else if (std.mem.eql(u8, command.name, "hash")) {
             return try self.builtinHash(command);
         } else if (std.mem.eql(u8, command.name, "yes")) {
@@ -2306,9 +2308,14 @@ pub const Executor = struct {
     }
 
     fn builtinRead(self: *Executor, command: *types.ParsedCommand) !i32 {
-        // Parse options: -p prompt, -r (raw)
+        // Parse options: -p prompt, -r (raw), -a (array), -d (delimiter), -n (nchars), -s (silent), -t (timeout)
         var prompt: ?[]const u8 = null;
         var raw_mode = false;
+        var array_name: ?[]const u8 = null; // -a: read into array
+        var delimiter: u8 = '\n'; // -d: delimiter character
+        var nchars: ?usize = null; // -n: read exactly n characters
+        var silent = false; // -s: don't echo input
+        var timeout_secs: ?f64 = null; // -t: timeout in seconds
         var var_name_start: usize = 0;
 
         var i: usize = 0;
@@ -2325,12 +2332,50 @@ pub const Executor = struct {
                     prompt = command.args[i];
                 } else if (std.mem.eql(u8, arg, "-r")) {
                     raw_mode = true;
-                } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "-t")) {
-                    // Skip unsupported options that take arguments
-                    if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "-t")) {
-                        i += 1; // Skip the argument
+                } else if (std.mem.eql(u8, arg, "-a")) {
+                    // Next arg is the array name
+                    i += 1;
+                    if (i >= command.args.len) {
+                        try IO.eprint("den: read: -a requires an argument\n", .{});
+                        return 1;
                     }
-                    // -s, -n, -t are recognized but not implemented
+                    array_name = command.args[i];
+                } else if (std.mem.eql(u8, arg, "-d")) {
+                    // Next arg is the delimiter
+                    i += 1;
+                    if (i >= command.args.len) {
+                        try IO.eprint("den: read: -d requires an argument\n", .{});
+                        return 1;
+                    }
+                    if (command.args[i].len > 0) {
+                        delimiter = command.args[i][0];
+                    } else {
+                        delimiter = 0; // Empty string means NUL delimiter
+                    }
+                } else if (std.mem.eql(u8, arg, "-n")) {
+                    // Next arg is the number of characters
+                    i += 1;
+                    if (i >= command.args.len) {
+                        try IO.eprint("den: read: -n requires an argument\n", .{});
+                        return 1;
+                    }
+                    nchars = std.fmt.parseInt(usize, command.args[i], 10) catch {
+                        try IO.eprint("den: read: {s}: invalid number\n", .{command.args[i]});
+                        return 1;
+                    };
+                } else if (std.mem.eql(u8, arg, "-s")) {
+                    silent = true;
+                } else if (std.mem.eql(u8, arg, "-t")) {
+                    // Next arg is the timeout in seconds
+                    i += 1;
+                    if (i >= command.args.len) {
+                        try IO.eprint("den: read: -t requires an argument\n", .{});
+                        return 1;
+                    }
+                    timeout_secs = std.fmt.parseFloat(f64, command.args[i]) catch {
+                        try IO.eprint("den: read: {s}: invalid timeout\n", .{command.args[i]});
+                        return 1;
+                    };
                 } else {
                     try IO.eprint("den: read: invalid option: {s}\n", .{arg});
                     return 1;
@@ -2345,103 +2390,195 @@ pub const Executor = struct {
         // Get variable names (remaining args after options)
         const var_names = if (var_name_start < command.args.len)
             command.args[var_name_start..]
+        else if (array_name == null)
+            &[_][]const u8{"REPLY"}
         else
-            &[_][]const u8{"REPLY"};
+            &[_][]const u8{};
 
         // Display prompt if specified (no newline)
         if (prompt) |p| {
             try IO.writeBytes(p);
         }
 
-        // Read a line from stdin
-        const line_opt = try IO.readLine(self.allocator);
-        if (line_opt) |line| {
-            defer self.allocator.free(line);
+        // Note: -s (silent) would require terminal manipulation (tcsetattr) to disable echo
+        // For now, we acknowledge the flag but don't fully implement terminal control
+        if (silent) {
+            // Silent mode acknowledged - terminal echo control not yet implemented
+        }
 
-            // Process line (handle backslash escapes unless -r)
-            var processed_line: []const u8 = line;
-            var processed_buf: [4096]u8 = undefined;
+        // Note: -t (timeout) would require non-blocking I/O or poll/select
+        // For now, we acknowledge the flag but don't implement actual timeout
+        if (timeout_secs) |_| {
+            // Timeout acknowledged - not yet implemented
+        }
 
-            if (!raw_mode) {
-                // Process backslash escapes
-                var pos: usize = 0;
-                var j: usize = 0;
-                while (j < line.len and pos < processed_buf.len) {
-                    if (line[j] == '\\' and j + 1 < line.len) {
-                        // Skip the backslash and include the next char
-                        j += 1;
-                        processed_buf[pos] = line[j];
-                    } else {
-                        processed_buf[pos] = line[j];
-                    }
-                    j += 1;
-                    pos += 1;
-                }
-                processed_line = processed_buf[0..pos];
+        // Read input based on mode
+        var line_buf: [4096]u8 = undefined;
+        var line_len: usize = 0;
+
+        if (nchars) |n| {
+            // Read exactly n characters using posix read
+            var chars_read: usize = 0;
+            while (chars_read < n and chars_read < line_buf.len) {
+                var byte_buf: [1]u8 = undefined;
+                const bytes_read = std.posix.read(std.posix.STDIN_FILENO, &byte_buf) catch break;
+                if (bytes_read == 0) break; // EOF
+                line_buf[chars_read] = byte_buf[0];
+                chars_read += 1;
             }
-
-            // Split by IFS if multiple variable names
-            if (var_names.len == 1) {
-                // Single variable - store entire line
-                const var_name = var_names[0];
-                const value = try self.allocator.dupe(u8, processed_line);
-                const gop = try self.environment.getOrPut(var_name);
-                if (gop.found_existing) {
-                    self.allocator.free(gop.value_ptr.*);
-                    gop.value_ptr.* = value;
-                } else {
-                    const key = try self.allocator.dupe(u8, var_name);
-                    gop.key_ptr.* = key;
-                    gop.value_ptr.* = value;
-                }
-            } else {
-                // Multiple variables - split by whitespace (IFS)
-                var word_iter = std.mem.tokenizeAny(u8, processed_line, " \t");
-                var var_idx: usize = 0;
-
-                while (var_idx < var_names.len) : (var_idx += 1) {
-                    const var_name = var_names[var_idx];
-                    var value: []const u8 = "";
-
-                    if (var_idx == var_names.len - 1) {
-                        // Last variable gets rest of the line
-                        if (word_iter.next()) |first_word| {
-                            const rest_start = @intFromPtr(first_word.ptr) - @intFromPtr(processed_line.ptr);
-                            value = processed_line[rest_start..];
-                        }
-                    } else {
-                        if (word_iter.next()) |word| {
-                            value = word;
-                        }
-                    }
-
-                    const duped_value = try self.allocator.dupe(u8, value);
-                    const gop = try self.environment.getOrPut(var_name);
-                    if (gop.found_existing) {
-                        self.allocator.free(gop.value_ptr.*);
-                        gop.value_ptr.* = duped_value;
-                    } else {
-                        const key = try self.allocator.dupe(u8, var_name);
-                        gop.key_ptr.* = key;
-                        gop.value_ptr.* = duped_value;
-                    }
-                }
+            line_len = chars_read;
+        } else if (delimiter != '\n') {
+            // Read until delimiter using posix read
+            while (line_len < line_buf.len) {
+                var byte_buf: [1]u8 = undefined;
+                const bytes_read = std.posix.read(std.posix.STDIN_FILENO, &byte_buf) catch break;
+                if (bytes_read == 0) break; // EOF
+                if (byte_buf[0] == delimiter) break;
+                line_buf[line_len] = byte_buf[0];
+                line_len += 1;
             }
         } else {
-            // EOF - set all variables to empty string and return 1
-            for (var_names) |var_name| {
-                const value = try self.allocator.dupe(u8, "");
+            // Normal line read
+            const line_opt = try IO.readLine(self.allocator);
+            if (line_opt) |line| {
+                defer self.allocator.free(line);
+                const copy_len = @min(line.len, line_buf.len);
+                @memcpy(line_buf[0..copy_len], line[0..copy_len]);
+                line_len = copy_len;
+            } else {
+                // EOF
+                if (array_name) |arr_name| {
+                    // Set empty array
+                    if (self.shell) |shell_ref| {
+                        if (shell_ref.arrays.fetchRemove(arr_name)) |old| {
+                            for (old.value) |elem| {
+                                self.allocator.free(elem);
+                            }
+                            self.allocator.free(old.value);
+                            self.allocator.free(old.key);
+                        }
+                    }
+                } else {
+                    for (var_names) |var_name| {
+                        const value = try self.allocator.dupe(u8, "");
+                        const gop = try self.environment.getOrPut(var_name);
+                        if (gop.found_existing) {
+                            self.allocator.free(gop.value_ptr.*);
+                            gop.value_ptr.* = value;
+                        } else {
+                            const key = try self.allocator.dupe(u8, var_name);
+                            gop.key_ptr.* = key;
+                            gop.value_ptr.* = value;
+                        }
+                    }
+                }
+                return 1; // EOF returns 1
+            }
+        }
+
+        const line = line_buf[0..line_len];
+
+        // Process line (handle backslash escapes unless -r)
+        var processed_line: []const u8 = line;
+        var processed_buf: [4096]u8 = undefined;
+
+        if (!raw_mode) {
+            // Process backslash escapes
+            var pos: usize = 0;
+            var j: usize = 0;
+            while (j < line.len and pos < processed_buf.len) {
+                if (line[j] == '\\' and j + 1 < line.len) {
+                    // Skip the backslash and include the next char
+                    j += 1;
+                    processed_buf[pos] = line[j];
+                } else {
+                    processed_buf[pos] = line[j];
+                }
+                j += 1;
+                pos += 1;
+            }
+            processed_line = processed_buf[0..pos];
+        }
+
+        // Handle -a (array) mode
+        if (array_name) |arr_name| {
+            const shell_ref = self.shell orelse {
+                try IO.eprint("den: read: -a requires shell context\n", .{});
+                return 1;
+            };
+
+            // Split by IFS and store in array
+            var words = std.ArrayList([]const u8).empty;
+            defer words.deinit(self.allocator);
+
+            var word_iter = std.mem.tokenizeAny(u8, processed_line, " \t");
+            while (word_iter.next()) |word| {
+                try words.append(self.allocator, try self.allocator.dupe(u8, word));
+            }
+
+            // Remove old array if exists
+            if (shell_ref.arrays.fetchRemove(arr_name)) |old| {
+                for (old.value) |elem| {
+                    self.allocator.free(elem);
+                }
+                self.allocator.free(old.value);
+                self.allocator.free(old.key);
+            }
+
+            // Store new array
+            const key = try self.allocator.dupe(u8, arr_name);
+            const arr_slice = try words.toOwnedSlice(self.allocator);
+            try shell_ref.arrays.put(key, arr_slice);
+
+            return 0;
+        }
+
+        // Split by IFS if multiple variable names
+        if (var_names.len == 1) {
+            // Single variable - store entire line
+            const var_name = var_names[0];
+            const value = try self.allocator.dupe(u8, processed_line);
+            const gop = try self.environment.getOrPut(var_name);
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+                gop.value_ptr.* = value;
+            } else {
+                const key = try self.allocator.dupe(u8, var_name);
+                gop.key_ptr.* = key;
+                gop.value_ptr.* = value;
+            }
+        } else {
+            // Multiple variables - split by whitespace (IFS)
+            var word_iter = std.mem.tokenizeAny(u8, processed_line, " \t");
+            var var_idx: usize = 0;
+
+            while (var_idx < var_names.len) : (var_idx += 1) {
+                const var_name = var_names[var_idx];
+                var value: []const u8 = "";
+
+                if (var_idx == var_names.len - 1) {
+                    // Last variable gets rest of the line
+                    if (word_iter.next()) |first_word| {
+                        const rest_start = @intFromPtr(first_word.ptr) - @intFromPtr(processed_line.ptr);
+                        value = processed_line[rest_start..];
+                    }
+                } else {
+                    if (word_iter.next()) |word| {
+                        value = word;
+                    }
+                }
+
+                const duped_value = try self.allocator.dupe(u8, value);
                 const gop = try self.environment.getOrPut(var_name);
                 if (gop.found_existing) {
                     self.allocator.free(gop.value_ptr.*);
-                    gop.value_ptr.* = value;
+                    gop.value_ptr.* = duped_value;
                 } else {
                     const key = try self.allocator.dupe(u8, var_name);
                     gop.key_ptr.* = key;
-                    gop.value_ptr.* = value;
+                    gop.value_ptr.* = duped_value;
                 }
             }
-            return 1; // EOF returns 1
         }
 
         return 0;
@@ -4382,6 +4519,262 @@ pub const Executor = struct {
         }
 
         return exit_code;
+    }
+
+    fn builtinTimeout(_: *Executor, command: *types.ParsedCommand) !i32 {
+        // timeout [-s signal] [-k duration] duration command [args...]
+        var signal_name: []const u8 = "TERM"; // Default signal
+        var kill_after: ?f64 = null; // -k: send KILL after duration
+        var preserve_status = false; // --preserve-status
+        var foreground = false; // --foreground
+        var arg_start: usize = 0;
+
+        // Parse options
+        while (arg_start < command.args.len) {
+            const arg = command.args[arg_start];
+            if (arg.len > 0 and arg[0] == '-') {
+                if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--signal")) {
+                    arg_start += 1;
+                    if (arg_start >= command.args.len) {
+                        try IO.eprint("den: timeout: -s requires an argument\n", .{});
+                        return 1;
+                    }
+                    signal_name = command.args[arg_start];
+                } else if (std.mem.eql(u8, arg, "-k") or std.mem.eql(u8, arg, "--kill-after")) {
+                    arg_start += 1;
+                    if (arg_start >= command.args.len) {
+                        try IO.eprint("den: timeout: -k requires an argument\n", .{});
+                        return 1;
+                    }
+                    kill_after = parseDuration(command.args[arg_start]) catch {
+                        try IO.eprint("den: timeout: invalid duration: {s}\n", .{command.args[arg_start]});
+                        return 1;
+                    };
+                } else if (std.mem.eql(u8, arg, "--preserve-status")) {
+                    preserve_status = true;
+                } else if (std.mem.eql(u8, arg, "--foreground")) {
+                    foreground = true;
+                } else if (std.mem.eql(u8, arg, "--help")) {
+                    try IO.print("Usage: timeout [OPTION] DURATION COMMAND [ARG]...\n", .{});
+                    try IO.print("Start COMMAND, and kill it if still running after DURATION.\n\n", .{});
+                    try IO.print("Options:\n", .{});
+                    try IO.print("  -s, --signal=SIGNAL    Signal to send (default: TERM)\n", .{});
+                    try IO.print("  -k, --kill-after=DUR   Send KILL signal after DUR if still running\n", .{});
+                    try IO.print("  --preserve-status      Exit with the same status as COMMAND\n", .{});
+                    try IO.print("  --foreground           Don't create a new process group\n", .{});
+                    try IO.print("\nDURATION is a number with optional suffix: s (seconds), m (minutes), h (hours), d (days)\n", .{});
+                    return 0;
+                } else if (std.mem.eql(u8, arg, "--")) {
+                    arg_start += 1;
+                    break;
+                } else {
+                    // Unknown option or start of duration
+                    break;
+                }
+                arg_start += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Need at least duration and command
+        if (arg_start + 1 >= command.args.len) {
+            try IO.eprint("den: timeout: missing operand\n", .{});
+            try IO.eprint("Usage: timeout [OPTION] DURATION COMMAND [ARG]...\n", .{});
+            return 1;
+        }
+
+        // Parse duration
+        const duration_str = command.args[arg_start];
+        const duration_secs = parseDuration(duration_str) catch {
+            try IO.eprint("den: timeout: invalid duration: {s}\n", .{duration_str});
+            return 1;
+        };
+
+        // Get command and args
+        const cmd_name = command.args[arg_start + 1];
+        const cmd_args = if (arg_start + 2 < command.args.len) command.args[arg_start + 2 ..] else &[_][]const u8{};
+
+        // Acknowledge options we don't fully use yet
+        if (foreground) {
+            // Foreground mode - acknowledged but not changing behavior
+        }
+
+        // Get signal number from name
+        const sig = parseSignalName(signal_name);
+
+        // Fork and exec the command
+        const fork_result = std.posix.fork() catch |err| {
+            try IO.eprint("den: timeout: fork failed: {}\n", .{err});
+            return 1;
+        };
+
+        if (fork_result == 0) {
+            // Child process - exec the command
+            // Use a page allocator since we're post-fork
+            const page_alloc = std.heap.page_allocator;
+
+            // Create null-terminated command name
+            const cmd_z = page_alloc.dupeZ(u8, cmd_name) catch {
+                std.posix.exit(127);
+            };
+
+            // Build argv array with null-terminated strings
+            var argv_buf: [256]?[*:0]const u8 = undefined;
+            argv_buf[0] = cmd_z.ptr;
+
+            var argv_idx: usize = 1;
+            for (cmd_args) |arg| {
+                if (argv_idx >= argv_buf.len - 1) break;
+                const arg_z = page_alloc.dupeZ(u8, arg) catch {
+                    std.posix.exit(127);
+                };
+                argv_buf[argv_idx] = arg_z.ptr;
+                argv_idx += 1;
+            }
+            argv_buf[argv_idx] = null;
+
+            _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv_buf[0..argv_idx :null]), getCEnviron()) catch {
+                // exec failed
+                std.posix.exit(127);
+            };
+            // If we get here, exec failed
+            std.posix.exit(127);
+        }
+
+        // Parent process - wait with timeout
+        const child_pid = fork_result;
+        const timeout_ns: u64 = @intFromFloat(duration_secs * 1_000_000_000);
+        const start_time = std.time.Instant.now() catch {
+            // Can't get time, just wait normally
+            const result = std.posix.waitpid(child_pid, 0);
+            return @intCast(std.posix.W.EXITSTATUS(result.status));
+        };
+
+        // Poll for child completion with timeout
+        while (true) {
+            // Check if child has exited (non-blocking)
+            const wait_result = std.posix.waitpid(child_pid, std.posix.W.NOHANG);
+            if (wait_result.pid != 0) {
+                // Child exited
+                if (std.posix.W.IFEXITED(wait_result.status)) {
+                    return @intCast(std.posix.W.EXITSTATUS(wait_result.status));
+                } else if (std.posix.W.IFSIGNALED(wait_result.status)) {
+                    return 128 + @as(i32, @intCast(std.posix.W.TERMSIG(wait_result.status)));
+                }
+                return 1;
+            }
+
+            // Check timeout
+            const now = std.time.Instant.now() catch break;
+            if (now.since(start_time) >= timeout_ns) {
+                // Timeout - send signal
+                std.posix.kill(child_pid, sig) catch {};
+
+                // Wait a bit for graceful exit, then send KILL if -k was specified
+                if (kill_after) |ka| {
+                    const ka_secs: u64 = @intFromFloat(ka);
+                    const ka_nanos: u64 = @intFromFloat((ka - @as(f64, @floatFromInt(ka_secs))) * 1_000_000_000);
+                    std.posix.nanosleep(ka_secs, ka_nanos);
+                    // Check if still running
+                    const check = std.posix.waitpid(child_pid, std.posix.W.NOHANG);
+                    if (check.pid == 0) {
+                        // Still running, send KILL
+                        std.posix.kill(child_pid, std.posix.SIG.KILL) catch {};
+                    }
+                }
+
+                // Wait for child to actually exit
+                const final_result = std.posix.waitpid(child_pid, 0);
+                if (preserve_status) {
+                    if (std.posix.W.IFEXITED(final_result.status)) {
+                        return @intCast(std.posix.W.EXITSTATUS(final_result.status));
+                    } else if (std.posix.W.IFSIGNALED(final_result.status)) {
+                        return 128 + @as(i32, @intCast(std.posix.W.TERMSIG(final_result.status)));
+                    }
+                }
+                return 124; // Standard timeout exit code
+            }
+
+            // Sleep briefly before checking again
+            std.posix.nanosleep(0, 10_000_000); // 10ms
+        }
+
+        return 1;
+    }
+
+    /// Parse duration string (e.g., "5", "5s", "2m", "1h", "1d")
+    fn parseDuration(str: []const u8) !f64 {
+        if (str.len == 0) return error.InvalidDuration;
+
+        var num_end: usize = str.len;
+        var multiplier: f64 = 1.0;
+
+        // Check for suffix
+        if (str.len > 0) {
+            const last = str[str.len - 1];
+            if (last == 's' or last == 'S') {
+                num_end = str.len - 1;
+                multiplier = 1.0;
+            } else if (last == 'm' or last == 'M') {
+                num_end = str.len - 1;
+                multiplier = 60.0;
+            } else if (last == 'h' or last == 'H') {
+                num_end = str.len - 1;
+                multiplier = 3600.0;
+            } else if (last == 'd' or last == 'D') {
+                num_end = str.len - 1;
+                multiplier = 86400.0;
+            }
+        }
+
+        if (num_end == 0) return error.InvalidDuration;
+
+        const num = std.fmt.parseFloat(f64, str[0..num_end]) catch return error.InvalidDuration;
+        return num * multiplier;
+    }
+
+    /// Convert signal name to signal enum for timeout
+    fn parseSignalName(name: []const u8) std.posix.SIG {
+        const upper = blk: {
+            var buf: [16]u8 = undefined;
+            const len = @min(name.len, buf.len);
+            for (name[0..len], 0..) |c, i| {
+                buf[i] = std.ascii.toUpper(c);
+            }
+            break :blk buf[0..len];
+        };
+
+        // Handle numeric signal
+        if (std.fmt.parseInt(u6, name, 10)) |num| {
+            return @enumFromInt(num);
+        } else |_| {}
+
+        // Remove SIG prefix if present
+        const sig_name = if (std.mem.startsWith(u8, upper, "SIG")) upper[3..] else upper;
+
+        // Map common signal names
+        if (std.mem.eql(u8, sig_name, "HUP")) return .HUP;
+        if (std.mem.eql(u8, sig_name, "INT")) return .INT;
+        if (std.mem.eql(u8, sig_name, "QUIT")) return .QUIT;
+        if (std.mem.eql(u8, sig_name, "ILL")) return .ILL;
+        if (std.mem.eql(u8, sig_name, "TRAP")) return .TRAP;
+        if (std.mem.eql(u8, sig_name, "ABRT")) return .ABRT;
+        if (std.mem.eql(u8, sig_name, "BUS")) return .BUS;
+        if (std.mem.eql(u8, sig_name, "FPE")) return .FPE;
+        if (std.mem.eql(u8, sig_name, "KILL")) return .KILL;
+        if (std.mem.eql(u8, sig_name, "USR1")) return .USR1;
+        if (std.mem.eql(u8, sig_name, "SEGV")) return .SEGV;
+        if (std.mem.eql(u8, sig_name, "USR2")) return .USR2;
+        if (std.mem.eql(u8, sig_name, "PIPE")) return .PIPE;
+        if (std.mem.eql(u8, sig_name, "ALRM")) return .ALRM;
+        if (std.mem.eql(u8, sig_name, "TERM")) return .TERM;
+        if (std.mem.eql(u8, sig_name, "CHLD")) return .CHLD;
+        if (std.mem.eql(u8, sig_name, "CONT")) return .CONT;
+        if (std.mem.eql(u8, sig_name, "STOP")) return .STOP;
+        if (std.mem.eql(u8, sig_name, "TSTP")) return .TSTP;
+
+        return .TERM; // Default to SIGTERM
     }
 
     fn builtinHash(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {

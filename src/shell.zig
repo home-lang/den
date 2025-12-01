@@ -1214,9 +1214,6 @@ pub const Shell = struct {
             } else if (std.mem.eql(u8, cmd.name, "getopts")) {
                 try self.builtinGetopts(cmd);
                 return;
-            } else if (std.mem.eql(u8, cmd.name, "timeout")) {
-                try self.builtinTimeout(cmd);
-                return;
             } else if (std.mem.eql(u8, cmd.name, "times")) {
                 try self.builtinTimes(cmd);
                 return;
@@ -3323,7 +3320,7 @@ pub const Shell = struct {
         try IO.print("  builtin cmd       Execute builtin bypassing functions\n", .{});
         try IO.print("  trap cmd sig      Handle signals (stub)\n", .{});
         try IO.print("  getopts spec var  Parse command options (stub)\n", .{});
-        try IO.print("  timeout dur cmd   Execute with timeout (stub)\n", .{});
+        try IO.print("  timeout [-s sig] [-k dur] dur cmd  Execute with timeout\n", .{});
         try IO.print("  times             Display process times\n", .{});
         try IO.print("\nTotal: 54 builtin commands available\n", .{});
         try IO.print("For more help, use 'man bash' or visit docs.den.sh\n", .{});
@@ -4785,18 +4782,6 @@ pub const Shell = struct {
     fn builtinGetopts(self: *Shell, cmd: *types.ParsedCommand) !void {
         _ = cmd;
         try IO.print("den: getopts: option parsing not yet implemented\n", .{});
-        self.last_exit_code = 1;
-    }
-
-    /// Builtin: timeout - execute command with timeout
-    fn builtinTimeout(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len < 2) {
-            try IO.eprint("den: timeout: usage: timeout DURATION COMMAND [ARG]...\n", .{});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        try IO.print("den: timeout: command timeout not yet implemented\n", .{});
         self.last_exit_code = 1;
     }
 
