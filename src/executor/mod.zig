@@ -626,7 +626,7 @@ pub const Executor = struct {
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
             "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
-            "show", "hide", "ft", "sys-stats", "netstats", "net-check",
+            "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -785,6 +785,10 @@ pub const Executor = struct {
             return try self.builtinNetstats(command);
         } else if (std.mem.eql(u8, command.name, "net-check")) {
             return try self.builtinNetCheck(command);
+        } else if (std.mem.eql(u8, command.name, "log-tail")) {
+            return try self.builtinLogTail(command);
+        } else if (std.mem.eql(u8, command.name, "proc-monitor")) {
+            return try self.builtinProcMonitor(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -7869,7 +7873,424 @@ pub const Executor = struct {
 
         return 0;
     }
+
+    /// log-tail builtin - tail log files with filtering and highlighting
+    fn builtinLogTail(self: *Executor, command: *types.ParsedCommand) !i32 {
+        // Parse options
+        var num_lines: usize = 10;
+        var follow = false;
+        var filter: ?[]const u8 = null;
+        var highlight: ?[]const u8 = null;
+        var file_path: ?[]const u8 = null;
+        var show_help = false;
+
+        var i: usize = 0;
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+            if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+                show_help = true;
+            } else if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "--lines")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    num_lines = std.fmt.parseInt(usize, command.args[i], 10) catch 10;
+                }
+            } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--follow")) {
+                follow = true;
+            } else if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--grep")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    filter = command.args[i];
+                }
+            } else if (std.mem.eql(u8, arg, "-H") or std.mem.eql(u8, arg, "--highlight")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    highlight = command.args[i];
+                }
+            } else if (arg.len > 0 and arg[0] != '-') {
+                file_path = arg;
+            }
+        }
+
+        if (show_help or file_path == null) {
+            try IO.print("log-tail - tail log files with filtering and highlighting\n", .{});
+            try IO.print("Usage: log-tail [options] FILE\n", .{});
+            try IO.print("Options:\n", .{});
+            try IO.print("  -n, --lines N      Show last N lines (default: 10)\n", .{});
+            try IO.print("  -f, --follow       Follow file (like tail -f)\n", .{});
+            try IO.print("  -g, --grep PATTERN Filter lines by pattern\n", .{});
+            try IO.print("  -H, --highlight PATTERN  Highlight pattern in output\n", .{});
+            try IO.print("\nExamples:\n", .{});
+            try IO.print("  log-tail /var/log/system.log\n", .{});
+            try IO.print("  log-tail -n 50 app.log\n", .{});
+            try IO.print("  log-tail -f -g ERROR server.log\n", .{});
+            try IO.print("  log-tail -H \"WARN|ERROR\" app.log\n", .{});
+            return if (show_help) 0 else 1;
+        }
+
+        const path = file_path.?;
+
+        // Open file
+        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+            try IO.eprint("log-tail: cannot open '{s}': {}\n", .{ path, err });
+            return 1;
+        };
+        defer file.close();
+
+        // Read file to get last N lines
+        const stat = file.stat() catch |err| {
+            try IO.eprint("log-tail: cannot stat '{s}': {}\n", .{ path, err });
+            return 1;
+        };
+
+        // Read entire file (for simplicity with smaller log files)
+        const max_size: usize = 10 * 1024 * 1024; // 10MB max
+        const read_size = @min(stat.size, max_size);
+
+        const content = self.allocator.alloc(u8, read_size) catch {
+            try IO.eprint("log-tail: out of memory\n", .{});
+            return 1;
+        };
+        defer self.allocator.free(content);
+
+        // Read file contents
+        var total_read: usize = 0;
+        while (total_read < read_size) {
+            const n = file.read(content[total_read..]) catch |err| {
+                try IO.eprint("log-tail: read error: {}\n", .{err});
+                return 1;
+            };
+            if (n == 0) break;
+            total_read += n;
+        }
+        const bytes_read = total_read;
+
+        // Split into lines
+        var lines = std.ArrayList([]const u8).empty;
+        defer lines.deinit(self.allocator);
+
+        var line_iter = std.mem.splitScalar(u8, content[0..bytes_read], '\n');
+        while (line_iter.next()) |line| {
+            // Apply filter if specified
+            if (filter) |f| {
+                if (std.mem.indexOf(u8, line, f) == null) {
+                    continue;
+                }
+            }
+            lines.append(self.allocator, line) catch {};
+        }
+
+        // Get last N lines
+        const start_idx = if (lines.items.len > num_lines) lines.items.len - num_lines else 0;
+
+        // Print lines
+        for (lines.items[start_idx..]) |line| {
+            if (highlight) |h| {
+                // Highlight matching patterns
+                try logTailHighlightLine(line, h);
+            } else {
+                // Auto-highlight common log levels
+                try logTailAutoHighlightLine(line);
+            }
+        }
+
+        // Follow mode
+        if (follow) {
+            try IO.print("\n\x1b[2m--- Following {s} (Ctrl+C to stop) ---\x1b[0m\n", .{path});
+
+            var last_pos = stat.size;
+
+            // Simple follow loop (non-blocking would be better but this works)
+            while (true) {
+                std.posix.nanosleep(0, 500_000_000); // 500ms
+
+                const new_stat = file.stat() catch continue;
+                if (new_stat.size > last_pos) {
+                    file.seekTo(last_pos) catch continue;
+
+                    var buf: [4096]u8 = undefined;
+                    while (true) {
+                        const n = file.read(&buf) catch break;
+                        if (n == 0) break;
+
+                        // Print new content
+                        var new_lines = std.mem.splitScalar(u8, buf[0..n], '\n');
+                        while (new_lines.next()) |new_line| {
+                            if (new_line.len == 0) continue;
+
+                            // Apply filter
+                            if (filter) |f| {
+                                if (std.mem.indexOf(u8, new_line, f) == null) {
+                                    continue;
+                                }
+                            }
+
+                            if (highlight) |h| {
+                                try logTailHighlightLine(new_line, h);
+                            } else {
+                                try logTailAutoHighlightLine(new_line);
+                            }
+                        }
+                    }
+
+                    last_pos = new_stat.size;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /// proc-monitor builtin - monitor processes
+    fn builtinProcMonitor(_: *Executor, command: *types.ParsedCommand) !i32 {
+        // Parse options
+        var pattern: ?[]const u8 = null;
+        var pid_filter: ?i32 = null;
+        var interval: u32 = 2; // seconds
+        var count: ?u32 = null;
+        var show_help = false;
+
+        var i: usize = 0;
+        while (i < command.args.len) : (i += 1) {
+            const arg = command.args[i];
+            if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+                show_help = true;
+            } else if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "--pid")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    pid_filter = std.fmt.parseInt(i32, command.args[i], 10) catch null;
+                }
+            } else if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "--interval")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    interval = std.fmt.parseInt(u32, command.args[i], 10) catch 2;
+                }
+            } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--count")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    count = std.fmt.parseInt(u32, command.args[i], 10) catch null;
+                }
+            } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--sort")) {
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    // Note: sort_by option recognized but not yet implemented
+                }
+            } else if (arg.len > 0 and arg[0] != '-') {
+                pattern = arg;
+            }
+        }
+
+        if (show_help) {
+            try IO.print("proc-monitor - monitor processes\n", .{});
+            try IO.print("Usage: proc-monitor [options] [PATTERN]\n", .{});
+            try IO.print("Options:\n", .{});
+            try IO.print("  -p, --pid PID       Monitor specific PID\n", .{});
+            try IO.print("  -n, --interval N    Update interval in seconds (default: 2)\n", .{});
+            try IO.print("  -c, --count N       Number of iterations (default: continuous)\n", .{});
+            try IO.print("  -s, --sort FIELD    Sort by: cpu, mem, pid, name (default: cpu)\n", .{});
+            try IO.print("\nExamples:\n", .{});
+            try IO.print("  proc-monitor              # Show top processes by CPU\n", .{});
+            try IO.print("  proc-monitor -p 1234      # Monitor specific PID\n", .{});
+            try IO.print("  proc-monitor node         # Monitor processes matching 'node'\n", .{});
+            try IO.print("  proc-monitor -s mem -c 5  # Sort by memory, 5 iterations\n", .{});
+            return 0;
+        }
+
+        var iterations: u32 = 0;
+        const max_iterations = count orelse std.math.maxInt(u32);
+
+        while (iterations < max_iterations) : (iterations += 1) {
+            // Clear screen and move cursor to top (for continuous monitoring)
+            if (iterations > 0) {
+                try IO.print("\x1b[2J\x1b[H", .{}); // Clear screen
+            }
+
+            try IO.print("\x1b[1;36m=== Process Monitor ===\x1b[0m", .{});
+            if (pattern) |p| {
+                try IO.print(" (filter: {s})", .{p});
+            }
+            if (pid_filter) |pid| {
+                try IO.print(" (pid: {})", .{pid});
+            }
+            try IO.print("\n\n", .{});
+
+            // Use ps command to get process info
+            // On macOS: ps -axo pid,pcpu,pmem,rss,comm
+            const ps_args = if (builtin.os.tag == .macos)
+                [_]?[*:0]const u8{ "ps", "-axo", "pid,pcpu,pmem,rss,comm", null }
+            else
+                [_]?[*:0]const u8{ "ps", "-eo", "pid,pcpu,pmem,rss,comm", null };
+
+            // Create pipe for ps output
+            const pipe_fds = std.posix.pipe() catch {
+                try IO.eprint("proc-monitor: failed to create pipe\n", .{});
+                return 1;
+            };
+
+            const pid = std.posix.fork() catch {
+                try IO.eprint("proc-monitor: failed to fork\n", .{});
+                return 1;
+            };
+
+            if (pid == 0) {
+                // Child: redirect stdout to pipe
+                std.posix.close(pipe_fds[0]);
+                std.posix.dup2(pipe_fds[1], std.posix.STDOUT_FILENO) catch {};
+                std.posix.close(pipe_fds[1]);
+
+                // Redirect stderr to /dev/null
+                const dev_null = std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+                std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
+
+                _ = std.posix.execvpeZ("ps", @ptrCast(&ps_args), getCEnviron()) catch {};
+                std.posix.exit(127);
+            } else {
+                // Parent: read ps output
+                std.posix.close(pipe_fds[1]);
+
+                var buf: [8192]u8 = undefined;
+                var total_read: usize = 0;
+
+                while (total_read < buf.len) {
+                    const n = std.posix.read(pipe_fds[0], buf[total_read..]) catch break;
+                    if (n == 0) break;
+                    total_read += n;
+                }
+
+                std.posix.close(pipe_fds[0]);
+                _ = std.posix.waitpid(pid, 0);
+
+                // Parse and display output
+                var line_num: usize = 0;
+                var proc_count: usize = 0;
+                var lines = std.mem.splitScalar(u8, buf[0..total_read], '\n');
+
+                // Print header
+                try IO.print("\x1b[1m{s:>7}  {s:>6}  {s:>6}  {s:>10}  {s}\x1b[0m\n", .{
+                    "PID", "%CPU", "%MEM", "RSS", "COMMAND",
+                });
+                try IO.print("{s:-<60}\n", .{""});
+
+                while (lines.next()) |line| {
+                    line_num += 1;
+                    if (line_num == 1) continue; // Skip header
+
+                    if (line.len == 0) continue;
+
+                    // Parse line: PID %CPU %MEM RSS COMMAND
+                    var fields = std.mem.tokenizeScalar(u8, line, ' ');
+
+                    const pid_str = fields.next() orelse continue;
+                    const cpu_str = fields.next() orelse continue;
+                    const mem_str = fields.next() orelse continue;
+                    const rss_str = fields.next() orelse continue;
+
+                    // Rest is command name
+                    var cmd_start: usize = 0;
+                    var field_count: usize = 0;
+                    for (line, 0..) |c, idx| {
+                        if (c != ' ' and field_count < 4) {
+                            while (idx + cmd_start < line.len and line[idx + cmd_start] != ' ') : (cmd_start += 1) {}
+                            field_count += 1;
+                            if (field_count == 4) {
+                                cmd_start = idx;
+                                break;
+                            }
+                        }
+                    }
+                    const cmd_name = std.mem.trim(u8, line[cmd_start..], " ");
+
+                    // Apply filters
+                    if (pid_filter) |filter_pid| {
+                        const proc_pid = std.fmt.parseInt(i32, pid_str, 10) catch continue;
+                        if (proc_pid != filter_pid) continue;
+                    }
+
+                    if (pattern) |p| {
+                        if (std.mem.indexOf(u8, cmd_name, p) == null) continue;
+                    }
+
+                    // Format RSS (in KB)
+                    const rss_kb = std.fmt.parseInt(u64, rss_str, 10) catch 0;
+                    var rss_display: [16]u8 = undefined;
+                    const rss_formatted = if (rss_kb >= 1024 * 1024)
+                        std.fmt.bufPrint(&rss_display, "{d:.1}G", .{@as(f64, @floatFromInt(rss_kb)) / (1024.0 * 1024.0)}) catch "?"
+                    else if (rss_kb >= 1024)
+                        std.fmt.bufPrint(&rss_display, "{d:.1}M", .{@as(f64, @floatFromInt(rss_kb)) / 1024.0}) catch "?"
+                    else
+                        std.fmt.bufPrint(&rss_display, "{}K", .{rss_kb}) catch "?";
+
+                    // Color based on CPU usage
+                    const cpu_val = std.fmt.parseFloat(f64, cpu_str) catch 0.0;
+                    const color = if (cpu_val >= 50.0) "\x1b[1;31m" // Red for high CPU
+                    else if (cpu_val >= 20.0) "\x1b[1;33m" // Yellow for medium
+                    else "\x1b[0m";
+
+                    try IO.print("{s}{s:>7}  {s:>6}  {s:>6}  {s:>10}  {s}\x1b[0m\n", .{
+                        color, pid_str, cpu_str, mem_str, rss_formatted, cmd_name,
+                    });
+
+                    proc_count += 1;
+                    if (proc_count >= 20) break; // Limit to top 20
+                }
+
+                try IO.print("\n\x1b[2mShowing top {} processes", .{proc_count});
+                if (count == null) {
+                    try IO.print(" (updating every {}s, Ctrl+C to stop)", .{interval});
+                }
+                try IO.print("\x1b[0m\n", .{});
+            }
+
+            // Sleep before next iteration (unless this is the last one)
+            if (iterations + 1 < max_iterations) {
+                std.posix.nanosleep(interval, 0);
+            }
+        }
+
+        return 0;
+    }
 };
+
+/// Print a line with custom highlight pattern (for log-tail)
+fn logTailHighlightLine(line: []const u8, pattern: []const u8) !void {
+    var remaining = line;
+    while (remaining.len > 0) {
+        if (std.mem.indexOf(u8, remaining, pattern)) |idx| {
+            // Print before match
+            if (idx > 0) {
+                try IO.print("{s}", .{remaining[0..idx]});
+            }
+            // Print match in red bold
+            try IO.print("\x1b[1;31m{s}\x1b[0m", .{pattern});
+            remaining = remaining[idx + pattern.len ..];
+        } else {
+            try IO.print("{s}\n", .{remaining});
+            break;
+        }
+    }
+}
+
+/// Print a line with auto-highlighting for common log levels (for log-tail)
+fn logTailAutoHighlightLine(line: []const u8) !void {
+    // Check for common log levels and colorize
+    if (std.mem.indexOf(u8, line, "ERROR") != null or
+        std.mem.indexOf(u8, line, "FATAL") != null or
+        std.mem.indexOf(u8, line, "CRITICAL") != null)
+    {
+        try IO.print("\x1b[1;31m{s}\x1b[0m\n", .{line}); // Red
+    } else if (std.mem.indexOf(u8, line, "WARN") != null or
+        std.mem.indexOf(u8, line, "WARNING") != null)
+    {
+        try IO.print("\x1b[1;33m{s}\x1b[0m\n", .{line}); // Yellow
+    } else if (std.mem.indexOf(u8, line, "INFO") != null) {
+        try IO.print("\x1b[1;32m{s}\x1b[0m\n", .{line}); // Green
+    } else if (std.mem.indexOf(u8, line, "DEBUG") != null or
+        std.mem.indexOf(u8, line, "TRACE") != null)
+    {
+        try IO.print("\x1b[2m{s}\x1b[0m\n", .{line}); // Dim
+    } else {
+        try IO.print("{s}\n", .{line});
+    }
+}
 
 /// Simple glob pattern matching for [[ == ]] operator
 fn globMatch(str: []const u8, pattern: []const u8) bool {

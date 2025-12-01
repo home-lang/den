@@ -32,6 +32,8 @@ Den Shell provides a comprehensive set of built-in commands that are optimized f
 - [System Commands](#system-commands)
   - [sys-stats - System Statistics](#sys-stats---system-statistics)
   - [netstats - Network Statistics](#netstats---network-statistics)
+  - [log-tail - Tail Log Files](#log-tail---tail-log-files)
+  - [proc-monitor - Process Monitor](#proc-monitor---process-monitor)
 - [Shell Control](#shell-control)
   - [exit - Exit Shell](#exit---exit-shell)
   - [export - Set Environment Variables](#export---set-environment-variables)
@@ -963,6 +965,133 @@ netstats
 | **Network Interfaces** | All network interfaces with their IP addresses |
 | **Active Connections** | TCP connections grouped by state |
 | **Total Connections** | Sum of all TCP connections |
+
+---
+
+### log-tail - Tail Log Files
+
+Tail log files with filtering and automatic highlighting of log levels.
+
+#### Syntax
+
+```bash
+log-tail [OPTIONS] FILE
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-n`, `--lines N` | Show last N lines (default: 10) |
+| `-f`, `--follow` | Follow file for new content (like tail -f) |
+| `-g`, `--grep PATTERN` | Filter lines by pattern |
+| `-H`, `--highlight PATTERN` | Highlight pattern in output |
+
+#### Examples
+
+```bash
+log-tail /var/log/system.log
+# Show last 10 lines with auto-highlighting
+
+log-tail -n 50 app.log
+# Show last 50 lines
+
+log-tail -f server.log
+# Follow log file for new entries
+
+log-tail -g ERROR server.log
+# Show only lines containing "ERROR"
+
+log-tail -f -g "ERROR|WARN" app.log
+# Follow and filter for errors and warnings
+
+log-tail -H "timeout" access.log
+# Highlight "timeout" occurrences in red
+```
+
+#### Auto-Highlighting
+
+Log levels are automatically colorized:
+
+| Level | Color |
+|-------|-------|
+| ERROR, FATAL, CRITICAL | Red (bold) |
+| WARN, WARNING | Yellow (bold) |
+| INFO | Green (bold) |
+| DEBUG, TRACE | Dim |
+
+#### Use Cases
+
+- **Debugging**: Monitor application logs in real-time
+- **Error tracking**: Filter for specific error patterns
+- **Log analysis**: Review recent log entries with color highlighting
+
+---
+
+### proc-monitor - Process Monitor
+
+Monitor system processes with filtering and color-coded CPU usage.
+
+#### Syntax
+
+```bash
+proc-monitor [OPTIONS] [PATTERN]
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--pid PID` | Monitor a specific process by PID |
+| `-n`, `--interval N` | Update interval in seconds (default: 2) |
+| `-c`, `--count N` | Number of iterations (default: continuous) |
+| `-s`, `--sort FIELD` | Sort by: cpu, mem, pid, name (default: cpu) |
+
+#### Examples
+
+```bash
+proc-monitor
+# Show top processes by CPU (updates every 2s)
+
+proc-monitor -c 1
+# Show processes once and exit
+
+proc-monitor -p 1234
+# Monitor specific process ID
+
+proc-monitor node
+# Monitor all processes matching "node"
+
+proc-monitor -n 5 -c 10
+# Update every 5 seconds, 10 iterations
+
+proc-monitor docker
+# Monitor Docker-related processes
+```
+
+#### Output Columns
+
+| Column | Description |
+|--------|-------------|
+| PID | Process ID |
+| %CPU | CPU usage percentage |
+| %MEM | Memory usage percentage |
+| RSS | Resident Set Size (actual memory used) |
+| COMMAND | Process name/command |
+
+#### Color Coding
+
+| CPU Usage | Color |
+|-----------|-------|
+| >= 50% | Red (bold) |
+| >= 20% | Yellow (bold) |
+| < 20% | Normal |
+
+#### Use Cases
+
+- **Performance monitoring**: Track resource-heavy processes
+- **Debugging**: Monitor specific application processes
+- **System administration**: Check overall process health
 
 ---
 

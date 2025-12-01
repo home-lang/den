@@ -265,9 +265,9 @@
   - [x] `grep` - Text search with highlighting ✅
   - [x] `watch` - Execute command repeatedly ✅
 - [ ] **Monitoring & Logging**
-  - [ ] `log-tail` - Tail logs with filtering
+  - [x] `log-tail` - Tail logs with filtering ✅
   - [ ] `log-parse` - Parse structured logs
-  - [ ] `proc-monitor` - Process monitoring
+  - [x] `proc-monitor` - Process monitoring ✅
   - [x] `sys-stats` - System statistics ✅
   - [x] `netstats` - Network statistics ✅
   - [x] `net-check` - Network connectivity check ✅
@@ -287,8 +287,8 @@
   - [x] Create configuration guide ✅ (docs/config.md)
   - [x] Create builtin command reference ✅ (docs/BUILTINS.md - fully updated)
   - [x] Create scripting guide ✅ (docs/SCRIPTING.md)
-  - [ ] Create plugin development guide
-  - [ ] Create theme customization guide
+  - [x] Create plugin development guide ✅ (docs/PLUGIN_DEVELOPMENT.md)
+  - [x] Create theme customization guide ✅ (docs/THEMES.md - already exists)
   - [ ] Create troubleshooting guide
   - [ ] Create man page
 - [ ] **Migration Guide**

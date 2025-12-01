@@ -454,4 +454,4 @@ Consider contributing your theme to the Den community! Submit a pull request wit
 
 - [Shell Configuration](./config.md)
 - [Built-in Commands](./BUILTINS.md)
-- [Plugin Development](../PLUGIN_DEVELOPMENT.md)
+- [Plugin Development](./PLUGIN_DEVELOPMENT.md)
