@@ -314,6 +314,9 @@ pub const Shell = struct {
         };
         shell.plugin_registry.executeHooks(.shell_init, &init_context) catch {};
 
+        // Set global completion config for tabCompletionFn
+        setCompletionConfig(config.completion);
+
         return shell;
     }
 
@@ -5389,7 +5392,28 @@ fn refreshPromptCallback(editor: *LineEditor) !void {
     editor.prompt = try editor.allocator.dupe(u8, prompt);
 }
 
+/// Global completion configuration (set by Shell during initialization)
+/// This allows the static tabCompletionFn to access completion settings
+var g_completion_config: types.CompletionConfig = .{};
+var g_completion_config_initialized: bool = false;
+
+/// Set the global completion configuration
+pub fn setCompletionConfig(config: types.CompletionConfig) void {
+    g_completion_config = config;
+    g_completion_config_initialized = true;
+}
+
+/// Get the global completion configuration
+pub fn getCompletionConfig() types.CompletionConfig {
+    return g_completion_config;
+}
+
 fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
+    // Check if completion is enabled via config
+    if (g_completion_config_initialized and !g_completion_config.enabled) {
+        return &[_][]const u8{};
+    }
+
     var completion = Completion.init(allocator);
     var ctx_completion = ContextCompletion.init(allocator);
 
@@ -5486,7 +5510,23 @@ fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u
     }
 
     // Otherwise, try file completion
-    return completion.completeFile(prefix);
+    const results = try completion.completeFile(prefix);
+
+    // Apply max_suggestions limit from config
+    if (g_completion_config_initialized and g_completion_config.max_suggestions > 0) {
+        const max = @as(usize, g_completion_config.max_suggestions);
+        if (results.len > max) {
+            // Free excess results
+            for (results[max..]) |r| {
+                allocator.free(r);
+            }
+            // Shrink the slice
+            const limited = allocator.realloc(results, max) catch results[0..max];
+            return limited;
+        }
+    }
+
+    return results;
 }
 
 /// Get completions for git command (branches, files, subcommands)

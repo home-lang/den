@@ -626,7 +626,7 @@ pub const Executor = struct {
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
             "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
-            "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor", "log-parse", "dotfiles", "library",
+            "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor", "log-parse", "dotfiles", "library", "hook",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -795,6 +795,8 @@ pub const Executor = struct {
             return try self.builtinDotfiles(command);
         } else if (std.mem.eql(u8, command.name, "library")) {
             return try self.builtinLibrary(command);
+        } else if (std.mem.eql(u8, command.name, "hook")) {
+            return try builtinHook(self, command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -9584,4 +9586,166 @@ fn matchCharClass(c: u8, class: []const u8) bool {
     }
 
     return if (negate) !matched else matched;
+}
+
+/// hook builtin - manage custom command hooks
+fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
+    _ = self;
+    const plugins = @import("../plugins/interface.zig");
+
+    // Static custom hook registry (persists across calls)
+    const S = struct {
+        var registry: ?plugins.CustomHookRegistry = null;
+    };
+
+    // Initialize registry on first use
+    if (S.registry == null) {
+        S.registry = plugins.CustomHookRegistry.init(std.heap.page_allocator);
+    }
+    var registry = &(S.registry.?);
+
+    // No arguments - show help
+    if (command.args.len == 0) {
+        try IO.print("hook - manage custom command hooks\n", .{});
+        try IO.print("Usage: hook <command> [args]\n", .{});
+        try IO.print("\nCommands:\n", .{});
+        try IO.print("  list                  List registered hooks\n", .{});
+        try IO.print("  add <name> <pattern> <script>\n", .{});
+        try IO.print("                        Register a hook\n", .{});
+        try IO.print("  remove <name>         Remove a hook\n", .{});
+        try IO.print("  enable <name>         Enable a hook\n", .{});
+        try IO.print("  disable <name>        Disable a hook\n", .{});
+        try IO.print("  test <command>        Test which hooks match\n", .{});
+        try IO.print("\nExamples:\n", .{});
+        try IO.print("  hook add git:push \"git push\" \"echo 'Pushing...'\"\n", .{});
+        try IO.print("  hook add npm:install \"npm install\" \"echo 'Installing deps'\"\n", .{});
+        try IO.print("  hook add docker:build \"docker build\" \"echo 'Building image'\"\n", .{});
+        try IO.print("  hook list\n", .{});
+        try IO.print("  hook test \"git push origin main\"\n", .{});
+        return 0;
+    }
+
+    const subcmd = command.args[0];
+
+    if (std.mem.eql(u8, subcmd, "list")) {
+        const hooks = registry.list();
+        if (hooks.len == 0) {
+            try IO.print("\x1b[2mNo hooks registered\x1b[0m\n", .{});
+            try IO.print("\nUse 'hook add <name> <pattern> <script>' to add a hook.\n", .{});
+            return 0;
+        }
+
+        try IO.print("\x1b[1;36m=== Registered Hooks ===\x1b[0m\n\n", .{});
+        for (hooks) |hook| {
+            const status = if (hook.enabled) "\x1b[1;32m●\x1b[0m" else "\x1b[2m○\x1b[0m";
+            try IO.print("{s} \x1b[1m{s}\x1b[0m\n", .{ status, hook.name });
+            try IO.print("    Pattern: {s}\n", .{hook.pattern});
+            if (hook.script) |script| {
+                try IO.print("    Script:  {s}\n", .{script});
+            }
+            try IO.print("\n", .{});
+        }
+        return 0;
+    } else if (std.mem.eql(u8, subcmd, "add")) {
+        if (command.args.len < 4) {
+            try IO.eprint("hook add: usage: hook add <name> <pattern> <script>\n", .{});
+            try IO.eprint("Example: hook add git:push \"git push\" \"echo 'Pushing...'\"\n", .{});
+            return 1;
+        }
+
+        const name = command.args[1];
+        const pattern = command.args[2];
+        const script = command.args[3];
+
+        registry.register(name, pattern, script, null, null, 0) catch |err| {
+            try IO.eprint("hook add: failed to register: {}\n", .{err});
+            return 1;
+        };
+
+        try IO.print("\x1b[1;32m✓\x1b[0m Registered hook '{s}'\n", .{name});
+        try IO.print("  Pattern: {s}\n", .{pattern});
+        try IO.print("  Script:  {s}\n", .{script});
+        return 0;
+    } else if (std.mem.eql(u8, subcmd, "remove")) {
+        if (command.args.len < 2) {
+            try IO.eprint("hook remove: missing hook name\n", .{});
+            return 1;
+        }
+
+        const name = command.args[1];
+        if (registry.unregister(name)) {
+            try IO.print("\x1b[1;32m✓\x1b[0m Removed hook '{s}'\n", .{name});
+            return 0;
+        } else {
+            try IO.eprint("hook remove: '{s}' not found\n", .{name});
+            return 1;
+        }
+    } else if (std.mem.eql(u8, subcmd, "enable")) {
+        if (command.args.len < 2) {
+            try IO.eprint("hook enable: missing hook name\n", .{});
+            return 1;
+        }
+
+        const name = command.args[1];
+        if (registry.setEnabled(name, true)) {
+            try IO.print("\x1b[1;32m✓\x1b[0m Enabled hook '{s}'\n", .{name});
+            return 0;
+        } else {
+            try IO.eprint("hook enable: '{s}' not found\n", .{name});
+            return 1;
+        }
+    } else if (std.mem.eql(u8, subcmd, "disable")) {
+        if (command.args.len < 2) {
+            try IO.eprint("hook disable: missing hook name\n", .{});
+            return 1;
+        }
+
+        const name = command.args[1];
+        if (registry.setEnabled(name, false)) {
+            try IO.print("\x1b[1;32m✓\x1b[0m Disabled hook '{s}'\n", .{name});
+            return 0;
+        } else {
+            try IO.eprint("hook disable: '{s}' not found\n", .{name});
+            return 1;
+        }
+    } else if (std.mem.eql(u8, subcmd, "test")) {
+        if (command.args.len < 2) {
+            try IO.eprint("hook test: missing command to test\n", .{});
+            return 1;
+        }
+
+        // Join remaining args as the test command
+        var test_cmd_buf: [1024]u8 = undefined;
+        var pos: usize = 0;
+        for (command.args[1..]) |arg| {
+            if (pos > 0) {
+                test_cmd_buf[pos] = ' ';
+                pos += 1;
+            }
+            const len = @min(arg.len, test_cmd_buf.len - pos);
+            @memcpy(test_cmd_buf[pos .. pos + len], arg[0..len]);
+            pos += len;
+        }
+        const test_cmd = test_cmd_buf[0..pos];
+
+        const matches = registry.findMatchingHooks(test_cmd);
+        if (matches.len == 0) {
+            try IO.print("\x1b[2mNo hooks match: {s}\x1b[0m\n", .{test_cmd});
+        } else {
+            try IO.print("\x1b[1;36mHooks matching '{s}':\x1b[0m\n\n", .{test_cmd});
+            for (matches) |hook| {
+                const cond_met = plugins.CustomHookRegistry.checkCondition(hook.condition);
+                const cond_status = if (cond_met) "\x1b[1;32m✓\x1b[0m" else "\x1b[1;31m✗\x1b[0m";
+                try IO.print("  {s} {s}\n", .{ cond_status, hook.name });
+                if (hook.script) |script| {
+                    try IO.print("      → {s}\n", .{script});
+                }
+            }
+        }
+        return 0;
+    } else {
+        try IO.eprint("hook: unknown command '{s}'\n", .{subcmd});
+        try IO.eprint("Run 'hook' for usage.\n", .{});
+        return 1;
+    }
 }

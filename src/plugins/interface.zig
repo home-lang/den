@@ -10,6 +10,172 @@ pub const HookType = enum {
     shell_exit,    // Shell exit
 };
 
+/// Custom command hook - triggers on specific command patterns
+pub const CustomHook = struct {
+    name: []const u8,           // Hook name (e.g., "git:push")
+    pattern: []const u8,        // Command pattern to match (e.g., "git push")
+    script: ?[]const u8,        // Script to execute (shell command)
+    function: ?HookFn,          // Function to call (for plugins)
+    enabled: bool,
+    priority: i32,              // Lower runs first
+    condition: ?HookCondition,  // Optional condition
+};
+
+/// Hook condition types
+pub const HookCondition = union(enum) {
+    file_exists: []const u8,    // Run only if file exists
+    env_set: []const u8,        // Run only if env var is set
+    env_equals: struct {        // Run only if env var equals value
+        name: []const u8,
+        value: []const u8,
+    },
+    always: void,               // Always run
+};
+
+/// Custom hook registry
+pub const CustomHookRegistry = struct {
+    allocator: std.mem.Allocator,
+    hooks: std.ArrayListUnmanaged(CustomHook),
+
+    pub fn init(allocator: std.mem.Allocator) CustomHookRegistry {
+        return .{
+            .allocator = allocator,
+            .hooks = .{},
+        };
+    }
+
+    pub fn deinit(self: *CustomHookRegistry) void {
+        for (self.hooks.items) |hook| {
+            self.allocator.free(hook.name);
+            self.allocator.free(hook.pattern);
+            if (hook.script) |script| {
+                self.allocator.free(script);
+            }
+            if (hook.condition) |cond| {
+                switch (cond) {
+                    .file_exists => |path| self.allocator.free(path),
+                    .env_set => |name| self.allocator.free(name),
+                    .env_equals => |eq| {
+                        self.allocator.free(eq.name);
+                        self.allocator.free(eq.value);
+                    },
+                    .always => {},
+                }
+            }
+        }
+        self.hooks.deinit(self.allocator);
+    }
+
+    /// Register a custom command hook
+    pub fn register(self: *CustomHookRegistry, name: []const u8, pattern: []const u8, script: ?[]const u8, function: ?HookFn, condition: ?HookCondition, priority: i32) !void {
+        const hook = CustomHook{
+            .name = try self.allocator.dupe(u8, name),
+            .pattern = try self.allocator.dupe(u8, pattern),
+            .script = if (script) |s| try self.allocator.dupe(u8, s) else null,
+            .function = function,
+            .enabled = true,
+            .priority = priority,
+            .condition = if (condition) |cond| blk: {
+                break :blk switch (cond) {
+                    .file_exists => |path| HookCondition{ .file_exists = try self.allocator.dupe(u8, path) },
+                    .env_set => |name_str| HookCondition{ .env_set = try self.allocator.dupe(u8, name_str) },
+                    .env_equals => |eq| HookCondition{ .env_equals = .{
+                        .name = try self.allocator.dupe(u8, eq.name),
+                        .value = try self.allocator.dupe(u8, eq.value),
+                    } },
+                    .always => HookCondition{ .always = {} },
+                };
+            } else null,
+        };
+        try self.hooks.append(self.allocator, hook);
+    }
+
+    /// Find hooks matching a command
+    pub fn findMatchingHooks(self: *CustomHookRegistry, command: []const u8) []const CustomHook {
+        var matches: [32]CustomHook = undefined;
+        var count: usize = 0;
+
+        for (self.hooks.items) |hook| {
+            if (!hook.enabled) continue;
+            if (count >= matches.len) break;
+
+            // Check if command starts with pattern
+            if (std.mem.startsWith(u8, command, hook.pattern)) {
+                // Verify pattern is followed by space or end of command
+                if (command.len == hook.pattern.len or
+                    (command.len > hook.pattern.len and command[hook.pattern.len] == ' '))
+                {
+                    matches[count] = hook;
+                    count += 1;
+                }
+            }
+        }
+
+        // Sort by priority (lower first)
+        const slice = matches[0..count];
+        std.mem.sort(CustomHook, slice, {}, struct {
+            fn lessThan(_: void, a: CustomHook, b: CustomHook) bool {
+                return a.priority < b.priority;
+            }
+        }.lessThan);
+
+        // Return static slice (caller should copy if needed)
+        return slice;
+    }
+
+    /// Check if a hook condition is met
+    pub fn checkCondition(cond: ?HookCondition) bool {
+        const condition = cond orelse return true; // No condition = always run
+
+        switch (condition) {
+            .file_exists => |path| {
+                _ = std.fs.cwd().statFile(path) catch return false;
+                return true;
+            },
+            .env_set => |name| {
+                return std.posix.getenv(name) != null;
+            },
+            .env_equals => |eq| {
+                const value = std.posix.getenv(eq.name) orelse return false;
+                return std.mem.eql(u8, value, eq.value);
+            },
+            .always => return true,
+        }
+    }
+
+    /// Unregister a hook by name
+    pub fn unregister(self: *CustomHookRegistry, name: []const u8) bool {
+        var i: usize = 0;
+        while (i < self.hooks.items.len) {
+            if (std.mem.eql(u8, self.hooks.items[i].name, name)) {
+                const hook = self.hooks.orderedRemove(i);
+                self.allocator.free(hook.name);
+                self.allocator.free(hook.pattern);
+                if (hook.script) |script| self.allocator.free(script);
+                return true;
+            }
+            i += 1;
+        }
+        return false;
+    }
+
+    /// List all registered hooks
+    pub fn list(self: *CustomHookRegistry) []const CustomHook {
+        return self.hooks.items;
+    }
+
+    /// Enable/disable a hook
+    pub fn setEnabled(self: *CustomHookRegistry, name: []const u8, enabled: bool) bool {
+        for (self.hooks.items) |*hook| {
+            if (std.mem.eql(u8, hook.name, name)) {
+                hook.enabled = enabled;
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
 /// Hook function signature
 pub const HookFn = *const fn (context: *HookContext) anyerror!void;
 

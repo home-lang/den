@@ -53,6 +53,7 @@ Den Shell provides a comprehensive set of built-in commands that are optimized f
   - [pstorm - Open in PhpStorm](#pstorm---open-in-phpstorm)
   - [bookmark - Directory Bookmarks](#bookmark---directory-bookmarks)
   - [library - Shell Function Libraries](#library---shell-function-libraries)
+  - [hook - Custom Command Hooks](#hook---custom-command-hooks)
   - [shrug - Copy Shrug Emoji](#shrug---copy-shrug-emoji)
 
 ---
@@ -1653,6 +1654,86 @@ library info git-helpers
 library load git-helpers
 # Loaded: git-helpers
 ```
+
+---
+
+### hook - Custom Command Hooks
+
+Register and manage custom hooks that trigger before specific commands.
+
+#### Syntax
+
+```bash
+hook <command> [args]
+```
+
+#### Commands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all registered hooks |
+| `add <name> <pattern> <script>` | Register a new hook |
+| `remove <name>` | Remove a hook by name |
+| `enable <name>` | Enable a disabled hook |
+| `disable <name>` | Disable a hook |
+| `test <command>` | Test which hooks would match |
+
+#### Examples
+
+**Register hooks for common commands:**
+```bash
+# Pre-push notification
+hook add git:push "git push" "echo 'Pushing to remote...'"
+
+# Pre-install notification
+hook add npm:install "npm install" "echo 'Installing dependencies...'"
+
+# Docker build notification
+hook add docker:build "docker build" "echo 'Building image...'"
+```
+
+**List registered hooks:**
+```bash
+hook list
+# === Registered Hooks ===
+#
+# ● git:push
+#     Pattern: git push
+#     Script:  echo 'Pushing to remote...'
+```
+
+**Test which hooks match a command:**
+```bash
+hook test "git push origin main"
+# Hooks matching 'git push origin main':
+#
+#   ✓ git:push
+#       → echo 'Pushing to remote...'
+```
+
+**Disable a hook temporarily:**
+```bash
+hook disable git:push
+# ✓ Disabled hook 'git:push'
+
+hook enable git:push
+# ✓ Enabled hook 'git:push'
+```
+
+**Remove a hook:**
+```bash
+hook remove git:push
+# ✓ Removed hook 'git:push'
+```
+
+#### Hook Conditions
+
+Hooks support conditional execution based on:
+- **file_exists**: Run only if a file exists
+- **env_set**: Run only if an environment variable is set
+- **env_equals**: Run only if an env var equals a specific value
+
+Note: Conditions are configured programmatically through the plugin API.
 
 ---
 

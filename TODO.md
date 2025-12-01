@@ -147,7 +147,7 @@
   - [x] kubectl completion (subcommands, resources, namespaces)
   - [x] Custom completion registration ✅ (complete builtin with -f,-d,-c,-a,-b,-e,-u,-W,-S,-P flags)
 - [x] Completion caching with TTL ✅
-- [ ] Completion configuration (enable/disable, case sensitivity, max suggestions)
+- [x] Completion configuration (enable/disable, case sensitivity, max suggestions) ✅
 - **Implementation**: `src/utils/context_completion.zig` (1000+ lines)
 
 ### 8. Arithmetic Expansion ✅ Complete
@@ -216,21 +216,21 @@
   - [ ] Recursive functions (untested)
   - [ ] Function overriding
   - **Note**: Functions work in both scripts and REPL (single-line and multi-line)
-- [ ] **Script Execution**
+- [x] **Script Execution**
   - [x] Script context (variables, functions, scope)
-  - [ ] Script caching (parsed AST)
+  - [x] Script caching ✅ (content caching with mtime validation in ScriptManager)
   - [ ] Script timeout
 - [ ] **Error Handling**
   - [ ] Error suggestions
   - [ ] Error recovery
 
-### 12. Custom Hooks (Phase 16)
-- [ ] `git:push` - Before git push
-- [ ] `docker:build` - Before docker build
-- [ ] `npm:install` - Before npm install
-- [ ] Support user-defined custom hooks
-- [ ] Conditional execution (file/env/custom predicates)
-- [ ] Script execution from hooks
+### 12. Custom Hooks (Phase 16) ✅
+- [x] `git:push` - Before git push ✅
+- [x] `docker:build` - Before docker build ✅
+- [x] `npm:install` - Before npm install ✅
+- [x] Support user-defined custom hooks ✅ (`hook` builtin)
+- [x] Conditional execution (file/env/custom predicates) ✅
+- [x] Script execution from hooks ✅
 
 ---
 
@@ -290,11 +290,11 @@
   - [x] Create plugin development guide ✅ (docs/PLUGIN_DEVELOPMENT.md)
   - [x] Create theme customization guide ✅ (docs/THEMES.md - already exists)
   - [x] Create troubleshooting guide ✅ (docs/TROUBLESHOOTING.md)
-  - [ ] Create man page
-- [ ] **Migration Guide**
-  - [ ] Document breaking changes
-  - [ ] Create migration script/tool
-  - [ ] Document feature parity status
+  - [x] Create man page ✅ (docs/den.1)
+- [x] **Migration Guide** ✅ (docs/MIGRATION.md)
+  - [x] Document breaking changes ✅
+  - [x] Create migration script/tool ✅
+  - [x] Document feature parity status ✅
 - [ ] **Website/Docs Site**
   - [ ] Port VitePress docs to static site
   - [ ] Create online playground/demo
