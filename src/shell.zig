@@ -141,6 +141,8 @@ pub const Shell = struct {
     multiline_mode: MultilineMode,
     // Flag to prevent re-entrancy in C-style for loop execution
     in_cstyle_for_body: bool,
+    // Flag for break statement in loops
+    break_requested: bool,
 
     const MultilineMode = enum {
         none,
@@ -263,6 +265,7 @@ pub const Shell = struct {
             .multiline_brace_count = 0,
             .multiline_mode = .none,
             .in_cstyle_for_body = false,
+            .break_requested = false,
         };
 
         // Detect if stdin is a TTY
@@ -985,6 +988,12 @@ pub const Shell = struct {
         const trimmed_input = std.mem.trim(u8, input, &std.ascii.whitespace);
         if (!self.in_cstyle_for_body and std.mem.startsWith(u8, trimmed_input, "for ((")) {
             try self.executeCStyleForLoopOneline(input);
+            return;
+        }
+
+        // Check for select loop: select VAR in ITEM1 ITEM2; do ... done
+        if (std.mem.startsWith(u8, trimmed_input, "select ")) {
+            try self.executeSelectLoop(input);
             return;
         }
 
@@ -3801,11 +3810,10 @@ pub const Shell = struct {
         else
             1;
 
-        // In a full implementation, this would break out of N levels of loops
-        // For now, just acknowledge the command
-        _ = levels;
+        // Signal break to the loop
+        _ = levels; // TODO: support breaking multiple levels
+        self.break_requested = true;
         self.last_exit_code = 0;
-        try IO.print("den: break: loop control not yet fully implemented\n", .{});
     }
 
     /// Builtin: continue - skip to next loop iteration
@@ -4206,6 +4214,196 @@ pub const Shell = struct {
                 // to handle them properly (it will detect if there's another for loop)
                 self.executeCStyleLoopBodyCommand(after_done);
             }
+        }
+    }
+
+    /// Execute a select loop: select VAR in ITEM1 ITEM2 ...; do BODY; done
+    fn executeSelectLoop(self: *Shell, input: []const u8) !void {
+        const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+
+        // Verify it starts with "select "
+        if (!std.mem.startsWith(u8, trimmed, "select ")) {
+            try IO.eprint("den: syntax error: expected 'select'\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Parse: select VAR in ITEM1 ITEM2 ...; do BODY; done
+        const after_select = trimmed[7..]; // After "select "
+
+        // Find " in "
+        const in_pos = std.mem.indexOf(u8, after_select, " in ") orelse {
+            try IO.eprint("den: syntax error: expected 'in' in select\n", .{});
+            self.last_exit_code = 1;
+            return;
+        };
+
+        const variable = std.mem.trim(u8, after_select[0..in_pos], &std.ascii.whitespace);
+        if (variable.len == 0) {
+            try IO.eprint("den: syntax error: missing variable in select\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Find "; do" or just "do"
+        const after_in = after_select[in_pos + 4 ..]; // After " in "
+        const do_pos = std.mem.indexOf(u8, after_in, "; do") orelse
+            std.mem.indexOf(u8, after_in, ";do") orelse {
+            try IO.eprint("den: syntax error: expected 'do' in select\n", .{});
+            self.last_exit_code = 1;
+            return;
+        };
+
+        // Extract items
+        const items_str = std.mem.trim(u8, after_in[0..do_pos], &std.ascii.whitespace);
+        if (items_str.len == 0) {
+            try IO.eprint("den: syntax error: no items in select\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Parse items (space-separated words)
+        var items_buf: [100][]const u8 = undefined;
+        var items_count: usize = 0;
+        var items_iter = std.mem.tokenizeAny(u8, items_str, " \t");
+        while (items_iter.next()) |item| {
+            if (items_count >= items_buf.len) break;
+            items_buf[items_count] = item;
+            items_count += 1;
+        }
+
+        if (items_count == 0) {
+            try IO.eprint("den: syntax error: no items in select\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Find body (between "do" and "done")
+        const do_keyword_len: usize = if (std.mem.indexOf(u8, after_in, "; do") != null) 4 else 3;
+        const body_start_offset = do_pos + do_keyword_len;
+        const body_and_rest = after_in[body_start_offset..];
+
+        const done_pos = std.mem.indexOf(u8, body_and_rest, "done") orelse {
+            try IO.eprint("den: syntax error: expected 'done' in select\n", .{});
+            self.last_exit_code = 1;
+            return;
+        };
+
+        var body_str = std.mem.trim(u8, body_and_rest[0..done_pos], &std.ascii.whitespace);
+        // Remove leading semicolon if present
+        if (body_str.len > 0 and body_str[0] == ';') {
+            body_str = std.mem.trim(u8, body_str[1..], &std.ascii.whitespace);
+        }
+        // Remove trailing semicolon if present
+        if (body_str.len > 0 and body_str[body_str.len - 1] == ';') {
+            body_str = std.mem.trim(u8, body_str[0 .. body_str.len - 1], &std.ascii.whitespace);
+        }
+
+        // Get PS3 prompt (or use default)
+        const ps3 = self.environment.get("PS3") orelse "#? ";
+
+        // Interactive select loop
+        const posix = std.posix;
+
+        // Display menu
+        try IO.print("\n", .{});
+        for (items_buf[0..items_count], 1..) |item, idx| {
+            try IO.print("{d}) {s}\n", .{ idx, item });
+        }
+
+        // Main select loop
+        while (true) {
+            // Display prompt
+            try IO.print("{s}", .{ps3});
+
+            // Read input from stdin
+            var input_buf: [1024]u8 = undefined;
+            const bytes_read = posix.read(posix.STDIN_FILENO, &input_buf) catch |err| {
+                if (err == error.WouldBlock) continue;
+                break;
+            };
+
+            if (bytes_read == 0) {
+                // EOF
+                break;
+            }
+
+            const user_input = std.mem.trim(u8, input_buf[0..bytes_read], &std.ascii.whitespace);
+
+            // Empty input - redisplay menu
+            if (user_input.len == 0) {
+                try IO.print("\n", .{});
+                for (items_buf[0..items_count], 1..) |item, idx| {
+                    try IO.print("{d}) {s}\n", .{ idx, item });
+                }
+                continue;
+            }
+
+            // Parse selection
+            const selection = std.fmt.parseInt(usize, user_input, 10) catch {
+                // Invalid number - set variable empty and run body
+                self.setArithVariable(variable, "");
+                self.setArithVariable("REPLY", user_input);
+                self.executeSelectBody(body_str);
+                if (self.break_requested) {
+                    self.break_requested = false;
+                    break;
+                }
+                continue;
+            };
+
+            if (selection == 0 or selection > items_count) {
+                // Invalid selection - set variable empty and run body
+                self.setArithVariable(variable, "");
+                var reply_buf: [32]u8 = undefined;
+                const reply_str = std.fmt.bufPrint(&reply_buf, "{d}", .{selection}) catch continue;
+                self.setArithVariable("REPLY", reply_str);
+                self.executeSelectBody(body_str);
+                if (self.break_requested) {
+                    self.break_requested = false;
+                    break;
+                }
+                continue;
+            }
+
+            // Valid selection
+            const selected_item = items_buf[selection - 1];
+            self.setArithVariable(variable, selected_item);
+            var reply_buf: [32]u8 = undefined;
+            const reply_str = std.fmt.bufPrint(&reply_buf, "{d}", .{selection}) catch continue;
+            self.setArithVariable("REPLY", reply_str);
+
+            // Execute body
+            self.executeSelectBody(body_str);
+
+            // Check for break
+            if (self.break_requested) {
+                self.break_requested = false;
+                break;
+            }
+        }
+
+        self.last_exit_code = 0;
+    }
+
+    /// Execute select loop body command (non-recursive helper)
+    fn executeSelectBody(self: *Shell, body: []const u8) void {
+        // Split body by semicolons and execute each command
+        var cmd_iter = std.mem.splitSequence(u8, body, ";");
+        while (cmd_iter.next()) |cmd| {
+            const trimmed_cmd = std.mem.trim(u8, cmd, &std.ascii.whitespace);
+            if (trimmed_cmd.len == 0) continue;
+
+            // Check for break
+            if (std.mem.eql(u8, trimmed_cmd, "break")) {
+                self.break_requested = true;
+                return;
+            }
+
+            // Execute the command using executeCStyleLoopBodyCommand which handles recursion safely
+            self.executeCStyleLoopBodyCommand(trimmed_cmd);
+
+            if (self.break_requested) return;
         }
     }
 

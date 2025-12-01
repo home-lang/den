@@ -200,12 +200,12 @@
 - **Implementation**: `src/shell.zig` (option fields), `src/executor/mod.zig` (builtinSet, executeCommand, pipelines)
 
 ### 11. Scripting Engine (Phase 14 - Partial)
-- [ ] **Control Flow Enhancements**
-  - [ ] C-style for loop (`for ((i=0; i<10; i++))`)
+- [x] **Control Flow Enhancements** ✅
+  - [x] C-style for loop (`for ((i=0; i<10; i++))`) ✅
   - [ ] Iterate over array in for loops
   - [ ] Multiple patterns per case statement
   - [ ] Fallthrough with `;&` and `;;&` in case
-  - [ ] `select` loops (interactive menu)
+  - [x] `select` loops (interactive menu) ✅
 - [x] **Functions** ✅ (Partial)
   - [x] Function definition (`function name { ... }`, `name() { ... }`)
   - [x] Function call
