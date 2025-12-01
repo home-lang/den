@@ -243,7 +243,7 @@
   - [x] `reload` - Reload configuration
   - [x] `code` - Open in VS Code ✅
   - [x] `pstorm` - Open in PhpStorm ✅
-  - [ ] `library` - Library management
+  - [x] `library` - Library management ✅
   - [x] `show` / `hide` - Show/hide files (macOS) ✅
 - [x] **System Helpers**
   - [x] `ip` - Display public IP info ✅
@@ -280,7 +280,7 @@
   - [x] Create architecture documentation ✅ (docs/ARCHITECTURE.md - updated with config system)
   - [x] Document data structures ✅ (docs/DATA_STRUCTURES.md)
   - [x] Document algorithms (parser, expansion, etc.) ✅ (docs/ALGORITHMS.md)
-  - [ ] Create contributor guide
+  - [x] Create contributor guide ✅ (docs/CONTRIBUTING.md)
 - [x] **User Documentation**
   - [x] Update README.md for Zig version ✅
   - [x] Create getting started guide ✅ (docs/intro.md, docs/install.md)
@@ -289,7 +289,7 @@
   - [x] Create scripting guide ✅ (docs/SCRIPTING.md)
   - [x] Create plugin development guide ✅ (docs/PLUGIN_DEVELOPMENT.md)
   - [x] Create theme customization guide ✅ (docs/THEMES.md - already exists)
-  - [ ] Create troubleshooting guide
+  - [x] Create troubleshooting guide ✅ (docs/TROUBLESHOOTING.md)
   - [ ] Create man page
 - [ ] **Migration Guide**
   - [ ] Document breaking changes

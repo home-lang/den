@@ -626,7 +626,7 @@ pub const Executor = struct {
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
             "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
-            "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor", "log-parse", "dotfiles",
+            "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor", "log-parse", "dotfiles", "library",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -793,6 +793,8 @@ pub const Executor = struct {
             return try self.builtinLogParse(command);
         } else if (std.mem.eql(u8, command.name, "dotfiles")) {
             return try self.builtinDotfiles(command);
+        } else if (std.mem.eql(u8, command.name, "library")) {
+            return try self.builtinLibrary(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -8624,7 +8626,358 @@ pub const Executor = struct {
             return 1;
         }
     }
+
+    /// library builtin - manage shell function libraries
+    fn builtinLibrary(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        if (command.args.len == 0) {
+            try IO.print("library - manage shell function libraries\n", .{});
+            try IO.print("Usage: library <command> [args]\n", .{});
+            try IO.print("\nCommands:\n", .{});
+            try IO.print("  list                  List available libraries\n", .{});
+            try IO.print("  info <name>           Show library information\n", .{});
+            try IO.print("  load <name|path>      Load a library\n", .{});
+            try IO.print("  unload <name>         Unload a library\n", .{});
+            try IO.print("  create <name>         Create a new library template\n", .{});
+            try IO.print("  path                  Show library search paths\n", .{});
+            try IO.print("\nLibrary locations:\n", .{});
+            try IO.print("  ~/.config/den/lib/    User libraries\n", .{});
+            try IO.print("  /usr/local/share/den/lib/  System libraries\n", .{});
+            try IO.print("\nExamples:\n", .{});
+            try IO.print("  library list\n", .{});
+            try IO.print("  library load git-helpers\n", .{});
+            try IO.print("  library create my-utils\n", .{});
+            return 0;
+        }
+
+        const subcmd = command.args[0];
+
+        if (std.mem.eql(u8, subcmd, "list")) {
+            return try libraryList();
+        } else if (std.mem.eql(u8, subcmd, "path")) {
+            return try libraryPath();
+        } else if (std.mem.eql(u8, subcmd, "info")) {
+            if (command.args.len < 2) {
+                try IO.eprint("library info: missing library name\n", .{});
+                return 1;
+            }
+            return try libraryInfo(command.args[1]);
+        } else if (std.mem.eql(u8, subcmd, "load")) {
+            if (command.args.len < 2) {
+                try IO.eprint("library load: missing library name\n", .{});
+                return 1;
+            }
+            return try libraryLoad(command.args[1]);
+        } else if (std.mem.eql(u8, subcmd, "unload")) {
+            if (command.args.len < 2) {
+                try IO.eprint("library unload: missing library name\n", .{});
+                return 1;
+            }
+            try IO.print("library unload: not yet implemented\n", .{});
+            return 1;
+        } else if (std.mem.eql(u8, subcmd, "create")) {
+            if (command.args.len < 2) {
+                try IO.eprint("library create: missing library name\n", .{});
+                return 1;
+            }
+            return try libraryCreate(command.args[1]);
+        } else {
+            try IO.eprint("library: unknown command '{s}'\n", .{subcmd});
+            return 1;
+        }
+    }
 };
+
+/// List available libraries
+fn libraryList() !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("library: HOME not set\n", .{});
+        return 1;
+    };
+
+    try IO.print("\x1b[1;36m=== Shell Libraries ===\x1b[0m\n\n", .{});
+
+    // Check user library directory
+    var user_lib_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const user_lib_path = std.fmt.bufPrint(&user_lib_buf, "{s}/.config/den/lib", .{home}) catch return 1;
+
+    try IO.print("\x1b[1;33mUser libraries:\x1b[0m {s}\n", .{user_lib_path});
+
+    if (std.fs.cwd().openDir(user_lib_path, .{ .iterate = true })) |dir_val| {
+        var dir = dir_val;
+        defer dir.close();
+        var iter = dir.iterate();
+        var count: usize = 0;
+        while (iter.next() catch null) |entry| {
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".den") or
+                std.mem.endsWith(u8, entry.name, ".sh"))
+            {
+                try IO.print("  \x1b[1;32m•\x1b[0m {s}\n", .{entry.name});
+                count += 1;
+            }
+        }
+        if (count == 0) {
+            try IO.print("  \x1b[2m(none)\x1b[0m\n", .{});
+        }
+    } else |_| {
+        try IO.print("  \x1b[2m(directory not found)\x1b[0m\n", .{});
+    }
+
+    // Check system library directory
+    try IO.print("\n\x1b[1;33mSystem libraries:\x1b[0m /usr/local/share/den/lib\n", .{});
+
+    if (std.fs.cwd().openDir("/usr/local/share/den/lib", .{ .iterate = true })) |dir_val| {
+        var dir = dir_val;
+        defer dir.close();
+        var iter = dir.iterate();
+        var count: usize = 0;
+        while (iter.next() catch null) |entry| {
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".den") or
+                std.mem.endsWith(u8, entry.name, ".sh"))
+            {
+                try IO.print("  \x1b[1;32m•\x1b[0m {s}\n", .{entry.name});
+                count += 1;
+            }
+        }
+        if (count == 0) {
+            try IO.print("  \x1b[2m(none)\x1b[0m\n", .{});
+        }
+    } else |_| {
+        try IO.print("  \x1b[2m(directory not found)\x1b[0m\n", .{});
+    }
+
+    return 0;
+}
+
+/// Show library search paths
+fn libraryPath() !i32 {
+    const home = std.posix.getenv("HOME") orelse "";
+
+    try IO.print("\x1b[1;36m=== Library Search Paths ===\x1b[0m\n\n", .{});
+
+    var user_lib_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const user_lib_path = std.fmt.bufPrint(&user_lib_buf, "{s}/.config/den/lib", .{home}) catch "(error)";
+
+    const paths = [_][]const u8{
+        user_lib_path,
+        "/usr/local/share/den/lib",
+        "/usr/share/den/lib",
+    };
+
+    for (paths, 1..) |path, i| {
+        const exists = std.fs.cwd().statFile(path) catch null;
+        const status = if (exists != null) "\x1b[1;32m✓\x1b[0m" else "\x1b[2m✗\x1b[0m";
+        try IO.print("{s} {}. {s}\n", .{ status, i, path });
+    }
+
+    return 0;
+}
+
+/// Show library info
+fn libraryInfo(name: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("library: HOME not set\n", .{});
+        return 1;
+    };
+
+    // Try to find the library
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    // Try user lib directory
+    const user_path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}.den", .{ home, name }) catch return 1;
+
+    var lib_path: []const u8 = user_path;
+    var file = std.fs.cwd().openFile(user_path, .{}) catch blk: {
+        // Try with .sh extension
+        const user_sh_path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}.sh", .{ home, name }) catch return 1;
+        lib_path = user_sh_path;
+        break :blk std.fs.cwd().openFile(user_sh_path, .{}) catch {
+            try IO.eprint("library: '{s}' not found\n", .{name});
+            return 1;
+        };
+    };
+    defer file.close();
+
+    try IO.print("\x1b[1;36m=== Library: {s} ===\x1b[0m\n\n", .{name});
+    try IO.print("\x1b[1;33mPath:\x1b[0m {s}\n", .{lib_path});
+
+    const stat = file.stat() catch return 1;
+    try IO.print("\x1b[1;33mSize:\x1b[0m {} bytes\n", .{stat.size});
+
+    // Read and show header comments
+    var buf: [4096]u8 = undefined;
+    const n = file.read(&buf) catch 0;
+
+    if (n > 0) {
+        try IO.print("\n\x1b[1;33mDescription:\x1b[0m\n", .{});
+
+        var lines = std.mem.splitScalar(u8, buf[0..n], '\n');
+        var found_desc = false;
+        while (lines.next()) |line| {
+            if (line.len > 0 and line[0] == '#') {
+                if (line.len > 2) {
+                    try IO.print("  {s}\n", .{line[2..]});
+                    found_desc = true;
+                }
+            } else if (found_desc) {
+                break;
+            }
+        }
+
+        if (!found_desc) {
+            try IO.print("  \x1b[2m(no description)\x1b[0m\n", .{});
+        }
+
+        // Count functions
+        try IO.print("\n\x1b[1;33mFunctions:\x1b[0m\n", .{});
+        var func_count: usize = 0;
+        var content_lines = std.mem.splitScalar(u8, buf[0..n], '\n');
+        while (content_lines.next()) |line| {
+            if (std.mem.startsWith(u8, line, "function ") or
+                (std.mem.indexOf(u8, line, "()") != null and !std.mem.startsWith(u8, line, "#")))
+            {
+                // Extract function name
+                var func_name: []const u8 = "";
+                if (std.mem.startsWith(u8, line, "function ")) {
+                    const rest = line[9..];
+                    if (std.mem.indexOf(u8, rest, " ")) |space_idx| {
+                        func_name = rest[0..space_idx];
+                    } else if (std.mem.indexOf(u8, rest, "(")) |paren_idx| {
+                        func_name = rest[0..paren_idx];
+                    }
+                } else if (std.mem.indexOf(u8, line, "()")) |paren_idx| {
+                    func_name = std.mem.trim(u8, line[0..paren_idx], " \t");
+                }
+
+                if (func_name.len > 0) {
+                    try IO.print("  \x1b[1;32m•\x1b[0m {s}\n", .{func_name});
+                    func_count += 1;
+                }
+            }
+        }
+
+        if (func_count == 0) {
+            try IO.print("  \x1b[2m(no functions found)\x1b[0m\n", .{});
+        }
+    }
+
+    return 0;
+}
+
+/// Load a library
+fn libraryLoad(name: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("library: HOME not set\n", .{});
+        return 1;
+    };
+
+    // Try to find the library
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    // If it's an absolute path, use directly
+    if (name[0] == '/') {
+        _ = std.fs.cwd().statFile(name) catch {
+            try IO.eprint("library: '{s}' not found\n", .{name});
+            return 1;
+        };
+        try IO.print("\x1b[1;32m✓\x1b[0m Loading {s}\n", .{name});
+        try IO.print("  \x1b[2mRun: source {s}\x1b[0m\n", .{name});
+        return 0;
+    }
+
+    // Try user lib directory
+    const extensions = [_][]const u8{ ".den", ".sh", "" };
+    for (extensions) |ext| {
+        const path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}{s}", .{ home, name, ext }) catch continue;
+
+        if (std.fs.cwd().statFile(path)) |_| {
+            try IO.print("\x1b[1;32m✓\x1b[0m Found library: {s}\n", .{path});
+            try IO.print("  \x1b[2mRun: source {s}\x1b[0m\n", .{path});
+            return 0;
+        } else |_| {}
+    }
+
+    // Try system lib directory
+    for (extensions) |ext| {
+        const path = std.fmt.bufPrint(&path_buf, "/usr/local/share/den/lib/{s}{s}", .{ name, ext }) catch continue;
+
+        if (std.fs.cwd().statFile(path)) |_| {
+            try IO.print("\x1b[1;32m✓\x1b[0m Found library: {s}\n", .{path});
+            try IO.print("  \x1b[2mRun: source {s}\x1b[0m\n", .{path});
+            return 0;
+        } else |_| {}
+    }
+
+    try IO.eprint("library: '{s}' not found\n", .{name});
+    try IO.eprint("Try: library list\n", .{});
+    return 1;
+}
+
+/// Create a new library template
+fn libraryCreate(name: []const u8) !i32 {
+    const home = std.posix.getenv("HOME") orelse {
+        try IO.eprint("library: HOME not set\n", .{});
+        return 1;
+    };
+
+    // Create lib directory if needed
+    var lib_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const lib_dir = std.fmt.bufPrint(&lib_dir_buf, "{s}/.config/den/lib", .{home}) catch return 1;
+
+    std.fs.cwd().makePath(lib_dir) catch |err| {
+        try IO.eprint("library: cannot create directory: {}\n", .{err});
+        return 1;
+    };
+
+    // Create library file
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/{s}.den", .{ lib_dir, name }) catch return 1;
+
+    // Check if file exists
+    if (std.fs.cwd().statFile(path)) |_| {
+        try IO.eprint("library: '{s}' already exists\n", .{path});
+        return 1;
+    } else |_| {}
+
+    // Create template
+    const template =
+        \\# {s} - Den Shell Library
+        \\# Description: Add your description here
+        \\# Author: Your Name
+        \\# Version: 1.0.0
+        \\
+        \\# Example function
+        \\{s}_hello() {{
+        \\    echo "Hello from {s} library!"
+        \\}}
+        \\
+        \\# Add your functions below
+        \\
+    ;
+
+    var content_buf: [2048]u8 = undefined;
+    const content = std.fmt.bufPrint(&content_buf, template, .{ name, name, name }) catch return 1;
+
+    const file = std.fs.cwd().createFile(path, .{}) catch |err| {
+        try IO.eprint("library: cannot create file: {}\n", .{err});
+        return 1;
+    };
+    defer file.close();
+
+    _ = file.write(content) catch |err| {
+        try IO.eprint("library: cannot write file: {}\n", .{err});
+        return 1;
+    };
+
+    try IO.print("\x1b[1;32m✓\x1b[0m Created library: {s}\n", .{path});
+    try IO.print("\nNext steps:\n", .{});
+    try IO.print("  1. Edit: dotfiles edit {s}\n", .{path});
+    try IO.print("  2. Load: source {s}\n", .{path});
+    try IO.print("  3. Use:  {s}_hello\n", .{name});
+
+    return 0;
+}
 
 /// List common dotfiles
 fn dotfilesList() !i32 {

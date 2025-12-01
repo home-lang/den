@@ -52,6 +52,7 @@ Den Shell provides a comprehensive set of built-in commands that are optimized f
   - [code - Open in VS Code](#code---open-in-vs-code)
   - [pstorm - Open in PhpStorm](#pstorm---open-in-phpstorm)
   - [bookmark - Directory Bookmarks](#bookmark---directory-bookmarks)
+  - [library - Shell Function Libraries](#library---shell-function-libraries)
   - [shrug - Copy Shrug Emoji](#shrug---copy-shrug-emoji)
 
 ---
@@ -1562,6 +1563,95 @@ bookmark go projects
 
 bookmark rm projects
 # Remove bookmark
+```
+
+---
+
+### library - Shell Function Libraries
+
+Manage shell function libraries. Libraries are collections of reusable shell functions that can be loaded into your session.
+
+#### Syntax
+
+```bash
+library <command> [args]
+```
+
+#### Commands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List available libraries |
+| `info <name>` | Show library information |
+| `load <name\|path>` | Load a library into current session |
+| `unload <name>` | Unload a library |
+| `create <name>` | Create a new library template |
+| `path` | Show library search paths |
+
+#### Library Locations
+
+Libraries are searched in the following locations:
+- `~/.config/den/lib/` - User libraries
+- `/usr/local/share/den/lib/` - System libraries
+
+#### Examples
+
+**List available libraries:**
+```bash
+library list
+# === Shell Libraries ===
+#
+# User libraries: /Users/you/.config/den/lib
+#   • git-helpers.den
+#   • docker-utils.sh
+#
+# System libraries: /usr/local/share/den/lib
+#   (none)
+```
+
+**Show library search paths:**
+```bash
+library path
+# === Library Search Paths ===
+#
+# ✓ 1. /Users/you/.config/den/lib
+# ✗ 2. /usr/local/share/den/lib
+# ✗ 3. /usr/share/den/lib
+```
+
+**Create a new library:**
+```bash
+library create my-utils
+# ✓ Created library: /Users/you/.config/den/lib/my-utils.den
+#
+# Next steps:
+#   1. Edit: dotfiles edit /Users/you/.config/den/lib/my-utils.den
+#   2. Load: source /Users/you/.config/den/lib/my-utils.den
+#   3. Use:  my-utils_hello
+```
+
+**Show library info:**
+```bash
+library info git-helpers
+# === Library: git-helpers ===
+#
+# Path: /Users/you/.config/den/lib/git-helpers.den
+# Size: 1234 bytes
+#
+# Description:
+#   git-helpers - Den Shell Library
+#   Git workflow helper functions
+#
+# Functions:
+#   • git_checkout_branch
+#   • git_delete_merged
+#   • git_rebase_main
+```
+
+**Load a library:**
+```bash
+library load git-helpers
+# Loaded: git-helpers
 ```
 
 ---
