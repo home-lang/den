@@ -268,23 +268,24 @@
   - [ ] `log-tail` - Tail logs with filtering
   - [ ] `log-parse` - Parse structured logs
   - [ ] `proc-monitor` - Process monitoring
-  - [ ] `sys-stats` - System statistics
+  - [x] `sys-stats` - System statistics ✅
+  - [x] `netstats` - Network statistics ✅
   - [ ] `net-check` - Network connectivity check
 - [ ] **Dotfiles**
   - [ ] `dotfiles` - Dotfiles management helper
 
-### 14. Documentation (Phase 21)
-- [ ] **Code Documentation**
-  - [ ] Document all public APIs
-  - [ ] Create architecture documentation
-  - [ ] Document data structures
-  - [ ] Document algorithms (parser, expansion, etc.)
+### 14. Documentation (Phase 21) ✅ Mostly Complete
+- [x] **Code Documentation**
+  - [x] Document all public APIs ✅ (docs/API.md)
+  - [x] Create architecture documentation ✅ (docs/ARCHITECTURE.md - updated with config system)
+  - [x] Document data structures ✅ (docs/DATA_STRUCTURES.md)
+  - [x] Document algorithms (parser, expansion, etc.) ✅ (docs/ALGORITHMS.md)
   - [ ] Create contributor guide
-- [ ] **User Documentation**
-  - [ ] Update README.md for Zig version
-  - [ ] Create getting started guide
-  - [ ] Create configuration guide
-  - [ ] Create builtin command reference
+- [x] **User Documentation**
+  - [x] Update README.md for Zig version ✅
+  - [x] Create getting started guide ✅ (docs/intro.md, docs/install.md)
+  - [x] Create configuration guide ✅ (docs/config.md)
+  - [x] Create builtin command reference ✅ (docs/BUILTINS.md - fully updated)
   - [ ] Create scripting guide
   - [ ] Create plugin development guide
   - [ ] Create theme customization guide

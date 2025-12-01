@@ -8,6 +8,11 @@ Den Shell provides a comprehensive set of built-in commands that are optimized f
   - [ls - List Directory Contents](#ls---list-directory-contents)
   - [cd - Change Directory](#cd---change-directory)
   - [pwd - Print Working Directory](#pwd---print-working-directory)
+  - [tree - Directory Tree](#tree---directory-tree)
+- [Search & File Tools](#search--file-tools)
+  - [ft - Fuzzy File Finder](#ft---fuzzy-file-finder)
+  - [grep - Text Search with Highlighting](#grep---text-search-with-highlighting)
+  - [find - File Finder](#find---file-finder)
 - [Productivity Commands](#productivity-commands)
   - [calc - Calculator](#calc---calculator)
   - [date - Date and Time](#date---date-and-time)
@@ -15,10 +20,31 @@ Den Shell provides a comprehensive set of built-in commands that are optimized f
   - [watch - Execute Periodically](#watch---execute-periodically)
   - [base64 - Base64 Encoding/Decoding](#base64---base64-encodingdecoding)
   - [uuid - UUID Generator](#uuid---uuid-generator)
+  - [json - JSON Processing](#json---json-processing)
+  - [parallel - Parallel Command Execution](#parallel---parallel-command-execution)
+  - [timeout - Run Command with Timeout](#timeout---run-command-with-timeout)
+- [Network Commands](#network-commands)
+  - [http - HTTP Requests](#http---http-requests)
+  - [localip - Show Local IP](#localip---show-local-ip)
+  - [ip - Show IP Address](#ip---show-ip-address)
+  - [web - Open URL in Browser](#web---open-url-in-browser)
 - [Shell Control](#shell-control)
   - [exit - Exit Shell](#exit---exit-shell)
   - [export - Set Environment Variables](#export---set-environment-variables)
   - [alias - Create Command Aliases](#alias---create-command-aliases)
+  - [reload - Reload Configuration](#reload---reload-configuration)
+- [macOS Commands](#macos-commands)
+  - [copyssh - Copy SSH Key](#copyssh---copy-ssh-key)
+  - [reloaddns - Reload DNS](#reloaddns---reload-dns)
+  - [emptytrash - Empty Trash](#emptytrash---empty-trash)
+  - [show - Show Hidden Files](#show---show-hidden-files)
+  - [hide - Hide Hidden Files](#hide---hide-hidden-files)
+- [Developer Commands](#developer-commands)
+  - [wip - Work in Progress Commit](#wip---work-in-progress-commit)
+  - [code - Open in VS Code](#code---open-in-vs-code)
+  - [pstorm - Open in PhpStorm](#pstorm---open-in-phpstorm)
+  - [bookmark - Directory Bookmarks](#bookmark---directory-bookmarks)
+  - [shrug - Copy Shrug Emoji](#shrug---copy-shrug-emoji)
 
 ---
 
@@ -165,6 +191,175 @@ pwd
 ```bash
 pwd
 # Output: /Users/user/projects/den
+```
+
+---
+
+### tree - Directory Tree
+
+Display directory structure in a tree format.
+
+#### Syntax
+
+```bash
+tree [OPTIONS] [PATH]
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-d` | Show directories only |
+| `-L N` | Limit depth to N levels |
+| `-a` | Show hidden files |
+
+#### Examples
+
+```bash
+tree
+# Output:
+# .
+# ├── src
+# │   ├── main.zig
+# │   └── shell.zig
+# └── build.zig
+
+tree -L 2
+# Limit to 2 levels deep
+
+tree -d
+# Show only directories
+
+tree src -a
+# Show hidden files in src directory
+```
+
+---
+
+## Search & File Tools
+
+### ft - Fuzzy File Finder
+
+Fast fuzzy file finder with scoring-based matching.
+
+#### Syntax
+
+```bash
+ft [OPTIONS] PATTERN
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-t TYPE` | Filter by type: `f` (files) or `d` (directories) |
+| `-d DEPTH` | Maximum search depth (default: 10) |
+| `-n LIMIT` | Maximum number of results (default: 50) |
+| `-p PATH` | Starting directory (default: current) |
+
+#### Examples
+
+```bash
+ft main
+# Find files matching "main"
+# Output:
+# src/main.zig (score: 100)
+# docs/main.md (score: 80)
+
+ft -t f .zig
+# Find only files matching ".zig"
+
+ft -d 3 config
+# Search only 3 levels deep for "config"
+
+ft -n 10 -p src mod
+# Find top 10 matches for "mod" in src/
+```
+
+#### Scoring Algorithm
+
+The fuzzy matcher uses a scoring system:
+- **Exact match**: 100 points
+- **Prefix match**: 90 points
+- **Substring match**: 70 points
+- **Suffix match**: 50 points
+- **Fuzzy match**: 30+ points (based on consecutive matches)
+
+Results are sorted by score, highest first.
+
+---
+
+### grep - Text Search with Highlighting
+
+Search for patterns in files with colored highlighting.
+
+#### Syntax
+
+```bash
+grep [OPTIONS] PATTERN FILE...
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-i` | Case insensitive search |
+| `-n` | Show line numbers |
+| `-v` | Invert match (show non-matching lines) |
+| `-c` | Count matches only |
+| `-H` | Show filename for each match |
+| `--color` | Enable highlighting (default) |
+| `--no-color` | Disable highlighting |
+
+#### Examples
+
+```bash
+grep fn src/main.zig
+# Output with highlighted matches:
+# pub fn main() !void {
+
+grep -n TODO src/*.zig
+# Show line numbers with matches
+
+grep -i error *.log
+# Case-insensitive search
+
+grep -c import src/shell.zig
+# Count number of import lines
+
+grep -v test src/main.zig
+# Show lines NOT containing "test"
+
+grep --no-color pattern file.txt
+# Plain output without colors
+```
+
+#### Highlighting
+
+- **Matches**: Bold red
+- **Line numbers**: Green
+- **Filenames**: Magenta (when searching multiple files)
+
+---
+
+### find - File Finder
+
+Find files by name pattern.
+
+#### Syntax
+
+```bash
+find [PATH] -name PATTERN
+```
+
+#### Examples
+
+```bash
+find . -name "*.zig"
+# Find all .zig files
+
+find src -name "mod.zig"
+# Find mod.zig in src directory
 ```
 
 ---
@@ -437,6 +632,189 @@ echo "Session ID: $SESSION_ID"
 
 ---
 
+### json - JSON Processing
+
+Parse and manipulate JSON data.
+
+#### Syntax
+
+```bash
+json [OPTIONS] [FILE]
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--pretty` | Pretty print JSON |
+| `-c`, `--compact` | Compact output |
+| `-q QUERY` | JQ-style query (basic support) |
+
+#### Examples
+
+```bash
+echo '{"name":"den"}' | json -p
+# Output:
+# {
+#   "name": "den"
+# }
+
+json -q '.name' data.json
+# Extract "name" field
+
+json -c pretty.json
+# Compact JSON output
+```
+
+---
+
+### parallel - Parallel Command Execution
+
+Execute multiple commands in parallel.
+
+#### Syntax
+
+```bash
+parallel COMMAND1 ::: COMMAND2 ::: COMMAND3
+```
+
+#### Examples
+
+```bash
+parallel "sleep 1; echo one" ::: "sleep 1; echo two" ::: "sleep 1; echo three"
+# All three commands run simultaneously
+# Completes in ~1 second instead of ~3 seconds
+```
+
+---
+
+### timeout - Run Command with Timeout
+
+Execute a command with a time limit.
+
+#### Syntax
+
+```bash
+timeout SECONDS COMMAND [ARGS...]
+```
+
+#### Examples
+
+```bash
+timeout 5 sleep 10
+# Terminates after 5 seconds
+
+timeout 30 curl https://example.com
+# Timeout after 30 seconds if no response
+
+timeout 10 ./long-running-script.sh
+# Kill script if it runs longer than 10 seconds
+```
+
+#### Exit Codes
+
+- `0`: Command completed successfully within timeout
+- `124`: Command timed out
+- Other: Exit code from the command
+
+---
+
+## Network Commands
+
+### http - HTTP Requests
+
+Make HTTP requests from the command line.
+
+#### Syntax
+
+```bash
+http [METHOD] URL [OPTIONS]
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-X METHOD` | HTTP method (GET, POST, PUT, DELETE) |
+| `-H HEADER` | Add custom header |
+| `-d DATA` | Request body data |
+| `-o FILE` | Output to file |
+
+#### Examples
+
+```bash
+http https://api.example.com/users
+# GET request (default)
+
+http -X POST -d '{"name":"test"}' https://api.example.com/users
+# POST request with JSON body
+
+http -H "Authorization: Bearer token" https://api.example.com/protected
+# Request with custom header
+```
+
+---
+
+### localip - Show Local IP
+
+Display the local IP address of the machine.
+
+#### Syntax
+
+```bash
+localip
+```
+
+#### Example
+
+```bash
+localip
+# Output: 192.168.1.100
+```
+
+---
+
+### ip - Show IP Address
+
+Display IP address information.
+
+#### Syntax
+
+```bash
+ip
+```
+
+#### Example
+
+```bash
+ip
+# Output: Shows network interface information
+```
+
+---
+
+### web - Open URL in Browser
+
+Open a URL in the default web browser.
+
+#### Syntax
+
+```bash
+web URL
+```
+
+#### Examples
+
+```bash
+web https://github.com
+# Opens GitHub in default browser
+
+web http://localhost:3000
+# Opens local development server
+```
+
+---
+
 ## Shell Control
 
 ### exit - Exit Shell
@@ -500,6 +878,280 @@ alias NAME="COMMAND WITH ARGS"
 alias ll="ls -la"
 alias ..="cd .."
 alias gst="git status"
+```
+
+---
+
+### reload - Reload Configuration
+
+Reload shell configuration without restarting.
+
+#### Syntax
+
+```bash
+reload [OPTIONS]
+```
+
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `-v`, `--verbose` | Show detailed reload information |
+| `--aliases` | Reload only aliases |
+| `--config` | Reload only config (no aliases) |
+
+#### Examples
+
+```bash
+reload
+# Output: Configuration reloaded
+
+reload -v
+# Output:
+# Configuration loaded from: den.jsonc (den.jsonc)
+# Aliases reloaded from configuration
+# Reload complete
+
+reload --aliases
+# Only reload aliases from config
+```
+
+#### Configuration Search Order
+
+1. `./den.jsonc`
+2. `./package.jsonc` (with "den" key)
+3. `./config/den.jsonc`
+4. `./.config/den.jsonc`
+5. `~/.config/den.jsonc`
+6. `~/package.jsonc` (with "den" key)
+
+#### Hot Reload
+
+Set `"hot_reload": true` in your config to automatically reload when the config file changes.
+
+---
+
+## macOS Commands
+
+These commands are optimized for macOS but may work on other Unix systems.
+
+### copyssh - Copy SSH Key
+
+Copy your SSH public key to the clipboard.
+
+#### Syntax
+
+```bash
+copyssh
+```
+
+#### Example
+
+```bash
+copyssh
+# Copies ~/.ssh/id_rsa.pub to clipboard
+# Output: SSH key copied to clipboard
+```
+
+---
+
+### reloaddns - Reload DNS
+
+Flush the DNS cache on macOS.
+
+#### Syntax
+
+```bash
+reloaddns
+```
+
+#### Example
+
+```bash
+reloaddns
+# Flushes DNS cache
+# Output: DNS cache flushed
+```
+
+---
+
+### emptytrash - Empty Trash
+
+Empty the macOS Trash.
+
+#### Syntax
+
+```bash
+emptytrash
+```
+
+#### Example
+
+```bash
+emptytrash
+# Empties the Trash
+```
+
+---
+
+### show - Show Hidden Files
+
+Show hidden files in Finder.
+
+#### Syntax
+
+```bash
+show
+```
+
+#### Example
+
+```bash
+show
+# Makes hidden files visible in Finder
+```
+
+---
+
+### hide - Hide Hidden Files
+
+Hide hidden files in Finder.
+
+#### Syntax
+
+```bash
+hide
+```
+
+#### Example
+
+```bash
+hide
+# Hides hidden files in Finder (default macOS behavior)
+```
+
+---
+
+## Developer Commands
+
+### wip - Work in Progress Commit
+
+Create a quick "work in progress" git commit.
+
+#### Syntax
+
+```bash
+wip [MESSAGE]
+```
+
+#### Examples
+
+```bash
+wip
+# Creates commit with message "wip"
+
+wip "saving progress on feature"
+# Creates commit with custom message
+```
+
+---
+
+### code - Open in VS Code
+
+Open files or directories in Visual Studio Code.
+
+#### Syntax
+
+```bash
+code [PATH]
+```
+
+#### Examples
+
+```bash
+code .
+# Open current directory in VS Code
+
+code src/main.zig
+# Open specific file
+```
+
+---
+
+### pstorm - Open in PhpStorm
+
+Open files or directories in PhpStorm.
+
+#### Syntax
+
+```bash
+pstorm [PATH]
+```
+
+#### Examples
+
+```bash
+pstorm .
+# Open current directory in PhpStorm
+
+pstorm src/
+# Open src directory
+```
+
+---
+
+### bookmark - Directory Bookmarks
+
+Manage directory bookmarks for quick navigation.
+
+#### Syntax
+
+```bash
+bookmark [COMMAND] [NAME] [PATH]
+```
+
+#### Commands
+
+| Command | Description |
+|---------|-------------|
+| `add NAME [PATH]` | Add bookmark (default: current directory) |
+| `rm NAME` | Remove bookmark |
+| `list` | List all bookmarks |
+| `go NAME` | Go to bookmarked directory |
+
+#### Examples
+
+```bash
+bookmark add projects ~/Documents/Projects
+# Add bookmark named "projects"
+
+bookmark list
+# Show all bookmarks
+
+bookmark go projects
+# Navigate to bookmarked directory
+
+bookmark rm projects
+# Remove bookmark
+```
+
+---
+
+### shrug - Copy Shrug Emoji
+
+Copy the shrug emoji ¯\_(ツ)_/¯ to clipboard.
+
+#### Syntax
+
+```bash
+shrug
+```
+
+#### Example
+
+```bash
+shrug
+# Copies ¯\_(ツ)_/¯ to clipboard
 ```
 
 ---

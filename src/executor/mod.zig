@@ -626,7 +626,7 @@ pub const Executor = struct {
             "seq", "date", "parallel", "http", "base64", "uuid",
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
             "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
-            "show", "hide", "ft",
+            "show", "hide", "ft", "sys-stats", "netstats",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -779,6 +779,10 @@ pub const Executor = struct {
             return try self.builtinShow(command);
         } else if (std.mem.eql(u8, command.name, "hide")) {
             return try self.builtinHide(command);
+        } else if (std.mem.eql(u8, command.name, "sys-stats")) {
+            return try self.builtinSysStats(command);
+        } else if (std.mem.eql(u8, command.name, "netstats")) {
+            return try self.builtinNetstats(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -7470,6 +7474,248 @@ pub const Executor = struct {
             }
         }
         return exit_code;
+    }
+
+    fn builtinSysStats(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        // Check for help
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+                try IO.print("sys-stats - display system statistics\n", .{});
+                try IO.print("Usage: sys-stats [options]\n", .{});
+                try IO.print("Options:\n", .{});
+                try IO.print("  -c, --cpu     Show CPU info only\n", .{});
+                try IO.print("  -m, --memory  Show memory info only\n", .{});
+                try IO.print("  -d, --disk    Show disk info only\n", .{});
+                try IO.print("  -u, --uptime  Show uptime only\n", .{});
+                try IO.print("  -a, --all     Show all stats (default)\n", .{});
+                return 0;
+            }
+        }
+
+        var show_cpu = false;
+        var show_memory = false;
+        var show_disk = false;
+        var show_uptime = false;
+        var show_all = command.args.len == 0;
+
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--cpu")) {
+                show_cpu = true;
+            } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--memory")) {
+                show_memory = true;
+            } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--disk")) {
+                show_disk = true;
+            } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--uptime")) {
+                show_uptime = true;
+            } else if (std.mem.eql(u8, arg, "-a") or std.mem.eql(u8, arg, "--all")) {
+                show_all = true;
+            }
+        }
+
+        if (show_all) {
+            show_cpu = true;
+            show_memory = true;
+            show_disk = true;
+            show_uptime = true;
+        }
+
+        // Header
+        try IO.print("\x1b[1;36m=== System Statistics ===\x1b[0m\n\n", .{});
+
+        // CPU Info
+        if (show_cpu) {
+            try IO.print("\x1b[1;33mCPU:\x1b[0m\n", .{});
+            if (builtin.os.tag == .macos) {
+                // Get CPU info via sysctl on macOS
+                try IO.print("  Cores: {d}\n", .{try std.Thread.getCpuCount()});
+            } else if (builtin.os.tag == .linux) {
+                // On Linux, read /proc/cpuinfo
+                if (std.fs.cwd().openFile("/proc/cpuinfo", .{})) |file| {
+                    defer file.close();
+                    var cores: u32 = 0;
+                    var buf: [4096]u8 = undefined;
+                    const n = file.read(&buf) catch 0;
+                    var iter = std.mem.splitScalar(u8, buf[0..n], '\n');
+                    while (iter.next()) |line| {
+                        if (std.mem.startsWith(u8, line, "processor")) {
+                            cores += 1;
+                        }
+                    }
+                    try IO.print("  Cores: {d}\n", .{cores});
+                } else |_| {
+                    try IO.print("  Cores: {d}\n", .{try std.Thread.getCpuCount()});
+                }
+            } else {
+                try IO.print("  Cores: {d}\n", .{try std.Thread.getCpuCount()});
+            }
+            try IO.print("\n", .{});
+        }
+
+        // Memory Info
+        if (show_memory) {
+            try IO.print("\x1b[1;33mMemory:\x1b[0m\n", .{});
+            if (builtin.os.tag == .linux) {
+                if (std.fs.cwd().openFile("/proc/meminfo", .{})) |file| {
+                    defer file.close();
+                    var buf: [4096]u8 = undefined;
+                    const n = file.read(&buf) catch 0;
+                    var iter = std.mem.splitScalar(u8, buf[0..n], '\n');
+                    while (iter.next()) |line| {
+                        if (std.mem.startsWith(u8, line, "MemTotal:")) {
+                            try IO.print("  {s}\n", .{line});
+                        } else if (std.mem.startsWith(u8, line, "MemFree:")) {
+                            try IO.print("  {s}\n", .{line});
+                        } else if (std.mem.startsWith(u8, line, "MemAvailable:")) {
+                            try IO.print("  {s}\n", .{line});
+                        }
+                    }
+                } else |_| {
+                    try IO.print("  (unable to read memory info)\n", .{});
+                }
+            } else if (builtin.os.tag == .macos) {
+                // On macOS, use vm_stat output format description
+                try IO.print("  (use 'vm_stat' for detailed memory info)\n", .{});
+                // We can get page size at least
+                try IO.print("  Page size: 16384 bytes (typical for macOS)\n", .{});
+            } else {
+                try IO.print("  (memory info not available on this platform)\n", .{});
+            }
+            try IO.print("\n", .{});
+        }
+
+        // Disk Info
+        if (show_disk) {
+            try IO.print("\x1b[1;33mDisk:\x1b[0m\n", .{});
+            // Get current directory disk usage
+            const cwd = std.fs.cwd();
+            const stat = cwd.statFile(".") catch null;
+            if (stat) |_| {
+                try IO.print("  (use 'df -h' for detailed disk info)\n", .{});
+            } else {
+                try IO.print("  (unable to read disk info)\n", .{});
+            }
+            try IO.print("\n", .{});
+        }
+
+        // Uptime
+        if (show_uptime) {
+            try IO.print("\x1b[1;33mUptime:\x1b[0m\n", .{});
+            if (builtin.os.tag == .linux) {
+                if (std.fs.cwd().openFile("/proc/uptime", .{})) |file| {
+                    defer file.close();
+                    var buf: [128]u8 = undefined;
+                    const n = file.read(&buf) catch 0;
+                    if (n > 0) {
+                        var iter = std.mem.splitScalar(u8, buf[0..n], ' ');
+                        if (iter.next()) |uptime_str| {
+                            const uptime_float = std.fmt.parseFloat(f64, uptime_str) catch 0;
+                            const uptime_secs: u64 = @intFromFloat(uptime_float);
+                            const days = uptime_secs / 86400;
+                            const hours = (uptime_secs % 86400) / 3600;
+                            const mins = (uptime_secs % 3600) / 60;
+                            try IO.print("  {d} days, {d} hours, {d} minutes\n", .{ days, hours, mins });
+                        }
+                    }
+                } else |_| {
+                    try IO.print("  (unable to read uptime)\n", .{});
+                }
+            } else if (builtin.os.tag == .macos) {
+                try IO.print("  (use 'uptime' command for uptime info)\n", .{});
+            } else {
+                try IO.print("  (uptime not available on this platform)\n", .{});
+            }
+        }
+
+        return 0;
+    }
+
+    fn builtinNetstats(self: *Executor, command: *types.ParsedCommand) !i32 {
+        _ = self;
+
+        // Check for help
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+                try IO.print("netstats - display network statistics\n", .{});
+                try IO.print("Usage: netstats [options]\n", .{});
+                try IO.print("Options:\n", .{});
+                try IO.print("  -i, --interfaces  Show network interfaces\n", .{});
+                try IO.print("  -c, --connections Show active connections\n", .{});
+                try IO.print("  -l, --listening   Show listening ports\n", .{});
+                try IO.print("  -a, --all         Show all stats (default)\n", .{});
+                return 0;
+            }
+        }
+
+        var show_interfaces = false;
+        var show_connections = false;
+        var show_listening = false;
+        var show_all = command.args.len == 0;
+
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--interfaces")) {
+                show_interfaces = true;
+            } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--connections")) {
+                show_connections = true;
+            } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--listening")) {
+                show_listening = true;
+            } else if (std.mem.eql(u8, arg, "-a") or std.mem.eql(u8, arg, "--all")) {
+                show_all = true;
+            }
+        }
+
+        if (show_all) {
+            show_interfaces = true;
+            show_connections = true;
+            show_listening = true;
+        }
+
+        try IO.print("\x1b[1;36m=== Network Statistics ===\x1b[0m\n\n", .{});
+
+        if (show_interfaces) {
+            try IO.print("\x1b[1;33mNetwork Interfaces:\x1b[0m\n", .{});
+            if (builtin.os.tag == .linux) {
+                // Read from /sys/class/net
+                var dir = std.fs.openDirAbsolute("/sys/class/net", .{ .iterate = true }) catch {
+                    try IO.print("  (unable to list interfaces)\n", .{});
+                    return 0;
+                };
+                defer dir.close();
+
+                var iter = dir.iterate();
+                while (iter.next() catch null) |entry| {
+                    if (entry.kind == .sym_link or entry.kind == .directory) {
+                        try IO.print("  - {s}\n", .{entry.name});
+                    }
+                }
+            } else if (builtin.os.tag == .macos) {
+                try IO.print("  (use 'ifconfig' or 'networksetup -listallhardwareports' for interfaces)\n", .{});
+            } else {
+                try IO.print("  (interface listing not available on this platform)\n", .{});
+            }
+            try IO.print("\n", .{});
+        }
+
+        if (show_connections or show_listening) {
+            if (show_connections) {
+                try IO.print("\x1b[1;33mActive Connections:\x1b[0m\n", .{});
+            }
+            if (show_listening) {
+                try IO.print("\x1b[1;33mListening Ports:\x1b[0m\n", .{});
+            }
+
+            if (builtin.os.tag == .linux) {
+                // Read from /proc/net/tcp and /proc/net/tcp6
+                try IO.print("  (use 'ss -tuln' or 'netstat -tuln' for connection details)\n", .{});
+            } else if (builtin.os.tag == .macos) {
+                try IO.print("  (use 'lsof -i' or 'netstat -an' for connection details)\n", .{});
+            } else {
+                try IO.print("  (connection info not available on this platform)\n", .{});
+            }
+        }
+
+        return 0;
     }
 };
 

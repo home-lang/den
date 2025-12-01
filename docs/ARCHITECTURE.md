@@ -290,7 +290,69 @@ pub const HookType = enum {
 - Execute functions with arguments
 - Handle function-local variables
 
-### 8. Utilities (src/utils/)
+### 8. Configuration System (src/config_loader.zig, src/types/config.zig)
+
+**Purpose**: Load and manage shell configuration
+
+**Key Components**:
+
+#### Config Loader (src/config_loader.zig)
+- Multi-source configuration loading
+- JSONC parsing with comment support
+- Configuration validation
+
+**Configuration Search Order**:
+1. Custom path (via `--config` flag)
+2. `./den.jsonc`
+3. `./package.jsonc` (extracts "den" key)
+4. `./config/den.jsonc`
+5. `./.config/den.jsonc`
+6. `~/.config/den.jsonc`
+7. `~/package.jsonc` (extracts "den" key)
+
+**Key Types**:
+```zig
+pub const ConfigSource = struct {
+    path: ?[]const u8,
+    source_type: SourceType,
+
+    pub const SourceType = enum {
+        default,
+        den_jsonc,
+        package_jsonc,
+        custom_path,
+    };
+};
+
+pub const ConfigLoadResult = struct {
+    config: DenConfig,
+    source: ConfigSource,
+};
+```
+
+**Features**:
+- **Hot Reload**: Set `hot_reload: true` in config for automatic reload
+- **Validation**: Comprehensive validation with warnings and errors
+- **package.jsonc Support**: Embed Den config in package.jsonc under "den" key
+
+#### Config Types (src/types/config.zig)
+```zig
+pub const DenConfig = struct {
+    verbose: bool = false,
+    stream_output: ?bool = null,
+    hot_reload: bool = false,  // Auto-reload on file change
+    prompt: PromptConfig = .{},
+    history: HistoryConfig = .{},
+    completion: CompletionConfig = .{},
+    theme: ThemeConfig = .{},
+    expansion: ExpansionConfig = .{},
+    aliases: AliasConfig = .{},
+    keybindings: KeybindingConfig = .{},
+    environment: EnvironmentConfig = .{},
+};
+```
+
+### 9. Utilities (src/utils/)
 
 **Purpose**: Shared functionality and helpers
 
