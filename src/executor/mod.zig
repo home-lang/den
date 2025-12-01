@@ -1339,15 +1339,34 @@ pub const Executor = struct {
             return try self.builtinEnv();
         }
 
-        // Check for --help
-        if (command.args.len == 1 and std.mem.eql(u8, command.args[0], "--help")) {
-            try IO.print("Usage: export [-fnp] [name[=value] ...]\n", .{});
-            try IO.print("Set export attribute for shell variables.\n\n", .{});
-            try IO.print("Options:\n", .{});
-            try IO.print("  -f    treat each NAME as a shell function\n", .{});
-            try IO.print("  -n    remove the export property from NAME\n", .{});
-            try IO.print("  -p    display all exported variables and functions\n", .{});
-            try IO.print("\nWith no NAME, display all exported variables.\n", .{});
+        // Check for --help anywhere in args
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "--help")) {
+                try IO.print("Usage: export [-fnp] [name[=value] ...]\n", .{});
+                try IO.print("Set export attribute for shell variables.\n\n", .{});
+                try IO.print("Options:\n", .{});
+                try IO.print("  -f    treat each NAME as a shell function\n", .{});
+                try IO.print("  -n    remove the export property from NAME\n", .{});
+                try IO.print("  -p    display all exported variables and functions\n", .{});
+                try IO.print("  -pf   display all exported functions\n", .{});
+                try IO.print("\nWith no NAME, display all exported variables.\n", .{});
+                return 0;
+            }
+        }
+
+        // Check for -pf flag (print exported functions)
+        if (command.args.len >= 1 and (std.mem.eql(u8, command.args[0], "-pf") or
+            (command.args.len >= 2 and std.mem.eql(u8, command.args[0], "-p") and std.mem.eql(u8, command.args[1], "-f"))))
+        {
+            if (self.shell) |shell| {
+                var iter = shell.function_manager.functions.iterator();
+                while (iter.next()) |entry| {
+                    const func = entry.value_ptr;
+                    if (func.is_exported) {
+                        try IO.print("export -f {s}\n", .{func.name});
+                    }
+                }
+            }
             return 0;
         }
 
@@ -1373,12 +1392,57 @@ pub const Executor = struct {
             return 0;
         }
 
-        // Check for -n flag (unexport)
+        // Parse flags
         var arg_start: usize = 0;
         var unexport_mode = false;
-        if (command.args.len > 0 and std.mem.eql(u8, command.args[0], "-n")) {
-            unexport_mode = true;
-            arg_start = 1;
+        var function_mode = false;
+
+        while (arg_start < command.args.len) {
+            const arg = command.args[arg_start];
+            if (arg.len > 0 and arg[0] == '-') {
+                if (std.mem.eql(u8, arg, "-n")) {
+                    unexport_mode = true;
+                    arg_start += 1;
+                } else if (std.mem.eql(u8, arg, "-f")) {
+                    function_mode = true;
+                    arg_start += 1;
+                } else if (std.mem.eql(u8, arg, "-nf") or std.mem.eql(u8, arg, "-fn")) {
+                    unexport_mode = true;
+                    function_mode = true;
+                    arg_start += 1;
+                } else if (std.mem.eql(u8, arg, "--")) {
+                    arg_start += 1;
+                    break;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Handle function export mode
+        if (function_mode) {
+            if (self.shell) |shell| {
+                for (command.args[arg_start..]) |func_name| {
+                    if (unexport_mode) {
+                        // Remove export flag from function
+                        if (shell.function_manager.getFunction(func_name)) |func| {
+                            func.is_exported = false;
+                        } else {
+                            try IO.eprint("den: export: {s}: not a function\n", .{func_name});
+                        }
+                    } else {
+                        // Mark function as exported
+                        if (shell.function_manager.getFunction(func_name)) |func| {
+                            func.is_exported = true;
+                        } else {
+                            try IO.eprint("den: export: {s}: not a function\n", .{func_name});
+                        }
+                    }
+                }
+            }
+            return 0;
         }
 
         if (unexport_mode) {
