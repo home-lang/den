@@ -39,6 +39,8 @@ pub const Executor = struct {
     environment: *std.StringHashMap([]const u8),
     shell: ?*Shell, // Optional reference to shell for options
 
+    /// Initialize an executor without a shell reference.
+    /// Used for standalone command execution.
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8)) Executor {
         return .{
             .allocator = allocator,
@@ -47,6 +49,8 @@ pub const Executor = struct {
         };
     }
 
+    /// Initialize an executor with a shell reference.
+    /// Provides access to shell state like directory stack, aliases, and options.
     pub fn initWithShell(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), shell: *Shell) Executor {
         return .{
             .allocator = allocator,
@@ -55,6 +59,8 @@ pub const Executor = struct {
         };
     }
 
+    /// Execute a command chain, handling operators like && and ||.
+    /// Returns the exit code of the last executed command.
     pub fn executeChain(self: *Executor, chain: *types.CommandChain) !i32 {
         if (chain.commands.len == 0) return 0;
 
@@ -162,6 +168,8 @@ pub const Executor = struct {
         return last_exit_code;
     }
 
+    /// Execute a pipeline of commands (e.g., "cmd1 | cmd2 | cmd3").
+    /// Connects stdout of each command to stdin of the next.
     fn executePipeline(self: *Executor, commands: []types.ParsedCommand) !i32 {
         if (commands.len == 0) return 0;
         if (commands.len == 1) return try self.executeCommand(&commands[0]);
@@ -172,6 +180,7 @@ pub const Executor = struct {
         return try self.executePipelinePosix(commands);
     }
 
+    /// Windows-specific pipeline implementation using std.process.Child.
     fn executePipelineWindows(self: *Executor, commands: []types.ParsedCommand) !i32 {
         // Windows implementation using std.process.Child with pipes
         const num_pipes = commands.len - 1;
@@ -523,6 +532,8 @@ pub const Executor = struct {
         }
     }
 
+    /// Execute a single command, either as a builtin or external program.
+    /// Handles shell options like xtrace (-x) and noexec (-n).
     pub fn executeCommand(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Handle set -x (xtrace): print command before execution
         if (self.shell) |shell| {
@@ -613,6 +624,7 @@ pub const Executor = struct {
         return true;
     }
 
+    /// Check if a command name is a shell builtin.
     fn isBuiltin(self: *Executor, name: []const u8) bool {
         _ = self;
         const builtins = [_][]const u8{
@@ -634,6 +646,7 @@ pub const Executor = struct {
         return false;
     }
 
+    /// Dispatch and execute a builtin command.
     fn executeBuiltin(self: *Executor, command: *types.ParsedCommand) !i32 {
         if (std.mem.eql(u8, command.name, "echo")) {
             return try self.builtinEcho(command);
@@ -1149,7 +1162,7 @@ pub const Executor = struct {
                         i += 1;
                         try unset_vars.append(self.allocator, command.args[i]);
                     } else {
-                        try IO.eprint("env: option requires an argument -- 'u'\n", .{});
+                        try IO.eprint("den: env: option requires an argument -- 'u'\n", .{});
                         return 1;
                     }
                 } else if (std.mem.eql(u8, arg, "--")) {
@@ -1162,7 +1175,7 @@ pub const Executor = struct {
                     try IO.print("  -u, --unset=NAME          Unset variable NAME\n", .{});
                     return 0;
                 } else {
-                    try IO.eprint("env: invalid option -- '{s}'\n", .{arg});
+                    try IO.eprint("den: env: invalid option -- '{s}'\n", .{arg});
                     return 1;
                 }
             } else if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
@@ -2983,7 +2996,10 @@ pub const Executor = struct {
                 return 1;
             }
 
-            const top_dir = shell_ref.dir_stack[shell_ref.dir_stack_count - 1] orelse unreachable;
+            const top_dir = shell_ref.dir_stack[shell_ref.dir_stack_count - 1] orelse {
+                try IO.eprint("den: pushd: directory stack corrupted\n", .{});
+                return 1;
+            };
 
             // Change to top dir
             std.posix.chdir(top_dir) catch |err| {
@@ -3024,7 +3040,10 @@ pub const Executor = struct {
             // Rotate stack: bring index to top
             // Index 1 = top of stack = dir_stack[count-1]
             const stack_idx = shell_ref.dir_stack_count - index;
-            const target_dir = shell_ref.dir_stack[stack_idx] orelse unreachable;
+            const target_dir = shell_ref.dir_stack[stack_idx] orelse {
+                try IO.eprint("den: pushd: directory stack corrupted\n", .{});
+                return error.InvalidArgument;
+            };
 
             // Change to target directory
             std.posix.chdir(target_dir) catch |err| {
@@ -3111,7 +3130,10 @@ pub const Executor = struct {
 
         // Default: pop top and cd to it
         shell_ref.dir_stack_count -= 1;
-        const dir = shell_ref.dir_stack[shell_ref.dir_stack_count] orelse unreachable;
+        const dir = shell_ref.dir_stack[shell_ref.dir_stack_count] orelse {
+            try IO.eprint("den: popd: directory stack corrupted\n", .{});
+            return 1;
+        };
         defer self.allocator.free(dir);
 
         std.posix.chdir(dir) catch |err| {
@@ -4267,7 +4289,7 @@ pub const Executor = struct {
                         'p' => portable = true,
                         else => {
                             try IO.eprint("den: umask: -{c}: invalid option\n", .{c});
-                            try IO.eprint("umask: usage: umask [-p] [-S] [mode]\n", .{});
+                            try IO.eprint("den: umask: usage: umask [-p] [-S] [mode]\n", .{});
                             return 1;
                         },
                     }
@@ -4600,7 +4622,7 @@ pub const Executor = struct {
         // Need at least duration and command
         if (arg_start + 1 >= command.args.len) {
             try IO.eprint("den: timeout: missing operand\n", .{});
-            try IO.eprint("Usage: timeout [OPTION] DURATION COMMAND [ARG]...\n", .{});
+            try IO.eprint("den: timeout: usage: timeout [OPTION] DURATION COMMAND [ARG]...\n", .{});
             return 1;
         }
 
@@ -5049,7 +5071,7 @@ pub const Executor = struct {
 
         if (command.args.len == 0) {
             try IO.eprint("den: watch: missing command\n", .{});
-            try IO.eprint("Usage: watch [-n seconds] command [args...]\n", .{});
+            try IO.eprint("den: watch: usage: watch [-n seconds] command [args...]\n", .{});
             return 1;
         }
 
@@ -5091,7 +5113,7 @@ pub const Executor = struct {
 
             // Execute as external command to avoid issues
             _ = self.executeExternal(&new_cmd) catch |err| {
-                try IO.eprint("Error executing command: {}\n", .{err});
+                try IO.eprint("den: watch: error executing command: {}\n", .{err});
             };
 
             // Sleep for the interval
@@ -5156,7 +5178,7 @@ pub const Executor = struct {
         // grep [options] pattern [file...]
         if (command.args.len == 0) {
             try IO.eprint("den: grep: missing pattern\n", .{});
-            try IO.eprint("Usage: grep [-i] [-n] [-v] [-c] [--color] [--no-color] pattern [file...]\n", .{});
+            try IO.eprint("den: grep: usage: grep [-i] [-n] [-v] [-c] [--color] [--no-color] pattern [file...]\n", .{});
             return 1;
         }
 
@@ -5513,7 +5535,7 @@ pub const Executor = struct {
 
         if (pattern == null) {
             try IO.eprint("den: ft: missing pattern\n", .{});
-            try IO.eprint("Usage: ft [pattern] [-t f|d] [-d depth] [-n limit]\n", .{});
+            try IO.eprint("den: ft: usage: ft [pattern] [-t f|d] [-d depth] [-n limit]\n", .{});
             return 1;
         }
 
@@ -5542,7 +5564,7 @@ pub const Executor = struct {
         }
 
         if (results.items.len == 0) {
-            try IO.eprint("No matches found for '{s}'\n", .{pattern.?});
+            try IO.eprint("den: ft: no matches found for '{s}'\n", .{pattern.?});
             return 1;
         }
 
@@ -5709,8 +5731,8 @@ pub const Executor = struct {
 
         if (command.args.len == 0) {
             try IO.eprint("den: calc: missing expression\n", .{});
-            try IO.eprint("Usage: calc <expression>\n", .{});
-            try IO.eprint("Examples: calc 2 + 2, calc 10 * 5, calc 100 / 4\n", .{});
+            try IO.eprint("den: calc: usage: calc <expression>\n", .{});
+            try IO.eprint("den: calc: examples: calc 2 + 2, calc 10 * 5, calc 100 / 4\n", .{});
             return 1;
         }
 
@@ -5781,7 +5803,7 @@ pub const Executor = struct {
         // json [file] - pretty print JSON
         if (command.args.len == 0) {
             try IO.eprint("den: json: missing file argument\n", .{});
-            try IO.eprint("Usage: json <file>\n", .{});
+            try IO.eprint("den: json: usage: json <file>\n", .{});
             return 1;
         }
 
@@ -5858,7 +5880,7 @@ pub const Executor = struct {
                         '1' => one_per_line = true,
                         'd' => directory_only = true,
                         else => {
-                            try IO.eprint("ls: invalid option -- '{c}'\n", .{c});
+                            try IO.eprint("den: ls: invalid option -- '{c}'\n", .{c});
                             return 1;
                         },
                     }
@@ -5876,7 +5898,7 @@ pub const Executor = struct {
         }
 
         var dir = std.fs.cwd().openDir(target_path, .{ .iterate = true }) catch |err| {
-            try IO.eprint("ls: cannot access '{s}': {}\n", .{ target_path, err });
+            try IO.eprint("den: ls: cannot access '{s}': {}\n", .{ target_path, err });
             return 1;
         };
         defer dir.close();
@@ -6565,7 +6587,7 @@ pub const Executor = struct {
         _ = self;
 
         if (command.args.len == 0) {
-            try IO.eprint("seq: missing operand\nUsage: seq [FIRST [INCREMENT]] LAST\n", .{});
+            try IO.eprint("den: seq: missing operand\nden: seq: usage: seq [FIRST [INCREMENT]] LAST\n", .{});
             return 1;
         }
 
@@ -6583,7 +6605,7 @@ pub const Executor = struct {
         const last = try std.fmt.parseInt(i64, command.args[last_idx], 10);
 
         if (increment == 0) {
-            try IO.eprint("seq: INCREMENT must not be zero\n", .{});
+            try IO.eprint("den: seq: INCREMENT must not be zero\n", .{});
             return 1;
         }
 
@@ -6676,8 +6698,8 @@ pub const Executor = struct {
         _ = self;
 
         if (command.args.len == 0) {
-            try IO.eprint("parallel: missing command\nUsage: parallel command [args...]\n", .{});
-            try IO.eprint("Note: parallel is a stub implementation\n", .{});
+            try IO.eprint("den: parallel: missing command\nden: parallel: usage: parallel command [args...]\n", .{});
+            try IO.eprint("den: parallel: note: parallel is a stub implementation\n", .{});
             return 1;
         }
 
@@ -6692,17 +6714,17 @@ pub const Executor = struct {
         _ = self;
 
         if (command.args.len == 0) {
-            try IO.eprint("http: missing URL\n", .{});
-            try IO.eprint("Usage: http [OPTIONS] URL\n", .{});
-            try IO.eprint("Options:\n", .{});
-            try IO.eprint("  -X METHOD     HTTP method (GET, POST, PUT, DELETE)\n", .{});
-            try IO.eprint("  -d DATA       Request body data\n", .{});
-            try IO.eprint("  -i            Show response headers\n", .{});
-            try IO.eprint("\nExamples:\n", .{});
-            try IO.eprint("  http https://api.example.com/users\n", .{});
-            try IO.eprint("  http -X POST -d 'data' https://api.example.com/users\n", .{});
-            try IO.eprint("\nNote: This is a stub implementation.\n", .{});
-            try IO.eprint("For full HTTP client functionality, use curl or wget.\n", .{});
+            try IO.eprint("den: http: missing URL\n", .{});
+            try IO.eprint("den: http: usage: http [OPTIONS] URL\n", .{});
+            try IO.eprint("den: http: options:\n", .{});
+            try IO.eprint("den: http:   -X METHOD     HTTP method (GET, POST, PUT, DELETE)\n", .{});
+            try IO.eprint("den: http:   -d DATA       Request body data\n", .{});
+            try IO.eprint("den: http:   -i            Show response headers\n", .{});
+            try IO.eprint("den: http: examples:\n", .{});
+            try IO.eprint("den: http:   http https://api.example.com/users\n", .{});
+            try IO.eprint("den: http:   http -X POST -d 'data' https://api.example.com/users\n", .{});
+            try IO.eprint("den: http: note: this is a stub implementation.\n", .{});
+            try IO.eprint("den: http: for full HTTP client functionality, use curl or wget.\n", .{});
             return 1;
         }
 
@@ -6717,14 +6739,14 @@ pub const Executor = struct {
 
             if (std.mem.eql(u8, arg, "-X") or std.mem.eql(u8, arg, "--request")) {
                 if (i + 1 >= command.args.len) {
-                    try IO.eprint("http: -X requires an argument\n", .{});
+                    try IO.eprint("den: http: -X requires an argument\n", .{});
                     return 1;
                 }
                 i += 1;
                 method = command.args[i];
             } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--data")) {
                 if (i + 1 >= command.args.len) {
-                    try IO.eprint("http: -d requires an argument\n", .{});
+                    try IO.eprint("den: http: -d requires an argument\n", .{});
                     return 1;
                 }
                 i += 1;
@@ -6734,13 +6756,13 @@ pub const Executor = struct {
             } else if (arg[0] != '-') {
                 url = arg;
             } else {
-                try IO.eprint("http: unknown option {s}\n", .{arg});
+                try IO.eprint("den: http: unknown option {s}\n", .{arg});
                 return 1;
             }
         }
 
         if (url == null) {
-            try IO.eprint("http: missing URL\n", .{});
+            try IO.eprint("den: http: missing URL\n", .{});
             return 1;
         }
 
@@ -6764,13 +6786,13 @@ pub const Executor = struct {
 
     fn builtinBase64(self: *Executor, command: *types.ParsedCommand) !i32 {
         if (command.args.len == 0) {
-            try IO.eprint("base64: missing input\n", .{});
-            try IO.eprint("Usage: base64 [-d] <string>\n", .{});
-            try IO.eprint("Options:\n", .{});
-            try IO.eprint("  -d    Decode base64 input\n", .{});
-            try IO.eprint("\nExamples:\n", .{});
-            try IO.eprint("  base64 'Hello World'\n", .{});
-            try IO.eprint("  base64 -d 'SGVsbG8gV29ybGQ='\n", .{});
+            try IO.eprint("den: base64: missing input\n", .{});
+            try IO.eprint("den: base64: usage: base64 [-d] <string>\n", .{});
+            try IO.eprint("den: base64: options:\n", .{});
+            try IO.eprint("den: base64:   -d    Decode base64 input\n", .{});
+            try IO.eprint("den: base64: examples:\n", .{});
+            try IO.eprint("den: base64:   base64 'Hello World'\n", .{});
+            try IO.eprint("den: base64:   base64 -d 'SGVsbG8gV29ybGQ='\n", .{});
             return 1;
         }
 
@@ -6789,7 +6811,7 @@ pub const Executor = struct {
         }
 
         if (input == null) {
-            try IO.eprint("base64: missing input\n", .{});
+            try IO.eprint("den: base64: missing input\n", .{});
             return 1;
         }
 
@@ -6803,7 +6825,7 @@ pub const Executor = struct {
             defer self.allocator.free(output);
 
             decoder.decode(output, data) catch {
-                try IO.eprint("base64: invalid base64 input\n", .{});
+                try IO.eprint("den: base64: invalid base64 input\n", .{});
                 return 1;
             };
 
@@ -6894,7 +6916,7 @@ pub const Executor = struct {
         _ = self;
 
         if (command.args.len == 0) {
-            try IO.eprint("web: usage: web <url>\n", .{});
+            try IO.eprint("den: web: usage: web <url>\n", .{});
             return 1;
         }
 
@@ -6911,7 +6933,7 @@ pub const Executor = struct {
             try IO.print("Opening: {s}\n", .{url});
             try IO.print("Run: start \"{s}\"\n", .{url});
         } else {
-            try IO.eprint("web: not supported on this platform\n", .{});
+            try IO.eprint("den: web: not supported on this platform\n", .{});
             return 1;
         }
         return 0;
@@ -6919,7 +6941,7 @@ pub const Executor = struct {
 
     fn builtinReturn(self: *Executor, command: *types.ParsedCommand) !i32 {
         const shell = self.shell orelse {
-            try IO.eprint("return: can only return from a function or sourced script\n", .{});
+            try IO.eprint("den: return: can only return from a function or sourced script\n", .{});
             return 1;
         };
 
@@ -6927,14 +6949,14 @@ pub const Executor = struct {
         var return_code: i32 = 0;
         if (command.args.len > 0) {
             return_code = std.fmt.parseInt(i32, command.args[0], 10) catch {
-                try IO.eprint("return: {s}: numeric argument required\n", .{command.args[0]});
+                try IO.eprint("den: return: {s}: numeric argument required\n", .{command.args[0]});
                 return 2;
             };
         }
 
         // Request return from current function
         shell.function_manager.requestReturn(return_code) catch {
-            try IO.eprint("return: can only return from a function or sourced script\n", .{});
+            try IO.eprint("den: return: can only return from a function or sourced script\n", .{});
             return 1;
         };
 
@@ -6943,7 +6965,7 @@ pub const Executor = struct {
 
     fn builtinLocal(self: *Executor, command: *types.ParsedCommand) !i32 {
         const shell = self.shell orelse {
-            try IO.eprint("local: can only be used in a function\n", .{});
+            try IO.eprint("den: local: can only be used in a function\n", .{});
             return 1;
         };
 
@@ -6965,13 +6987,13 @@ pub const Executor = struct {
                 const name = arg[0..eq_pos];
                 const value = arg[eq_pos + 1 ..];
                 shell.function_manager.setLocal(name, value) catch {
-                    try IO.eprint("local: {s}: can only be used in a function\n", .{name});
+                    try IO.eprint("den: local: {s}: can only be used in a function\n", .{name});
                     return 1;
                 };
             } else {
                 // Just declare as empty
                 shell.function_manager.setLocal(arg, "") catch {
-                    try IO.eprint("local: {s}: can only be used in a function\n", .{arg});
+                    try IO.eprint("den: local: {s}: can only be used in a function\n", .{arg});
                     return 1;
                 };
             }
@@ -6986,7 +7008,7 @@ pub const Executor = struct {
 
         // Get home directory
         const home = std.posix.getenv("HOME") orelse {
-            try IO.eprint("copyssh: HOME environment variable not set\n", .{});
+            try IO.eprint("den: copyssh: HOME environment variable not set\n", .{});
             return 1;
         };
 
@@ -7020,8 +7042,8 @@ pub const Executor = struct {
         }
 
         const key_content = found_key orelse {
-            try IO.eprint("copyssh: no SSH public key found\n", .{});
-            try IO.eprint("Try generating one with: ssh-keygen -t ed25519\n", .{});
+            try IO.eprint("den: copyssh: no SSH public key found\n", .{});
+            try IO.eprint("den: copyssh: try generating one with: ssh-keygen -t ed25519\n", .{});
             return 1;
         };
 
@@ -7040,13 +7062,13 @@ pub const Executor = struct {
             child.stderr_behavior = .Ignore;
 
             child.spawn() catch {
-                try IO.eprint("copyssh: failed to run pbcopy\n", .{});
+                try IO.eprint("den: copyssh: failed to run pbcopy\n", .{});
                 return 1;
             };
 
             if (child.stdin) |stdin| {
                 stdin.writeAll(trimmed_key) catch {
-                    try IO.eprint("copyssh: failed to write to pbcopy\n", .{});
+                    try IO.eprint("den: copyssh: failed to write to pbcopy\n", .{});
                     return 1;
                 };
                 stdin.close();
@@ -7054,7 +7076,7 @@ pub const Executor = struct {
             }
 
             _ = child.wait() catch {
-                try IO.eprint("copyssh: pbcopy failed\n", .{});
+                try IO.eprint("den: copyssh: pbcopy failed\n", .{});
                 return 1;
             };
 
@@ -7077,7 +7099,7 @@ pub const Executor = struct {
             } else |_| {
                 // Fallback: just print the key
                 try IO.print("{s}\n", .{trimmed_key});
-                try IO.eprint("(xclip not found - key printed above)\n", .{});
+                try IO.eprint("den: copyssh: (xclip not found - key printed above)\n", .{});
             }
         } else {
             // Fallback: just print the key
@@ -7092,7 +7114,7 @@ pub const Executor = struct {
         _ = command;
 
         if (builtin.os.tag != .macos) {
-            try IO.eprint("reloaddns: only supported on macOS\n", .{});
+            try IO.eprint("den: reloaddns: only supported on macOS\n", .{});
             return 1;
         }
 
@@ -7103,17 +7125,17 @@ pub const Executor = struct {
         flush_child.stderr_behavior = .Pipe;
 
         flush_child.spawn() catch {
-            try IO.eprint("reloaddns: failed to run dscacheutil\n", .{});
+            try IO.eprint("den: reloaddns: failed to run dscacheutil\n", .{});
             return 1;
         };
 
         const flush_result = flush_child.wait() catch {
-            try IO.eprint("reloaddns: dscacheutil failed\n", .{});
+            try IO.eprint("den: reloaddns: dscacheutil failed\n", .{});
             return 1;
         };
 
         if (flush_result.Exited != 0) {
-            try IO.eprint("reloaddns: dscacheutil returned error\n", .{});
+            try IO.eprint("den: reloaddns: dscacheutil returned error\n", .{});
             return 1;
         }
 
@@ -7124,17 +7146,17 @@ pub const Executor = struct {
         kill_child.stderr_behavior = .Pipe;
 
         kill_child.spawn() catch {
-            try IO.eprint("reloaddns: failed to run killall\n", .{});
+            try IO.eprint("den: reloaddns: failed to run killall\n", .{});
             return 1;
         };
 
         const kill_result = kill_child.wait() catch {
-            try IO.eprint("reloaddns: killall failed\n", .{});
+            try IO.eprint("den: reloaddns: killall failed\n", .{});
             return 1;
         };
 
         if (kill_result.Exited != 0) {
-            try IO.eprint("reloaddns: killall mDNSResponder returned error (may need sudo)\n", .{});
+            try IO.eprint("den: reloaddns: killall mDNSResponder returned error (may need sudo)\n", .{});
             return 1;
         }
 
@@ -7147,7 +7169,7 @@ pub const Executor = struct {
         _ = command;
 
         if (builtin.os.tag != .macos) {
-            try IO.eprint("emptytrash: only supported on macOS\n", .{});
+            try IO.eprint("den: emptytrash: only supported on macOS\n", .{});
             return 1;
         }
 
@@ -7160,17 +7182,17 @@ pub const Executor = struct {
         child.stderr_behavior = .Pipe;
 
         child.spawn() catch {
-            try IO.eprint("emptytrash: failed to run osascript\n", .{});
+            try IO.eprint("den: emptytrash: failed to run osascript\n", .{});
             return 1;
         };
 
         const result = child.wait() catch {
-            try IO.eprint("emptytrash: osascript failed\n", .{});
+            try IO.eprint("den: emptytrash: osascript failed\n", .{});
             return 1;
         };
 
         if (result.Exited != 0) {
-            try IO.eprint("emptytrash: failed to empty trash\n", .{});
+            try IO.eprint("den: emptytrash: failed to empty trash\n", .{});
             return 1;
         }
 
@@ -7194,17 +7216,17 @@ pub const Executor = struct {
         add_child.stderr_behavior = .Inherit;
 
         add_child.spawn() catch {
-            try IO.eprint("wip: failed to run git add\n", .{});
+            try IO.eprint("den: wip: failed to run git add\n", .{});
             return 1;
         };
 
         const add_result = add_child.wait() catch {
-            try IO.eprint("wip: git add failed\n", .{});
+            try IO.eprint("den: wip: git add failed\n", .{});
             return 1;
         };
 
         if (add_result.Exited != 0) {
-            try IO.eprint("wip: git add returned error\n", .{});
+            try IO.eprint("den: wip: git add returned error\n", .{});
             return 1;
         }
 
@@ -7215,12 +7237,12 @@ pub const Executor = struct {
         commit_child.stderr_behavior = .Inherit;
 
         commit_child.spawn() catch {
-            try IO.eprint("wip: failed to run git commit\n", .{});
+            try IO.eprint("den: wip: failed to run git commit\n", .{});
             return 1;
         };
 
         const commit_result = commit_child.wait() catch {
-            try IO.eprint("wip: git commit failed\n", .{});
+            try IO.eprint("den: wip: git commit failed\n", .{});
             return 1;
         };
 
@@ -7246,7 +7268,7 @@ pub const Executor = struct {
                     try IO.print("No bookmarks set. Use 'bookmark -a name' to add one.\n", .{});
                 }
             } else {
-                try IO.eprint("bookmark: shell not available\n", .{});
+                try IO.eprint("den: bookmark: shell not available\n", .{});
                 return 1;
             }
             return 0;
@@ -7257,7 +7279,7 @@ pub const Executor = struct {
         if (std.mem.eql(u8, first_arg, "-a")) {
             // Add bookmark
             if (command.args.len < 2) {
-                try IO.eprint("bookmark: -a requires a name\n", .{});
+                try IO.eprint("den: bookmark: -a requires a name\n", .{});
                 return 1;
             }
             const name = command.args[1];
@@ -7265,7 +7287,7 @@ pub const Executor = struct {
             // Get current directory
             var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
             const cwd = std.posix.getcwd(&cwd_buf) catch {
-                try IO.eprint("bookmark: failed to get current directory\n", .{});
+                try IO.eprint("den: bookmark: failed to get current directory\n", .{});
                 return 1;
             };
 
@@ -7277,7 +7299,7 @@ pub const Executor = struct {
                 const result = shell.named_dirs.fetchPut(key, value) catch {
                     self.allocator.free(key);
                     self.allocator.free(value);
-                    try IO.eprint("bookmark: failed to save bookmark\n", .{});
+                    try IO.eprint("den: bookmark: failed to save bookmark\n", .{});
                     return 1;
                 };
 
@@ -7288,7 +7310,7 @@ pub const Executor = struct {
 
                 try IO.print("Bookmark '{s}' -> {s}\n", .{ name, cwd });
             } else {
-                try IO.eprint("bookmark: shell not available\n", .{});
+                try IO.eprint("den: bookmark: shell not available\n", .{});
                 return 1;
             }
             return 0;
@@ -7297,7 +7319,7 @@ pub const Executor = struct {
         if (std.mem.eql(u8, first_arg, "-d")) {
             // Delete bookmark
             if (command.args.len < 2) {
-                try IO.eprint("bookmark: -d requires a name\n", .{});
+                try IO.eprint("den: bookmark: -d requires a name\n", .{});
                 return 1;
             }
             const name = command.args[1];
@@ -7308,11 +7330,11 @@ pub const Executor = struct {
                     self.allocator.free(old.value);
                     try IO.print("Bookmark '{s}' removed\n", .{name});
                 } else {
-                    try IO.eprint("bookmark: '{s}' not found\n", .{name});
+                    try IO.eprint("den: bookmark: '{s}' not found\n", .{name});
                     return 1;
                 }
             } else {
-                try IO.eprint("bookmark: shell not available\n", .{});
+                try IO.eprint("den: bookmark: shell not available\n", .{});
                 return 1;
             }
             return 0;
@@ -7324,16 +7346,16 @@ pub const Executor = struct {
         if (self.shell) |shell| {
             if (shell.named_dirs.get(name)) |path| {
                 std.posix.chdir(path) catch |err| {
-                    try IO.eprint("bookmark: {s}: {}\n", .{ path, err });
+                    try IO.eprint("den: bookmark: {s}: {}\n", .{ path, err });
                     return 1;
                 };
                 try IO.print("{s}\n", .{path});
             } else {
-                try IO.eprint("bookmark: '{s}' not found\n", .{name});
+                try IO.eprint("den: bookmark: '{s}' not found\n", .{name});
                 return 1;
             }
         } else {
-            try IO.eprint("bookmark: shell not available\n", .{});
+            try IO.eprint("den: bookmark: shell not available\n", .{});
             return 1;
         }
 
@@ -7343,7 +7365,7 @@ pub const Executor = struct {
     /// Open file or directory in VS Code
     fn builtinCode(self: *Executor, command: *types.ParsedCommand) !i32 {
         if (builtin.os.tag != .macos) {
-            try IO.eprint("code: only supported on macOS\n", .{});
+            try IO.eprint("den: code: only supported on macOS\n", .{});
             return 1;
         }
 
@@ -7375,7 +7397,7 @@ pub const Executor = struct {
     /// Open file or directory in PhpStorm
     fn builtinPstorm(self: *Executor, command: *types.ParsedCommand) !i32 {
         if (builtin.os.tag != .macos) {
-            try IO.eprint("pstorm: only supported on macOS\n", .{});
+            try IO.eprint("den: pstorm: only supported on macOS\n", .{});
             return 1;
         }
 
@@ -7407,12 +7429,12 @@ pub const Executor = struct {
     /// Show hidden files (macOS) - removes hidden attribute
     fn builtinShow(self: *Executor, command: *types.ParsedCommand) !i32 {
         if (builtin.os.tag != .macos) {
-            try IO.eprint("show: only supported on macOS\n", .{});
+            try IO.eprint("den: show: only supported on macOS\n", .{});
             return 1;
         }
 
         if (command.args.len == 0) {
-            try IO.eprint("show: usage: show <file>...\n", .{});
+            try IO.eprint("den: show: usage: show <file>...\n", .{});
             return 1;
         }
 
@@ -7439,7 +7461,7 @@ pub const Executor = struct {
                 const result = std.posix.waitpid(pid, 0);
                 const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
                 if (code != 0) {
-                    try IO.eprint("show: failed to show {s}\n", .{file});
+                    try IO.eprint("den: show: failed to show {s}\n", .{file});
                     exit_code = code;
                 }
             }
@@ -7450,12 +7472,12 @@ pub const Executor = struct {
     /// Hide files (macOS) - sets hidden attribute
     fn builtinHide(self: *Executor, command: *types.ParsedCommand) !i32 {
         if (builtin.os.tag != .macos) {
-            try IO.eprint("hide: only supported on macOS\n", .{});
+            try IO.eprint("den: hide: only supported on macOS\n", .{});
             return 1;
         }
 
         if (command.args.len == 0) {
-            try IO.eprint("hide: usage: hide <file>...\n", .{});
+            try IO.eprint("den: hide: usage: hide <file>...\n", .{});
             return 1;
         }
 
@@ -7482,7 +7504,7 @@ pub const Executor = struct {
                 const result = std.posix.waitpid(pid, 0);
                 const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
                 if (code != 0) {
-                    try IO.eprint("hide: failed to hide {s}\n", .{file});
+                    try IO.eprint("den: hide: failed to hide {s}\n", .{file});
                     exit_code = code;
                 }
             }
@@ -7939,14 +7961,14 @@ pub const Executor = struct {
 
         // Open file
         const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-            try IO.eprint("log-tail: cannot open '{s}': {}\n", .{ path, err });
+            try IO.eprint("den: log-tail: cannot open '{s}': {}\n", .{ path, err });
             return 1;
         };
         defer file.close();
 
         // Read file to get last N lines
         const stat = file.stat() catch |err| {
-            try IO.eprint("log-tail: cannot stat '{s}': {}\n", .{ path, err });
+            try IO.eprint("den: log-tail: cannot stat '{s}': {}\n", .{ path, err });
             return 1;
         };
 
@@ -7955,7 +7977,7 @@ pub const Executor = struct {
         const read_size = @min(stat.size, max_size);
 
         const content = self.allocator.alloc(u8, read_size) catch {
-            try IO.eprint("log-tail: out of memory\n", .{});
+            try IO.eprint("den: log-tail: out of memory\n", .{});
             return 1;
         };
         defer self.allocator.free(content);
@@ -7964,7 +7986,7 @@ pub const Executor = struct {
         var total_read: usize = 0;
         while (total_read < read_size) {
             const n = file.read(content[total_read..]) catch |err| {
-                try IO.eprint("log-tail: read error: {}\n", .{err});
+                try IO.eprint("den: log-tail: read error: {}\n", .{err});
                 return 1;
             };
             if (n == 0) break;
@@ -8130,12 +8152,12 @@ pub const Executor = struct {
 
             // Create pipe for ps output
             const pipe_fds = std.posix.pipe() catch {
-                try IO.eprint("proc-monitor: failed to create pipe\n", .{});
+                try IO.eprint("den: proc-monitor: failed to create pipe\n", .{});
                 return 1;
             };
 
             const pid = std.posix.fork() catch {
-                try IO.eprint("proc-monitor: failed to fork\n", .{});
+                try IO.eprint("den: proc-monitor: failed to fork\n", .{});
                 return 1;
             };
 
@@ -8339,7 +8361,7 @@ pub const Executor = struct {
 
         if (file_path) |path| {
             const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-                try IO.eprint("log-parse: cannot open '{s}': {}\n", .{ path, err });
+                try IO.eprint("den: log-parse: cannot open '{s}': {}\n", .{ path, err });
                 return 1;
             };
             defer file.close();
@@ -8350,7 +8372,7 @@ pub const Executor = struct {
                 content_len += n;
             }
         } else {
-            try IO.eprint("log-parse: no file specified\n", .{});
+            try IO.eprint("den: log-parse: no file specified\n", .{});
             return 1;
         }
 
@@ -8483,7 +8505,10 @@ pub const Executor = struct {
                         }
                     }
                 },
-                .auto => unreachable,
+                .auto => {
+                    // Should never reach here - auto is resolved above
+                    continue;
+                },
             }
 
             // Apply filter
@@ -8624,7 +8649,7 @@ pub const Executor = struct {
             }
             return try dotfilesDiff(command.args[1]);
         } else {
-            try IO.eprint("dotfiles: unknown command '{s}'\n", .{subcmd});
+            try IO.eprint("den: dotfiles: unknown command '{s}'\n", .{subcmd});
             return 1;
         }
     }
@@ -8661,31 +8686,31 @@ pub const Executor = struct {
             return try libraryPath();
         } else if (std.mem.eql(u8, subcmd, "info")) {
             if (command.args.len < 2) {
-                try IO.eprint("library info: missing library name\n", .{});
+                try IO.eprint("den: library: info: missing library name\n", .{});
                 return 1;
             }
             return try libraryInfo(command.args[1]);
         } else if (std.mem.eql(u8, subcmd, "load")) {
             if (command.args.len < 2) {
-                try IO.eprint("library load: missing library name\n", .{});
+                try IO.eprint("den: library: load: missing library name\n", .{});
                 return 1;
             }
             return try libraryLoad(command.args[1]);
         } else if (std.mem.eql(u8, subcmd, "unload")) {
             if (command.args.len < 2) {
-                try IO.eprint("library unload: missing library name\n", .{});
+                try IO.eprint("den: library: unload: missing library name\n", .{});
                 return 1;
             }
             try IO.print("library unload: not yet implemented\n", .{});
             return 1;
         } else if (std.mem.eql(u8, subcmd, "create")) {
             if (command.args.len < 2) {
-                try IO.eprint("library create: missing library name\n", .{});
+                try IO.eprint("den: library: create: missing library name\n", .{});
                 return 1;
             }
             return try libraryCreate(command.args[1]);
         } else {
-            try IO.eprint("library: unknown command '{s}'\n", .{subcmd});
+            try IO.eprint("den: library: unknown command '{s}'\n", .{subcmd});
             return 1;
         }
     }
@@ -8694,7 +8719,7 @@ pub const Executor = struct {
 /// List available libraries
 fn libraryList() !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("library: HOME not set\n", .{});
+        try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
 
@@ -8779,7 +8804,7 @@ fn libraryPath() !i32 {
 /// Show library info
 fn libraryInfo(name: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("library: HOME not set\n", .{});
+        try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
 
@@ -8795,7 +8820,7 @@ fn libraryInfo(name: []const u8) !i32 {
         const user_sh_path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}.sh", .{ home, name }) catch return 1;
         lib_path = user_sh_path;
         break :blk std.fs.cwd().openFile(user_sh_path, .{}) catch {
-            try IO.eprint("library: '{s}' not found\n", .{name});
+            try IO.eprint("den: library: '{s}' not found\n", .{name});
             return 1;
         };
     };
@@ -8870,7 +8895,7 @@ fn libraryInfo(name: []const u8) !i32 {
 /// Load a library
 fn libraryLoad(name: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("library: HOME not set\n", .{});
+        try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
 
@@ -8880,7 +8905,7 @@ fn libraryLoad(name: []const u8) !i32 {
     // If it's an absolute path, use directly
     if (name[0] == '/') {
         _ = std.fs.cwd().statFile(name) catch {
-            try IO.eprint("library: '{s}' not found\n", .{name});
+            try IO.eprint("den: library: '{s}' not found\n", .{name});
             return 1;
         };
         try IO.print("\x1b[1;32m✓\x1b[0m Loading {s}\n", .{name});
@@ -8911,15 +8936,15 @@ fn libraryLoad(name: []const u8) !i32 {
         } else |_| {}
     }
 
-    try IO.eprint("library: '{s}' not found\n", .{name});
-    try IO.eprint("Try: library list\n", .{});
+    try IO.eprint("den: library: '{s}' not found\n", .{name});
+    try IO.eprint("den: library: try: library list\n", .{});
     return 1;
 }
 
 /// Create a new library template
 fn libraryCreate(name: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("library: HOME not set\n", .{});
+        try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
 
@@ -8928,7 +8953,7 @@ fn libraryCreate(name: []const u8) !i32 {
     const lib_dir = std.fmt.bufPrint(&lib_dir_buf, "{s}/.config/den/lib", .{home}) catch return 1;
 
     std.fs.cwd().makePath(lib_dir) catch |err| {
-        try IO.eprint("library: cannot create directory: {}\n", .{err});
+        try IO.eprint("den: library: cannot create directory: {}\n", .{err});
         return 1;
     };
 
@@ -8938,7 +8963,7 @@ fn libraryCreate(name: []const u8) !i32 {
 
     // Check if file exists
     if (std.fs.cwd().statFile(path)) |_| {
-        try IO.eprint("library: '{s}' already exists\n", .{path});
+        try IO.eprint("den: library: '{s}' already exists\n", .{path});
         return 1;
     } else |_| {}
 
@@ -8962,13 +8987,13 @@ fn libraryCreate(name: []const u8) !i32 {
     const content = std.fmt.bufPrint(&content_buf, template, .{ name, name, name }) catch return 1;
 
     const file = std.fs.cwd().createFile(path, .{}) catch |err| {
-        try IO.eprint("library: cannot create file: {}\n", .{err});
+        try IO.eprint("den: library: cannot create file: {}\n", .{err});
         return 1;
     };
     defer file.close();
 
     _ = file.write(content) catch |err| {
-        try IO.eprint("library: cannot write file: {}\n", .{err});
+        try IO.eprint("den: library: cannot write file: {}\n", .{err});
         return 1;
     };
 
@@ -8984,7 +9009,7 @@ fn libraryCreate(name: []const u8) !i32 {
 /// List common dotfiles
 fn dotfilesList() !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("dotfiles: HOME not set\n", .{});
+        try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
@@ -9059,7 +9084,7 @@ fn dotfilesList() !i32 {
 /// Show status of dotfiles
 fn dotfilesStatus() !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("dotfiles: HOME not set\n", .{});
+        try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
@@ -9106,13 +9131,13 @@ fn dotfilesStatus() !i32 {
 /// Create symlink for dotfile
 fn dotfilesLink(file: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("dotfiles: HOME not set\n", .{});
+        try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
     var target_buf: [std.fs.max_path_bytes]u8 = undefined;
     const target = std.fmt.bufPrint(&target_buf, "{s}/{s}", .{ home, file }) catch {
-        try IO.eprint("dotfiles: path too long\n", .{});
+        try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
     };
 
@@ -9124,21 +9149,21 @@ fn dotfilesLink(file: []const u8) !i32 {
 
     // Check if target already exists
     if (std.fs.cwd().statFile(target)) |_| {
-        try IO.eprint("dotfiles link: '{s}' already exists\n", .{target});
-        try IO.eprint("Use 'dotfiles backup {s}' first, then try again\n", .{file});
+        try IO.eprint("den: dotfiles: link: '{s}' already exists\n", .{target});
+        try IO.eprint("den: dotfiles: use 'dotfiles backup {s}' first, then try again\n", .{file});
         return 1;
     } else |_| {}
 
     // Get absolute path to source
     var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
     const cwd = std.posix.getcwd(&cwd_buf) catch {
-        try IO.eprint("dotfiles: cannot get current directory\n", .{});
+        try IO.eprint("den: dotfiles: cannot get current directory\n", .{});
         return 1;
     };
 
     var abs_source_buf: [std.fs.max_path_bytes]u8 = undefined;
     const abs_source = std.fmt.bufPrint(&abs_source_buf, "{s}/{s}", .{ cwd, file }) catch {
-        try IO.eprint("dotfiles: path too long\n", .{});
+        try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
     };
 
@@ -9155,13 +9180,13 @@ fn dotfilesLink(file: []const u8) !i32 {
 /// Remove symlink
 fn dotfilesUnlink(file: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("dotfiles: HOME not set\n", .{});
+        try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
     var target_buf: [std.fs.max_path_bytes]u8 = undefined;
     const target = std.fmt.bufPrint(&target_buf, "{s}/{s}", .{ home, file }) catch {
-        try IO.eprint("dotfiles: path too long\n", .{});
+        try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
     };
 
@@ -9187,7 +9212,7 @@ fn dotfilesUnlink(file: []const u8) !i32 {
 /// Backup a dotfile
 fn dotfilesBackup(file: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("dotfiles: HOME not set\n", .{});
+        try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
@@ -9198,14 +9223,14 @@ fn dotfilesBackup(file: []const u8) !i32 {
         file
     else blk: {
         const s = std.fmt.bufPrint(&source_buf, "{s}/{s}", .{ home, file }) catch {
-            try IO.eprint("dotfiles: path too long\n", .{});
+            try IO.eprint("den: dotfiles: path too long\n", .{});
             return 1;
         };
         break :blk s;
     };
 
     const backup = std.fmt.bufPrint(&backup_buf, "{s}.bak", .{source}) catch {
-        try IO.eprint("dotfiles: path too long\n", .{});
+        try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
     };
 
@@ -9228,7 +9253,7 @@ fn dotfilesBackup(file: []const u8) !i32 {
 /// Restore from backup
 fn dotfilesRestore(file: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("dotfiles: HOME not set\n", .{});
+        try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
@@ -9239,14 +9264,14 @@ fn dotfilesRestore(file: []const u8) !i32 {
         file
     else blk: {
         const t = std.fmt.bufPrint(&target_buf, "{s}/{s}", .{ home, file }) catch {
-            try IO.eprint("dotfiles: path too long\n", .{});
+            try IO.eprint("den: dotfiles: path too long\n", .{});
             return 1;
         };
         break :blk t;
     };
 
     const backup = std.fmt.bufPrint(&backup_buf, "{s}.bak", .{target}) catch {
-        try IO.eprint("dotfiles: path too long\n", .{});
+        try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
     };
 
@@ -9269,7 +9294,7 @@ fn dotfilesRestore(file: []const u8) !i32 {
 /// Edit a dotfile
 fn dotfilesEdit(file: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("dotfiles: HOME not set\n", .{});
+        try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
@@ -9278,7 +9303,7 @@ fn dotfilesEdit(file: []const u8) !i32 {
         file
     else blk: {
         const p = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ home, file }) catch {
-            try IO.eprint("dotfiles: path too long\n", .{});
+            try IO.eprint("den: dotfiles: path too long\n", .{});
             return 1;
         };
         break :blk p;
@@ -9316,7 +9341,7 @@ fn dotfilesEdit(file: []const u8) !i32 {
 /// Show diff with backup
 fn dotfilesDiff(file: []const u8) !i32 {
     const home = std.posix.getenv("HOME") orelse {
-        try IO.eprint("dotfiles: HOME not set\n", .{});
+        try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
@@ -9327,14 +9352,14 @@ fn dotfilesDiff(file: []const u8) !i32 {
         file
     else blk: {
         const c = std.fmt.bufPrint(&current_buf, "{s}/{s}", .{ home, file }) catch {
-            try IO.eprint("dotfiles: path too long\n", .{});
+            try IO.eprint("den: dotfiles: path too long\n", .{});
             return 1;
         };
         break :blk c;
     };
 
     const backup = std.fmt.bufPrint(&backup_buf, "{s}.bak", .{current}) catch {
-        try IO.eprint("dotfiles: path too long\n", .{});
+        try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
     };
 
@@ -9648,8 +9673,8 @@ fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
         return 0;
     } else if (std.mem.eql(u8, subcmd, "add")) {
         if (command.args.len < 4) {
-            try IO.eprint("hook add: usage: hook add <name> <pattern> <script>\n", .{});
-            try IO.eprint("Example: hook add git:push \"git push\" \"echo 'Pushing...'\"\n", .{});
+            try IO.eprint("den: hook: add: usage: hook add <name> <pattern> <script>\n", .{});
+            try IO.eprint("den: hook: add: example: hook add git:push \"git push\" \"echo 'Pushing...'\"\n", .{});
             return 1;
         }
 
@@ -9658,7 +9683,7 @@ fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
         const script = command.args[3];
 
         registry.register(name, pattern, script, null, null, 0) catch |err| {
-            try IO.eprint("hook add: failed to register: {}\n", .{err});
+            try IO.eprint("den: hook: add: failed to register: {}\n", .{err});
             return 1;
         };
 
@@ -9668,7 +9693,7 @@ fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
         return 0;
     } else if (std.mem.eql(u8, subcmd, "remove")) {
         if (command.args.len < 2) {
-            try IO.eprint("hook remove: missing hook name\n", .{});
+            try IO.eprint("den: hook: remove: missing hook name\n", .{});
             return 1;
         }
 
@@ -9677,12 +9702,12 @@ fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
             try IO.print("\x1b[1;32m✓\x1b[0m Removed hook '{s}'\n", .{name});
             return 0;
         } else {
-            try IO.eprint("hook remove: '{s}' not found\n", .{name});
+            try IO.eprint("den: hook: remove: '{s}' not found\n", .{name});
             return 1;
         }
     } else if (std.mem.eql(u8, subcmd, "enable")) {
         if (command.args.len < 2) {
-            try IO.eprint("hook enable: missing hook name\n", .{});
+            try IO.eprint("den: hook: enable: missing hook name\n", .{});
             return 1;
         }
 
@@ -9691,12 +9716,12 @@ fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
             try IO.print("\x1b[1;32m✓\x1b[0m Enabled hook '{s}'\n", .{name});
             return 0;
         } else {
-            try IO.eprint("hook enable: '{s}' not found\n", .{name});
+            try IO.eprint("den: hook: enable: '{s}' not found\n", .{name});
             return 1;
         }
     } else if (std.mem.eql(u8, subcmd, "disable")) {
         if (command.args.len < 2) {
-            try IO.eprint("hook disable: missing hook name\n", .{});
+            try IO.eprint("den: hook: disable: missing hook name\n", .{});
             return 1;
         }
 
@@ -9705,12 +9730,12 @@ fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
             try IO.print("\x1b[1;32m✓\x1b[0m Disabled hook '{s}'\n", .{name});
             return 0;
         } else {
-            try IO.eprint("hook disable: '{s}' not found\n", .{name});
+            try IO.eprint("den: hook: disable: '{s}' not found\n", .{name});
             return 1;
         }
     } else if (std.mem.eql(u8, subcmd, "test")) {
         if (command.args.len < 2) {
-            try IO.eprint("hook test: missing command to test\n", .{});
+            try IO.eprint("den: hook: test: missing command to test\n", .{});
             return 1;
         }
 
@@ -9744,8 +9769,8 @@ fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
         }
         return 0;
     } else {
-        try IO.eprint("hook: unknown command '{s}'\n", .{subcmd});
-        try IO.eprint("Run 'hook' for usage.\n", .{});
+        try IO.eprint("den: hook: unknown command '{s}'\n", .{subcmd});
+        try IO.eprint("den: hook: run 'hook' for usage.\n", .{});
         return 1;
     }
 }

@@ -37,6 +37,22 @@ const ContextCompletion = @import("utils/context_completion.zig").ContextComplet
 const CompletionRegistry = @import("utils/completion_registry.zig").CompletionRegistry;
 const CompletionSpec = @import("utils/completion_registry.zig").CompletionSpec;
 
+/// Format a parser error into a user-friendly message.
+fn formatParseError(err: anyerror) []const u8 {
+    return switch (err) {
+        error.UnexpectedEndOfInput => "unexpected end of input (missing operand after operator)",
+        error.RedirectionMissingTarget => "missing target for redirection",
+        error.InvalidFileDescriptor => "invalid file descriptor in redirection",
+        error.EmptyCommand => "empty command",
+        error.TooManyOperators => "too many operators in command (limit: 31)",
+        error.TooManyCommands => "too many commands in pipeline (limit: 32)",
+        error.TooManyArguments => "too many arguments (limit: 128)",
+        error.TooManyRedirections => "too many redirections (limit: 16)",
+        error.TooManyTokens => "command too complex (limit: 1024 tokens)",
+        else => "syntax error",
+    };
+}
+
 /// Extract exit status from wait status (cross-platform)
 fn getExitStatus(status: u32) i32 {
     if (builtin.os.tag == .windows) {
@@ -1058,8 +1074,8 @@ pub const Shell = struct {
         // Parse
         var parser = parser_mod.Parser.init(self.allocator, tokens);
         var chain = parser.parse() catch |err| {
-            try IO.eprint("den: parse error: {}\n", .{err});
-            self.last_exit_code = 1;
+            try IO.eprint("den: {s}\n", .{formatParseError(err)});
+            self.last_exit_code = 2;
             return;
         };
         defer chain.deinit(self.allocator);
@@ -3534,8 +3550,8 @@ pub const Shell = struct {
         // Parse
         var parser = parser_mod.Parser.init(self.allocator, tokens);
         var chain = parser.parse() catch |err| {
-            try IO.eprint("den: eval: parse error: {}\n", .{err});
-            self.last_exit_code = 1;
+            try IO.eprint("den: eval: {s}\n", .{formatParseError(err)});
+            self.last_exit_code = 2;
             return;
         };
         defer chain.deinit(self.allocator);
@@ -3638,8 +3654,8 @@ pub const Shell = struct {
 
         var parser = parser_mod.Parser.init(self.allocator, tokens);
         var chain = parser.parse() catch |err| {
-            try IO.eprint("den: time: parse error: {}\n", .{err});
-            self.last_exit_code = 1;
+            try IO.eprint("den: time: {s}\n", .{formatParseError(err)});
+            self.last_exit_code = 2;
             return;
         };
         defer chain.deinit(self.allocator);
