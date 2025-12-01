@@ -62,15 +62,15 @@
 
 ## 🟡 Medium Priority - Missing Features
 
-### 4. Configuration System (Phase 3) ✅ Partial
+### 4. Configuration System (Phase 3) ✅ Complete
 - [x] Integrate `zig-config` library for JSONC parsing
 - [x] Config file search logic (current dir → home dir)
 - [x] Support `den.jsonc` config file format
-- [ ] Support `package.jsonc` config file format
+- [x] Support `package.jsonc` config file format ✅ (extracts "den" key)
 - [x] Config validation with error messages ✅ (validateConfig, ConfigError, ValidationResult)
 - [x] Config override via CLI flags (`--config <path>`)
-- [ ] Config reload mechanism
-- [ ] Config hot-reload
+- [x] Config reload mechanism ✅ (`reload` builtin with -v, --aliases, --config options)
+- [x] Config hot-reload ✅ (set `hot_reload: true` in config, checks mtime on each prompt)
 - [x] Port default config from TypeScript version
   - [x] Default aliases (~35 aliases in den.jsonc)
   - [x] Default environment variables

@@ -4939,23 +4939,88 @@ pub const Executor = struct {
     }
 
     fn builtinReload(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = command;
         const shell_ref = self.shell orelse {
             try IO.eprint("den: reload: shell context not available\n", .{});
             return 1;
         };
 
-        // Reload shell configuration files
-        // For 1.0, we'll just reload aliases and environment from the config
-        const config_loader = @import("../config_loader.zig");
-        const new_config = config_loader.loadConfig(self.allocator) catch {
-            try IO.eprint("den: reload: failed to load configuration\n", .{});
-            return 1;
-        };
+        // Check for --help
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+                try IO.print("reload - reload shell configuration\n", .{});
+                try IO.print("Usage: reload [options]\n", .{});
+                try IO.print("Options:\n", .{});
+                try IO.print("  -v, --verbose  Show detailed reload information\n", .{});
+                try IO.print("  --aliases      Reload only aliases\n", .{});
+                try IO.print("  --config       Reload only config (no aliases)\n", .{});
+                try IO.print("\nConfig search order:\n", .{});
+                try IO.print("  1. ./den.jsonc\n", .{});
+                try IO.print("  2. ./package.jsonc (\"den\" key)\n", .{});
+                try IO.print("  3. ./config/den.jsonc\n", .{});
+                try IO.print("  4. ./.config/den.jsonc\n", .{});
+                try IO.print("  5. ~/.config/den.jsonc\n", .{});
+                try IO.print("  6. ~/package.jsonc (\"den\" key)\n", .{});
+                return 0;
+            }
+        }
 
-        // Update shell config
-        shell_ref.config = new_config;
-        try IO.print("Configuration reloaded\n", .{});
+        var verbose = false;
+        var reload_aliases = true;
+        var reload_config = true;
+
+        for (command.args) |arg| {
+            if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--verbose")) {
+                verbose = true;
+            } else if (std.mem.eql(u8, arg, "--aliases")) {
+                reload_config = false;
+            } else if (std.mem.eql(u8, arg, "--config")) {
+                reload_aliases = false;
+            }
+        }
+
+        const config_loader = @import("../config_loader.zig");
+
+        if (reload_config) {
+            // Load config with source information
+            const result = config_loader.loadConfigWithSource(self.allocator) catch {
+                try IO.eprint("den: reload: failed to load configuration\n", .{});
+                return 1;
+            };
+
+            // Update shell config
+            shell_ref.config = result.config;
+
+            if (verbose) {
+                const source_name = switch (result.source.source_type) {
+                    .default => "defaults",
+                    .den_jsonc => "den.jsonc",
+                    .package_jsonc => "package.jsonc",
+                    .custom_path => "custom path",
+                };
+                if (result.source.path) |path| {
+                    try IO.print("Configuration loaded from: {s} ({s})\n", .{ path, source_name });
+                } else {
+                    try IO.print("Configuration loaded from: {s}\n", .{source_name});
+                }
+            }
+        }
+
+        if (reload_aliases) {
+            // Reload aliases from config
+            shell_ref.loadAliasesFromConfig() catch {
+                try IO.eprint("den: reload: failed to reload aliases\n", .{});
+                return 1;
+            };
+            if (verbose) {
+                try IO.print("Aliases reloaded from configuration\n", .{});
+            }
+        }
+
+        if (!verbose) {
+            try IO.print("Configuration reloaded\n", .{});
+        } else {
+            try IO.print("Reload complete\n", .{});
+        }
 
         return 0;
     }

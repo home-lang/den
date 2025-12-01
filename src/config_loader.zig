@@ -3,64 +3,224 @@ const zig_config = @import("zig-config");
 const types = @import("types/mod.zig");
 const DenConfig = types.DenConfig;
 
+/// Configuration source information
+pub const ConfigSource = struct {
+    path: ?[]const u8,
+    source_type: SourceType,
+
+    pub const SourceType = enum {
+        default,
+        den_jsonc,
+        package_jsonc,
+        custom_path,
+    };
+};
+
+/// Result of loading config with source tracking
+pub const ConfigLoadResult = struct {
+    config: DenConfig,
+    source: ConfigSource,
+};
+
 /// Load Den shell configuration from multiple sources
 /// Priority: env vars > local file > home directory > defaults
 pub fn loadConfig(allocator: std.mem.Allocator) !DenConfig {
     return loadConfigWithPath(allocator, null);
 }
 
+/// Load configuration and return source information
+pub fn loadConfigWithSource(allocator: std.mem.Allocator) !ConfigLoadResult {
+    return loadConfigWithPathAndSource(allocator, null);
+}
+
 /// Load Den shell configuration from a custom path
 /// If custom_path is provided, it takes priority over default search paths
 pub fn loadConfigWithPath(allocator: std.mem.Allocator, custom_path: ?[]const u8) !DenConfig {
+    const result = try loadConfigWithPathAndSource(allocator, custom_path);
+    return result.config;
+}
+
+/// Load configuration with source tracking
+pub fn loadConfigWithPathAndSource(allocator: std.mem.Allocator, custom_path: ?[]const u8) !ConfigLoadResult {
     if (custom_path) |path| {
         // Load from custom path directly
-        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-            std.debug.print("Error: Failed to open config file '{s}': {any}\n", .{ path, err });
-            return error.ConfigFileNotFound;
+        const config = try loadFromFile(allocator, path);
+        return .{
+            .config = config,
+            .source = .{ .path = path, .source_type = .custom_path },
         };
-        defer file.close();
-
-        // Read file content
-        var content = std.ArrayList(u8).empty;
-        defer content.deinit(allocator);
-
-        var buf: [4096]u8 = undefined;
-        while (true) {
-            const n = file.read(&buf) catch break;
-            if (n == 0) break;
-            try content.appendSlice(allocator, buf[0..n]);
-        }
-
-        // Remove JSONC comments (same as zig-config does)
-        const json = try removeJsoncComments(allocator, content.items);
-        defer allocator.free(json);
-
-        // Parse JSON
-        const parsed = std.json.parseFromSlice(DenConfig, allocator, json, .{
-            .ignore_unknown_fields = true,
-            .allocate = .alloc_always,
-        }) catch |err| {
-            std.debug.print("Error: Failed to parse config file '{s}': {any}\n", .{ path, err });
-            return error.ConfigParseError;
-        };
-
-        return parsed.value;
     }
 
-    // Use default config loading
-    const config = zig_config.loadConfig(DenConfig, allocator, .{
-        .name = "den",
-        .env_prefix = "DEN",
-    }) catch |err| {
-        // If loading fails, use defaults
-        std.debug.print("Warning: Failed to load config ({any}), using defaults\n", .{err});
-        return DenConfig{};
-    };
-    // Note: We do NOT call config.deinit() here because the config value
-    // contains slices that point to memory that would be freed.
-    // The config memory lives for the lifetime of the shell.
+    // Search order:
+    // 1. ./den.jsonc
+    // 2. ./package.jsonc (with "den" key)
+    // 3. ./config/den.jsonc
+    // 4. ./.config/den.jsonc
+    // 5. ~/.config/den.jsonc
+    // 6. ~/package.jsonc (with "den" key)
 
-    return config.value;
+    // Try ./den.jsonc
+    if (tryLoadFromPath(DenConfig, allocator, "den.jsonc")) |config| {
+        return .{
+            .config = config,
+            .source = .{ .path = "den.jsonc", .source_type = .den_jsonc },
+        };
+    }
+
+    // Try ./package.jsonc with "den" key
+    if (tryLoadDenFromPackageJson(allocator, "package.jsonc")) |config| {
+        return .{
+            .config = config,
+            .source = .{ .path = "package.jsonc", .source_type = .package_jsonc },
+        };
+    }
+
+    // Try config/den.jsonc
+    if (tryLoadFromPath(DenConfig, allocator, "config/den.jsonc")) |config| {
+        return .{
+            .config = config,
+            .source = .{ .path = "config/den.jsonc", .source_type = .den_jsonc },
+        };
+    }
+
+    // Try .config/den.jsonc
+    if (tryLoadFromPath(DenConfig, allocator, ".config/den.jsonc")) |config| {
+        return .{
+            .config = config,
+            .source = .{ .path = ".config/den.jsonc", .source_type = .den_jsonc },
+        };
+    }
+
+    // Try home directory
+    if (std.posix.getenv("HOME")) |home| {
+        // Try ~/.config/den.jsonc
+        const home_config_path = std.fmt.allocPrint(allocator, "{s}/.config/den.jsonc", .{home}) catch null;
+        if (home_config_path) |path| {
+            defer allocator.free(path);
+            if (tryLoadFromPath(DenConfig, allocator, path)) |config| {
+                return .{
+                    .config = config,
+                    .source = .{ .path = null, .source_type = .den_jsonc }, // Don't store allocated path
+                };
+            }
+        }
+
+        // Try ~/package.jsonc with "den" key
+        const home_package_path = std.fmt.allocPrint(allocator, "{s}/package.jsonc", .{home}) catch null;
+        if (home_package_path) |path| {
+            defer allocator.free(path);
+            if (tryLoadDenFromPackageJson(allocator, path)) |config| {
+                return .{
+                    .config = config,
+                    .source = .{ .path = null, .source_type = .package_jsonc },
+                };
+            }
+        }
+    }
+
+    // Return defaults
+    return .{
+        .config = DenConfig{},
+        .source = .{ .path = null, .source_type = .default },
+    };
+}
+
+/// Load config from a specific file path
+fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
+    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        std.debug.print("Error: Failed to open config file '{s}': {any}\n", .{ path, err });
+        return error.ConfigFileNotFound;
+    };
+    defer file.close();
+
+    // Read file content
+    var content = std.ArrayList(u8).empty;
+    defer content.deinit(allocator);
+
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = file.read(&buf) catch break;
+        if (n == 0) break;
+        try content.appendSlice(allocator, buf[0..n]);
+    }
+
+    // Remove JSONC comments (same as zig-config does)
+    const json = try removeJsoncComments(allocator, content.items);
+    defer allocator.free(json);
+
+    // Parse JSON
+    const parsed = std.json.parseFromSlice(DenConfig, allocator, json, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    }) catch |err| {
+        std.debug.print("Error: Failed to parse config file '{s}': {any}\n", .{ path, err });
+        return error.ConfigParseError;
+    };
+
+    return parsed.value;
+}
+
+/// Try to load config from a path, return null on failure
+fn tryLoadFromPath(comptime T: type, allocator: std.mem.Allocator, path: []const u8) ?T {
+    const file = std.fs.cwd().openFile(path, .{}) catch return null;
+    defer file.close();
+
+    // Read file content
+    var content = std.ArrayList(u8).empty;
+    defer content.deinit(allocator);
+
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = file.read(&buf) catch break;
+        if (n == 0) break;
+        content.appendSlice(allocator, buf[0..n]) catch return null;
+    }
+
+    // Remove JSONC comments
+    const json = removeJsoncComments(allocator, content.items) catch return null;
+    defer allocator.free(json);
+
+    // Parse JSON
+    const parsed = std.json.parseFromSlice(T, allocator, json, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    }) catch return null;
+
+    return parsed.value;
+}
+
+/// Package.jsonc structure with optional "den" key
+const PackageJsonWithDen = struct {
+    den: ?DenConfig = null,
+};
+
+/// Try to load Den config from package.jsonc "den" key
+fn tryLoadDenFromPackageJson(allocator: std.mem.Allocator, path: []const u8) ?DenConfig {
+    const file = std.fs.cwd().openFile(path, .{}) catch return null;
+    defer file.close();
+
+    // Read file content
+    var content = std.ArrayList(u8).empty;
+    defer content.deinit(allocator);
+
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = file.read(&buf) catch break;
+        if (n == 0) break;
+        content.appendSlice(allocator, buf[0..n]) catch return null;
+    }
+
+    // Remove JSONC comments
+    const json = removeJsoncComments(allocator, content.items) catch return null;
+    defer allocator.free(json);
+
+    // Parse JSON looking for "den" key
+    const parsed = std.json.parseFromSlice(PackageJsonWithDen, allocator, json, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    }) catch return null;
+
+    return parsed.value.den;
 }
 
 /// Remove JSONC comments (// and /* */) and trailing commas

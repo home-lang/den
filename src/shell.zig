@@ -53,6 +53,15 @@ fn getenv(key: []const u8) ?[]const u8 {
     return env_utils.getEnv(key);
 }
 
+/// Get modification time of a config file (for hot-reload)
+fn getConfigMtime(path: ?[]const u8) i128 {
+    const config_path = path orelse return 0;
+    const file = std.fs.cwd().openFile(config_path, .{}) catch return 0;
+    defer file.close();
+    const stat = file.stat() catch return 0;
+    return stat.mtime.nanoseconds;
+}
+
 /// Job status
 const JobStatus = enum {
     running,
@@ -143,6 +152,9 @@ pub const Shell = struct {
     in_cstyle_for_body: bool,
     // Flag for break statement in loops
     break_requested: bool,
+    // Config hot-reload tracking
+    config_source: config_loader.ConfigSource,
+    config_last_mtime: i128,
 
     const MultilineMode = enum {
         none,
@@ -156,8 +168,16 @@ pub const Shell = struct {
     /// Initialize shell with a custom config path
     /// If config_path is provided, it takes priority over default search paths
     pub fn initWithConfig(allocator: std.mem.Allocator, config_path: ?[]const u8) !Shell {
-        // Load configuration from files and environment variables
-        const config = config_loader.loadConfigWithPath(allocator, config_path) catch types.DenConfig{};
+        // Load configuration from files and environment variables (with source tracking)
+        const config_result = config_loader.loadConfigWithPathAndSource(allocator, config_path) catch config_loader.ConfigLoadResult{
+            .config = types.DenConfig{},
+            .source = .{ .path = null, .source_type = .default },
+        };
+        const config = config_result.config;
+        const config_source = config_result.source;
+
+        // Get initial mtime for hot-reload
+        const config_mtime = getConfigMtime(config_source.path);
 
         // Initialize environment from system
         var env = std.StringHashMap([]const u8).init(allocator);
@@ -266,6 +286,8 @@ pub const Shell = struct {
             .multiline_mode = .none,
             .in_cstyle_for_body = false,
             .break_requested = false,
+            .config_source = config_source,
+            .config_last_mtime = config_mtime,
         };
 
         // Detect if stdin is a TTY
@@ -490,6 +512,9 @@ pub const Shell = struct {
         try IO.print("Type 'exit' to quit or Ctrl+D to exit.\n\n", .{});
 
         while (self.running) {
+            // Check for config hot-reload
+            self.checkConfigHotReload();
+
             // Check for signals
             if (signals.checkSignal()) |sig| {
                 switch (sig) {
@@ -1814,7 +1839,7 @@ pub const Shell = struct {
     }
 
     /// Load aliases from configuration
-    fn loadAliasesFromConfig(self: *Shell) !void {
+    pub fn loadAliasesFromConfig(self: *Shell) !void {
         // Check if aliases are enabled in config
         if (!self.config.aliases.enabled) return;
 
@@ -1824,6 +1849,38 @@ pub const Shell = struct {
                 const name_copy = try self.allocator.dupe(u8, alias_entry.name);
                 const cmd_copy = try self.allocator.dupe(u8, alias_entry.command);
                 try self.aliases.put(name_copy, cmd_copy);
+            }
+        }
+    }
+
+    /// Check if config file has changed and reload if needed (hot-reload)
+    pub fn checkConfigHotReload(self: *Shell) void {
+        // Only check if hot-reload is enabled in config
+        if (!self.config.hot_reload) return;
+
+        // Only check if we have a config file to watch
+        if (self.config_source.source_type == .default) return;
+
+        // Get current mtime
+        const current_mtime = getConfigMtime(self.config_source.path);
+        if (current_mtime == 0) return; // File doesn't exist or error
+
+        // Check if file has changed
+        if (current_mtime != self.config_last_mtime) {
+            // Reload config
+            const result = config_loader.loadConfigWithSource(self.allocator) catch return;
+
+            // Update config
+            self.config = result.config;
+            self.config_source = result.source;
+            self.config_last_mtime = current_mtime;
+
+            // Reload aliases
+            self.loadAliasesFromConfig() catch {};
+
+            // Notify user (only in interactive mode)
+            if (self.is_interactive) {
+                IO.print("\n[Config reloaded]\n", .{}) catch {};
             }
         }
     }

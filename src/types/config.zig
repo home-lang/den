@@ -4,6 +4,8 @@ const std = @import("std");
 pub const DenConfig = struct {
     verbose: bool = false,
     stream_output: ?bool = null,
+    /// Enable automatic config reload when config file changes
+    hot_reload: bool = false,
 
     prompt: PromptConfig = .{},
     history: HistoryConfig = .{},
