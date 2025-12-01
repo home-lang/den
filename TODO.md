@@ -262,7 +262,7 @@
 - [ ] **Advanced Tools**
   - [ ] `find` - Fuzzy file finder (interactive)
   - [x] `tree` - Directory tree ✅
-  - [ ] `grep` - Text search with highlighting
+  - [x] `grep` - Text search with highlighting ✅
   - [x] `watch` - Execute command repeatedly ✅
 - [ ] **Monitoring & Logging**
   - [ ] `log-tail` - Tail logs with filtering

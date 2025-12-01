@@ -5073,28 +5073,56 @@ pub const Executor = struct {
         // grep [options] pattern [file...]
         if (command.args.len == 0) {
             try IO.eprint("den: grep: missing pattern\n", .{});
-            try IO.eprint("Usage: grep [-i] [-n] [-v] pattern [file...]\n", .{});
+            try IO.eprint("Usage: grep [-i] [-n] [-v] [-c] [--color] [--no-color] pattern [file...]\n", .{});
             return 1;
         }
 
         var case_insensitive = false;
         var show_line_numbers = false;
         var invert_match = false;
+        var count_only = false;
+        var use_color = true; // Default to color on
+        var show_filename = false;
         var pattern_idx: usize = 0;
 
         // Parse flags
         for (command.args, 0..) |arg, i| {
             if (arg.len > 0 and arg[0] == '-') {
-                for (arg[1..]) |c| {
-                    if (c == 'i') case_insensitive = true
-                    else if (c == 'n') show_line_numbers = true
-                    else if (c == 'v') invert_match = true
-                    else {
-                        try IO.eprint("den: grep: invalid option: -{c}\n", .{c});
-                        return 1;
+                if (std.mem.eql(u8, arg, "--color") or std.mem.eql(u8, arg, "--colour")) {
+                    use_color = true;
+                    pattern_idx = i + 1;
+                } else if (std.mem.eql(u8, arg, "--no-color") or std.mem.eql(u8, arg, "--no-colour")) {
+                    use_color = false;
+                    pattern_idx = i + 1;
+                } else if (std.mem.eql(u8, arg, "-H")) {
+                    show_filename = true;
+                    pattern_idx = i + 1;
+                } else if (std.mem.eql(u8, arg, "--help")) {
+                    try IO.print("grep - search for patterns in files\n", .{});
+                    try IO.print("Usage: grep [options] pattern [file...]\n", .{});
+                    try IO.print("Options:\n", .{});
+                    try IO.print("  -i          Case insensitive search\n", .{});
+                    try IO.print("  -n          Show line numbers\n", .{});
+                    try IO.print("  -v          Invert match (show non-matching lines)\n", .{});
+                    try IO.print("  -c          Count matches only\n", .{});
+                    try IO.print("  -H          Show filename for each match\n", .{});
+                    try IO.print("  --color     Highlight matches (default)\n", .{});
+                    try IO.print("  --no-color  Disable highlighting\n", .{});
+                    return 0;
+                } else {
+                    for (arg[1..]) |c| {
+                        if (c == 'i') case_insensitive = true
+                        else if (c == 'n') show_line_numbers = true
+                        else if (c == 'v') invert_match = true
+                        else if (c == 'c') count_only = true
+                        else if (c == 'H') show_filename = true
+                        else {
+                            try IO.eprint("den: grep: invalid option: -{c}\n", .{c});
+                            return 1;
+                        }
                     }
+                    pattern_idx = i + 1;
                 }
-                pattern_idx = i + 1;
             } else {
                 break;
             }
@@ -5113,6 +5141,17 @@ pub const Executor = struct {
             try IO.print("den: grep: reading from stdin not yet implemented\n", .{});
             return 1;
         }
+
+        // Auto-enable filename display for multiple files
+        const display_filename = show_filename or files.len > 1;
+
+        // ANSI color codes for highlighting
+        const color_match = "\x1b[1;31m"; // Bold red
+        const color_linenum = "\x1b[32m"; // Green
+        const color_filename = "\x1b[35m"; // Magenta
+        const color_reset = "\x1b[0m";
+
+        var total_matches: usize = 0;
 
         // Search each file
         for (files) |file_path| {
@@ -5143,38 +5182,114 @@ pub const Executor = struct {
 
             var line_iter = std.mem.splitScalar(u8, content, '\n');
             var line_num: usize = 1;
+            var file_matches: usize = 0;
 
             while (line_iter.next()) |line| {
                 var matches = false;
+                var match_pos: ?usize = null;
 
                 if (case_insensitive) {
                     // Simple case-insensitive search
-                    var i: usize = 0;
-                    while (i + pattern.len <= line.len) : (i += 1) {
-                        if (std.ascii.eqlIgnoreCase(line[i .. i + pattern.len], pattern)) {
+                    var idx: usize = 0;
+                    while (idx + pattern.len <= line.len) : (idx += 1) {
+                        if (std.ascii.eqlIgnoreCase(line[idx .. idx + pattern.len], pattern)) {
                             matches = true;
+                            match_pos = idx;
                             break;
                         }
                     }
                 } else {
-                    matches = std.mem.indexOf(u8, line, pattern) != null;
+                    match_pos = std.mem.indexOf(u8, line, pattern);
+                    matches = match_pos != null;
                 }
 
                 if (invert_match) matches = !matches;
 
                 if (matches) {
-                    if (show_line_numbers) {
-                        try IO.print("{d}:{s}\n", .{ line_num, line });
-                    } else {
-                        try IO.print("{s}\n", .{line});
+                    file_matches += 1;
+                    total_matches += 1;
+
+                    if (!count_only) {
+                        // Build output with highlighting
+                        if (display_filename) {
+                            if (use_color) {
+                                try IO.print("{s}{s}{s}:", .{ color_filename, file_path, color_reset });
+                            } else {
+                                try IO.print("{s}:", .{file_path});
+                            }
+                        }
+
+                        if (show_line_numbers) {
+                            if (use_color) {
+                                try IO.print("{s}{d}{s}:", .{ color_linenum, line_num, color_reset });
+                            } else {
+                                try IO.print("{d}:", .{line_num});
+                            }
+                        }
+
+                        // Print line with highlighted matches (only if not inverted)
+                        if (use_color and !invert_match and match_pos != null) {
+                            try self.printHighlightedLine(line, pattern, case_insensitive, color_match, color_reset);
+                        } else {
+                            try IO.print("{s}\n", .{line});
+                        }
                     }
                 }
 
                 line_num += 1;
             }
+
+            if (count_only) {
+                if (display_filename) {
+                    try IO.print("{s}:{d}\n", .{ file_path, file_matches });
+                } else {
+                    try IO.print("{d}\n", .{file_matches});
+                }
+            }
         }
 
-        return 0;
+        return if (total_matches > 0) 0 else 1;
+    }
+
+    /// Print a line with all occurrences of pattern highlighted
+    fn printHighlightedLine(_: *Executor, line: []const u8, pattern: []const u8, case_insensitive: bool, color_on: []const u8, color_off: []const u8) !void {
+        if (pattern.len == 0) {
+            try IO.print("{s}\n", .{line});
+            return;
+        }
+
+        var pos: usize = 0;
+        while (pos < line.len) {
+            // Find next match
+            var match_start: ?usize = null;
+
+            if (case_insensitive) {
+                var idx = pos;
+                while (idx + pattern.len <= line.len) : (idx += 1) {
+                    if (std.ascii.eqlIgnoreCase(line[idx .. idx + pattern.len], pattern)) {
+                        match_start = idx;
+                        break;
+                    }
+                }
+            } else {
+                match_start = std.mem.indexOfPos(u8, line, pos, pattern);
+            }
+
+            if (match_start) |start| {
+                // Print text before match
+                if (start > pos) {
+                    try IO.print("{s}", .{line[pos..start]});
+                }
+                // Print highlighted match
+                try IO.print("{s}{s}{s}", .{ color_on, line[start .. start + pattern.len], color_off });
+                pos = start + pattern.len;
+            } else {
+                // No more matches, print rest of line
+                try IO.print("{s}", .{line[pos..]});
+                break;
+            }
+        }
+        try IO.print("\n", .{});
     }
 
     fn builtinFind(self: *Executor, command: *types.ParsedCommand) !i32 {
