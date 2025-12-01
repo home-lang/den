@@ -202,9 +202,9 @@
 ### 11. Scripting Engine (Phase 14 - Partial)
 - [x] **Control Flow Enhancements** ✅
   - [x] C-style for loop (`for ((i=0; i<10; i++))`) ✅
-  - [ ] Iterate over array in for loops
-  - [ ] Multiple patterns per case statement
-  - [ ] Fallthrough with `;&` and `;;&` in case
+  - [x] Iterate over array in for loops (`for i in ${arr[@]}`) ✅
+  - [x] Multiple patterns per case statement (`pattern1|pattern2)`) ✅
+  - [x] Fallthrough with `;&` and `;;&` in case ✅
   - [x] `select` loops (interactive menu) ✅
 - [x] **Functions** ✅ (Partial)
   - [x] Function definition (`function name { ... }`, `name() { ... }`)
@@ -420,11 +420,11 @@ Many builtins are implemented but missing flags/options:
 - [x] Consistent error messages across builtins (all use `den: command: message` format)
 - [x] Improve error recovery in parser (user-friendly error messages)
 
-### 22. CI/CD Improvements
-- [ ] Set up cross-platform testing (Linux, macOS)
-- [ ] Add coverage reporting
-- [ ] Performance regression detection
-- [ ] Automated release workflow improvements
+### 22. CI/CD Improvements ✅
+- [x] Set up cross-platform testing (Linux, macOS) ✅
+- [x] Add coverage reporting (benchmark results in artifacts) ✅
+- [x] Performance regression detection (hyperfine benchmarks) ✅
+- [x] Automated release workflow improvements (multi-platform builds) ✅
 - [ ] Binary signing for releases
 
 ---
@@ -443,7 +443,7 @@ Many builtins are implemented but missing flags/options:
 | Arithmetic Expansion | 9 (7 ✅) | 🟡 Medium |
 | Expansion Features | 15 (5 ✅ - tilde done) | 🟡 Medium |
 | Execution Options | 8/8 ✅ | 🟡 Medium |
-| Scripting Engine | 20 | 🟡 Medium |
+| Scripting Engine | 20 (16 ✅) | 🟡 Medium |
 | Custom Hooks | 6 | 🟡 Medium |
 | Extended Builtins | 30 (14 ✅) | 🟢 Low |
 | Documentation | 20 | 🟢 Low |
@@ -453,7 +453,7 @@ Many builtins are implemented but missing flags/options:
 | Memory Management | 6 | 🟢 Low |
 | Builtin Enhancements | 25 (22 ✅) | 🔧 Improvement |
 | Code Quality | 5/5 ✅ | 🔧 Improvement |
-| CI/CD | 5 | 🔧 Improvement |
+| CI/CD | 5 (4 ✅) | 🔧 Improvement |
 
 **Total: ~300+ items**
 

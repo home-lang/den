@@ -1,5 +1,6 @@
 const std = @import("std");
 const Shell = @import("../shell.zig").Shell;
+const Expansion = @import("../utils/expansion.zig").Expansion;
 
 /// Control flow statement type
 pub const ControlFlowType = enum {
@@ -248,11 +249,50 @@ pub const ControlFlowExecutor = struct {
         return last_exit;
     }
 
-    /// Execute for loop
+    /// Execute for loop with array expansion support.
+    /// Supports: `for i in a b c`, `for i in ${arr[@]}`, `for i in "${arr[@]}"`
     pub fn executeFor(self: *ControlFlowExecutor, loop: *ForLoop) !i32 {
         var last_exit: i32 = 0;
 
+        // Expand each item (handles array variables like ${arr[@]})
+        var expanded_items = std.ArrayList([]const u8).empty;
+        defer {
+            for (expanded_items.items) |item| {
+                self.allocator.free(item);
+            }
+            expanded_items.deinit(self.allocator);
+        }
+
+        // Create expansion context
+        var expander = Expansion.init(self.allocator, &self.shell.environment, self.shell.last_exit_code);
+        expander.arrays = &self.shell.arrays;
+
         for (loop.items) |item| {
+            // Check if item is an array expansion
+            if (std.mem.indexOf(u8, item, "${") != null and
+                (std.mem.indexOf(u8, item, "[@]") != null or std.mem.indexOf(u8, item, "[*]") != null))
+            {
+                // Expand the array - result may be multiple items
+                const expanded = expander.expand(item) catch item;
+                defer if (expanded.ptr != item.ptr) self.allocator.free(expanded);
+
+                // Split expanded result by spaces (word splitting)
+                var word_iter = std.mem.tokenizeAny(u8, expanded, " \t\n");
+                while (word_iter.next()) |word| {
+                    try expanded_items.append(self.allocator, try self.allocator.dupe(u8, word));
+                }
+            } else {
+                // Regular item - expand variables but keep as single item
+                const expanded = expander.expand(item) catch item;
+                if (expanded.ptr != item.ptr) {
+                    try expanded_items.append(self.allocator, expanded);
+                } else {
+                    try expanded_items.append(self.allocator, try self.allocator.dupe(u8, item));
+                }
+            }
+        }
+
+        for (expanded_items.items) |item| {
             // Set loop variable
             const value = try self.allocator.dupe(u8, item);
 

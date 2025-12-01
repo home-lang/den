@@ -1,4 +1,4 @@
-name: Releaser
+name: Release
 
 on:
   push:
@@ -8,46 +8,100 @@ on:
 permissions:
   contents: write
 
+env:
+  ZIG_VERSION: '0.14.0'
+
 jobs:
   build:
-    name: Build Release
-    runs-on: ubuntu-latest
+    name: Build Release Binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-linux
+            artifact: den-linux-x64
+          - os: ubuntu-latest
+            target: aarch64-linux
+            artifact: den-linux-arm64
+          - os: macos-latest
+            target: x86_64-macos
+            artifact: den-darwin-x64
+          - os: macos-latest
+            target: aarch64-macos
+            artifact: den-darwin-arm64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.15.2
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Build release binaries
+      - name: Build release binary
         run: |
-          echo "Building Den Shell v${{ steps.version.outputs.VERSION }}"
-          zig build release
+          echo "Building Den Shell v${{ steps.version.outputs.VERSION }} for ${{ matrix.target }}"
+          zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
 
-      - name: Create release archives
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
         run: |
-          chmod +x scripts/release.sh
-          scripts/release.sh ${{ steps.version.outputs.VERSION }}
+          mkdir -p dist
+          cp zig-out/bin/den dist/
+          cd dist
+          tar -czvf ${{ matrix.artifact }}-${{ steps.version.outputs.VERSION }}.tar.gz den
+          shasum -a 256 ${{ matrix.artifact }}-${{ steps.version.outputs.VERSION }}.tar.gz > ${{ matrix.artifact }}-${{ steps.version.outputs.VERSION }}.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/*
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create checksums file
+        run: |
+          cd dist
+          cat *.sha256 > checksums-${{ steps.version.outputs.VERSION }}.txt
 
       - name: Create GitHub Release
-        uses: stacksjs/action-releaser@v1.2.6
+        uses: softprops/action-gh-release@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-          changelog: CHANGELOG.md
+          tag_name: ${{ github.ref_name }}
+          name: Den Shell v${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
           files: |
-            dist/den-*-linux-x64.tar.gz
-            dist/den-*-linux-arm64.tar.gz
-            dist/den-*-darwin-x64.tar.gz
-            dist/den-*-darwin-arm64.tar.gz
-            dist/den-*-windows-x64.zip
+            dist/*.tar.gz
+            dist/*.zip
             dist/checksums-*.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
