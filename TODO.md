@@ -169,9 +169,11 @@
   - [x] `~+` (current working directory - PWD)
   - [x] `~-` (previous working directory - OLDPWD)
   - **Implementation**: `src/utils/expansion.zig` (`expandTilde` function, `getUserHomeDir`)
-- [ ] **Brace Expansion**
+- [x] **Brace Expansion** ✅
   - [x] Nested brace expansion
   - [x] Zero-padding support (`{01..10}`)
+  - [x] Prefix/suffix combination
+  - [x] Cartesian product of multiple braces
 - [x] **Process Substitution** ✅
   - [x] `<(command)` (create pipe with command output) ✅
   - [x] `>(command)` (create pipe as command input) ✅

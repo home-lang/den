@@ -199,25 +199,29 @@ pub const Shell = struct {
         var env = std.StringHashMap([]const u8).init(allocator);
 
         // Add some basic environment variables (cross-platform)
+        // Note: Both keys and values must be allocated for proper cleanup
         const home = std.process.getEnvVarOwned(allocator, "HOME") catch
             std.process.getEnvVarOwned(allocator, "USERPROFILE") catch
             try allocator.dupe(u8, "/");
-        try env.put("HOME", home);
+        const home_key = try allocator.dupe(u8, "HOME");
+        try env.put(home_key, home);
 
         const path = std.process.getEnvVarOwned(allocator, "PATH") catch
             try allocator.dupe(u8, "/usr/bin:/bin");
-        try env.put("PATH", path);
+        const path_key = try allocator.dupe(u8, "PATH");
+        try env.put(path_key, path);
 
         // Load default environment variables from config
         if (config.environment.enabled) {
             // First, set defaults (only if not already set in system env)
             for (types.EnvironmentConfig.defaults) |default_var| {
                 const existing = std.process.getEnvVarOwned(allocator, default_var.name) catch null;
+                const key_copy = try allocator.dupe(u8, default_var.name);
                 if (existing == null) {
                     const value_copy = try allocator.dupe(u8, default_var.value);
-                    try env.put(default_var.name, value_copy);
+                    try env.put(key_copy, value_copy);
                 } else {
-                    try env.put(default_var.name, existing.?);
+                    try env.put(key_copy, existing.?);
                 }
             }
 
@@ -225,11 +229,13 @@ pub const Shell = struct {
             if (config.environment.variables) |custom_vars| {
                 for (custom_vars) |env_var| {
                     const value_copy = try allocator.dupe(u8, env_var.value);
-                    // Free old value if exists
-                    if (env.get(env_var.name)) |old_val| {
-                        allocator.free(old_val);
+                    // Free old key and value if exists
+                    if (env.fetchRemove(env_var.name)) |old_kv| {
+                        allocator.free(old_kv.key);
+                        allocator.free(old_kv.value);
                     }
-                    try env.put(env_var.name, value_copy);
+                    const key_copy = try allocator.dupe(u8, env_var.name);
+                    try env.put(key_copy, value_copy);
                 }
             }
         }
@@ -453,16 +459,18 @@ pub const Shell = struct {
             self.allocator.free(self.shell_name);
         }
 
-        // Clean up environment variables (values were allocated)
+        // Clean up environment variables (keys and values were allocated)
         var env_iter = self.environment.iterator();
         while (env_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
             self.allocator.free(entry.value_ptr.*);
         }
         self.environment.deinit();
 
-        // Clean up aliases (values were allocated)
+        // Clean up aliases (keys and values were allocated)
         var alias_iter = self.aliases.iterator();
         while (alias_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
             self.allocator.free(entry.value_ptr.*);
         }
         self.aliases.deinit();
@@ -2290,14 +2298,15 @@ pub const Shell = struct {
                         value;
 
                     // Store alias
-                    const name_copy = try self.allocator.dupe(u8, name);
                     const value_copy = try self.allocator.dupe(u8, clean_value);
 
-                    // Free old value if exists
-                    if (self.aliases.get(name)) |old_value| {
-                        self.allocator.free(old_value);
+                    // Free old key and value if exists
+                    if (self.aliases.fetchRemove(name)) |old_kv| {
+                        self.allocator.free(old_kv.key);
+                        self.allocator.free(old_kv.value);
                     }
 
+                    const name_copy = try self.allocator.dupe(u8, name);
                     try self.aliases.put(name_copy, value_copy);
                 } else {
                     // Show specific alias
@@ -4558,24 +4567,28 @@ pub const Shell = struct {
 
     /// Set a variable for arithmetic operations
     fn setArithVariable(self: *Shell, name: []const u8, value: []const u8) void {
-        // Dupe the key and value to ensure proper lifetime
-        const key = self.allocator.dupe(u8, name) catch return;
-        const val = self.allocator.dupe(u8, value) catch {
-            self.allocator.free(key);
+        // Dupe the value
+        const val = self.allocator.dupe(u8, value) catch return;
+
+        // Get or put entry to avoid memory leak
+        const gop = self.environment.getOrPut(name) catch {
+            self.allocator.free(val);
             return;
         };
-
-        // Free old value if exists
-        if (self.environment.get(name)) |old_val| {
-            self.allocator.free(old_val);
+        if (gop.found_existing) {
+            // Free old value and update
+            self.allocator.free(gop.value_ptr.*);
+            gop.value_ptr.* = val;
+        } else {
+            // New key - duplicate it
+            const key = self.allocator.dupe(u8, name) catch {
+                self.allocator.free(val);
+                _ = self.environment.remove(name);
+                return;
+            };
+            gop.key_ptr.* = key;
+            gop.value_ptr.* = val;
         }
-
-        // Put new value (may need to remove old key first)
-        _ = self.environment.remove(name);
-        self.environment.put(key, val) catch {
-            self.allocator.free(key);
-            self.allocator.free(val);
-        };
     }
 
     /// Evaluate arithmetic condition (returns true if non-zero)
