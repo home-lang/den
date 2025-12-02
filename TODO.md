@@ -206,20 +206,20 @@
   - [x] Multiple patterns per case statement (`pattern1|pattern2)`) ✅
   - [x] Fallthrough with `;&` and `;;&` in case ✅
   - [x] `select` loops (interactive menu) ✅
-- [x] **Functions** ✅ (Partial)
+- [x] **Functions** ✅
   - [x] Function definition (`function name { ... }`, `name() { ... }`)
   - [x] Function call
   - [x] Positional parameters in functions (`$1`, `$2`, etc.)
   - [x] Local variables (`local` builtin)
   - [x] Return statement (`return` builtin)
-  - [ ] Function export
-  - [ ] Recursive functions (untested)
-  - [ ] Function overriding
+  - [x] Function export (`export -f funcname`, `export -pf`) ✅
+  - [x] Recursive functions (control flow in function bodies) ✅
+  - [x] Function overriding (redefining replaces old definition) ✅
   - **Note**: Functions work in both scripts and REPL (single-line and multi-line)
 - [x] **Script Execution**
   - [x] Script context (variables, functions, scope)
   - [x] Script caching ✅ (content caching with mtime validation in ScriptManager)
-  - [ ] Script timeout
+  - [x] Script timeout (`timeout` builtin) ✅
 - [ ] **Error Handling**
   - [ ] Error suggestions
   - [ ] Error recovery
@@ -259,8 +259,8 @@
   - [x] `calc` - Calculator with functions ✅
   - [x] `json` - JSON utilities (parse, format, query) ✅
   - [x] `http` - HTTP requests ✅
-- [ ] **Advanced Tools**
-  - [ ] `find` - Fuzzy file finder (interactive)
+- [x] **Advanced Tools**
+  - [x] `ifind` - Fuzzy file finder with pattern matching ✅
   - [x] `tree` - Directory tree ✅
   - [x] `grep` - Text search with highlighting ✅
   - [x] `watch` - Execute command repeatedly ✅
@@ -443,9 +443,9 @@ Many builtins are implemented but missing flags/options:
 | Arithmetic Expansion | 9 (7 ✅) | 🟡 Medium |
 | Expansion Features | 15 (5 ✅ - tilde done) | 🟡 Medium |
 | Execution Options | 8/8 ✅ | 🟡 Medium |
-| Scripting Engine | 20 (16 ✅) | 🟡 Medium |
+| Scripting Engine | 20 (19 ✅) | 🟡 Medium |
 | Custom Hooks | 6 | 🟡 Medium |
-| Extended Builtins | 30 (14 ✅) | 🟢 Low |
+| Extended Builtins | 30 (15 ✅) | 🟢 Low |
 | Documentation | 20 | 🟢 Low |
 | Performance | 25 | 🟢 Low |
 | Foundation Libraries | 12 (9 ✅) | 🟢 Low |
@@ -484,7 +484,7 @@ The following features are production-ready:
 
 ---
 
-*Last updated: November 27, 2025*
+*Last updated: December 2, 2025*
 *Based on codebase analysis and ROADMAP.md review*
 
 **Recent completions:**
@@ -652,3 +652,9 @@ The following features are production-ready:
   - `env`: Already had `VAR=value command`, `-i`, `-u` implemented
   - `export`: Already had `-n` and `-p` flags implemented
   - `jobs`, `kill`, `type`, `which`, `unset` flags already implemented
+- Scripting Engine (December 2, 2025):
+  - Function export: `export -f funcname` marks functions as exported, `export -pf` lists exported functions
+  - Recursive functions: Added ControlFlowExecutor integration to function bodies for proper if/else/for/while handling
+  - Function overriding: Redefining a function replaces the previous definition
+  - Script timeout: Already implemented via `timeout` builtin command
+  - `ifind` builtin: Fuzzy file finder with `-f` (files), `-D` (dirs), `-a` (hidden), `-d N` (depth) options
