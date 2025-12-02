@@ -1,6 +1,7 @@
 pub const tokenizer = @import("tokenizer.zig");
 pub const parser = @import("parser.zig");
 pub const ast = @import("ast.zig");
+pub const ast_builder = @import("ast_builder.zig");
 
 pub const Tokenizer = tokenizer.Tokenizer;
 pub const Token = tokenizer.Token;
@@ -25,3 +26,11 @@ pub const Assignment = ast.Assignment;
 pub const SourceLoc = ast.SourceLoc;
 pub const Span = ast.Span;
 pub const PrettyPrinter = ast.PrettyPrinter;
+
+// AST Builder
+pub const AstBuilder = ast_builder.AstBuilder;
+
+// AST Optimizer
+pub const ast_optimizer = @import("ast_optimizer.zig");
+pub const AstOptimizer = ast_optimizer.AstOptimizer;
+pub const optimizeAst = ast_optimizer.optimizeAst;

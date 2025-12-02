@@ -380,9 +380,9 @@
 ### 19. AST Construction (Phase 5) ✅
 - [x] Design abstract syntax tree structure ✅ (`src/parser/ast.zig`)
 - [x] Implement AST node types (Command, Pipeline, Chain, etc.) ✅
-- [ ] Implement AST builder from tokens
+- [x] Implement AST builder from tokens ✅ (`AstBuilder` in ast_builder.zig)
 - [x] Implement AST pretty-printing (for debugging) ✅ (`PrettyPrinter` in ast.zig)
-- [ ] Implement AST optimization
+- [x] Implement AST optimization ✅ (`AstOptimizer` in ast_optimizer.zig)
 
 ---
 
