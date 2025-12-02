@@ -347,6 +347,80 @@ pub fn memoize(
     };
 }
 
+/// String hash set for O(1) deduplication
+/// Much faster than linear search for checking duplicates in completion results
+pub const StringHashSet = struct {
+    const Self = @This();
+
+    map: std.StringHashMap(void),
+    allocator: std.mem.Allocator,
+    owns_strings: bool,
+
+    /// Initialize a new StringHashSet
+    /// If owns_strings is true, the set will duplicate and own the strings
+    pub fn init(allocator: std.mem.Allocator, owns_strings: bool) Self {
+        return .{
+            .map = std.StringHashMap(void).init(allocator),
+            .allocator = allocator,
+            .owns_strings = owns_strings,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        if (self.owns_strings) {
+            var iter = self.map.keyIterator();
+            while (iter.next()) |key| {
+                self.allocator.free(key.*);
+            }
+        }
+        self.map.deinit();
+    }
+
+    /// Add a string to the set
+    /// Returns true if the string was added (not a duplicate)
+    /// Returns false if the string was already present
+    pub fn add(self: *Self, s: []const u8) !bool {
+        if (self.map.contains(s)) {
+            return false;
+        }
+
+        const key = if (self.owns_strings)
+            try self.allocator.dupe(u8, s)
+        else
+            s;
+
+        try self.map.put(key, {});
+        return true;
+    }
+
+    /// Check if the set contains a string (O(1) lookup)
+    pub fn contains(self: *const Self, s: []const u8) bool {
+        return self.map.contains(s);
+    }
+
+    /// Get the number of unique strings in the set
+    pub fn count(self: *const Self) usize {
+        return self.map.count();
+    }
+
+    /// Clear all entries from the set
+    pub fn clear(self: *Self) void {
+        if (self.owns_strings) {
+            var iter = self.map.keyIterator();
+            while (iter.next()) |key| {
+                self.allocator.free(key.*);
+            }
+        }
+        self.map.clearRetainingCapacity();
+    }
+};
+
+/// Inline deduplication helper - returns true if value should be added
+/// Uses a pre-allocated hash set for O(1) lookups
+pub fn shouldAddUnique(seen: *StringHashSet, value: []const u8) bool {
+    return seen.add(value) catch false;
+}
+
 // Tests
 test "LRUCache basic operations" {
     var cache = LRUCache(i32, []const u8, 3).init(std.testing.allocator);
@@ -415,4 +489,38 @@ test "HistoryIndex" {
 
     const prefix_result = index.prefixSearch("git");
     try std.testing.expect(prefix_result != null);
+}
+
+test "StringHashSet deduplication" {
+    var set = StringHashSet.init(std.testing.allocator, true);
+    defer set.deinit();
+
+    // First add should succeed
+    try std.testing.expect(try set.add("hello"));
+    try std.testing.expect(try set.add("world"));
+
+    // Duplicate should return false
+    try std.testing.expect(!try set.add("hello"));
+
+    // Contains should work
+    try std.testing.expect(set.contains("hello"));
+    try std.testing.expect(set.contains("world"));
+    try std.testing.expect(!set.contains("foo"));
+
+    // Count should be correct
+    try std.testing.expectEqual(@as(usize, 2), set.count());
+}
+
+test "StringHashSet non-owning" {
+    var set = StringHashSet.init(std.testing.allocator, false);
+    defer set.deinit();
+
+    const s1 = "hello";
+    const s2 = "world";
+
+    try std.testing.expect(try set.add(s1));
+    try std.testing.expect(try set.add(s2));
+    try std.testing.expect(!try set.add(s1)); // Duplicate
+
+    try std.testing.expectEqual(@as(usize, 2), set.count());
 }

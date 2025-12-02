@@ -1,5 +1,38 @@
 const std = @import("std");
 
+// ============================================================================
+// Compile-time operator lookup table for fast tokenization
+// ============================================================================
+
+const OperatorEntry = struct {
+    chars: [2]u8,
+    token_type: TokenType,
+    value: []const u8,
+};
+
+/// Two-character operators lookup table (sorted by first char for binary search)
+const two_char_operators = [_]OperatorEntry{
+    .{ .chars = .{ '&', '>' }, .token_type = .redirect_both, .value = "&>" },
+    .{ .chars = .{ '&', '&' }, .token_type = .and_op, .value = "&&" },
+    .{ .chars = .{ '2', '>' }, .token_type = .redirect_err, .value = "2>" },
+    .{ .chars = .{ '<', '<' }, .token_type = .heredoc, .value = "<<" },
+    .{ .chars = .{ '>', '>' }, .token_type = .redirect_append, .value = ">>" },
+    .{ .chars = .{ '|', '|' }, .token_type = .or_op, .value = "||" },
+};
+
+/// Fast lookup for two-character operators using direct comparison
+fn lookupTwoCharOperator(c1: u8, c2: u8) ?OperatorEntry {
+    // Use a switch on first character for fast dispatch
+    return switch (c1) {
+        '&' => if (c2 == '>') two_char_operators[0] else if (c2 == '&') two_char_operators[1] else null,
+        '2' => if (c2 == '>') two_char_operators[2] else null,
+        '<' => if (c2 == '<') two_char_operators[3] else null,
+        '>' => if (c2 == '>') two_char_operators[4] else null,
+        '|' => if (c2 == '|') two_char_operators[5] else null,
+        else => null,
+    };
+}
+
 /// Token types for shell parsing
 pub const TokenType = enum {
     word, // Regular word/command
@@ -128,72 +161,40 @@ pub const Tokenizer = struct {
             }
         }
 
-        // Check for operators (multi-character first)
+        // Check for operators (multi-character first) using optimized lookup
         if (self.pos + 1 < self.input.len) {
-            const two_char = self.input[self.pos .. self.pos + 2];
+            const c1 = self.input[self.pos];
+            const c2 = self.input[self.pos + 1];
 
-            if (std.mem.eql(u8, two_char, "&&")) {
-                self.pos += 2;
-                self.column += 2;
-                return Token{
-                    .type = .and_op,
-                    .value = "&&",
-                    .line = start_line,
-                    .column = start_col,
-                };
-            } else if (std.mem.eql(u8, two_char, "||")) {
-                self.pos += 2;
-                self.column += 2;
-                return Token{
-                    .type = .or_op,
-                    .value = "||",
-                    .line = start_line,
-                    .column = start_col,
-                };
-            } else if (std.mem.eql(u8, two_char, ">>")) {
-                self.pos += 2;
-                self.column += 2;
-                return Token{
-                    .type = .redirect_append,
-                    .value = ">>",
-                    .line = start_line,
-                    .column = start_col,
-                };
-            } else if (std.mem.eql(u8, two_char, "&>")) {
-                self.pos += 2;
-                self.column += 2;
-                return Token{
-                    .type = .redirect_both,
-                    .value = "&>",
-                    .line = start_line,
-                    .column = start_col,
-                };
-            } else if (std.mem.eql(u8, two_char, "2>")) {
-                self.pos += 2;
-                self.column += 2;
-                return Token{
-                    .type = .redirect_err,
-                    .value = "2>",
-                    .line = start_line,
-                    .column = start_col,
-                };
-            } else if (std.mem.eql(u8, two_char, "<<")) {
-                self.pos += 2;
-                self.column += 2;
-                // Check for <<<
-                if (self.pos < self.input.len and self.input[self.pos] == '<') {
-                    self.pos += 1;
-                    self.column += 1;
+            // Fast path: use lookup table for two-char operators
+            if (lookupTwoCharOperator(c1, c2)) |op| {
+                // Special case for heredoc/herestring (<<< vs <<)
+                if (op.token_type == .heredoc) {
+                    self.pos += 2;
+                    self.column += 2;
+                    if (self.pos < self.input.len and self.input[self.pos] == '<') {
+                        self.pos += 1;
+                        self.column += 1;
+                        return Token{
+                            .type = .herestring,
+                            .value = "<<<",
+                            .line = start_line,
+                            .column = start_col,
+                        };
+                    }
                     return Token{
-                        .type = .herestring,
-                        .value = "<<<",
+                        .type = .heredoc,
+                        .value = "<<",
                         .line = start_line,
                         .column = start_col,
                     };
                 }
+                // All other two-char operators
+                self.pos += 2;
+                self.column += 2;
                 return Token{
-                    .type = .heredoc,
-                    .value = "<<",
+                    .type = op.token_type,
+                    .value = op.value,
                     .line = start_line,
                     .column = start_col,
                 };
