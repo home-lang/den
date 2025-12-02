@@ -328,23 +328,23 @@
   - [ ] Parallelize module detection
   - [ ] Use thread pool for async operations
   - [ ] Minimize lock contention
-- [ ] **Benchmarking**
-  - [ ] Create comprehensive benchmark suite
-  - [ ] Benchmark against Bash
-  - [ ] Benchmark against Zsh
+- [x] **Benchmarking** (partial)
+  - [x] Create comprehensive benchmark suite ✅ (`tests/test_performance.zig`)
+  - [x] Benchmark against Bash ✅ (`tests/bench_comparison.sh`)
+  - [x] Benchmark against Zsh ✅ (`tests/bench_comparison.sh`)
   - [ ] Benchmark against Fish
   - [ ] Track performance over time
   - [ ] Set performance targets
 
 ### 16. Foundation Libraries (Phase 4 - Partial) ✅
-- [ ] **ANSI/Terminal**
-  - [ ] Handle Windows console API differences
+- [x] **ANSI/Terminal**
+  - [x] Handle Windows console API differences ✅ (in ansi.zig, terminal.zig)
 - [x] **Terminal I/O**
   - [x] Non-blocking I/O (in terminal.zig)
   - [x] Signal-safe I/O (in io.zig)
-- [ ] **File System**
-  - [ ] Path normalization
-  - [ ] Recursive directory walking
+- [x] **File System**
+  - [x] Path normalization ✅ (`src/utils/path.zig`)
+  - [x] Recursive directory walking ✅ (`DirWalker` in `src/utils/path.zig`)
   - [x] Cross-platform path handling (glob.zig path separators)
 - [x] **Process Management** (`src/utils/process.zig`)
   - [x] ProcessId/FileHandle type abstractions
@@ -369,19 +369,19 @@
 - [x] Create assertion macros
 - [x] Add timing/profiling utilities
 
-### 18. Memory Management (Phase 1)
-- [ ] Design allocator strategy (GPA, Arena, Pool allocators)
-- [ ] Implement memory pools for common objects
-- [ ] Create arena allocator for request-scoped allocations
-- [ ] Add memory leak detection for debug builds
+### 18. Memory Management (Phase 1) ✅
+- [x] Design allocator strategy (GPA, Arena, Pool allocators) ✅ (`src/utils/memory.zig`)
+- [x] Implement memory pools for common objects ✅ (`src/utils/shell_pool.zig`)
+- [x] Create arena allocator for request-scoped allocations ✅ (`ShellArena` in memory.zig)
+- [x] Add memory leak detection for debug builds ✅ (`LeakDetector` in `src/utils/leak_detector.zig`)
 - [ ] Implement reference counting where needed
-- [ ] Create object pooling for frequently allocated structures
+- [x] Create object pooling for frequently allocated structures ✅ (`ObjectPool`, `StringPool`, `SlabAllocator` in `src/utils/pool.zig`)
 
-### 19. AST Construction (Phase 5)
-- [ ] Design abstract syntax tree structure
-- [ ] Implement AST node types (Command, Pipeline, Chain, etc.)
+### 19. AST Construction (Phase 5) ✅
+- [x] Design abstract syntax tree structure ✅ (`src/parser/ast.zig`)
+- [x] Implement AST node types (Command, Pipeline, Chain, etc.) ✅
 - [ ] Implement AST builder from tokens
-- [ ] Implement AST pretty-printing (for debugging)
+- [x] Implement AST pretty-printing (for debugging) ✅ (`PrettyPrinter` in ast.zig)
 - [ ] Implement AST optimization
 
 ---

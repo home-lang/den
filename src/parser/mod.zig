@@ -1,8 +1,27 @@
 pub const tokenizer = @import("tokenizer.zig");
 pub const parser = @import("parser.zig");
+pub const ast = @import("ast.zig");
 
 pub const Tokenizer = tokenizer.Tokenizer;
 pub const Token = tokenizer.Token;
 pub const TokenType = tokenizer.TokenType;
 
 pub const Parser = parser.Parser;
+
+// AST types
+pub const Node = ast.Node;
+pub const Script = ast.Script;
+pub const SimpleCommand = ast.SimpleCommand;
+pub const Pipeline = ast.Pipeline;
+pub const List = ast.List;
+pub const IfStatement = ast.IfStatement;
+pub const ForLoop = ast.ForLoop;
+pub const WhileLoop = ast.WhileLoop;
+pub const CaseStatement = ast.CaseStatement;
+pub const FunctionDef = ast.FunctionDef;
+pub const Word = ast.Word;
+pub const Redirection = ast.Redirection;
+pub const Assignment = ast.Assignment;
+pub const SourceLoc = ast.SourceLoc;
+pub const Span = ast.Span;
+pub const PrettyPrinter = ast.PrettyPrinter;
