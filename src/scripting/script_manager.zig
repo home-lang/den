@@ -353,11 +353,13 @@ pub const ScriptManager = struct {
             if (is_function_keyword or is_paren_syntax) {
                 const result = func_parser.parseFunction(lines, line_num) catch {
                     shell.last_exit_code = 1;
+                    shell.executeErrTrap();
                     break;
                 };
                 // Define the function
                 shell.function_manager.defineFunction(result.name, result.body, false) catch {
                     shell.last_exit_code = 1;
+                    shell.executeErrTrap();
                     break;
                 };
                 line_num = result.end;
@@ -368,10 +370,14 @@ pub const ScriptManager = struct {
             if (std.mem.startsWith(u8, trimmed, "if ")) {
                 var result = parser.parseIf(lines, line_num) catch {
                     shell.last_exit_code = 1;
+                    shell.executeErrTrap();
                     break;
                 };
                 defer result.stmt.deinit();
                 shell.last_exit_code = executor.executeIf(&result.stmt) catch 1;
+                if (shell.last_exit_code != 0) {
+                    shell.executeErrTrap();
+                }
                 line_num = result.end;
                 continue;
             }
@@ -379,10 +385,14 @@ pub const ScriptManager = struct {
             if (std.mem.startsWith(u8, trimmed, "while ")) {
                 var result = parser.parseWhile(lines, line_num, false) catch {
                     shell.last_exit_code = 1;
+                    shell.executeErrTrap();
                     break;
                 };
                 defer result.loop.deinit();
                 shell.last_exit_code = executor.executeWhile(&result.loop) catch 1;
+                if (shell.last_exit_code != 0) {
+                    shell.executeErrTrap();
+                }
                 line_num = result.end;
                 continue;
             }
@@ -390,10 +400,14 @@ pub const ScriptManager = struct {
             if (std.mem.startsWith(u8, trimmed, "until ")) {
                 var result = parser.parseWhile(lines, line_num, true) catch {
                     shell.last_exit_code = 1;
+                    shell.executeErrTrap();
                     break;
                 };
                 defer result.loop.deinit();
                 shell.last_exit_code = executor.executeWhile(&result.loop) catch 1;
+                if (shell.last_exit_code != 0) {
+                    shell.executeErrTrap();
+                }
                 line_num = result.end;
                 continue;
             }
@@ -401,15 +415,20 @@ pub const ScriptManager = struct {
             if (std.mem.startsWith(u8, trimmed, "for ")) {
                 var result = parser.parseFor(lines, line_num) catch {
                     shell.last_exit_code = 1;
+                    shell.executeErrTrap();
                     break;
                 };
                 defer result.loop.deinit();
                 shell.last_exit_code = executor.executeFor(&result.loop) catch 1;
+                if (shell.last_exit_code != 0) {
+                    shell.executeErrTrap();
+                }
                 line_num = result.end;
                 continue;
             }
 
             // Execute regular command (ignoring errors - exit code set in shell)
+            // Note: executeCommand already handles ERR trap execution
             _ = shell.executeCommand(trimmed) catch {};
 
             // Check if we should exit due to errexit

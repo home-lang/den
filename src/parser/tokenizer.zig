@@ -373,7 +373,15 @@ pub const Tokenizer = struct {
             }
 
             // Add character to word
-            if (word_len < word_buffer.len) {
+            // If in single quotes, escape special characters ($, `) so they're not expanded
+            if (in_single_quote and (char == '$' or char == '`')) {
+                if (word_len + 1 < word_buffer.len) {
+                    word_buffer[word_len] = '\\';
+                    word_len += 1;
+                    word_buffer[word_len] = char;
+                    word_len += 1;
+                }
+            } else if (word_len < word_buffer.len) {
                 word_buffer[word_len] = char;
                 word_len += 1;
             }

@@ -1164,6 +1164,9 @@ pub const Shell = struct {
                 return;
             } else if (std.mem.eql(u8, cmd.name, "test") or std.mem.eql(u8, cmd.name, "[")) {
                 try self.builtinTest(cmd);
+                if (self.last_exit_code != 0) {
+                    self.executeErrTrap();
+                }
                 return;
             } else if (std.mem.eql(u8, cmd.name, "pushd")) {
                 try self.builtinPushd(cmd);
@@ -1184,6 +1187,7 @@ pub const Shell = struct {
                 return;
             } else if (std.mem.eql(u8, cmd.name, "false")) {
                 self.last_exit_code = 1;
+                self.executeErrTrap();
                 return;
             } else if (std.mem.eql(u8, cmd.name, "sleep")) {
                 try self.builtinSleep(cmd);
@@ -1261,9 +1265,6 @@ pub const Shell = struct {
             } else if (std.mem.eql(u8, cmd.name, "disown")) {
                 try self.builtinDisown(cmd);
                 return;
-            } else if (std.mem.eql(u8, cmd.name, "trap")) {
-                try self.builtinTrap(cmd);
-                return;
             } else if (std.mem.eql(u8, cmd.name, "getopts")) {
                 try self.builtinGetopts(cmd);
                 return;
@@ -1302,6 +1303,7 @@ pub const Shell = struct {
             };
 
             self.last_exit_code = exit_code;
+            // Note: ERR trap is executed in executeChain after each command
         }
 
         // Execute post_command hooks
@@ -1312,6 +1314,39 @@ pub const Shell = struct {
             .allocator = self.allocator,
         };
         self.plugin_registry.executeHooks(.post_command, &post_context) catch {};
+    }
+
+    /// Execute ERR trap if one is set
+    pub fn executeErrTrap(self: *Shell) void {
+        // Check if ERR trap is set
+        if (self.signal_handlers.get("ERR")) |handler| {
+            if (handler.len > 0) {
+                // Execute the trap handler
+                // Note: Save and restore last_exit_code to preserve $? for the trap
+                const saved_exit_code = self.last_exit_code;
+
+                // Parse and execute the trap handler command
+                var tokenizer = parser_mod.Tokenizer.init(self.allocator, handler);
+                const tokens = tokenizer.tokenize() catch return;
+                defer self.allocator.free(tokens);
+
+                if (tokens.len == 0) return;
+
+                var parser = parser_mod.Parser.init(self.allocator, tokens);
+                var chain = parser.parse() catch return;
+                defer chain.deinit(self.allocator);
+
+                // Expand the command chain (for $?, etc)
+                self.expandCommandChain(&chain) catch return;
+
+                // Execute the trap handler (without triggering ERR trap again)
+                var executor = executor_mod.Executor.initWithShell(self.allocator, &self.environment, self);
+                _ = executor.executeChain(&chain) catch {};
+
+                // Restore the original exit code
+                self.last_exit_code = saved_exit_code;
+            }
+        }
     }
 
     fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_input: []const u8) !void {

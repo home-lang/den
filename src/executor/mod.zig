@@ -69,7 +69,17 @@ pub const Executor = struct {
 
         // Single command - execute directly
         if (chain.commands.len == 1) {
-            return try self.executeCommand(&chain.commands[0]);
+            const exit_code = try self.executeCommand(&chain.commands[0]);
+
+            // Update shell's last_exit_code and execute ERR trap if command failed
+            if (self.shell) |shell| {
+                shell.last_exit_code = exit_code;
+                if (exit_code != 0) {
+                    shell.executeErrTrap();
+                }
+            }
+
+            return exit_code;
         }
 
         // Multiple commands - handle operators
@@ -151,6 +161,14 @@ pub const Executor = struct {
             } else {
                 // Execute single command normally
                 last_exit_code = try self.executeCommand(&chain.commands[i]);
+
+                // Update shell's last_exit_code and execute ERR trap if command failed
+                if (self.shell) |shell| {
+                    shell.last_exit_code = last_exit_code;
+                    if (last_exit_code != 0) {
+                        shell.executeErrTrap();
+                    }
+                }
 
                 // Check for errexit option (set -e)
                 if (self.shell) |shell| {

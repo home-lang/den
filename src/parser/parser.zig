@@ -91,7 +91,12 @@ pub const Parser = struct {
             const token = self.tokens[self.pos];
 
             switch (token.type) {
-                .word, .process_sub_in, .process_sub_out => {
+                // Words and keyword tokens can be command names or arguments
+                // Keywords like 'done', 'fi', 'if' etc. can be used as arguments in command context
+                .word, .process_sub_in, .process_sub_out,
+                .kw_if, .kw_then, .kw_else, .kw_elif, .kw_fi,
+                .kw_for, .kw_while, .kw_do, .kw_done,
+                .kw_case, .kw_esac, .kw_in, .kw_function => {
                     // Process substitution tokens are treated as word arguments
                     // The value contains the full construct like "<(echo hello)"
                     const value = try self.allocator.dupe(u8, token.value);
