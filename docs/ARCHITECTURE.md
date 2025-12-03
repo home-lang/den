@@ -25,7 +25,7 @@ Den Shell is a modern, high-performance POSIX-compatible shell written in Zig. T
 
 ### Technology Stack
 
-- **Language**: Zig 0.15.1
+- **Language**: Zig 0.16-dev
 - **Build System**: Zig build system
 - **Testing**: Zig test framework with custom profiling
 - **Concurrency**: Custom thread pool and lock-free data structures

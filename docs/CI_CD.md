@@ -57,7 +57,7 @@ Our CI/CD pipeline ensures code quality, cross-platform compatibility, and autom
 
 1. **Run Tests**
    - Platforms: Ubuntu, macOS, Windows
-   - Zig version: 0.15.2
+   - Zig version: 0.16-dev
    - Tests all core modules:
      - Tokenizer tests
      - Parser tests
@@ -173,7 +173,7 @@ Benchmarks:
 **Process:**
 
 1. **Checkout code** with full history
-2. **Setup Zig** (version 0.15.2)
+2. **Setup Zig** (version 0.16-dev)
 3. **Extract version** from git tag
 4. **Build release binaries** for all platforms:
    - Linux x64
@@ -220,7 +220,7 @@ dist/checksums-1.0.0.txt
 
 ### Zig Version
 
-- **Current:** 0.15.2
+- **Current:** 0.16-dev
 - **Update frequency:** Following Zig stable releases
 - **Compatibility:** Backward compatible within minor versions
 
@@ -409,7 +409,7 @@ Add these to your fork's README to track CI status:
 ```bash
 # Check Zig version
 zig version
-# Should output: 0.15.2
+# Should output: 0.16-dev
 
 # Update Zig if needed
 brew upgrade zig  # macOS

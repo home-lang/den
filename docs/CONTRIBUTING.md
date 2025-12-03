@@ -46,7 +46,7 @@ Violations may result in temporary or permanent ban from the project.
 
 ### Prerequisites
 
-- **Zig 0.15.1**: [Download from ziglang.org](https://ziglang.org/download/)
+- **Zig 0.16-dev**: [Download from ziglang.org](https://ziglang.org/download/)
 - **Git**: For version control
 - **A Unix-like system**: Linux, macOS, or WSL on Windows
 
@@ -557,7 +557,7 @@ What actually happens
 
 **Environment**
 - OS: macOS 14.0
-- Zig version: 0.15.1
+- Zig version: 0.16-dev
 - Den version: 0.1.0
 
 **Additional Context**

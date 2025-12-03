@@ -174,7 +174,7 @@ den> bg %1
 
 ### Requirements
 
-- Zig 0.15.1 or later
+- Zig 0.16-dev or later
 - macOS, Linux, or BSD (Windows support planned)
 
 ### Build

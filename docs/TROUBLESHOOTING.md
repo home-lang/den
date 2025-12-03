@@ -30,7 +30,7 @@ This guide helps you diagnose and fix common issues with Den Shell.
    ```bash
    zig version
    ```
-   Den requires Zig 0.14+ (preferably 0.16-dev).
+   Den requires Zig 0.16-dev.
 
 2. **Clean build cache:**
    ```bash

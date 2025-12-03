@@ -20,7 +20,7 @@ Den Shell is designed for maximum performance. This document provides comprehens
 - **OS**: macOS 14.5 (Darwin 23.5.0)
 - **CPU**: Apple M1/M2 (ARM64)
 - **Memory**: 16GB RAM
-- **Zig Version**: 0.15.2
+- **Zig Version**: 0.16-dev
 - **Shells Tested**:
   - Den Shell (this project)
   - Bash 5.2

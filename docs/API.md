@@ -748,7 +748,7 @@ pool.waitIdle();
 
 ## Version Compatibility
 
-This API documentation is for Den Shell v0.1.0 using Zig 0.15.1.
+This API documentation is for Den Shell v0.1.0 using Zig 0.16-dev.
 
 Breaking changes will be noted in:
 - Major version increments

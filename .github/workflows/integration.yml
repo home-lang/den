@@ -10,7 +10,7 @@ on:
     - cron: '0 2 * * *'
 
 env:
-  ZIG_VERSION: '0.14.0'
+  ZIG_VERSION: '0.16-dev'
 
 jobs:
   integration-tests:
