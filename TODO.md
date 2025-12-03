@@ -499,7 +499,7 @@ The following features are production-ready:
   - Added `-c "command"` CLI flag support
 - Signal Handling (SIGTERM, SIGWINCH, clean exit, signal-safe I/O)
 - Logging & Debugging infrastructure
-- Zig 0.16 API compatibility fixes
+- Zig 0.16-dev API compatibility (updated all version references)
 - Testing Infrastructure - Unit Tests:
   - test_builtins.zig (cd, pwd, echo, export, type, which, true/false, test)
   - test_completion.zig (file completion, filtering, sorting, special chars)
