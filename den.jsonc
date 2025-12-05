@@ -121,6 +121,36 @@
       { "name": "free", "command": "free -h" },
       { "name": "ports", "command": "netstat -tulanp" },
       { "name": "path", "command": "echo $PATH | tr ':' '\\n'" }
+    ],
+    // Suffix aliases (zsh-style): typing "hello.ts" runs "bun hello.ts"
+    // Use: alias -s ts='bun' to add more at runtime
+    "suffix": [
+      // TypeScript/JavaScript with Bun
+      { "extension": "ts", "command": "bun" },
+      { "extension": "tsx", "command": "bun" },
+      { "extension": "js", "command": "bun" },
+      { "extension": "jsx", "command": "bun" },
+      { "extension": "mjs", "command": "bun" },
+      { "extension": "mts", "command": "bun" },
+
+      // Python
+      { "extension": "py", "command": "python3" },
+
+      // Shell scripts
+      { "extension": "sh", "command": "bash" },
+      { "extension": "zsh", "command": "zsh" },
+
+      // Ruby
+      { "extension": "rb", "command": "ruby" },
+
+      // Perl
+      { "extension": "pl", "command": "perl" },
+
+      // PHP
+      { "extension": "php", "command": "php" },
+
+      // Lua
+      { "extension": "lua", "command": "lua" }
     ]
   },
 

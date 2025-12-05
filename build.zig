@@ -693,6 +693,21 @@ pub fn build(b: *std.Build) void {
     const alias_test_step = b.step("test-alias", "Run alias tests");
     alias_test_step.dependOn(&run_alias_tests.step);
 
+    // Suffix alias tests (zsh-style)
+    const suffix_alias_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_suffix_alias.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const suffix_alias_tests = b.addTest(.{
+        .root_module = suffix_alias_test_module,
+    });
+
+    const run_suffix_alias_tests = b.addRunArtifact(suffix_alias_tests);
+    const suffix_alias_test_step = b.step("test-suffix-alias", "Run suffix alias tests");
+    suffix_alias_test_step.dependOn(&run_suffix_alias_tests.step);
+
     // Job control tests
     const job_control_test_module = b.createModule(.{
         .root_source_file = b.path("tests/test_job_control.zig"),

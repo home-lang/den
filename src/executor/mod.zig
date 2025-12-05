@@ -613,6 +613,14 @@ pub const Executor = struct {
             return try self.executeBuiltin(&cd_command);
         }
 
+        // Check for suffix alias (zsh-style: typing "hello.ts" runs "bun hello.ts")
+        if (self.shell) |shell| {
+            if (self.trySuffixAlias(shell, command)) |new_command| {
+                var suffix_cmd = new_command;
+                return try self.executeExternal(&suffix_cmd);
+            }
+        }
+
         // Execute external command
         return try self.executeExternal(command);
     }
@@ -643,6 +651,67 @@ pub const Executor = struct {
         };
         dir.close();
         return true;
+    }
+
+    /// Check for suffix alias and return a transformed command if applicable.
+    /// Suffix aliases allow typing "hello.ts" to run "bun hello.ts" (zsh-style).
+    fn trySuffixAlias(self: *Executor, shell: *Shell, command: *types.ParsedCommand) ?types.ParsedCommand {
+        const cmd_name = command.name;
+
+        // Get file extension (everything after the last dot)
+        const dot_pos = std.mem.lastIndexOfScalar(u8, cmd_name, '.') orelse return null;
+        if (dot_pos == cmd_name.len - 1) return null; // Ends with dot, no extension
+
+        const extension = cmd_name[dot_pos + 1 ..];
+
+        // Look up the extension in suffix aliases
+        const alias_cmd = shell.suffix_aliases.get(extension) orelse return null;
+
+        // Check if the file exists (either as absolute path, relative path, or in current directory)
+        const file_exists = blk: {
+            // Check if it's an absolute path or relative path that exists
+            std.fs.cwd().access(cmd_name, .{}) catch {
+                break :blk false;
+            };
+            break :blk true;
+        };
+
+        // Only apply suffix alias if the file exists
+        if (!file_exists) return null;
+
+        // Build new args: [original_filename] + original args
+        // We need to create a new args array with the filename as first arg
+        var new_args = self.allocator.alloc([]const u8, command.args.len + 1) catch return null;
+
+        // First arg is the original command name (the filename)
+        new_args[0] = self.allocator.dupe(u8, cmd_name) catch {
+            self.allocator.free(new_args);
+            return null;
+        };
+
+        // Copy remaining original args
+        for (command.args, 0..) |arg, i| {
+            new_args[i + 1] = self.allocator.dupe(u8, arg) catch {
+                // Clean up on error
+                for (new_args[0 .. i + 1]) |a| self.allocator.free(a);
+                self.allocator.free(new_args);
+                return null;
+            };
+        }
+
+        // Create new command with suffix alias as the command name
+        const new_cmd_name = self.allocator.dupe(u8, alias_cmd) catch {
+            for (new_args) |a| self.allocator.free(a);
+            self.allocator.free(new_args);
+            return null;
+        };
+
+        return types.ParsedCommand{
+            .name = new_cmd_name,
+            .args = new_args,
+            .redirections = command.redirections,
+            .type = .external,
+        };
     }
 
     /// Check if a command name is a shell builtin.
@@ -2343,13 +2412,74 @@ pub const Executor = struct {
         return 0;
     }
 
+    /// Supports -s flag for suffix aliases (zsh-style): alias -s ts='bun'
     fn builtinAlias(self: *Executor, command: *types.ParsedCommand) !i32 {
         const shell_ref = self.shell orelse {
             try IO.eprint("den: alias: shell context not available\n", .{});
             return 1;
         };
 
-        if (command.args.len == 0) {
+        // Check for -s flag (suffix alias)
+        var is_suffix_alias = false;
+        var args_start: usize = 0;
+        if (command.args.len > 0 and std.mem.eql(u8, command.args[0], "-s")) {
+            is_suffix_alias = true;
+            args_start = 1;
+        }
+
+        const effective_args = command.args[args_start..];
+
+        if (is_suffix_alias) {
+            // Handle suffix aliases
+            if (effective_args.len == 0) {
+                // Display all suffix aliases
+                var iter = shell_ref.suffix_aliases.iterator();
+                while (iter.next()) |entry| {
+                    try IO.print("alias -s {s}='{s}'\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                }
+                return 0;
+            }
+
+            // Parse suffix alias definition: extension=command
+            const arg = effective_args[0];
+            const eq_pos = std.mem.indexOf(u8, arg, "=") orelse {
+                // No '=', just show the suffix alias value
+                if (shell_ref.suffix_aliases.get(arg)) |value| {
+                    try IO.print("alias -s {s}='{s}'\n", .{ arg, value });
+                } else {
+                    try IO.eprint("den: alias: suffix alias {s}: not found\n", .{arg});
+                    return 1;
+                }
+                return 0;
+            };
+
+            const extension = arg[0..eq_pos];
+            var value = arg[eq_pos + 1 ..];
+
+            // Remove quotes if present
+            if (value.len >= 2 and
+                ((value[0] == '\'' and value[value.len - 1] == '\'') or
+                (value[0] == '"' and value[value.len - 1] == '"')))
+            {
+                value = value[1 .. value.len - 1];
+            }
+
+            // Store the suffix alias
+            const ext_owned = try self.allocator.dupe(u8, extension);
+            const value_owned = try self.allocator.dupe(u8, value);
+
+            const gop = try shell_ref.suffix_aliases.getOrPut(ext_owned);
+            if (gop.found_existing) {
+                self.allocator.free(ext_owned); // We don't need the new key
+                self.allocator.free(gop.value_ptr.*); // Free old value
+            }
+            gop.value_ptr.* = value_owned;
+
+            return 0;
+        }
+
+        // Handle regular aliases
+        if (effective_args.len == 0) {
             // Display all aliases
             if (shell_ref.aliases.count() == 0) {
                 return 0;
@@ -2363,7 +2493,7 @@ pub const Executor = struct {
         }
 
         // Parse alias definition: name=value
-        const arg = command.args[0];
+        const arg = effective_args[0];
         const eq_pos = std.mem.indexOf(u8, arg, "=") orelse {
             // No '=', just show the alias value
             if (shell_ref.aliases.get(arg)) |value| {
@@ -2392,6 +2522,7 @@ pub const Executor = struct {
         return 0;
     }
 
+    /// Supports -s flag for suffix aliases: unalias -s ts
     fn builtinUnalias(self: *Executor, command: *types.ParsedCommand) !i32 {
         const shell_ref = self.shell orelse {
             try IO.eprint("den: unalias: shell context not available\n", .{});
@@ -2399,12 +2530,52 @@ pub const Executor = struct {
         };
 
         if (command.args.len == 0) {
-            try IO.eprint("den: unalias: missing argument\n", .{});
+            try IO.eprint("den: unalias: usage: unalias [-s] [-a] name [name ...]\n", .{});
             return 1;
         }
 
+        // Check for -s flag (suffix alias)
+        var is_suffix_alias = false;
+        var args_start: usize = 0;
+        if (command.args.len > 0 and std.mem.eql(u8, command.args[0], "-s")) {
+            is_suffix_alias = true;
+            args_start = 1;
+        }
+
+        const effective_args = command.args[args_start..];
+
+        if (effective_args.len == 0) {
+            try IO.eprint("den: unalias: usage: unalias [-s] [-a] name [name ...]\n", .{});
+            return 1;
+        }
+
+        if (is_suffix_alias) {
+            // Support -a flag to remove all suffix aliases
+            if (std.mem.eql(u8, effective_args[0], "-a")) {
+                var iter = shell_ref.suffix_aliases.iterator();
+                while (iter.next()) |entry| {
+                    self.allocator.free(entry.key_ptr.*);
+                    self.allocator.free(entry.value_ptr.*);
+                }
+                shell_ref.suffix_aliases.clearRetainingCapacity();
+                return 0;
+            }
+
+            // Remove specific suffix alias
+            for (effective_args) |extension| {
+                if (shell_ref.suffix_aliases.fetchRemove(extension)) |kv| {
+                    self.allocator.free(kv.key);
+                    self.allocator.free(kv.value);
+                } else {
+                    try IO.eprint("den: unalias: suffix alias {s}: not found\n", .{extension});
+                    return 1;
+                }
+            }
+            return 0;
+        }
+
         // Support -a flag to remove all aliases
-        if (std.mem.eql(u8, command.args[0], "-a")) {
+        if (std.mem.eql(u8, effective_args[0], "-a")) {
             var iter = shell_ref.aliases.iterator();
             while (iter.next()) |entry| {
                 self.allocator.free(entry.key_ptr.*);
@@ -2415,7 +2586,7 @@ pub const Executor = struct {
         }
 
         // Remove specific alias
-        for (command.args) |name| {
+        for (effective_args) |name| {
             if (shell_ref.aliases.fetchRemove(name)) |kv| {
                 self.allocator.free(kv.key);
                 self.allocator.free(kv.value);

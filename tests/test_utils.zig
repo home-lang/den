@@ -395,3 +395,144 @@ test "ShellFixture environment variables" {
 
     try TestAssert.expectContains(result.stdout, "test_value");
 }
+
+/// Den Shell fixture for testing Den-specific features
+/// Uses the actual Den shell binary instead of system sh
+pub const DenShellFixture = struct {
+    temp_dir: TempDir,
+    allocator: std.mem.Allocator,
+    den_binary: []const u8,
+
+    pub fn init(allocator: std.mem.Allocator) !DenShellFixture {
+        const temp_dir = try TempDir.init(allocator);
+
+        // Default to relative path from project root
+        const den_binary = try allocator.dupe(u8, "./zig-out/bin/den");
+
+        return DenShellFixture{
+            .temp_dir = temp_dir,
+            .allocator = allocator,
+            .den_binary = den_binary,
+        };
+    }
+
+    pub fn deinit(self: *DenShellFixture) void {
+        self.allocator.free(self.den_binary);
+        self.temp_dir.deinit();
+    }
+
+    /// Create a file in the temp directory
+    pub fn createFile(self: *DenShellFixture, name: []const u8, content: []const u8) ![]const u8 {
+        return try self.temp_dir.createFile(name, content);
+    }
+
+    /// Get the temp directory path
+    pub fn getTempPath(self: *DenShellFixture) []const u8 {
+        return self.temp_dir.path;
+    }
+
+    /// Execute a command using the Den shell and capture output
+    /// The command is run from the temp directory
+    pub fn exec(self: *DenShellFixture, command: []const u8) !struct { stdout: []const u8, stderr: []const u8, exit_code: u8 } {
+        // Build command that changes to temp dir first, then runs the command
+        const full_command = try std.fmt.allocPrint(self.allocator, "cd {s} && {s}", .{ self.temp_dir.path, command });
+        defer self.allocator.free(full_command);
+
+        const args = [_][]const u8{ self.den_binary, "-c", full_command };
+
+        var child = std.process.Child.init(&args, self.allocator);
+        child.stdout_behavior = .Pipe;
+        child.stderr_behavior = .Pipe;
+
+        try child.spawn();
+
+        // Read output using ArrayList for Zig 0.16 compatibility
+        var stdout_list = std.ArrayList(u8).empty;
+        errdefer stdout_list.deinit(self.allocator);
+        var stderr_list = std.ArrayList(u8).empty;
+        errdefer stderr_list.deinit(self.allocator);
+
+        var read_buf: [4096]u8 = undefined;
+
+        if (child.stdout) |stdout| {
+            while (true) {
+                const n = stdout.read(&read_buf) catch break;
+                if (n == 0) break;
+                try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
+            }
+        }
+
+        if (child.stderr) |stderr| {
+            while (true) {
+                const n = stderr.read(&read_buf) catch break;
+                if (n == 0) break;
+                try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
+            }
+        }
+
+        const term = try child.wait();
+        const exit_code: u8 = switch (term) {
+            .Exited => |code| @intCast(code),
+            else => 1,
+        };
+
+        const stdout_owned = try stdout_list.toOwnedSlice(self.allocator);
+        const stderr_owned = try stderr_list.toOwnedSlice(self.allocator);
+
+        return .{
+            .stdout = stdout_owned,
+            .stderr = stderr_owned,
+            .exit_code = exit_code,
+        };
+    }
+
+    /// Execute a command directly (not prefixed with cd to temp dir)
+    pub fn execDirect(self: *DenShellFixture, command: []const u8) !struct { stdout: []const u8, stderr: []const u8, exit_code: u8 } {
+        const args = [_][]const u8{ self.den_binary, "-c", command };
+
+        var child = std.process.Child.init(&args, self.allocator);
+        child.stdout_behavior = .Pipe;
+        child.stderr_behavior = .Pipe;
+
+        try child.spawn();
+
+        // Read output using ArrayList for Zig 0.16 compatibility
+        var stdout_list = std.ArrayList(u8).empty;
+        errdefer stdout_list.deinit(self.allocator);
+        var stderr_list = std.ArrayList(u8).empty;
+        errdefer stderr_list.deinit(self.allocator);
+
+        var read_buf: [4096]u8 = undefined;
+
+        if (child.stdout) |stdout| {
+            while (true) {
+                const n = stdout.read(&read_buf) catch break;
+                if (n == 0) break;
+                try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
+            }
+        }
+
+        if (child.stderr) |stderr| {
+            while (true) {
+                const n = stderr.read(&read_buf) catch break;
+                if (n == 0) break;
+                try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
+            }
+        }
+
+        const term = try child.wait();
+        const exit_code: u8 = switch (term) {
+            .Exited => |code| @intCast(code),
+            else => 1,
+        };
+
+        const stdout_owned = try stdout_list.toOwnedSlice(self.allocator);
+        const stderr_owned = try stderr_list.toOwnedSlice(self.allocator);
+
+        return .{
+            .stdout = stdout_owned,
+            .stderr = stderr_owned,
+            .exit_code = exit_code,
+        };
+    }
+};

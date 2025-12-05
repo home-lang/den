@@ -48,9 +48,17 @@ pub const AliasConfig = struct {
     enabled: bool = true,
     /// Custom aliases map (loaded at runtime)
     custom: ?[]const AliasEntry = null,
+    /// Suffix aliases (zsh-style: maps file extensions to commands)
+    /// Example: { "extension": "ts", "command": "bun" } allows typing "hello.ts" to run "bun hello.ts"
+    suffix: ?[]const SuffixAliasEntry = null,
 
     pub const AliasEntry = struct {
         name: []const u8,
+        command: []const u8,
+    };
+
+    pub const SuffixAliasEntry = struct {
+        extension: []const u8,
         command: []const u8,
     };
 };
