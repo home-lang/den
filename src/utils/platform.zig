@@ -222,6 +222,138 @@ pub const signals = struct {
 };
 
 // ========================================
+// Process Groups (Job Control)
+// ========================================
+
+/// Set process group ID.
+pub fn setProcessGroup(pid: ProcessId, pgid: ProcessId) !void {
+    if (builtin.os.tag == .windows) {
+        // Windows doesn't have process groups in the same way
+        // Job objects provide similar functionality
+        _ = pid;
+        _ = pgid;
+        return;
+    } else {
+        try std.posix.setpgid(pid, pgid);
+    }
+}
+
+/// Get process group ID.
+pub fn getProcessGroup(pid: ProcessId) !ProcessId {
+    if (builtin.os.tag == .windows) {
+        // Windows: would need to use a job object
+        _ = pid;
+        return 0;
+    } else {
+        return std.posix.getpgid(pid);
+    }
+}
+
+/// Set foreground process group for terminal.
+pub fn setForegroundProcessGroup(fd: std.posix.fd_t, pgid: ProcessId) !void {
+    if (builtin.os.tag == .windows) {
+        // Windows doesn't have terminal process groups
+        _ = fd;
+        _ = pgid;
+        return;
+    } else {
+        try std.posix.tcsetpgrp(fd, pgid);
+    }
+}
+
+/// Get foreground process group for terminal.
+pub fn getForegroundProcessGroup(fd: std.posix.fd_t) !ProcessId {
+    if (builtin.os.tag == .windows) {
+        _ = fd;
+        return 0;
+    } else {
+        return std.posix.tcgetpgrp(fd);
+    }
+}
+
+// ========================================
+// Pipes
+// ========================================
+
+/// Pipe file descriptors.
+pub const Pipe = struct {
+    read_end: std.posix.fd_t,
+    write_end: std.posix.fd_t,
+};
+
+/// Create a pipe.
+pub fn createPipe() !Pipe {
+    if (builtin.os.tag == .windows) {
+        return createPipeWindows();
+    } else {
+        const fds = try std.posix.pipe();
+        return Pipe{
+            .read_end = fds[0],
+            .write_end = fds[1],
+        };
+    }
+}
+
+fn createPipeWindows() !Pipe {
+    // Windows: would use CreatePipe
+    return error.NotSupported;
+}
+
+/// Duplicate file descriptor.
+pub fn duplicateFd(old_fd: std.posix.fd_t, new_fd: std.posix.fd_t) !void {
+    if (builtin.os.tag == .windows) {
+        // Windows: would use DuplicateHandle + SetStdHandle
+        _ = old_fd;
+        _ = new_fd;
+        return error.NotSupported;
+    } else {
+        _ = try std.posix.dup2(old_fd, new_fd);
+    }
+}
+
+/// Close file descriptor.
+pub fn closeFd(fd: std.posix.fd_t) void {
+    if (builtin.os.tag == .windows) {
+        // Windows: would use CloseHandle
+        _ = fd;
+    } else {
+        std.posix.close(fd);
+    }
+}
+
+// ========================================
+// File Operations
+// ========================================
+
+/// Check if a file exists.
+pub fn fileExists(path: []const u8) bool {
+    std.fs.cwd().access(path, .{}) catch return false;
+    return true;
+}
+
+/// Check if a path is a directory.
+pub fn isDirectory(path: []const u8) bool {
+    const stat = std.fs.cwd().statFile(path) catch return false;
+    return stat.kind == .directory;
+}
+
+/// Check if a file is executable.
+pub fn isExecutable(path: []const u8) bool {
+    if (builtin.os.tag == .windows) {
+        // Windows: check file extension
+        const lower = std.ascii.lowerString(undefined, path);
+        _ = lower;
+        return std.mem.endsWith(u8, path, ".exe") or
+            std.mem.endsWith(u8, path, ".cmd") or
+            std.mem.endsWith(u8, path, ".bat") or
+            std.mem.endsWith(u8, path, ".com");
+    } else {
+        std.fs.cwd().access(path, .{ .mode = .execute }) catch return false;
+        return true;
+    }
+}
+
+// ========================================
 // Tests
 // ========================================
 

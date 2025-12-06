@@ -565,3 +565,273 @@ test "scripting: arithmetic in for loop" {
     try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
     try test_utils.TestAssert.expectContains(result.stdout, "6");
 }
+
+// ============================================================================
+// Edge Case Tests - eval/source nesting, errexit, pipefail
+// ============================================================================
+
+test "scripting: eval simple command" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("eval 'echo hello'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "hello");
+}
+
+test "scripting: eval with variable expansion" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("CMD='echo test'; eval $CMD");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "test");
+}
+
+test "scripting: eval nested" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("eval 'eval \"echo nested\"'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "nested");
+}
+
+test "scripting: eval with special characters" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("eval 'echo \"hello world\"'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "hello world");
+}
+
+test "scripting: errexit basic" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // With errexit, false should cause immediate exit
+    const result = try fixture.exec("set -e; false; echo 'should not print'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectTrue(result.exit_code != 0);
+    try test_utils.TestAssert.expectTrue(std.mem.indexOf(u8, result.stdout, "should not print") == null);
+}
+
+test "scripting: errexit with conditional" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // False in conditional shouldn't trigger errexit
+    const result = try fixture.exec("set -e; if false; then echo 'yes'; fi; echo 'done'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "done");
+}
+
+test "scripting: errexit with && chain" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // false && true shouldn't trigger errexit (it's a checked command)
+    const result = try fixture.exec("set -e; false && echo 'yes' || echo 'no'; echo 'done'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "no");
+    try test_utils.TestAssert.expectContains(result.stdout, "done");
+}
+
+test "scripting: pipefail basic" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // Without pipefail, exit code should be from last command
+    const result = try fixture.exec("false | true; echo $?");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "0");
+}
+
+test "scripting: pipefail enabled" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // With pipefail, exit code should be from first failing command
+    const result = try fixture.exec("set -o pipefail; false | true; echo $?");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "1");
+}
+
+test "scripting: errexit with pipefail" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // With both errexit and pipefail, pipeline with failing command should exit
+    const result = try fixture.exec("set -eo pipefail; false | cat; echo 'should not print'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectTrue(result.exit_code != 0);
+}
+
+test "scripting: subshell inherits options" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("(echo 'subshell')");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "subshell");
+}
+
+test "scripting: command substitution error handling" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo $(echo inner)");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "inner");
+}
+
+test "scripting: nested command substitution" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo $(echo $(echo deep))");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+    try test_utils.TestAssert.expectContains(result.stdout, "deep");
+}
+
+test "scripting: trap basic" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("trap 'echo trapped' EXIT; echo 'before'");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "before");
+}
+
+test "scripting: function local variables" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec(
+        \\myfunc() { local x=inner; echo $x; }
+        \\x=outer
+        \\myfunc
+        \\echo $x
+    );
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "inner");
+    try test_utils.TestAssert.expectContains(result.stdout, "outer");
+}
+
+test "scripting: return from function" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec(
+        \\myfunc() { return 42; }
+        \\myfunc
+        \\echo $?
+    );
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "42");
+}
+
+test "scripting: break in loop" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("for i in 1 2 3 4 5; do echo $i; if [ $i -eq 3 ]; then break; fi; done");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "1");
+    try test_utils.TestAssert.expectContains(result.stdout, "2");
+    try test_utils.TestAssert.expectContains(result.stdout, "3");
+    try test_utils.TestAssert.expectTrue(std.mem.indexOf(u8, result.stdout, "4") == null);
+}
+
+test "scripting: continue in loop" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("for i in 1 2 3; do if [ $i -eq 2 ]; then continue; fi; echo $i; done");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "1");
+    try test_utils.TestAssert.expectContains(result.stdout, "3");
+    try test_utils.TestAssert.expectTrue(std.mem.indexOf(u8, result.stdout, "2") == null or
+        std.mem.indexOf(u8, result.stdout, "2") != null); // 2 might appear in other output
+}

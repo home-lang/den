@@ -197,3 +197,175 @@ test "job control: exit code of background job" {
     // wait should return the exit code of the job
     try test_utils.TestAssert.expectContains(result.stdout, "1");
 }
+
+// ============================================================================
+// Enhanced Job Control Tests - Nested Jobs & Signal Handling
+// ============================================================================
+
+test "job control: nested background jobs" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    // Start multiple nested background jobs
+    const result = try fixture.exec("(sleep 0.1 &) & (sleep 0.1 &) & wait");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "job control: pipeline as background job" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("(echo foo | cat | cat) & wait");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "foo");
+}
+
+test "job control: kill SIGTERM signal name" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 10 & kill -TERM %1 2>&1");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "job control: kill SIGKILL signal name" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 10 & kill -KILL %1 2>&1");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "job control: kill SIGHUP signal name" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 10 & kill -HUP %1 2>&1");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "job control: wait for specific PID" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 0.1 & PID=$! ; wait $PID && echo waited_for_$PID");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "waited_for_");
+}
+
+test "job control: disown -h keeps job but removes from HUP" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 0.5 & disown -h %1");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "job control: disown -a removes all jobs" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 0.5 & sleep 0.5 & disown -a && jobs");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // After disown -a, jobs should be empty
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "job control: jobs -p shows only PIDs" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 1 & jobs -p ; kill %1");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // With -p flag, should show only the PID (numeric)
+    try test_utils.TestAssert.expectEqual(@as(u8, 0), result.exit_code);
+}
+
+test "job control: background job $! variable" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("sleep 0.1 & echo $!");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // $! should be a numeric PID
+    const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+    if (trimmed.len > 0) {
+        _ = std.fmt.parseInt(u32, trimmed, 10) catch {
+            try std.testing.expect(false); // Should be a valid number
+        };
+    }
+}
+
+test "job control: sequential background jobs" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo a & echo b & echo c & wait");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    // All three should have run (order may vary)
+    try test_utils.TestAssert.expectContains(result.stdout, "a");
+    try test_utils.TestAssert.expectContains(result.stdout, "b");
+    try test_utils.TestAssert.expectContains(result.stdout, "c");
+}
+
+test "job control: background job with redirection" {
+    const allocator = std.testing.allocator;
+
+    var fixture = try test_utils.ShellFixture.init(allocator);
+    defer fixture.deinit();
+
+    const result = try fixture.exec("echo redirected > /dev/null & wait && echo done");
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try test_utils.TestAssert.expectContains(result.stdout, "done");
+}

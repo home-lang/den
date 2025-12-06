@@ -11,6 +11,10 @@ Welcome to the Den Shell documentation! This directory contains comprehensive do
 - [Usage Guide](usage.md) - How to use Den Shell
 - [Configuration](config.md) - Configuration options
 
+#### Migration Guides
+- **[Bash Migration Guide](BASH_MIGRATION.md)** - For users coming from Bash
+- **[Zsh Migration Guide](ZSH_MIGRATION.md)** - For users coming from Zsh
+
 #### Features
 - **[Line Editing](LINE_EDITING.md)** ⭐ - Word navigation, Ctrl+R search, transpose, and more
 - **[Tab Completion](TAB_COMPLETION.md)** ⭐ - Interactive tab completion guide

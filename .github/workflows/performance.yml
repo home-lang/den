@@ -1,0 +1,170 @@
+name: Performance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  ZIG_VERSION: '0.16-dev'
+  # Performance budgets
+  MAX_STARTUP_MS: 10
+  MAX_IDLE_MEMORY_MB: 5
+  MAX_COMMAND_EXEC_MS: 5
+
+jobs:
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Cache Zig artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/zig
+            .zig-cache
+            zig-cache
+          key: ${{ runner.os }}-zig-perf-${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-perf-${{ env.ZIG_VERSION }}-
+
+      - name: Build release binary
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Measure startup time
+        id: startup
+        run: |
+          # Run 10 iterations and average
+          total=0
+          for i in {1..10}; do
+            start=$(date +%s%N)
+            echo "exit" | ./zig-out/bin/den 2>/dev/null
+            end=$(date +%s%N)
+            elapsed=$((($end - $start) / 1000000))
+            total=$(($total + $elapsed))
+          done
+          avg=$(($total / 10))
+          echo "startup_ms=$avg" >> $GITHUB_OUTPUT
+          echo "Average startup time: ${avg}ms"
+
+      - name: Check startup time budget
+        run: |
+          if [ ${{ steps.startup.outputs.startup_ms }} -gt ${{ env.MAX_STARTUP_MS }} ]; then
+            echo "::error::Startup time ${{ steps.startup.outputs.startup_ms }}ms exceeds budget of ${{ env.MAX_STARTUP_MS }}ms"
+            exit 1
+          fi
+          echo "✓ Startup time ${{ steps.startup.outputs.startup_ms }}ms is within budget"
+
+      - name: Measure idle memory
+        id: memory
+        run: |
+          # Start shell and measure RSS after settling
+          ./zig-out/bin/den -c "sleep 0.1" &
+          PID=$!
+          sleep 0.2
+          if [ -f /proc/$PID/status ]; then
+            # Linux
+            rss=$(grep VmRSS /proc/$PID/status | awk '{print $2}')
+            rss_mb=$((rss / 1024))
+          else
+            # macOS
+            rss_kb=$(ps -o rss= -p $PID 2>/dev/null || echo "0")
+            rss_mb=$((rss_kb / 1024))
+          fi
+          wait $PID 2>/dev/null || true
+          echo "memory_mb=$rss_mb" >> $GITHUB_OUTPUT
+          echo "Idle memory: ${rss_mb}MB"
+
+      - name: Check memory budget
+        run: |
+          if [ ${{ steps.memory.outputs.memory_mb }} -gt ${{ env.MAX_IDLE_MEMORY_MB }} ]; then
+            echo "::error::Idle memory ${{ steps.memory.outputs.memory_mb }}MB exceeds budget of ${{ env.MAX_IDLE_MEMORY_MB }}MB"
+            exit 1
+          fi
+          echo "✓ Idle memory ${{ steps.memory.outputs.memory_mb }}MB is within budget"
+
+      - name: Measure command execution time
+        id: exec
+        run: |
+          # Measure simple command execution
+          total=0
+          for i in {1..100}; do
+            start=$(date +%s%N)
+            ./zig-out/bin/den -c "true" 2>/dev/null
+            end=$(date +%s%N)
+            elapsed=$((($end - $start) / 1000000))
+            total=$(($total + $elapsed))
+          done
+          avg=$(($total / 100))
+          echo "exec_ms=$avg" >> $GITHUB_OUTPUT
+          echo "Average command execution: ${avg}ms"
+
+      - name: Check execution time budget
+        run: |
+          if [ ${{ steps.exec.outputs.exec_ms }} -gt ${{ env.MAX_COMMAND_EXEC_MS }} ]; then
+            echo "::error::Command execution ${{ steps.exec.outputs.exec_ms }}ms exceeds budget of ${{ env.MAX_COMMAND_EXEC_MS }}ms"
+            exit 1
+          fi
+          echo "✓ Command execution ${{ steps.exec.outputs.exec_ms }}ms is within budget"
+
+      - name: Measure binary size
+        id: size
+        run: |
+          size=$(stat -f%z ./zig-out/bin/den 2>/dev/null || stat --printf="%s" ./zig-out/bin/den)
+          size_mb=$((size / 1024 / 1024))
+          echo "size_mb=$size_mb" >> $GITHUB_OUTPUT
+          echo "Binary size: ${size_mb}MB"
+
+      - name: Run benchmarks
+        run: |
+          echo "=== Performance Summary ==="
+          echo "Startup time: ${{ steps.startup.outputs.startup_ms }}ms (budget: ${{ env.MAX_STARTUP_MS }}ms)"
+          echo "Idle memory: ${{ steps.memory.outputs.memory_mb }}MB (budget: ${{ env.MAX_IDLE_MEMORY_MB }}MB)"
+          echo "Command exec: ${{ steps.exec.outputs.exec_ms }}ms (budget: ${{ env.MAX_COMMAND_EXEC_MS }}ms)"
+          echo "Binary size: ${{ steps.size.outputs.size_mb }}MB"
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.os }}
+          path: |
+            zig-out/bin/den
+          retention-days: 7
+
+  compare:
+    name: Compare with baseline
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Download PR artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results-ubuntu-latest
+          path: pr-binary/
+
+      - name: Compare performance
+        run: |
+          echo "Performance comparison would go here"
+          echo "In a full implementation, this would:"
+          echo "1. Download baseline metrics from main branch"
+          echo "2. Compare against PR metrics"
+          echo "3. Report regressions > 10%"

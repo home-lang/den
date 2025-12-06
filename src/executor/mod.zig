@@ -6,9 +6,18 @@ const builtin = @import("builtin");
 const process = @import("../utils/process.zig");
 const TypoCorrection = @import("../utils/typo_correction.zig").TypoCorrection;
 const env_utils = @import("../utils/env.zig");
+const networking = @import("networking.zig");
+const memory_pool = @import("memory_pool.zig");
+const redirection = @import("redirection.zig");
 
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
+
+// Re-export networking functions for use in this module
+const openDevNet = networking.openDevNet;
+const parseDevNetPath = networking.parseDevNetPath;
+const parseIPv4 = networking.parseIPv4;
+const parseIPv6 = networking.parseIPv6;
 
 // C library extern declarations for environment manipulation
 const libc_env = struct {
@@ -37,277 +46,13 @@ const PROCESS_TERMINATE: u32 = 0x0001;
 // File type filter for ifind
 const FileTypeFilter = enum { all, files, dirs };
 
-/// Open a /dev/tcp/host/port or /dev/udp/host/port virtual path as a socket.
-/// Bash-compatible virtual device paths for network I/O.
-///
-/// Supported formats:
-///   /dev/tcp/127.0.0.1/80      - IPv4 TCP connection
-///   /dev/udp/192.168.1.1/53    - IPv4 UDP connection
-///   /dev/tcp/[::1]/8080        - IPv6 TCP connection
-///   /dev/udp/[fe80::1]/1234    - IPv6 UDP connection
-///
-/// Returns the socket fd on success, null if path is not a /dev/tcp or /dev/udp path
-/// or if the connection fails.
-fn openDevNet(path: []const u8) ?std.posix.socket_t {
-    const parsed = parseDevNetPath(path) orelse return null;
-    return connectToAddress(parsed.host, parsed.port, parsed.is_tcp);
-}
-
-/// Parsed /dev/tcp or /dev/udp path components
-const DevNetPath = struct {
-    host: []const u8,
-    port: u16,
-    is_tcp: bool,
-};
-
-/// Parse a /dev/tcp/host/port or /dev/udp/host/port path
-fn parseDevNetPath(path: []const u8) ?DevNetPath {
-    const is_tcp = std.mem.startsWith(u8, path, "/dev/tcp/");
-    const is_udp = std.mem.startsWith(u8, path, "/dev/udp/");
-
-    if (!is_tcp and !is_udp) return null;
-
-    // Parse host/port from path: /dev/tcp/host/port or /dev/udp/host/port
-    const prefix_len: usize = 9; // "/dev/tcp/" or "/dev/udp/"
-    const rest = path[prefix_len..];
-
-    if (rest.len == 0) return null;
-
-    // Handle IPv6 addresses in brackets: [::1]/port
-    if (rest[0] == '[') {
-        const bracket_end = std.mem.indexOf(u8, rest, "]") orelse return null;
-        if (bracket_end + 1 >= rest.len) return null;
-        if (rest[bracket_end + 1] != '/') return null;
-        if (bracket_end + 2 >= rest.len) return null;
-
-        const host = rest[1..bracket_end];
-        if (host.len == 0) return null;
-
-        const port_str = rest[bracket_end + 2 ..];
-        const port = std.fmt.parseInt(u16, port_str, 10) catch return null;
-        if (port == 0) return null; // Port 0 is not valid for explicit connections
-
-        return DevNetPath{ .host = host, .port = port, .is_tcp = is_tcp };
-    }
-
-    // IPv4 format: host/port
-    const port_sep = std.mem.lastIndexOf(u8, rest, "/") orelse return null;
-    if (port_sep == 0 or port_sep >= rest.len - 1) return null;
-
-    const host = rest[0..port_sep];
-    const port_str = rest[port_sep + 1 ..];
-
-    // Validate host is not empty
-    if (host.len == 0) return null;
-
-    // Validate port
-    const port = std.fmt.parseInt(u16, port_str, 10) catch return null;
-    if (port == 0) return null; // Port 0 is not valid for explicit connections
-
-    return DevNetPath{ .host = host, .port = port, .is_tcp = is_tcp };
-}
-
-/// Parse an IPv4 address string into bytes
-fn parseIPv4(host: []const u8) ?[4]u8 {
-    if (host.len == 0 or host.len > 15) return null;
-
-    var ip_bytes: [4]u8 = undefined;
-    var byte_idx: usize = 0;
-    var num: u16 = 0;
-    var digit_count: usize = 0;
-
-    for (host) |c| {
-        if (c == '.') {
-            if (byte_idx >= 3 or digit_count == 0) return null;
-            ip_bytes[byte_idx] = @intCast(num);
-            byte_idx += 1;
-            num = 0;
-            digit_count = 0;
-        } else if (c >= '0' and c <= '9') {
-            num = num * 10 + (c - '0');
-            digit_count += 1;
-            if (num > 255 or digit_count > 3) return null;
-        } else {
-            return null;
-        }
-    }
-
-    if (byte_idx != 3 or digit_count == 0) return null;
-    ip_bytes[byte_idx] = @intCast(num);
-
-    return ip_bytes;
-}
-
-/// Connect to a host:port using TCP or UDP
-fn connectToAddress(host: []const u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
-    // Try IPv4 first
-    if (parseIPv4(host)) |ip_bytes| {
-        return connectIPv4(ip_bytes, port, is_tcp);
-    }
-
-    // Try IPv6
-    if (parseIPv6(host)) |ip6_bytes| {
-        return connectIPv6(ip6_bytes, port, is_tcp);
-    }
-
-    return null;
-}
-
-/// Parse an IPv6 address string into bytes.
-/// Supports full form (2001:db8::1) and loopback (::1).
-fn parseIPv6(host: []const u8) ?[16]u8 {
-    if (host.len == 0 or host.len > 45) return null;
-
-    var result: [16]u8 = std.mem.zeroes([16]u8);
-    var groups: [8]u16 = undefined;
-    var group_count: usize = 0;
-    var double_colon_pos: ?usize = null;
-    var current_group: u16 = 0;
-    var digit_count: usize = 0;
-    var i: usize = 0;
-
-    // Handle leading ::
-    if (host.len >= 2 and host[0] == ':' and host[1] == ':') {
-        double_colon_pos = 0;
-        i = 2;
-        if (i >= host.len) {
-            // Just "::" - all zeros
-            return result;
-        }
-    }
-
-    while (i < host.len) {
-        const c = host[i];
-        if (c == ':') {
-            if (digit_count == 0) {
-                // Double colon
-                if (double_colon_pos != null) return null; // Only one :: allowed
-                double_colon_pos = group_count;
-                i += 1;
-                if (i < host.len and host[i] == ':') {
-                    i += 1; // Skip second colon of ::
-                }
-                continue;
-            }
-            if (group_count >= 8) return null;
-            groups[group_count] = current_group;
-            group_count += 1;
-            current_group = 0;
-            digit_count = 0;
-            i += 1;
-        } else if ((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F')) {
-            const val: u16 = if (c >= '0' and c <= '9')
-                c - '0'
-            else if (c >= 'a' and c <= 'f')
-                c - 'a' + 10
-            else
-                c - 'A' + 10;
-            current_group = current_group * 16 + val;
-            digit_count += 1;
-            if (digit_count > 4) return null;
-            i += 1;
-        } else {
-            return null;
-        }
-    }
-
-    // Handle last group
-    if (digit_count > 0) {
-        if (group_count >= 8) return null;
-        groups[group_count] = current_group;
-        group_count += 1;
-    }
-
-    // Expand :: (double colon)
-    if (double_colon_pos) |pos| {
-        if (group_count > 8) return null;
-        const zeros_needed = 8 - group_count;
-        // Shift groups after :: to the right position
-        var j: usize = 7;
-        var src: usize = group_count;
-        while (src > pos) {
-            src -= 1;
-            groups[j] = groups[src];
-            j -= 1;
-        }
-        // Fill zeros
-        var k: usize = pos;
-        while (k < pos + zeros_needed) {
-            groups[k] = 0;
-            k += 1;
-        }
-    } else {
-        if (group_count != 8) return null;
-    }
-
-    // Convert groups to bytes (big-endian)
-    for (groups, 0..) |group, idx| {
-        result[idx * 2] = @intCast(group >> 8);
-        result[idx * 2 + 1] = @intCast(group & 0xFF);
-    }
-
-    return result;
-}
-
-/// Connect to an IPv4 address
-fn connectIPv4(ip_bytes: [4]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
-    const sock_type: c_uint = if (is_tcp) std.c.SOCK.STREAM else std.c.SOCK.DGRAM;
-    const sock = std.c.socket(std.c.AF.INET, sock_type, 0);
-    if (sock < 0) return null;
-
-    var addr: std.c.sockaddr.in = std.mem.zeroes(std.c.sockaddr.in);
-    addr.len = @sizeOf(std.c.sockaddr.in);
-    addr.family = std.c.AF.INET;
-    addr.port = std.mem.nativeToBig(u16, port);
-    addr.addr = @bitCast(ip_bytes);
-
-    if (!doConnect(sock, @ptrCast(&addr), @sizeOf(std.c.sockaddr.in))) {
-        _ = std.c.close(sock);
-        return null;
-    }
-
-    return sock;
-}
-
-/// Connect to an IPv6 address
-fn connectIPv6(ip_bytes: [16]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
-    const sock_type: c_uint = if (is_tcp) std.c.SOCK.STREAM else std.c.SOCK.DGRAM;
-    const sock = std.c.socket(std.c.AF.INET6, sock_type, 0);
-    if (sock < 0) return null;
-
-    var addr: std.c.sockaddr.in6 = std.mem.zeroes(std.c.sockaddr.in6);
-    addr.len = @sizeOf(std.c.sockaddr.in6);
-    addr.family = std.c.AF.INET6;
-    addr.port = std.mem.nativeToBig(u16, port);
-    addr.addr = ip_bytes;
-
-    if (!doConnect(sock, @ptrCast(&addr), @sizeOf(std.c.sockaddr.in6))) {
-        _ = std.c.close(sock);
-        return null;
-    }
-
-    return sock;
-}
-
-/// Perform connect with retry on EINTR
-fn doConnect(sock: std.posix.socket_t, addr: *const std.c.sockaddr, addrlen: std.c.socklen_t) bool {
-    var retry_count: u32 = 0;
-    while (retry_count < 5) : (retry_count += 1) {
-        const connect_result = std.c.connect(sock, addr, addrlen);
-        if (connect_result >= 0) return true;
-
-        const errno = std.c._errno().*;
-        if (errno == 4) continue; // EINTR - retry
-        if (errno == 56) return true; // EISCONN - already connected
-        return false;
-    }
-    return false;
-}
+// Networking code moved to networking.zig
 
 pub const Executor = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
     shell: ?*Shell, // Optional reference to shell for options
+    command_pool: memory_pool.CommandMemoryPool, // Memory pool for command execution
 
     /// Initialize an executor without a shell reference.
     /// Used for standalone command execution.
@@ -316,6 +61,7 @@ pub const Executor = struct {
             .allocator = allocator,
             .environment = environment,
             .shell = null,
+            .command_pool = memory_pool.CommandMemoryPool.init(allocator),
         };
     }
 
@@ -326,12 +72,31 @@ pub const Executor = struct {
             .allocator = allocator,
             .environment = environment,
             .shell = shell,
+            .command_pool = memory_pool.CommandMemoryPool.init(allocator),
         };
+    }
+
+    /// Cleanup resources
+    pub fn deinit(self: *Executor) void {
+        self.command_pool.deinit();
+    }
+
+    /// Get the memory pool allocator for temporary command allocations
+    pub fn poolAllocator(self: *Executor) std.mem.Allocator {
+        return self.command_pool.allocator();
+    }
+
+    /// Reset the memory pool after command execution
+    pub fn resetPool(self: *Executor) void {
+        self.command_pool.reset();
     }
 
     /// Execute a command chain, handling operators like && and ||.
     /// Returns the exit code of the last executed command.
     pub fn executeChain(self: *Executor, chain: *types.CommandChain) !i32 {
+        // Reset the memory pool at the start of each command chain
+        defer self.resetPool();
+
         if (chain.commands.len == 0) return 0;
 
         // Single command - execute directly
@@ -708,171 +473,23 @@ pub const Executor = struct {
     }
 
     fn applyRedirections(self: *Executor, redirections: []types.Redirection) !void {
-        for (redirections) |redir| {
-            switch (redir.kind) {
-                .output_truncate => {
-                    // Check for /dev/tcp or /dev/udp virtual path
-                    if (openDevNet(redir.target)) |sock| {
-                        try std.posix.dup2(sock, @intCast(redir.fd));
-                        std.posix.close(sock);
-                    } else {
-                        // Open file for writing, truncate if exists
-                        const path_z = try self.allocator.dupeZ(u8, redir.target);
-                        defer self.allocator.free(path_z);
-
-                        const fd = std.posix.open(
-                            path_z,
-                            .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true },
-                            0o644,
-                        ) catch |err| {
-                            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-                            std.posix.exit(1);
-                        };
-
-                        try std.posix.dup2(fd, @intCast(redir.fd));
-                        std.posix.close(fd);
-                    }
-                },
-                .output_append => {
-                    // Check for /dev/tcp or /dev/udp virtual path
-                    if (openDevNet(redir.target)) |sock| {
-                        try std.posix.dup2(sock, @intCast(redir.fd));
-                        std.posix.close(sock);
-                    } else {
-                        // Open file for appending
-                        const path_z = try self.allocator.dupeZ(u8, redir.target);
-                        defer self.allocator.free(path_z);
-
-                        const fd = std.posix.open(
-                            path_z,
-                            .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true },
-                            0o644,
-                        ) catch |err| {
-                            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-                            std.posix.exit(1);
-                        };
-
-                        try std.posix.dup2(fd, @intCast(redir.fd));
-                        std.posix.close(fd);
-                    }
-                },
-                .input => {
-                    // Check for /dev/tcp or /dev/udp virtual path
-                    if (openDevNet(redir.target)) |sock| {
-                        try std.posix.dup2(sock, std.posix.STDIN_FILENO);
-                        std.posix.close(sock);
-                    } else {
-                        // Open file for reading
-                        const path_z = try self.allocator.dupeZ(u8, redir.target);
-                        defer self.allocator.free(path_z);
-
-                        const fd = std.posix.open(
-                            path_z,
-                            .{ .ACCMODE = .RDONLY },
-                            0,
-                        ) catch |err| {
-                            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-                            std.posix.exit(1);
-                        };
-
-                        try std.posix.dup2(fd, std.posix.STDIN_FILENO);
-                        std.posix.close(fd);
-                    }
-                },
-                .input_output => {
-                    // <> opens file for both reading and writing
-                    if (openDevNet(redir.target)) |sock| {
-                        try std.posix.dup2(sock, @intCast(redir.fd));
-                        std.posix.close(sock);
-                    } else {
-                        const path_z = try self.allocator.dupeZ(u8, redir.target);
-                        defer self.allocator.free(path_z);
-
-                        // Open for read+write, create if doesn't exist
-                        const fd = std.posix.open(
-                            path_z,
-                            .{ .ACCMODE = .RDWR, .CREAT = true },
-                            0o644,
-                        ) catch |err| {
-                            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-                            std.posix.exit(1);
-                        };
-
-                        try std.posix.dup2(fd, @intCast(redir.fd));
-                        std.posix.close(fd);
-                    }
-                },
-                .heredoc, .herestring => {
-                    // Create a pipe for the content
-                    const pipe_fds = try std.posix.pipe();
-                    const read_fd = pipe_fds[0];
-                    const write_fd = pipe_fds[1];
-
-                    // Write content to pipe
-                    const content = blk: {
-                        if (redir.kind == .herestring) {
-                            // For herestring, expand variables and use the content
-                            var expansion = Expansion.init(self.allocator, self.environment, 0);
-                            // Set options from shell if available
-                            if (self.shell) |shell| {
-                                expansion.option_nounset = shell.option_nounset;
-                                expansion.var_attributes = &shell.var_attributes;
-                                expansion.arrays = &shell.arrays;
-                                expansion.assoc_arrays = &shell.assoc_arrays;
-                            }
-                            const expanded = expansion.expand(redir.target) catch redir.target;
-                            // Add newline for herestring
-                            var buf: [4096]u8 = undefined;
-                            const with_newline = std.fmt.bufPrint(&buf, "{s}\n", .{expanded}) catch redir.target;
-                            if (expanded.ptr != redir.target.ptr) {
-                                self.allocator.free(expanded);
-                            }
-                            break :blk try self.allocator.dupe(u8, with_newline);
-                        } else {
-                            // For heredoc, use the target as-is (it contains the content)
-                            // Note: Full heredoc support requires parser changes
-                            // This provides basic support for single-line heredocs
-                            break :blk try self.allocator.dupe(u8, redir.target);
-                        }
-                    };
-                    defer self.allocator.free(content);
-
-                    // Fork to write content (avoid blocking)
-                    const writer_pid = try std.posix.fork();
-                    if (writer_pid == 0) {
-                        // Child: write content and exit
-                        std.posix.close(read_fd);
-                        _ = std.posix.write(write_fd, content) catch {};
-                        std.posix.close(write_fd);
-                        std.posix.exit(0);
-                    }
-
-                    // Parent: close write end and dup read end to stdin
-                    std.posix.close(write_fd);
-                    try std.posix.dup2(read_fd, std.posix.STDIN_FILENO);
-                    std.posix.close(read_fd);
-
-                    // Wait for writer to finish
-                    _ = std.posix.waitpid(writer_pid, 0);
-                },
-                .fd_duplicate => {
-                    // Parse target as file descriptor number
-                    // Format: N>&M or N<&M (duplicate fd M to fd N)
-                    const target_fd = std.fmt.parseInt(u32, redir.target, 10) catch {
-                        try IO.eprint("den: invalid file descriptor: {s}\n", .{redir.target});
-                        return error.InvalidFd;
-                    };
-
-                    // Duplicate the target_fd to redir.fd
-                    try std.posix.dup2(@intCast(target_fd), @intCast(redir.fd));
-                },
-                .fd_close => {
-                    // Close the specified file descriptor
-                    // Format: N>&- or N<&- (close fd N)
-                    std.posix.close(@intCast(redir.fd));
-                },
+        // Build expansion context from shell if available (for heredocs/herestrings)
+        const expansion_context: ?redirection.ExpansionContext = if (self.shell) |shell|
+            .{
+                .option_nounset = shell.option_nounset,
+                .var_attributes = &shell.var_attributes,
+                .arrays = &shell.arrays,
+                .assoc_arrays = &shell.assoc_arrays,
             }
-        }
+        else
+            null;
+
+        try redirection.applyRedirections(
+            self.allocator,
+            redirections,
+            self.environment,
+            expansion_context,
+        );
     }
 
     /// Execute a single command, either as a builtin or external program.

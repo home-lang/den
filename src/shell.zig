@@ -2075,14 +2075,52 @@ pub const Shell = struct {
         }
     }
 
-    /// Expand aliases in command chain
+    /// Expand aliases in command chain with circular reference detection
     fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
+        // Track seen aliases to detect circular references
+        var seen_aliases: [32][]const u8 = undefined;
+        var seen_count: usize = 0;
+
         for (chain.commands) |*cmd| {
-            if (self.aliases.get(cmd.name)) |alias_value| {
-                // Replace command name with alias value
-                const expanded = try self.allocator.dupe(u8, alias_value);
-                self.allocator.free(cmd.name);
-                cmd.name = expanded;
+            seen_count = 0; // Reset for each command
+            var current_name = cmd.name;
+            var expanded = false;
+
+            // Expand aliases iteratively with circular detection
+            while (self.aliases.get(current_name)) |alias_value| {
+                // Check for circular reference
+                for (seen_aliases[0..seen_count]) |seen| {
+                    if (std.mem.eql(u8, seen, current_name)) {
+                        try IO.eprint("den: alias: circular reference detected: {s}\n", .{current_name});
+                        return; // Stop expansion on circular reference
+                    }
+                }
+
+                // Track this alias
+                if (seen_count < seen_aliases.len) {
+                    seen_aliases[seen_count] = current_name;
+                    seen_count += 1;
+                } else {
+                    // Too many nested aliases
+                    try IO.eprint("den: alias: expansion depth limit exceeded\n", .{});
+                    return;
+                }
+
+                // Get the first word of the alias value as the new command name
+                const trimmed = std.mem.trim(u8, alias_value, &std.ascii.whitespace);
+                const first_space = std.mem.indexOfScalar(u8, trimmed, ' ');
+                const first_word = if (first_space) |pos| trimmed[0..pos] else trimmed;
+
+                // Replace command name with expanded alias
+                if (!expanded) {
+                    const new_name = try self.allocator.dupe(u8, alias_value);
+                    self.allocator.free(cmd.name);
+                    cmd.name = new_name;
+                    expanded = true;
+                }
+
+                // Check if first word is also an alias
+                current_name = first_word;
             }
         }
     }

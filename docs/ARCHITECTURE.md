@@ -167,6 +167,18 @@ pub const Shell = struct {
 - `completion.zig`: Tab completion engine
 - `expansion.zig`: Variable and glob expansion
 - `signals.zig`: Signal handling
+- `platform.zig`: Platform abstraction layer for cross-platform support
+
+#### Platform Abstraction (src/utils/platform.zig)
+Provides unified API for platform-specific operations:
+- **Process Management**: `waitProcess`, `killProcess`, `continueProcess`
+- **Process Groups**: `setProcessGroup`, `getProcessGroup`, `setForegroundProcessGroup`
+- **Terminal Detection**: `isTty`, `getTerminalSize`
+- **Pipes**: `createPipe`, `duplicateFd`, `closeFd`
+- **Environment**: `getEnv`, `getHomeDir`, `getUsername`, `isRoot`
+- **Path Operations**: `isAbsolutePath`, `path_separator`
+- **File Operations**: `fileExists`, `isDirectory`, `isExecutable`
+- **Signal Constants**: Platform-appropriate signal definitions
 
 ### 3. REPL Layer (src/repl/)
 
@@ -242,13 +254,23 @@ Input String → Tokenizer → Parser → AST → Expansion → Command Tree
 - Implements job control (fg, bg, jobs)
 
 #### Builtin Commands (src/builtins/)
+The builtins system is organized into logical modules:
+
+- **Registry** (`mod.zig`): `BuiltinRegistry` interface for registering and executing builtins
+- **Filesystem** (`filesystem.zig`): `basename`, `dirname`, `realpath`
+- **Directory** (`directory.zig`): `pushd`, `popd`, `dirs`
+- **I/O** (`io.zig`): `printf`, `read`
+- **Process** (`process.zig`): `exec`, `wait`, `kill`, `disown`
+- **Variables** (`variables.zig`): `local`, `declare`, `readonly`, `typeset`, `let`
+- **Misc** (`misc.zig`): `sleep`, `help`, `clear`, `uname`, `whoami`, `umask`, `time`, `caller`
+
+Core builtins include:
 - `cd`: Change directory with CDPATH support
 - `echo`: Print text with escape sequences
 - `export`: Set environment variables
 - `alias`: Create command aliases
 - `source`: Execute script files
 - `exit`: Exit shell with status code
-- Many more (see src/builtins/mod.zig)
 
 #### Process Management (src/executor/process.zig)
 - Fork/exec for external commands
@@ -261,6 +283,18 @@ Input String → Tokenizer → Parser → AST → Expansion → Command Tree
 - Pipe creation and management
 - Here-document implementation
 - File mode handling (read, write, append)
+
+#### Network Path Handling (src/executor/networking.zig)
+- `/dev/tcp/host/port` support for TCP connections
+- `/dev/udp/host/port` support for UDP connections
+- Detailed error messages for malformed paths
+- IPv4 and IPv6 address validation
+
+#### Memory Pools (src/executor/memory_pool.zig)
+- `CommandMemoryPool`: Arena allocator for command execution
+- `PipelineMemoryPool`: Arena allocator for pipeline management
+- `ExpansionMemoryPool`: Arena allocator for variable expansion
+- Reduces allocation overhead during execution
 
 ### 6. Plugin System (src/plugins/)
 
