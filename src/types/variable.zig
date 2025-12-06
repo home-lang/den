@@ -99,7 +99,7 @@ pub const Variable = union(enum) {
                 var count: usize = 0;
                 var it = map.iterator();
                 while (it.next()) |entry| {
-                    total_len += entry.key_ptr.len;
+                    total_len += entry.key_ptr.*.len;
                     count += 1;
                 }
                 if (count == 0) return try allocator.dupe(u8, "");
@@ -115,8 +115,9 @@ pub const Variable = union(enum) {
                         pos += 1;
                     }
                     first = false;
-                    @memcpy(result[pos..][0..entry.key_ptr.len], entry.key_ptr.*);
-                    pos += entry.key_ptr.len;
+                    const key = entry.key_ptr.*;
+                    @memcpy(result[pos..][0..key.len], key);
+                    pos += key.len;
                 }
                 return result;
             },

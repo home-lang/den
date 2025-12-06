@@ -322,6 +322,7 @@ pub const Tokenizer = struct {
     fn parseWord(self: *Tokenizer, start_line: usize, start_col: usize) !Token {
         var in_single_quote = false;
         var in_double_quote = false;
+        var in_ansi_quote = false; // $'...' ANSI-C quoting
 
         // Build the word with escape processing
         var word_buffer: [4096]u8 = undefined;
@@ -330,17 +331,27 @@ pub const Tokenizer = struct {
         while (self.pos < self.input.len) {
             const char = self.input[self.pos];
 
-            // Handle backslash escapes (not in single quotes)
-            if (char == '\\' and !in_single_quote) {
+            // Handle backslash escapes (not in regular single quotes, but yes in ANSI quotes)
+            if (char == '\\' and (!in_single_quote or in_ansi_quote)) {
                 self.pos += 1;
                 self.column += 1;
 
-                // If there's a next character, use it literally
+                // If there's a next character, process it
                 if (self.pos < self.input.len) {
                     const escaped_char = self.input[self.pos];
-                    if (word_len < word_buffer.len) {
-                        word_buffer[word_len] = escaped_char;
-                        word_len += 1;
+                    if (in_ansi_quote) {
+                        // Process ANSI-C escape sequences
+                        const result = self.processAnsiEscape(escaped_char);
+                        if (word_len < word_buffer.len) {
+                            word_buffer[word_len] = result;
+                            word_len += 1;
+                        }
+                    } else {
+                        // Regular escape - use literally
+                        if (word_len < word_buffer.len) {
+                            word_buffer[word_len] = escaped_char;
+                            word_len += 1;
+                        }
                     }
                     self.pos += 1;
                     self.column += 1;
@@ -348,15 +359,29 @@ pub const Tokenizer = struct {
                 continue;
             }
 
+            // Check for $' ANSI-C quoting start
+            if (char == '$' and !in_single_quote and !in_double_quote and !in_ansi_quote) {
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '\'') {
+                    in_ansi_quote = true;
+                    self.pos += 2; // Skip $'
+                    self.column += 2;
+                    continue;
+                }
+            }
+
             // Handle quotes
             if (char == '\'' and !in_double_quote) {
-                in_single_quote = !in_single_quote;
+                if (in_ansi_quote) {
+                    in_ansi_quote = false;
+                } else {
+                    in_single_quote = !in_single_quote;
+                }
                 self.pos += 1;
                 self.column += 1;
                 continue;
             }
 
-            if (char == '"' and !in_single_quote) {
+            if (char == '"' and !in_single_quote and !in_ansi_quote) {
                 in_double_quote = !in_double_quote;
                 self.pos += 1;
                 self.column += 1;
@@ -395,7 +420,7 @@ pub const Tokenizer = struct {
         const word = try self.allocator.dupe(u8, word_buffer[0..word_len]);
 
         // Check for keywords (only if not quoted)
-        const token_type = if (in_single_quote or in_double_quote)
+        const token_type = if (in_single_quote or in_double_quote or in_ansi_quote)
             TokenType.word
         else
             self.getKeywordType(word);
@@ -405,6 +430,27 @@ pub const Tokenizer = struct {
             .value = word,
             .line = start_line,
             .column = start_col,
+        };
+    }
+
+    /// Process ANSI-C escape sequences for $'...' quoting
+    fn processAnsiEscape(self: *Tokenizer, char: u8) u8 {
+        _ = self;
+        return switch (char) {
+            'a' => 0x07, // Alert (bell)
+            'b' => 0x08, // Backspace
+            'e', 'E' => 0x1B, // Escape
+            'f' => 0x0C, // Form feed
+            'n' => 0x0A, // Newline
+            'r' => 0x0D, // Carriage return
+            't' => 0x09, // Horizontal tab
+            'v' => 0x0B, // Vertical tab
+            '\\' => '\\', // Backslash
+            '\'' => '\'', // Single quote
+            '"' => '"', // Double quote
+            '?' => '?', // Question mark
+            '0' => 0x00, // Null (simplified - full octal would need more parsing)
+            else => char, // Unknown escape - return as is
         };
     }
 

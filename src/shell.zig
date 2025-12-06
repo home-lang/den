@@ -103,6 +103,136 @@ pub const CallFrame = struct {
     source_file: []const u8,
 };
 
+/// Helper function for regex matching at a specific position
+fn matchRegexAt(string: []const u8, pattern: []const u8, pos: usize, anchored_end: bool) bool {
+    var str_pos = pos;
+    var pat_pos: usize = 0;
+
+    while (pat_pos < pattern.len) {
+        const pat_char = pattern[pat_pos];
+
+        // Check for quantifiers
+        var quantifier: u8 = 0;
+        if (pat_pos + 1 < pattern.len) {
+            const next = pattern[pat_pos + 1];
+            if (next == '*' or next == '+' or next == '?') {
+                quantifier = next;
+            }
+        }
+
+        if (pat_char == '.') {
+            // Match any character
+            if (quantifier != 0) {
+                pat_pos += 2;
+                const min_match: usize = if (quantifier == '+') 1 else 0;
+                var count: usize = 0;
+                // Greedy match
+                while (str_pos < string.len) {
+                    str_pos += 1;
+                    count += 1;
+                }
+                // Backtrack to find match
+                while (count >= min_match) {
+                    if (matchRegexAt(string, pattern[pat_pos..], str_pos, anchored_end)) {
+                        return true;
+                    }
+                    if (count > 0) {
+                        str_pos -= 1;
+                        count -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                return false;
+            } else {
+                if (str_pos >= string.len) return false;
+                str_pos += 1;
+                pat_pos += 1;
+            }
+        } else if (pat_char == '[') {
+            // Character class
+            const class_end = std.mem.indexOfScalarPos(u8, pattern, pat_pos + 1, ']') orelse return false;
+            const class = pattern[pat_pos + 1 .. class_end];
+            const negate = class.len > 0 and class[0] == '^';
+            const actual_class = if (negate) class[1..] else class;
+
+            if (str_pos >= string.len) return false;
+            const ch = string[str_pos];
+            var matches_class = false;
+
+            var i: usize = 0;
+            while (i < actual_class.len) {
+                if (i + 2 < actual_class.len and actual_class[i + 1] == '-') {
+                    // Range
+                    if (ch >= actual_class[i] and ch <= actual_class[i + 2]) {
+                        matches_class = true;
+                        break;
+                    }
+                    i += 3;
+                } else {
+                    if (ch == actual_class[i]) {
+                        matches_class = true;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+
+            if (negate) matches_class = !matches_class;
+            if (!matches_class) return false;
+
+            str_pos += 1;
+            pat_pos = class_end + 1;
+            // Skip quantifier if present
+            if (pat_pos < pattern.len and (pattern[pat_pos] == '*' or pattern[pat_pos] == '+' or pattern[pat_pos] == '?')) {
+                pat_pos += 1;
+            }
+        } else if (pat_char == '\\' and pat_pos + 1 < pattern.len) {
+            // Escaped character
+            pat_pos += 1;
+            const escaped = pattern[pat_pos];
+            if (str_pos >= string.len or string[str_pos] != escaped) return false;
+            str_pos += 1;
+            pat_pos += 1;
+        } else {
+            // Literal character
+            if (quantifier != 0) {
+                pat_pos += 2;
+                const min_match: usize = if (quantifier == '+') 1 else 0;
+                var count: usize = 0;
+                // Match as many as possible
+                while (str_pos < string.len and string[str_pos] == pat_char) {
+                    str_pos += 1;
+                    count += 1;
+                }
+                // Backtrack
+                while (count >= min_match) {
+                    if (matchRegexAt(string, pattern[pat_pos..], str_pos, anchored_end)) {
+                        return true;
+                    }
+                    if (count > 0) {
+                        str_pos -= 1;
+                        count -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                return false;
+            } else {
+                if (str_pos >= string.len or string[str_pos] != pat_char) return false;
+                str_pos += 1;
+                pat_pos += 1;
+            }
+        }
+    }
+
+    // If anchored at end, must have consumed entire string
+    if (anchored_end) {
+        return str_pos == string.len;
+    }
+    return true;
+}
+
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     running: bool,
@@ -1233,7 +1363,7 @@ pub const Shell = struct {
                 try self.builtinRead(cmd);
                 self.last_exit_code = 0;
                 return;
-            } else if (std.mem.eql(u8, cmd.name, "test") or std.mem.eql(u8, cmd.name, "[")) {
+            } else if (std.mem.eql(u8, cmd.name, "test") or std.mem.eql(u8, cmd.name, "[") or std.mem.eql(u8, cmd.name, "[[")) {
                 try self.builtinTest(cmd);
                 if (self.last_exit_code != 0) {
                     self.executeErrTrap();
@@ -1344,6 +1474,24 @@ pub const Shell = struct {
                 return;
             } else if (std.mem.eql(u8, cmd.name, "builtin")) {
                 try self.builtinBuiltin(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "typeset")) {
+                try self.builtinTypeset(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "let")) {
+                try self.builtinLet(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "shopt")) {
+                try self.builtinShopt(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "mapfile") or std.mem.eql(u8, cmd.name, "readarray")) {
+                try self.builtinMapfile(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "caller")) {
+                try self.builtinCaller(cmd);
+                return;
+            } else if (std.mem.eql(u8, cmd.name, "compgen")) {
+                try self.builtinCompgen(cmd);
                 return;
             }
         }
@@ -2744,6 +2892,13 @@ pub const Shell = struct {
                 return;
             }
             args = args[0 .. args.len - 1]; // Remove trailing ]
+        } else if (std.mem.eql(u8, cmd.name, "[[")) {
+            if (args.len == 0 or !std.mem.eql(u8, args[args.len - 1], "]]")) {
+                try IO.eprint("den: [[: missing ]]\n", .{});
+                self.last_exit_code = 2;
+                return;
+            }
+            args = args[0 .. args.len - 1]; // Remove trailing ]]
         }
 
         if (args.len == 0) {
@@ -2853,6 +3008,43 @@ pub const Shell = struct {
                 };
                 self.last_exit_code = if (left_num > right_num) 0 else 1;
                 return;
+            } else if (std.mem.eql(u8, op, "-le")) {
+                // Less than or equal
+                const left_num = std.fmt.parseInt(i32, left, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                const right_num = std.fmt.parseInt(i32, right, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                self.last_exit_code = if (left_num <= right_num) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "-ge")) {
+                // Greater than or equal
+                const left_num = std.fmt.parseInt(i32, left, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                const right_num = std.fmt.parseInt(i32, right, 10) catch {
+                    self.last_exit_code = 2;
+                    return;
+                };
+                self.last_exit_code = if (left_num >= right_num) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "=~")) {
+                // Regex match (using basic pattern matching)
+                const matches = self.matchRegex(left, right);
+                self.last_exit_code = if (matches) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, "<")) {
+                // String less than (lexicographic)
+                self.last_exit_code = if (std.mem.lessThan(u8, left, right)) 0 else 1;
+                return;
+            } else if (std.mem.eql(u8, op, ">")) {
+                // String greater than (lexicographic)
+                self.last_exit_code = if (std.mem.lessThan(u8, right, left)) 0 else 1;
+                return;
             }
         }
 
@@ -2865,6 +3057,41 @@ pub const Shell = struct {
         // Unknown test
         try IO.eprint("den: test: unknown condition\n", .{});
         self.last_exit_code = 2;
+    }
+
+    /// Match string against a regex pattern (basic POSIX ERE)
+    /// Supports: . (any char), * (zero or more), + (one or more), ? (zero or one),
+    /// ^ (start anchor), $ (end anchor), [...] (character class), | (alternation)
+    fn matchRegex(self: *Shell, string: []const u8, pattern: []const u8) bool {
+        _ = self;
+        // Handle anchors
+        var pat = pattern;
+        var str = string;
+        var anchored_start = false;
+        var anchored_end = false;
+
+        if (pat.len > 0 and pat[0] == '^') {
+            anchored_start = true;
+            pat = pat[1..];
+        }
+        if (pat.len > 0 and pat[pat.len - 1] == '$') {
+            anchored_end = true;
+            pat = pat[0 .. pat.len - 1];
+        }
+
+        // If anchored at start, try match from beginning
+        if (anchored_start) {
+            return matchRegexAt(str, pat, 0, anchored_end);
+        }
+
+        // Otherwise try match at each position
+        var i: usize = 0;
+        while (i <= str.len) : (i += 1) {
+            if (matchRegexAt(str, pat, i, anchored_end)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// Builtin: pushd - push directory onto stack and cd
@@ -4236,38 +4463,853 @@ pub const Shell = struct {
         self.last_exit_code = 0;
     }
 
-    /// Builtin: declare - declare variables with attributes
+    /// Builtin: declare/typeset - declare variables with attributes
+    /// Flags: -a (array), -A (assoc), -i (integer), -l (lowercase), -u (uppercase),
+    ///        -r (readonly), -x (export), -n (nameref), -p (print), -f (functions)
     fn builtinDeclare(self: *Shell, cmd: *types.ParsedCommand) !void {
-        // For now, treat like local
-        try self.builtinLocal(cmd);
+        var attrs = types.VarAttributes{};
+        var print_mode = false;
+        var function_mode = false;
+        var remove_attrs = false;
+        var arg_start: usize = 0;
+
+        // Parse flags
+        while (arg_start < cmd.args.len) {
+            const arg = cmd.args[arg_start];
+            if (arg.len > 0 and arg[0] == '-') {
+                arg_start += 1;
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'a' => attrs.indexed_array = true,
+                        'A' => attrs.assoc_array = true,
+                        'i' => attrs.integer = true,
+                        'l' => attrs.lowercase = true,
+                        'u' => attrs.uppercase = true,
+                        'r' => attrs.readonly = true,
+                        'x' => attrs.exported = true,
+                        'n' => attrs.nameref = true,
+                        'p' => print_mode = true,
+                        'f' => function_mode = true,
+                        else => {},
+                    }
+                }
+            } else if (arg.len > 0 and arg[0] == '+') {
+                // +attr removes the attribute
+                arg_start += 1;
+                remove_attrs = true;
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'a' => attrs.indexed_array = true,
+                        'A' => attrs.assoc_array = true,
+                        'i' => attrs.integer = true,
+                        'l' => attrs.lowercase = true,
+                        'u' => attrs.uppercase = true,
+                        'r' => attrs.readonly = true,
+                        'x' => attrs.exported = true,
+                        'n' => attrs.nameref = true,
+                        else => {},
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Print mode: show variables with their attributes
+        if (print_mode and arg_start >= cmd.args.len) {
+            // Print all variables with attributes
+            var it = self.var_attributes.iterator();
+            while (it.next()) |entry| {
+                try self.printDeclare(entry.key_ptr.*, entry.value_ptr.*);
+            }
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Function mode: show functions
+        if (function_mode and arg_start >= cmd.args.len) {
+            var it = self.function_manager.functions.iterator();
+            while (it.next()) |entry| {
+                try IO.print("{s} ()\n{{\n", .{entry.key_ptr.*});
+                for (entry.value_ptr.*.body) |line| {
+                    try IO.print("    {s}\n", .{line});
+                }
+                try IO.print("}}\n", .{});
+            }
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // No arguments after flags - just declare with attributes
+        if (arg_start >= cmd.args.len) {
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Process variable declarations
+        for (cmd.args[arg_start..]) |arg| {
+            // Parse name[=value] or name[key]=value for assoc arrays
+            var var_name: []const u8 = undefined;
+            var var_value: ?[]const u8 = null;
+            var assoc_key: ?[]const u8 = null;
+
+            if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
+                const name_part = arg[0..eq_pos];
+                var_value = arg[eq_pos + 1 ..];
+
+                // Check for array subscript: name[key]
+                if (std.mem.indexOfScalar(u8, name_part, '[')) |bracket_pos| {
+                    if (std.mem.indexOfScalar(u8, name_part, ']')) |close_pos| {
+                        if (close_pos > bracket_pos) {
+                            var_name = name_part[0..bracket_pos];
+                            assoc_key = name_part[bracket_pos + 1 .. close_pos];
+                        } else {
+                            var_name = name_part;
+                        }
+                    } else {
+                        var_name = name_part;
+                    }
+                } else {
+                    var_name = name_part;
+                }
+            } else {
+                var_name = arg;
+            }
+
+            // Check if readonly
+            if (self.var_attributes.get(var_name)) |existing| {
+                if (existing.readonly and !remove_attrs) {
+                    try IO.eprint("den: {s}: readonly variable\n", .{var_name});
+                    self.last_exit_code = 1;
+                    continue;
+                }
+            }
+
+            // Handle associative array assignment
+            if (attrs.assoc_array or assoc_key != null) {
+                const gop = try self.assoc_arrays.getOrPut(var_name);
+                if (!gop.found_existing) {
+                    const key = try self.allocator.dupe(u8, var_name);
+                    gop.key_ptr.* = key;
+                    gop.value_ptr.* = std.StringHashMap([]const u8).init(self.allocator);
+                }
+
+                if (assoc_key) |key| {
+                    if (var_value) |value| {
+                        const dup_key = try self.allocator.dupe(u8, key);
+                        const dup_value = try self.allocator.dupe(u8, value);
+                        const inner_gop = try gop.value_ptr.getOrPut(dup_key);
+                        if (inner_gop.found_existing) {
+                            self.allocator.free(inner_gop.key_ptr.*);
+                            self.allocator.free(inner_gop.value_ptr.*);
+                        }
+                        inner_gop.key_ptr.* = dup_key;
+                        inner_gop.value_ptr.* = dup_value;
+                    }
+                }
+
+                // Store attributes
+                try self.setVarAttributes(var_name, attrs, remove_attrs);
+            } else if (attrs.indexed_array) {
+                // Handle indexed array
+                const gop = try self.arrays.getOrPut(var_name);
+                if (!gop.found_existing) {
+                    const key = try self.allocator.dupe(u8, var_name);
+                    gop.key_ptr.* = key;
+                    gop.value_ptr.* = &[_][]const u8{};
+                }
+                try self.setVarAttributes(var_name, attrs, remove_attrs);
+            } else {
+                // Regular variable
+                if (var_value) |value| {
+                    var final_value = value;
+
+                    // Apply integer attribute
+                    if (attrs.integer) {
+                        // Evaluate as arithmetic expression
+                        const arithmetic = @import("utils/arithmetic.zig");
+                        var arith = arithmetic.Arithmetic.initWithVariables(self.allocator, &self.environment);
+                        const result = arith.eval(value) catch 0;
+                        var buf: [32]u8 = undefined;
+                        const num_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                        final_value = num_str;
+                    }
+
+                    // Apply case conversion
+                    if (attrs.lowercase) {
+                        const lower = try self.allocator.alloc(u8, final_value.len);
+                        for (final_value, 0..) |c, i| {
+                            lower[i] = std.ascii.toLower(c);
+                        }
+                        final_value = lower;
+                    } else if (attrs.uppercase) {
+                        const upper = try self.allocator.alloc(u8, final_value.len);
+                        for (final_value, 0..) |c, i| {
+                            upper[i] = std.ascii.toUpper(c);
+                        }
+                        final_value = upper;
+                    }
+
+                    // Set the variable
+                    const dup_value = try self.allocator.dupe(u8, final_value);
+                    const gop = try self.environment.getOrPut(var_name);
+                    if (gop.found_existing) {
+                        self.allocator.free(gop.value_ptr.*);
+                        gop.value_ptr.* = dup_value;
+                    } else {
+                        const key = try self.allocator.dupe(u8, var_name);
+                        gop.key_ptr.* = key;
+                        gop.value_ptr.* = dup_value;
+                    }
+
+                    // Export if -x
+                    if (attrs.exported) {
+                        // Variable is already in environment, which is exported
+                    }
+                }
+
+                try self.setVarAttributes(var_name, attrs, remove_attrs);
+            }
+        }
+
+        self.last_exit_code = 0;
+    }
+
+    /// Helper to print declare output
+    fn printDeclare(self: *Shell, name: []const u8, attrs: types.VarAttributes) !void {
+        _ = self;
+        var flags_buf: [16]u8 = undefined;
+        var flags_len: usize = 0;
+
+        if (attrs.readonly) {
+            flags_buf[flags_len] = 'r';
+            flags_len += 1;
+        }
+        if (attrs.integer) {
+            flags_buf[flags_len] = 'i';
+            flags_len += 1;
+        }
+        if (attrs.exported) {
+            flags_buf[flags_len] = 'x';
+            flags_len += 1;
+        }
+        if (attrs.lowercase) {
+            flags_buf[flags_len] = 'l';
+            flags_len += 1;
+        }
+        if (attrs.uppercase) {
+            flags_buf[flags_len] = 'u';
+            flags_len += 1;
+        }
+        if (attrs.nameref) {
+            flags_buf[flags_len] = 'n';
+            flags_len += 1;
+        }
+        if (attrs.indexed_array) {
+            flags_buf[flags_len] = 'a';
+            flags_len += 1;
+        }
+        if (attrs.assoc_array) {
+            flags_buf[flags_len] = 'A';
+            flags_len += 1;
+        }
+
+        if (flags_len > 0) {
+            try IO.print("declare -{s} {s}\n", .{ flags_buf[0..flags_len], name });
+        } else {
+            try IO.print("declare -- {s}\n", .{name});
+        }
+    }
+
+    /// Helper to set variable attributes
+    fn setVarAttributes(self: *Shell, name: []const u8, attrs: types.VarAttributes, remove: bool) !void {
+        const gop = try self.var_attributes.getOrPut(name);
+        if (!gop.found_existing) {
+            const key = try self.allocator.dupe(u8, name);
+            gop.key_ptr.* = key;
+            gop.value_ptr.* = types.VarAttributes{};
+        }
+
+        if (remove) {
+            // Remove specified attributes
+            if (attrs.readonly) gop.value_ptr.*.readonly = false;
+            if (attrs.integer) gop.value_ptr.*.integer = false;
+            if (attrs.exported) gop.value_ptr.*.exported = false;
+            if (attrs.lowercase) gop.value_ptr.*.lowercase = false;
+            if (attrs.uppercase) gop.value_ptr.*.uppercase = false;
+            if (attrs.nameref) gop.value_ptr.*.nameref = false;
+            if (attrs.indexed_array) gop.value_ptr.*.indexed_array = false;
+            if (attrs.assoc_array) gop.value_ptr.*.assoc_array = false;
+        } else {
+            // Add specified attributes
+            if (attrs.readonly) gop.value_ptr.*.readonly = true;
+            if (attrs.integer) gop.value_ptr.*.integer = true;
+            if (attrs.exported) gop.value_ptr.*.exported = true;
+            if (attrs.lowercase) gop.value_ptr.*.lowercase = true;
+            if (attrs.uppercase) gop.value_ptr.*.uppercase = true;
+            if (attrs.nameref) gop.value_ptr.*.nameref = true;
+            if (attrs.indexed_array) gop.value_ptr.*.indexed_array = true;
+            if (attrs.assoc_array) gop.value_ptr.*.assoc_array = true;
+        }
     }
 
     /// Builtin: readonly - declare readonly variables
     fn builtinReadonly(self: *Shell, cmd: *types.ParsedCommand) !void {
         if (cmd.args.len == 0) {
-            try IO.print("den: readonly: not yet fully implemented\n", .{});
+            // Print all readonly variables
+            var it = self.var_attributes.iterator();
+            while (it.next()) |entry| {
+                if (entry.value_ptr.*.readonly) {
+                    if (self.environment.get(entry.key_ptr.*)) |value| {
+                        try IO.print("declare -r {s}=\"{s}\"\n", .{ entry.key_ptr.*, value });
+                    } else {
+                        try IO.print("declare -r {s}\n", .{entry.key_ptr.*});
+                    }
+                }
+            }
             self.last_exit_code = 0;
             return;
         }
 
-        // For now, just set variables (full impl would mark as readonly)
+        // Set variables as readonly
         for (cmd.args) |arg| {
-            if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
-                const var_name = arg[0..eq_pos];
-                const var_value = arg[eq_pos + 1 ..];
+            var var_name: []const u8 = undefined;
+            var var_value: ?[]const u8 = null;
 
-                const value = try self.allocator.dupe(u8, var_value);
+            if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
+                var_name = arg[0..eq_pos];
+                var_value = arg[eq_pos + 1 ..];
+            } else {
+                var_name = arg;
+            }
+
+            // Check if already readonly
+            if (self.var_attributes.get(var_name)) |existing| {
+                if (existing.readonly) {
+                    try IO.eprint("den: {s}: readonly variable\n", .{var_name});
+                    self.last_exit_code = 1;
+                    continue;
+                }
+            }
+
+            // Set value if provided
+            if (var_value) |value| {
+                const dup_value = try self.allocator.dupe(u8, value);
                 const gop = try self.environment.getOrPut(var_name);
                 if (gop.found_existing) {
                     self.allocator.free(gop.value_ptr.*);
-                    gop.value_ptr.* = value;
+                    gop.value_ptr.* = dup_value;
                 } else {
                     const key = try self.allocator.dupe(u8, var_name);
                     gop.key_ptr.* = key;
-                    gop.value_ptr.* = value;
+                    gop.value_ptr.* = dup_value;
+                }
+            }
+
+            // Mark as readonly
+            const gop = try self.var_attributes.getOrPut(var_name);
+            if (!gop.found_existing) {
+                const key = try self.allocator.dupe(u8, var_name);
+                gop.key_ptr.* = key;
+                gop.value_ptr.* = types.VarAttributes{};
+            }
+            gop.value_ptr.*.readonly = true;
+        }
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: typeset - alias for declare (bash compatibility)
+    fn builtinTypeset(self: *Shell, cmd: *types.ParsedCommand) !void {
+        try self.builtinDeclare(cmd);
+    }
+
+    /// Builtin: let - evaluate arithmetic expressions
+    fn builtinLet(self: *Shell, cmd: *types.ParsedCommand) !void {
+        if (cmd.args.len == 0) {
+            try IO.eprint("den: let: usage: let expression [expression ...]\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const arithmetic = @import("utils/arithmetic.zig");
+        var arith = arithmetic.Arithmetic.initWithVariables(self.allocator, &self.environment);
+        var last_result: i64 = 0;
+
+        for (cmd.args) |arg| {
+            // Handle assignment: var=expr or var+=expr etc
+            if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
+                // Check for compound assignment operators
+                var op_start = eq_pos;
+                var compound_op: ?u8 = null;
+                if (eq_pos > 0) {
+                    const before = arg[eq_pos - 1];
+                    if (before == '+' or before == '-' or before == '*' or before == '/' or before == '%') {
+                        compound_op = before;
+                        op_start = eq_pos - 1;
+                    }
+                }
+
+                const var_name = arg[0..op_start];
+                const expr = arg[eq_pos + 1 ..];
+
+                // Evaluate expression
+                var result = arith.eval(expr) catch |err| {
+                    try IO.eprint("den: let: {s}: arithmetic error: {}\n", .{ expr, err });
+                    self.last_exit_code = 1;
+                    return;
+                };
+
+                // Apply compound operator
+                if (compound_op) |op| {
+                    const current_val: i64 = blk: {
+                        if (self.environment.get(var_name)) |val| {
+                            break :blk std.fmt.parseInt(i64, val, 10) catch 0;
+                        }
+                        break :blk 0;
+                    };
+                    result = switch (op) {
+                        '+' => current_val + result,
+                        '-' => current_val - result,
+                        '*' => current_val * result,
+                        '/' => if (result != 0) @divTrunc(current_val, result) else 0,
+                        '%' => if (result != 0) @mod(current_val, result) else 0,
+                        else => result,
+                    };
+                }
+
+                // Store result
+                var buf: [32]u8 = undefined;
+                const result_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                const dup_value = try self.allocator.dupe(u8, result_str);
+                const gop = try self.environment.getOrPut(var_name);
+                if (gop.found_existing) {
+                    self.allocator.free(gop.value_ptr.*);
+                    gop.value_ptr.* = dup_value;
+                } else {
+                    const key = try self.allocator.dupe(u8, var_name);
+                    gop.key_ptr.* = key;
+                    gop.value_ptr.* = dup_value;
+                }
+                last_result = result;
+            } else {
+                // Just evaluate expression
+                last_result = arith.eval(arg) catch |err| {
+                    try IO.eprint("den: let: {s}: arithmetic error: {}\n", .{ arg, err });
+                    self.last_exit_code = 1;
+                    return;
+                };
+            }
+        }
+
+        // Return 1 if last result is 0, else 0 (bash behavior)
+        self.last_exit_code = if (last_result == 0) 1 else 0;
+    }
+
+    /// Builtin: shopt - shell options
+    fn builtinShopt(self: *Shell, cmd: *types.ParsedCommand) !void {
+        var set_mode = false; // -s: set
+        var unset_mode = false; // -u: unset
+        var quiet_mode = false; // -q: quiet (just return status)
+        var print_mode = false; // -p: print in reusable form
+        var arg_start: usize = 0;
+
+        // Parse flags
+        while (arg_start < cmd.args.len) {
+            const arg = cmd.args[arg_start];
+            if (arg.len > 0 and arg[0] == '-') {
+                arg_start += 1;
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        's' => set_mode = true,
+                        'u' => unset_mode = true,
+                        'q' => quiet_mode = true,
+                        'p' => print_mode = true,
+                        else => {},
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Option definitions
+        const ShoptOption = struct {
+            name: []const u8,
+            ptr: *bool,
+        };
+        var options = [_]ShoptOption{
+            .{ .name = "extglob", .ptr = &self.shopt_extglob },
+            .{ .name = "nullglob", .ptr = &self.shopt_nullglob },
+            .{ .name = "dotglob", .ptr = &self.shopt_dotglob },
+            .{ .name = "nocaseglob", .ptr = &self.shopt_nocaseglob },
+            .{ .name = "globstar", .ptr = &self.shopt_globstar },
+            .{ .name = "failglob", .ptr = &self.shopt_failglob },
+            .{ .name = "expand_aliases", .ptr = &self.shopt_expand_aliases },
+            .{ .name = "sourcepath", .ptr = &self.shopt_sourcepath },
+            .{ .name = "checkwinsize", .ptr = &self.shopt_checkwinsize },
+            .{ .name = "histappend", .ptr = &self.shopt_histappend },
+            .{ .name = "cmdhist", .ptr = &self.shopt_cmdhist },
+            .{ .name = "autocd", .ptr = &self.shopt_autocd },
+        };
+
+        // No arguments - print all or specified options
+        if (arg_start >= cmd.args.len) {
+            for (&options) |*opt| {
+                if (!quiet_mode) {
+                    if (print_mode) {
+                        try IO.print("shopt {s} {s}\n", .{ if (opt.ptr.*) "-s" else "-u", opt.name });
+                    } else {
+                        try IO.print("{s}\t{s}\n", .{ opt.name, if (opt.ptr.*) "on" else "off" });
+                    }
+                }
+            }
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Process specified options
+        var all_found = true;
+        for (cmd.args[arg_start..]) |opt_name| {
+            var found = false;
+            for (&options) |*opt| {
+                if (std.mem.eql(u8, opt_name, opt.name)) {
+                    found = true;
+                    if (set_mode) {
+                        opt.ptr.* = true;
+                    } else if (unset_mode) {
+                        opt.ptr.* = false;
+                    } else if (!quiet_mode) {
+                        if (print_mode) {
+                            try IO.print("shopt {s} {s}\n", .{ if (opt.ptr.*) "-s" else "-u", opt.name });
+                        } else {
+                            try IO.print("{s}\t{s}\n", .{ opt.name, if (opt.ptr.*) "on" else "off" });
+                        }
+                    }
+                    break;
+                }
+            }
+            if (!found) {
+                if (!quiet_mode) {
+                    try IO.eprint("den: shopt: {s}: invalid shell option name\n", .{opt_name});
+                }
+                all_found = false;
+            }
+        }
+
+        self.last_exit_code = if (all_found) 0 else 1;
+    }
+
+    /// Builtin: mapfile/readarray - read lines into array
+    fn builtinMapfile(self: *Shell, cmd: *types.ParsedCommand) !void {
+        var delimiter: u8 = '\n';
+        var count: ?usize = null; // -n count: read at most count lines
+        var origin: usize = 0; // -O origin: begin at index origin
+        var skip: usize = 0; // -s count: skip first count lines
+        var remove_delimiter = true; // -t: remove delimiter (default)
+        var callback: ?[]const u8 = null; // -C callback: eval callback
+        var callback_quantum: usize = 5000; // -c quantum: callback every quantum lines
+        var array_name: []const u8 = "MAPFILE";
+        var arg_start: usize = 0;
+
+        // Parse flags
+        while (arg_start < cmd.args.len) {
+            const arg = cmd.args[arg_start];
+            if (arg.len >= 2 and arg[0] == '-') {
+                arg_start += 1;
+                switch (arg[1]) {
+                    'd' => {
+                        if (arg.len > 2) {
+                            delimiter = arg[2];
+                        } else if (arg_start < cmd.args.len) {
+                            const delim_arg = cmd.args[arg_start];
+                            arg_start += 1;
+                            if (delim_arg.len > 0) delimiter = delim_arg[0];
+                        }
+                    },
+                    'n' => {
+                        if (arg.len > 2) {
+                            count = std.fmt.parseInt(usize, arg[2..], 10) catch null;
+                        } else if (arg_start < cmd.args.len) {
+                            count = std.fmt.parseInt(usize, cmd.args[arg_start], 10) catch null;
+                            arg_start += 1;
+                        }
+                    },
+                    'O' => {
+                        if (arg.len > 2) {
+                            origin = std.fmt.parseInt(usize, arg[2..], 10) catch 0;
+                        } else if (arg_start < cmd.args.len) {
+                            origin = std.fmt.parseInt(usize, cmd.args[arg_start], 10) catch 0;
+                            arg_start += 1;
+                        }
+                    },
+                    's' => {
+                        if (arg.len > 2) {
+                            skip = std.fmt.parseInt(usize, arg[2..], 10) catch 0;
+                        } else if (arg_start < cmd.args.len) {
+                            skip = std.fmt.parseInt(usize, cmd.args[arg_start], 10) catch 0;
+                            arg_start += 1;
+                        }
+                    },
+                    't' => remove_delimiter = true,
+                    'C' => {
+                        if (arg_start < cmd.args.len) {
+                            callback = cmd.args[arg_start];
+                            arg_start += 1;
+                        }
+                    },
+                    'c' => {
+                        if (arg.len > 2) {
+                            callback_quantum = std.fmt.parseInt(usize, arg[2..], 10) catch 5000;
+                        } else if (arg_start < cmd.args.len) {
+                            callback_quantum = std.fmt.parseInt(usize, cmd.args[arg_start], 10) catch 5000;
+                            arg_start += 1;
+                        }
+                    },
+                    else => {},
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Get array name if provided
+        if (arg_start < cmd.args.len) {
+            array_name = cmd.args[arg_start];
+        }
+
+        // Read from stdin
+        var lines = std.ArrayList([]const u8).empty;
+        defer {
+            for (lines.items) |line| {
+                self.allocator.free(line);
+            }
+            lines.deinit(self.allocator);
+        }
+
+        var line_count: usize = 0;
+        var skipped: usize = 0;
+        // Note: delimiter parameter is parsed but we use newline for now
+        const actual_delim = if (delimiter == '\n') delimiter else '\n';
+        _ = actual_delim;
+
+        // Read lines from stdin
+        while (true) {
+            const line = IO.readLine(self.allocator) catch break;
+            if (line == null) break;
+            defer self.allocator.free(line.?);
+
+            if (skipped < skip) {
+                skipped += 1;
+                continue;
+            }
+
+            if (count) |max_count| {
+                if (line_count >= max_count) break;
+            }
+
+            const line_copy = if (remove_delimiter)
+                try self.allocator.dupe(u8, line.?)
+            else blk: {
+                const with_delim = try self.allocator.alloc(u8, line.?.len + 1);
+                @memcpy(with_delim[0..line.?.len], line.?);
+                with_delim[line.?.len] = '\n';
+                break :blk with_delim;
+            };
+            try lines.append(self.allocator, line_copy);
+            line_count += 1;
+
+            // Execute callback if specified
+            if (callback) |cb| {
+                if (line_count % callback_quantum == 0) {
+                    _ = cb;
+                    // Would execute callback here
                 }
             }
         }
+
+        // Store in array
+        const array_slice = try self.allocator.alloc([]const u8, origin + lines.items.len);
+        // Initialize with empty strings for indices before origin
+        for (0..origin) |i| {
+            array_slice[i] = try self.allocator.dupe(u8, "");
+        }
+        for (lines.items, 0..) |line, i| {
+            array_slice[origin + i] = try self.allocator.dupe(u8, line);
+        }
+
+        const gop = try self.arrays.getOrPut(array_name);
+        if (gop.found_existing) {
+            // Free old array
+            for (gop.value_ptr.*) |item| {
+                self.allocator.free(item);
+            }
+            self.allocator.free(gop.value_ptr.*);
+        } else {
+            const key = try self.allocator.dupe(u8, array_name);
+            gop.key_ptr.* = key;
+        }
+        gop.value_ptr.* = array_slice;
+
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: caller - display call stack
+    fn builtinCaller(self: *Shell, cmd: *types.ParsedCommand) !void {
+        var expr_depth: usize = 0;
+
+        if (cmd.args.len > 0) {
+            expr_depth = std.fmt.parseInt(usize, cmd.args[0], 10) catch 0;
+        }
+
+        if (expr_depth >= self.call_stack_depth) {
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const frame = self.call_stack[self.call_stack_depth - 1 - expr_depth];
+        try IO.print("{d} {s} {s}\n", .{ frame.line_number, frame.function_name, frame.source_file });
+        self.last_exit_code = 0;
+    }
+
+    /// Builtin: compgen - generate completions
+    fn builtinCompgen(self: *Shell, cmd: *types.ParsedCommand) !void {
+        var action: enum { none, command, file, directory, builtin, keyword, alias, function, variable } = .none;
+        var prefix: []const u8 = "";
+        var arg_start: usize = 0;
+
+        // Parse flags
+        while (arg_start < cmd.args.len) {
+            const arg = cmd.args[arg_start];
+            if (arg.len >= 2 and arg[0] == '-') {
+                arg_start += 1;
+                switch (arg[1]) {
+                    'c' => action = .command,
+                    'f' => action = .file,
+                    'd' => action = .directory,
+                    'b' => action = .builtin,
+                    'k' => action = .keyword,
+                    'a' => action = .alias,
+                    'A' => {
+                        // -A action_name
+                        if (arg_start < cmd.args.len) {
+                            const action_name = cmd.args[arg_start];
+                            arg_start += 1;
+                            if (std.mem.eql(u8, action_name, "command")) {
+                                action = .command;
+                            } else if (std.mem.eql(u8, action_name, "file")) {
+                                action = .file;
+                            } else if (std.mem.eql(u8, action_name, "directory")) {
+                                action = .directory;
+                            } else if (std.mem.eql(u8, action_name, "builtin")) {
+                                action = .builtin;
+                            } else if (std.mem.eql(u8, action_name, "alias")) {
+                                action = .alias;
+                            } else if (std.mem.eql(u8, action_name, "function")) {
+                                action = .function;
+                            } else if (std.mem.eql(u8, action_name, "variable")) {
+                                action = .variable;
+                            }
+                        }
+                    },
+                    'v' => action = .variable,
+                    else => {},
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Get prefix
+        if (arg_start < cmd.args.len) {
+            prefix = cmd.args[arg_start];
+        }
+
+        // Generate completions based on action
+        switch (action) {
+            .alias => {
+                var it = self.aliases.iterator();
+                while (it.next()) |entry| {
+                    if (prefix.len == 0 or std.mem.startsWith(u8, entry.key_ptr.*, prefix)) {
+                        try IO.print("{s}\n", .{entry.key_ptr.*});
+                    }
+                }
+            },
+            .variable => {
+                var it = self.environment.iterator();
+                while (it.next()) |entry| {
+                    if (prefix.len == 0 or std.mem.startsWith(u8, entry.key_ptr.*, prefix)) {
+                        try IO.print("{s}\n", .{entry.key_ptr.*});
+                    }
+                }
+            },
+            .function => {
+                var it = self.function_manager.functions.iterator();
+                while (it.next()) |entry| {
+                    if (prefix.len == 0 or std.mem.startsWith(u8, entry.key_ptr.*, prefix)) {
+                        try IO.print("{s}\n", .{entry.key_ptr.*});
+                    }
+                }
+            },
+            .builtin => {
+                const builtins_list = [_][]const u8{
+                    "cd", "pwd", "echo", "exit", "export", "set", "unset",
+                    "alias", "unalias", "history", "type", "which", "source",
+                    "read", "test", "pushd", "popd", "dirs", "printf", "true",
+                    "false", "help", "eval", "shift", "time", "umask", "clear",
+                    "hash", "return", "break", "continue", "local", "declare",
+                    "typeset", "readonly", "let", "shopt", "mapfile", "readarray",
+                    "caller", "compgen", "complete", "exec", "wait", "kill",
+                    "disown", "getopts", "times", "builtin", "jobs", "fg", "bg",
+                };
+                for (builtins_list) |b| {
+                    if (prefix.len == 0 or std.mem.startsWith(u8, b, prefix)) {
+                        try IO.print("{s}\n", .{b});
+                    }
+                }
+            },
+            .file => {
+                // Use completion system
+                var completion = Completion.init(self.allocator);
+                const matches = try completion.completeFile(prefix);
+                defer {
+                    for (matches) |match| {
+                        self.allocator.free(match);
+                    }
+                    self.allocator.free(matches);
+                }
+                for (matches) |match| {
+                    try IO.print("{s}\n", .{match});
+                }
+            },
+            .directory => {
+                var completion = Completion.init(self.allocator);
+                const matches = try completion.completeDirectory(prefix);
+                defer {
+                    for (matches) |match| {
+                        self.allocator.free(match);
+                    }
+                    self.allocator.free(matches);
+                }
+                for (matches) |match| {
+                    try IO.print("{s}\n", .{match});
+                }
+            },
+            .command => {
+                var completion = Completion.init(self.allocator);
+                const matches = try completion.completeCommand(prefix);
+                defer {
+                    for (matches) |match| {
+                        self.allocator.free(match);
+                    }
+                    self.allocator.free(matches);
+                }
+                for (matches) |match| {
+                    try IO.print("{s}\n", .{match});
+                }
+            },
+            else => {},
+        }
+
         self.last_exit_code = 0;
     }
 
