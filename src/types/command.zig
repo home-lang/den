@@ -27,6 +27,7 @@ pub const Redirection = struct {
         output_truncate, // >
         output_append, // >>
         input, // <
+        input_output, // <>
         heredoc, // <<
         herestring, // <<<
         fd_duplicate, // >&, <&

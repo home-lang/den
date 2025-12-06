@@ -37,6 +37,114 @@ const PROCESS_TERMINATE: u32 = 0x0001;
 // File type filter for ifind
 const FileTypeFilter = enum { all, files, dirs };
 
+/// Open a /dev/tcp/host/port or /dev/udp/host/port virtual path as a socket
+/// Returns the socket fd on success, null if path is not a /dev/tcp or /dev/udp path
+fn openDevNet(path: []const u8) ?std.posix.socket_t {
+    // Debug: print path to see what we're receiving
+    IO.eprint("DEBUG openDevNet: path='{s}' len={}\n", .{ path, path.len }) catch {};
+
+    const is_tcp = std.mem.startsWith(u8, path, "/dev/tcp/");
+    const is_udp = std.mem.startsWith(u8, path, "/dev/udp/");
+
+    if (!is_tcp and !is_udp) {
+        IO.eprint("DEBUG: not tcp/udp path\n", .{}) catch {};
+        return null;
+    }
+
+    IO.eprint("DEBUG: is_tcp={} is_udp={}\n", .{ is_tcp, is_udp }) catch {};
+
+    // Parse host/port from path
+    const prefix_len: usize = if (is_tcp) 9 else 9; // "/dev/tcp/" or "/dev/udp/"
+    const rest = path[prefix_len..];
+
+    IO.eprint("DEBUG: rest='{s}'\n", .{rest}) catch {};
+
+    // Find port separator (last /)
+    const port_sep = std.mem.lastIndexOf(u8, rest, "/") orelse {
+        IO.eprint("DEBUG: no port separator found\n", .{}) catch {};
+        return null;
+    };
+    if (port_sep == 0 or port_sep >= rest.len - 1) {
+        IO.eprint("DEBUG: invalid port_sep={}\n", .{port_sep}) catch {};
+        return null;
+    }
+
+    const host = rest[0..port_sep];
+    const port_str = rest[port_sep + 1 ..];
+
+    IO.eprint("DEBUG: host='{s}' port_str='{s}'\n", .{ host, port_str }) catch {};
+
+    // Parse port
+    const port = std.fmt.parseInt(u16, port_str, 10) catch {
+        IO.eprint("DEBUG: invalid port\n", .{}) catch {};
+        return null;
+    };
+
+    IO.eprint("DEBUG: port={}\n", .{port}) catch {};
+
+    // Parse IPv4 address bytes directly
+    var ip_bytes: [4]u8 = undefined;
+    var byte_idx: usize = 0;
+    var num: u16 = 0;
+
+    for (host) |c| {
+        if (c == '.') {
+            if (byte_idx >= 4 or num > 255) {
+                IO.eprint("DEBUG: invalid IP octet\n", .{}) catch {};
+                return null;
+            }
+            ip_bytes[byte_idx] = @intCast(num);
+            byte_idx += 1;
+            num = 0;
+        } else if (c >= '0' and c <= '9') {
+            num = num * 10 + (c - '0');
+            if (num > 255) {
+                IO.eprint("DEBUG: octet overflow\n", .{}) catch {};
+                return null;
+            }
+        } else {
+            IO.eprint("DEBUG: invalid char in IP: {}\n", .{c}) catch {};
+            return null; // Invalid character
+        }
+    }
+    if (byte_idx != 3 or num > 255) {
+        IO.eprint("DEBUG: invalid byte_idx={} num={}\n", .{ byte_idx, num }) catch {};
+        return null;
+    }
+    ip_bytes[byte_idx] = @intCast(num);
+
+    IO.eprint("DEBUG: ip_bytes={}.{}.{}.{}\n", .{ ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3] }) catch {};
+
+    // Create socket (TCP or UDP) using libc directly
+    const sock_type: c_uint = if (is_tcp) std.c.SOCK.STREAM else std.c.SOCK.DGRAM;
+    const sock = std.c.socket(std.c.AF.INET, sock_type, 0);
+    if (sock < 0) {
+        IO.eprint("DEBUG: socket() failed\n", .{}) catch {};
+        return null;
+    }
+
+    IO.eprint("DEBUG: socket created: {}\n", .{sock}) catch {};
+
+    // Build sockaddr manually with correct types for Darwin
+    var addr: std.c.sockaddr.in = std.mem.zeroes(std.c.sockaddr.in);
+    addr.len = @sizeOf(std.c.sockaddr.in);
+    addr.family = std.c.AF.INET;
+    addr.port = std.mem.nativeToBig(u16, port);
+    addr.addr = @bitCast(ip_bytes);
+
+    // Connect using libc directly (to avoid panic on certain errors)
+    const result = std.c.connect(sock, @ptrCast(&addr), @sizeOf(std.c.sockaddr.in));
+    if (result < 0) {
+        const errno = std.c._errno().*;
+        IO.eprint("DEBUG: connect() failed with errno={}\n", .{errno}) catch {};
+        _ = std.c.close(sock);
+        return null;
+    }
+
+    IO.eprint("DEBUG: connected successfully!\n", .{}) catch {};
+    return sock;
+}
+
 pub const Executor = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
@@ -268,6 +376,17 @@ pub const Executor = struct {
                         children_buffer[i].stdin_behavior = .Ignore;
                         children_buffer[i].stdin = file;
                     },
+                    .input_output => {
+                        const file = try std.fs.cwd().openFile(redir.target, .{ .mode = .read_write });
+                        // For <> the fd defaults to 0 (stdin) but can be specified
+                        if (redir.fd == 0) {
+                            children_buffer[i].stdin_behavior = .Ignore;
+                            children_buffer[i].stdin = file;
+                        } else if (redir.fd == 1) {
+                            children_buffer[i].stdout_behavior = .Ignore;
+                            children_buffer[i].stdout = file;
+                        }
+                    },
                     .fd_duplicate => {
                         // Handle 2>&1 (stderr to stdout)
                         if (redir.fd == 2 and std.mem.eql(u8, redir.target, "1")) {
@@ -433,55 +552,96 @@ pub const Executor = struct {
         for (redirections) |redir| {
             switch (redir.kind) {
                 .output_truncate => {
-                    // Open file for writing, truncate if exists
-                    const path_z = try self.allocator.dupeZ(u8, redir.target);
-                    defer self.allocator.free(path_z);
+                    // Check for /dev/tcp or /dev/udp virtual path
+                    if (openDevNet(redir.target)) |sock| {
+                        try std.posix.dup2(sock, @intCast(redir.fd));
+                        std.posix.close(sock);
+                    } else {
+                        // Open file for writing, truncate if exists
+                        const path_z = try self.allocator.dupeZ(u8, redir.target);
+                        defer self.allocator.free(path_z);
 
-                    const fd = std.posix.open(
-                        path_z,
-                        .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true },
-                        0o644,
-                    ) catch |err| {
-                        try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-                        std.posix.exit(1);
-                    };
+                        const fd = std.posix.open(
+                            path_z,
+                            .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true },
+                            0o644,
+                        ) catch |err| {
+                            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
+                            std.posix.exit(1);
+                        };
 
-                    try std.posix.dup2(fd, @intCast(redir.fd));
-                    std.posix.close(fd);
+                        try std.posix.dup2(fd, @intCast(redir.fd));
+                        std.posix.close(fd);
+                    }
                 },
                 .output_append => {
-                    // Open file for appending
-                    const path_z = try self.allocator.dupeZ(u8, redir.target);
-                    defer self.allocator.free(path_z);
+                    // Check for /dev/tcp or /dev/udp virtual path
+                    if (openDevNet(redir.target)) |sock| {
+                        try std.posix.dup2(sock, @intCast(redir.fd));
+                        std.posix.close(sock);
+                    } else {
+                        // Open file for appending
+                        const path_z = try self.allocator.dupeZ(u8, redir.target);
+                        defer self.allocator.free(path_z);
 
-                    const fd = std.posix.open(
-                        path_z,
-                        .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true },
-                        0o644,
-                    ) catch |err| {
-                        try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-                        std.posix.exit(1);
-                    };
+                        const fd = std.posix.open(
+                            path_z,
+                            .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true },
+                            0o644,
+                        ) catch |err| {
+                            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
+                            std.posix.exit(1);
+                        };
 
-                    try std.posix.dup2(fd, @intCast(redir.fd));
-                    std.posix.close(fd);
+                        try std.posix.dup2(fd, @intCast(redir.fd));
+                        std.posix.close(fd);
+                    }
                 },
                 .input => {
-                    // Open file for reading
-                    const path_z = try self.allocator.dupeZ(u8, redir.target);
-                    defer self.allocator.free(path_z);
+                    // Check for /dev/tcp or /dev/udp virtual path
+                    if (openDevNet(redir.target)) |sock| {
+                        try std.posix.dup2(sock, std.posix.STDIN_FILENO);
+                        std.posix.close(sock);
+                    } else {
+                        // Open file for reading
+                        const path_z = try self.allocator.dupeZ(u8, redir.target);
+                        defer self.allocator.free(path_z);
 
-                    const fd = std.posix.open(
-                        path_z,
-                        .{ .ACCMODE = .RDONLY },
-                        0,
-                    ) catch |err| {
-                        try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-                        std.posix.exit(1);
-                    };
+                        const fd = std.posix.open(
+                            path_z,
+                            .{ .ACCMODE = .RDONLY },
+                            0,
+                        ) catch |err| {
+                            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
+                            std.posix.exit(1);
+                        };
 
-                    try std.posix.dup2(fd, std.posix.STDIN_FILENO);
-                    std.posix.close(fd);
+                        try std.posix.dup2(fd, std.posix.STDIN_FILENO);
+                        std.posix.close(fd);
+                    }
+                },
+                .input_output => {
+                    // <> opens file for both reading and writing
+                    if (openDevNet(redir.target)) |sock| {
+                        try std.posix.dup2(sock, @intCast(redir.fd));
+                        std.posix.close(sock);
+                    } else {
+                        const path_z = try self.allocator.dupeZ(u8, redir.target);
+                        defer self.allocator.free(path_z);
+
+                        // Open for read+write, create if doesn't exist
+                        const fd = std.posix.open(
+                            path_z,
+                            .{ .ACCMODE = .RDWR, .CREAT = true },
+                            0o644,
+                        ) catch |err| {
+                            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
+                            std.posix.exit(1);
+                        };
+
+                        try std.posix.dup2(fd, @intCast(redir.fd));
+                        std.posix.close(fd);
+                    }
                 },
                 .heredoc, .herestring => {
                     // Create a pipe for the content

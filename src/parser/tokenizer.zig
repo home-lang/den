@@ -16,6 +16,7 @@ const two_char_operators = [_]OperatorEntry{
     .{ .chars = .{ '&', '&' }, .token_type = .and_op, .value = "&&" },
     .{ .chars = .{ '2', '>' }, .token_type = .redirect_err, .value = "2>" },
     .{ .chars = .{ '<', '<' }, .token_type = .heredoc, .value = "<<" },
+    .{ .chars = .{ '<', '>' }, .token_type = .redirect_inout, .value = "<>" },
     .{ .chars = .{ '>', '>' }, .token_type = .redirect_append, .value = ">>" },
     .{ .chars = .{ '|', '|' }, .token_type = .or_op, .value = "||" },
 };
@@ -26,9 +27,9 @@ fn lookupTwoCharOperator(c1: u8, c2: u8) ?OperatorEntry {
     return switch (c1) {
         '&' => if (c2 == '>') two_char_operators[0] else if (c2 == '&') two_char_operators[1] else null,
         '2' => if (c2 == '>') two_char_operators[2] else null,
-        '<' => if (c2 == '<') two_char_operators[3] else null,
-        '>' => if (c2 == '>') two_char_operators[4] else null,
-        '|' => if (c2 == '|') two_char_operators[5] else null,
+        '<' => if (c2 == '<') two_char_operators[3] else if (c2 == '>') two_char_operators[4] else null,
+        '>' => if (c2 == '>') two_char_operators[5] else null,
+        '|' => if (c2 == '|') two_char_operators[6] else null,
         else => null,
     };
 }
@@ -44,6 +45,7 @@ pub const TokenType = enum {
     redirect_out, // >
     redirect_append, // >>
     redirect_in, // <
+    redirect_inout, // <>
     redirect_err, // 2>
     redirect_both, // &>
     redirect_fd_dup, // N>&M or N<&M for FD duplication

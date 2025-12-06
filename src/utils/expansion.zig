@@ -204,8 +204,12 @@ pub const Expansion = struct {
 
             // Handle tilde expansion at start of word or after : =
             if (char == '~') {
-                const should_expand = i == 0 or
-                    (i > 0 and (input[i - 1] == ':' or input[i - 1] == '='));
+                // Don't expand if this is the =~ regex operator (~ followed by space or end)
+                const is_regex_op = i > 0 and input[i - 1] == '=' and
+                    (i + 1 >= input.len or input[i + 1] == ' ' or input[i + 1] == '\t');
+
+                const should_expand = !is_regex_op and (i == 0 or
+                    (i > 0 and (input[i - 1] == ':' or input[i - 1] == '=')));
 
                 if (should_expand) {
                     const expansion_result = try self.expandTilde(input[i..]);
