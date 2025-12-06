@@ -103,12 +103,16 @@ pub const ExpansionCache = struct {
     }
 };
 
+// Import VarAttributes type
+const types = @import("../types/mod.zig");
+
 /// Variable expansion utilities
 pub const Expansion = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
     arrays: ?*std.StringHashMap([][]const u8), // Array variables
     local_vars: ?*std.StringHashMap([]const u8), // Function local variables (checked first)
+    var_attributes: ?*std.StringHashMap(types.VarAttributes), // Variable attributes for namerefs
     last_exit_code: i32,
     positional_params: []const []const u8, // $1, $2, etc.
     shell_name: []const u8, // $0
@@ -124,6 +128,7 @@ pub const Expansion = struct {
             .environment = environment,
             .arrays = null,
             .local_vars = null,
+            .var_attributes = null,
             .last_exit_code = last_exit_code,
             .positional_params = &[_][]const u8{},
             .shell_name = "den",
@@ -149,6 +154,7 @@ pub const Expansion = struct {
             .environment = environment,
             .arrays = null,
             .local_vars = null,
+            .var_attributes = null,
             .last_exit_code = last_exit_code,
             .positional_params = positional_params,
             .shell_name = shell_name,
@@ -175,6 +181,7 @@ pub const Expansion = struct {
             .environment = environment,
             .arrays = null,
             .local_vars = null,
+            .var_attributes = null,
             .last_exit_code = last_exit_code,
             .positional_params = positional_params,
             .shell_name = shell_name,
@@ -189,6 +196,53 @@ pub const Expansion = struct {
     /// Set the command substitution cache
     pub fn setCommandCache(self: *Expansion, cache: *ExpansionCache) void {
         self.cmd_cache = cache;
+    }
+
+    /// Set variable attributes for nameref resolution
+    pub fn setVarAttributes(self: *Expansion, attrs: *std.StringHashMap(types.VarAttributes)) void {
+        self.var_attributes = attrs;
+    }
+
+    /// Resolve a nameref chain - follow the reference to get the actual variable name
+    /// Returns the final variable name after following all nameref chains
+    /// Limits depth to prevent infinite loops
+    fn resolveNameref(self: *Expansion, name: []const u8) []const u8 {
+        const attrs = self.var_attributes orelse return name;
+
+        var current_name = name;
+        var depth: u32 = 0;
+        const max_depth = 10;
+
+        while (depth < max_depth) : (depth += 1) {
+            if (attrs.get(current_name)) |attr| {
+                if (attr.nameref) {
+                    // Get the value of the current nameref which contains the target variable name
+                    if (self.environment.get(current_name)) |ref_name| {
+                        current_name = ref_name;
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+
+        return current_name;
+    }
+
+    /// Get variable value, resolving namerefs if applicable
+    fn getVariableValue(self: *Expansion, name: []const u8) ?[]const u8 {
+        // First check local variables
+        if (self.local_vars) |locals| {
+            if (locals.get(name)) |value| {
+                return value;
+            }
+        }
+
+        // Resolve any nameref chain
+        const resolved_name = self.resolveNameref(name);
+
+        // Return value from environment
+        return self.environment.get(resolved_name);
     }
 
     /// Expand all variables in a string
@@ -788,8 +842,8 @@ pub const Expansion = struct {
             }
         }
 
-        // Simple braced variable
-        if (self.environment.get(content)) |value| {
+        // Simple braced variable - use getVariableValue for nameref resolution
+        if (self.getVariableValue(content)) |value| {
             const result = try self.allocator.dupe(u8, value);
             return ExpansionResult{ .value = result, .consumed = end + 1 };
         }
@@ -1016,16 +1070,8 @@ pub const Expansion = struct {
 
         const var_name = input[1..end];
 
-        // Check local variables first (function scope)
-        if (self.local_vars) |locals| {
-            if (locals.get(var_name)) |value| {
-                const result = try self.allocator.dupe(u8, value);
-                return ExpansionResult{ .value = result, .consumed = end };
-            }
-        }
-
-        // Then check environment variables
-        if (self.environment.get(var_name)) |value| {
+        // Use getVariableValue which handles local vars and nameref resolution
+        if (self.getVariableValue(var_name)) |value| {
             const result = try self.allocator.dupe(u8, value);
             return ExpansionResult{ .value = result, .consumed = end };
         }

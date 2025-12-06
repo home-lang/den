@@ -624,9 +624,10 @@ pub const Executor = struct {
                         if (redir.kind == .herestring) {
                             // For herestring, expand variables and use the content
                             var expansion = Expansion.init(self.allocator, self.environment, 0);
-                            // Set nounset option if enabled in shell
+                            // Set options from shell if available
                             if (self.shell) |shell| {
                                 expansion.option_nounset = shell.option_nounset;
+                                expansion.var_attributes = &shell.var_attributes;
                             }
                             const expanded = expansion.expand(redir.target) catch redir.target;
                             // Add newline for herestring
@@ -846,7 +847,6 @@ pub const Executor = struct {
 
     /// Check if a command name is a shell builtin.
     fn isBuiltin(self: *Executor, name: []const u8) bool {
-        _ = self;
         const builtins = [_][]const u8{
             "cd", "pwd", "echo", "exit", "env", "export", "set", "unset",
             "true", "false", "test", "[", "[[", "alias", "unalias", "which",
@@ -863,6 +863,10 @@ pub const Executor = struct {
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
+        }
+        // Check for loadable builtins
+        if (self.shell) |shell| {
+            if (shell.loadable_builtins.isEnabled(name)) return true;
         }
         return false;
     }
@@ -1035,6 +1039,20 @@ pub const Executor = struct {
             return try self.builtinIfind(command);
         } else if (std.mem.eql(u8, command.name, "coproc")) {
             return try self.builtinCoproc(command);
+        }
+
+        // Check for loadable builtins
+        if (self.shell) |shell| {
+            if (shell.loadable_builtins.isEnabled(command.name)) {
+                return shell.loadable_builtins.execute(self.allocator, command.name, command.args) catch |err| {
+                    switch (err) {
+                        error.NotLoaded => try IO.eprint("den: {s}: not a loadable builtin\n", .{command.name}),
+                        error.Disabled => try IO.eprint("den: {s}: loadable builtin is disabled\n", .{command.name}),
+                        else => try IO.eprint("den: {s}: execution error\n", .{command.name}),
+                    }
+                    return 1;
+                };
+            }
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});

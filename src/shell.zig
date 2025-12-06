@@ -36,6 +36,7 @@ const HistoryExpansion = @import("utils/history_expansion.zig").HistoryExpansion
 const ContextCompletion = @import("utils/context_completion.zig").ContextCompletion;
 const CompletionRegistry = @import("utils/completion_registry.zig").CompletionRegistry;
 const CompletionSpec = @import("utils/completion_registry.zig").CompletionSpec;
+const LoadableBuiltins = @import("utils/loadable.zig").LoadableBuiltins;
 
 /// Format a parser error into a user-friendly message.
 fn formatParseError(err: anyerror) []const u8 {
@@ -335,6 +336,8 @@ pub const Shell = struct {
     // Call stack for caller builtin
     call_stack: [64]CallFrame,
     call_stack_depth: usize,
+    // Loadable builtins (dynamically loaded shared libraries)
+    loadable_builtins: LoadableBuiltins,
 
     const MultilineMode = enum {
         none,
@@ -495,6 +498,7 @@ pub const Shell = struct {
             .shopt_autocd = false,
             .call_stack = [_]CallFrame{CallFrame{ .line_number = 0, .function_name = "", .source_file = "" }} ** 64,
             .call_stack_depth = 0,
+            .loadable_builtins = LoadableBuiltins.init(allocator),
         };
 
         // Detect if stdin is a TTY
@@ -567,6 +571,9 @@ pub const Shell = struct {
 
         // Clean up script manager
         self.script_manager.deinit();
+
+        // Clean up loadable builtins
+        self.loadable_builtins.deinit();
 
         // Clean up function manager
         self.function_manager.deinit();
@@ -1228,9 +1235,56 @@ pub const Shell = struct {
             return;
         }
 
+        // Check for simple variable assignment: VAR=value (no spaces before =)
+        // This handles both regular assignments and nameref assignments
+        const trimmed_input = std.mem.trim(u8, input, &std.ascii.whitespace);
+        if (std.mem.indexOf(u8, trimmed_input, "=")) |eq_pos| {
+            // Check if this is a simple assignment (no spaces before =, valid var name)
+            const potential_var = trimmed_input[0..eq_pos];
+            // Verify it's a valid variable name (no spaces, starts with letter or underscore)
+            if (potential_var.len > 0 and
+                std.mem.indexOfScalar(u8, potential_var, ' ') == null and
+                (std.ascii.isAlphabetic(potential_var[0]) or potential_var[0] == '_'))
+            {
+                var is_valid_var = true;
+                for (potential_var) |c| {
+                    if (!std.ascii.isAlphanumeric(c) and c != '_') {
+                        is_valid_var = false;
+                        break;
+                    }
+                }
+                // Also verify there's no additional command after the assignment
+                // e.g., "VAR=value cmd" should not be handled here
+                if (is_valid_var and eq_pos + 1 <= trimmed_input.len) {
+                    const rest = trimmed_input[eq_pos + 1 ..];
+                    // Check if there are any spaces after the value that indicate more commands
+                    // Handle quoted strings and special cases
+                    var in_single_quote = false;
+                    var in_double_quote = false;
+                    var found_space_outside_quotes = false;
+                    for (rest) |c| {
+                        if (c == '\'' and !in_double_quote) {
+                            in_single_quote = !in_single_quote;
+                        } else if (c == '"' and !in_single_quote) {
+                            in_double_quote = !in_double_quote;
+                        } else if (c == ' ' and !in_single_quote and !in_double_quote) {
+                            found_space_outside_quotes = true;
+                            break;
+                        }
+                    }
+                    if (!found_space_outside_quotes) {
+                        // Simple assignment - use setArithVariable which resolves namerefs
+                        const value = trimmed_input[eq_pos + 1 ..];
+                        self.setArithVariable(potential_var, value);
+                        self.last_exit_code = 0;
+                        return;
+                    }
+                }
+            }
+        }
+
         // Check for C-style for loop: for ((init; cond; update)); do ... done
         // Skip this check if we're already inside a C-style for loop body to avoid recursion
-        const trimmed_input = std.mem.trim(u8, input, &std.ascii.whitespace);
         if (!self.in_cstyle_for_body and std.mem.startsWith(u8, trimmed_input, "for ((")) {
             try self.executeCStyleForLoopOneline(input);
             return;
@@ -1493,6 +1547,9 @@ pub const Shell = struct {
             } else if (std.mem.eql(u8, cmd.name, "compgen")) {
                 try self.builtinCompgen(cmd);
                 return;
+            } else if (std.mem.eql(u8, cmd.name, "enable")) {
+                try self.builtinEnable(cmd);
+                return;
             }
         }
 
@@ -1632,6 +1689,7 @@ pub const Shell = struct {
             self,
         );
         expander.arrays = &self.arrays; // Add array support
+        expander.var_attributes = &self.var_attributes; // Add nameref support
         // Set local vars pointer if inside a function
         if (self.function_manager.currentFrame()) |frame| {
             expander.local_vars = &frame.local_vars;
@@ -5313,6 +5371,169 @@ pub const Shell = struct {
         self.last_exit_code = 0;
     }
 
+    /// enable builtin - load/unload loadable builtins from shared libraries
+    /// Usage:
+    ///   enable              - list all loadable builtins
+    ///   enable -a           - list all builtins (built-in and loadable)
+    ///   enable -f file name - load a builtin from shared library
+    ///   enable -d name      - delete (unload) a loadable builtin
+    ///   enable -n name      - disable a loadable builtin
+    ///   enable name         - enable a loadable builtin
+    fn builtinEnable(self: *Shell, cmd: *types.ParsedCommand) !void {
+        var load_file: ?[]const u8 = null;
+        var delete_mode = false;
+        var disable_mode = false;
+        var list_all = false;
+        var names_start: usize = 0;
+
+        // Parse options
+        var i: usize = 0;
+        while (i < cmd.args.len) : (i += 1) {
+            const arg = cmd.args[i];
+            if (arg.len > 0 and arg[0] == '-') {
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        'f' => {
+                            // -f file: load from file
+                            i += 1;
+                            if (i >= cmd.args.len) {
+                                try IO.eprint("den: enable: -f: option requires an argument\n", .{});
+                                self.last_exit_code = 1;
+                                return;
+                            }
+                            load_file = cmd.args[i];
+                        },
+                        'd' => {
+                            delete_mode = true;
+                        },
+                        'n' => {
+                            disable_mode = true;
+                        },
+                        'a' => {
+                            list_all = true;
+                        },
+                        'p', 's' => {
+                            // -p: print, -s: special builtins (ignored for now)
+                        },
+                        else => {
+                            try IO.eprint("den: enable: -{c}: invalid option\n", .{c});
+                            self.last_exit_code = 1;
+                            return;
+                        },
+                    }
+                }
+                names_start = i + 1;
+            } else {
+                break;
+            }
+        }
+
+        // If no arguments after options, list builtins
+        if (names_start >= cmd.args.len and !list_all and load_file == null) {
+            // List loaded builtins
+            var iter = self.loadable_builtins.list();
+            var count: usize = 0;
+            while (iter.next()) |entry| {
+                const info = entry.value_ptr.*;
+                const status = if (info.enabled) "enabled" else "disabled";
+                try IO.print("enable {s} ({s})\n", .{ info.name, status });
+                count += 1;
+            }
+            if (count == 0) {
+                try IO.print("No loadable builtins currently loaded.\n", .{});
+                try IO.print("Use 'enable -f <library.so> <name>' to load a builtin.\n", .{});
+            }
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // If -a specified, list all builtins
+        if (list_all) {
+            // List built-in commands
+            const builtin_names = [_][]const u8{
+                "cd",       "pwd",      "echo",     "exit",     "env",       "export",
+                "set",      "unset",    "true",     "false",    "test",      "[",
+                "[[",       "alias",    "unalias",  "which",    "type",      "help",
+                "read",     "printf",   "source",   ".",        "history",   "pushd",
+                "popd",     "dirs",     "eval",     "exec",     "command",   "builtin",
+                "jobs",     "fg",       "bg",       "wait",     "disown",    "kill",
+                "trap",     "times",    "umask",    "getopts",  "clear",     "time",
+                "hash",     "return",   "local",    "declare",  "readonly",  "typeset",
+                "let",      "shopt",    "mapfile",  "readarray", "caller",   "compgen",
+                "complete", "enable",
+            };
+            try IO.print("Built-in commands:\n", .{});
+            for (builtin_names) |name| {
+                try IO.print("  {s}\n", .{name});
+            }
+
+            // List loadable builtins
+            var iter = self.loadable_builtins.list();
+            var has_loadable = false;
+            while (iter.next()) |entry| {
+                if (!has_loadable) {
+                    try IO.print("\nLoadable builtins:\n", .{});
+                    has_loadable = true;
+                }
+                const info = entry.value_ptr.*;
+                const status = if (info.enabled) "enabled" else "disabled";
+                try IO.print("  {s} ({s}) [{s}]\n", .{ info.name, status, info.path });
+            }
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Process remaining arguments as builtin names
+        const names = cmd.args[names_start..];
+        if (names.len == 0 and load_file != null) {
+            try IO.eprint("den: enable: -f: builtin name required\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        for (names) |name| {
+            if (load_file) |file| {
+                // Load builtin from file
+                self.loadable_builtins.load(name, file) catch |err| {
+                    switch (err) {
+                        error.AlreadyLoaded => try IO.eprint("den: enable: {s}: already loaded\n", .{name}),
+                        error.LoadFailed => try IO.eprint("den: enable: {s}: cannot open shared object: {s}\n", .{ name, file }),
+                        error.SymbolNotFound => try IO.eprint("den: enable: {s}: function '{s}_builtin' not found in {s}\n", .{ name, name, file }),
+                        error.InitFailed => try IO.eprint("den: enable: {s}: initialization failed\n", .{name}),
+                        else => try IO.eprint("den: enable: {s}: load error\n", .{name}),
+                    }
+                    self.last_exit_code = 1;
+                    return;
+                };
+                try IO.print("enable: loaded '{s}' from {s}\n", .{ name, file });
+            } else if (delete_mode) {
+                // Delete (unload) builtin
+                self.loadable_builtins.unload(name) catch {
+                    try IO.eprint("den: enable: {s}: not a loadable builtin\n", .{name});
+                    self.last_exit_code = 1;
+                    return;
+                };
+                try IO.print("enable: unloaded '{s}'\n", .{name});
+            } else if (disable_mode) {
+                // Disable builtin
+                self.loadable_builtins.disable(name) catch {
+                    try IO.eprint("den: enable: {s}: not a loadable builtin\n", .{name});
+                    self.last_exit_code = 1;
+                    return;
+                };
+            } else {
+                // Enable builtin
+                self.loadable_builtins.enable(name) catch {
+                    try IO.eprint("den: enable: {s}: not a loadable builtin\n", .{name});
+                    self.last_exit_code = 1;
+                    return;
+                };
+            }
+        }
+
+        self.last_exit_code = 0;
+    }
+
     /// Execute a one-line C-style for loop: for ((init; cond; update)); do cmd1; cmd2; done
     fn executeCStyleForLoopOneline(self: *Shell, input: []const u8) !void {
         const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
@@ -5477,6 +5698,7 @@ pub const Shell = struct {
             self.last_arg,
             self,
         );
+        expander.var_attributes = &self.var_attributes; // Add nameref support
         const expanded = expander.expand(trimmed) catch {
             self.last_exit_code = 1;
             return;
@@ -5850,12 +6072,16 @@ pub const Shell = struct {
     }
 
     /// Set a variable for arithmetic operations
+    /// Resolves namerefs before setting the value
     fn setArithVariable(self: *Shell, name: []const u8, value: []const u8) void {
+        // Resolve nameref to get the actual variable name
+        const resolved_name = self.resolveNameref(name);
+
         // Dupe the value
         const val = self.allocator.dupe(u8, value) catch return;
 
         // Get or put entry to avoid memory leak
-        const gop = self.environment.getOrPut(name) catch {
+        const gop = self.environment.getOrPut(resolved_name) catch {
             self.allocator.free(val);
             return;
         };
@@ -5865,9 +6091,9 @@ pub const Shell = struct {
             gop.value_ptr.* = val;
         } else {
             // New key - duplicate it
-            const key = self.allocator.dupe(u8, name) catch {
+            const key = self.allocator.dupe(u8, resolved_name) catch {
                 self.allocator.free(val);
-                _ = self.environment.remove(name);
+                _ = self.environment.remove(resolved_name);
                 return;
             };
             gop.key_ptr.* = key;
@@ -5976,6 +6202,58 @@ pub const Shell = struct {
             return val;
         }
         return "0";
+    }
+
+    /// Resolve nameref: follow nameref chain to get the actual variable name
+    /// Returns the final variable name after following any nameref references
+    /// Max depth of 10 to prevent infinite loops
+    pub fn resolveNameref(self: *Shell, name: []const u8) []const u8 {
+        var current_name = name;
+        var depth: u32 = 0;
+        const max_depth = 10;
+
+        while (depth < max_depth) : (depth += 1) {
+            if (self.var_attributes.get(current_name)) |attrs| {
+                if (attrs.nameref) {
+                    // This is a nameref, its value is the name of the referenced variable
+                    if (self.environment.get(current_name)) |ref_name| {
+                        current_name = ref_name;
+                        continue;
+                    }
+                }
+            }
+            // Not a nameref or no more references to follow
+            break;
+        }
+        return current_name;
+    }
+
+    /// Get variable value following namerefs
+    pub fn getVariableValue(self: *Shell, name: []const u8) ?[]const u8 {
+        const resolved_name = self.resolveNameref(name);
+        return self.environment.get(resolved_name);
+    }
+
+    /// Set variable value following namerefs
+    pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void {
+        const resolved_name = self.resolveNameref(name);
+
+        // Check if readonly
+        if (self.var_attributes.get(resolved_name)) |attrs| {
+            if (attrs.readonly) {
+                try IO.eprint("den: {s}: readonly variable\n", .{resolved_name});
+                return error.ReadonlyVariable;
+            }
+        }
+
+        // Set the value
+        const gop = try self.environment.getOrPut(resolved_name);
+        if (gop.found_existing) {
+            self.allocator.free(gop.value_ptr.*);
+        } else {
+            gop.key_ptr.* = try self.allocator.dupe(u8, resolved_name);
+        }
+        gop.value_ptr.* = try self.allocator.dupe(u8, value);
     }
 
     /// Check if input is an array assignment: name=(value1 value2 ...)

@@ -1,662 +1,507 @@
-# Den Shell - TODO
+# Den Shell TODO
 
-> Comprehensive analysis of features to implement, fix, and improve.
-> Based on thorough codebase review and ROADMAP.md status.
+> Vision: Den as a minimal, dependency-free, Zig-native POSIX shell with zsh/fish-class ergonomics and top-tier performance.
+>
+> Goals: tiny binary, instant startup, predictable memory use, and rich interactive UX (line editing, history, completion, plugins) without sacrificing correctness or portability.
 
----
+This document aggregates improvement ideas from the codebase and docs (`ARCHITECTURE.md`, `FEATURES.md`, `CPU_OPTIMIZATION.md`, `MEMORY_OPTIMIZATION.md`, `CONCURRENCY.md`, `LINE_EDITING.md`, `PLUGIN_DEVELOPMENT.md`, `TESTING.md`, `ADVANCED.md`, etc.) and from direct inspection of `src/`.
 
-## 🔴 Critical / High Priority
+## 0. Meta / Project Hygiene
 
-### 1. Testing Infrastructure ✅
-- [x] **Port remaining unit tests** from TypeScript version
-  - [x] Expansion tests (447+ existing test blocks)
-  - [x] Redirection tests (existing in codebase)
-  - [x] Command execution tests (existing in codebase)
-  - [x] Builtin tests (`tests/test_builtins.zig`) - 30+ tests
-  - [x] Completion tests (`tests/test_completion.zig`) - 15+ tests
-  - [x] History tests (`tests/test_history.zig`) - 10+ tests
-  - [x] Alias tests (`tests/test_alias.zig`) - 15+ tests
-  - [x] Job control tests (`tests/test_job_control.zig`) - 15+ tests
-  - [x] Test utilities (`tests/test_utils.zig`) - ShellFixture, TempDir, etc.
-- [x] **Integration tests**
-  - [x] Pipeline tests (`tests/test_pipeline.zig`) - 30 tests
-  - [x] Chaining tests (`tests/test_chaining.zig`) - 35 tests
-  - [x] Scripting tests (`tests/test_scripting.zig`) - 42 tests
-- [x] **E2E tests**
-  - [x] CLI tests (`tests/test_e2e.zig`) - 50 tests
-  - [x] REPL tests (`tests/test_repl.zig`) - 35 tests
-  - [x] Shell integration tests (`tests/test_shell_integration.zig`) - 46 tests
-  - [x] Performance tests (`tests/test_performance.zig`) - 11 benchmarks
-- [x] **Regression tests** ✅
-  - [x] Parser regression tests (`tests/test_parser_regression.zig`) - 60+ tests
-  - [x] Operator tests (`tests/test_operators.zig`) - 44 tests
-  - [x] Pipefail tests (`tests/test_shell_options.zig`) - included
-  - [x] Xtrace tests (`tests/test_shell_options.zig`) - included
-  - [x] Nounset tests (`tests/test_shell_options.zig`) - included
-- [x] **Fuzzing** ✅
-  - [x] Parser fuzzing (`src/parser/test_fuzz.zig`, `test_fuzz_simple.zig`)
-  - [x] Completion fuzzing (`tests/test_fuzzing.zig`)
-  - [x] Expansion fuzzing (`tests/test_fuzzing.zig`)
-  - [x] Input handling fuzzing (`tests/test_fuzzing.zig`)
-
-### 2. Signal Handling ✅
-- [x] Handle SIGTERM gracefully (clean shutdown)
-- [x] Handle SIGWINCH properly (terminal resize redraw)
-- [x] Clean up resources on abnormal exit
-- [x] Signal-safe I/O operations
-
-### 3. Cross-Platform Support ✅
-- [x] **Windows support** (abstraction layer complete)
-  - [x] Windows process API (CreateProcess via std.process.Child)
-  - [x] Cross-platform process abstractions (`src/utils/process.zig`)
-  - [x] Cross-platform job control (`src/executor/job_control.zig`)
-  - [x] Windows environment handling (env.zig with thread-local cache)
-  - [x] Windows executable detection (.exe, .com, .bat, .cmd, .ps1)
-  - [x] Process groups replaced with job management on Windows
-  - [x] Windows signal handling equivalent (TerminateProcess)
-- [x] **Linux support** (verified via cross-compilation)
-  - [x] Cross-compiles for x86_64-linux (musl), x86_64-linux-gnu (glibc), aarch64-linux
-  - [x] System modules work (battery via /sys/class/power_supply/, memory via /proc/meminfo)
+- [ ] Keep this `TODO.md` as the **single source of truth** for technical work, and prune outdated doc TODOs as items move here.
+- [ ] Cross-link major items with existing docs (Architecture/CPU/MEMORY/CONCURRENCY/TESTING) and test files under `tests/` to avoid divergence.
+- [ ] Ensure every non-obvious decision is either:
+  - [ ] Documented in `docs/` (architecture/perf), **or**
+  - [ ] Self-explanatory in code via clear naming and small functions (no comments needed).
 
 ---
 
-## 🟡 Medium Priority - Missing Features
+## 1. Shell Core & Architecture (`src/shell.zig`, core types/modules)
 
-### 4. Configuration System (Phase 3) ✅ Complete
-- [x] Integrate `zig-config` library for JSONC parsing
-- [x] Config file search logic (current dir → home dir)
-- [x] Support `den.jsonc` config file format
-- [x] Support `package.jsonc` config file format ✅ (extracts "den" key)
-- [x] Config validation with error messages ✅ (validateConfig, ConfigError, ValidationResult)
-- [x] Config override via CLI flags (`--config <path>`)
-- [x] Config reload mechanism ✅ (`reload` builtin with -v, --aliases, --config options)
-- [x] Config hot-reload ✅ (set `hot_reload: true` in config, checks mtime on each prompt)
-- [x] Port default config from TypeScript version
-  - [x] Default aliases (~35 aliases in den.jsonc)
-  - [x] Default environment variables
-  - [x] Default prompt format
-  - [x] Default theme
-  - [x] Default history settings
-  - [x] Default completion settings
+### 1.1 Reduce `shell.zig` monolith and align with documented layering
 
-### 5. Advanced REPL Features (Phase 9) ✅ Mostly Complete
-- [x] **Cursor Movement** (in `src/utils/terminal.zig`)
-  - [x] Left/right arrow keys
-  - [x] Ctrl+A (home), Ctrl+E (end)
-  - [x] Ctrl+B (backward char), Ctrl+F (forward char)
-  - [x] Alt+B (backward word), Alt+F (forward word)
-- [x] **Auto-suggestions**
-  - [x] Inline suggestion rendering
-  - [x] Suggestion from history
-  - [x] Suggestion from completions
-  - [x] Typo correction (fuzzy matching)
-  - [x] Suggestion accept (Right arrow, End, Ctrl+E)
-  - [x] Partial suggestion accept (Alt+F)
-- [x] **Syntax Highlighting** (toggle available)
-  - [x] Command highlighting (builtin, alias, external)
-  - [x] Keyword highlighting
-  - [x] String highlighting
-  - [x] Operator highlighting
-  - [x] Error highlighting (invalid syntax)
-  - [x] Path highlighting
-  - [x] Variable highlighting
-- [x] **History Navigation**
-  - [x] Up/down arrow keys for history
-  - [x] History browsing state
-  - [x] Temporary line preservation
-- [x] **Reverse Search**
-  - [x] Ctrl+R reverse search trigger
-  - [x] Incremental search display
-  - [x] Search result highlighting
-  - [x] Search result cycling (Ctrl+R repeatedly)
-- [x] **Multi-line Input** ✅
-  - [x] Line continuation detection (`\` at EOL)
-  - [x] Unclosed quote detection
-  - [x] Multi-line prompt (PS2)
-  - [x] Multi-line editing
-  - [x] Unclosed parentheses/brackets/braces detection
-  - **Implementation**: `src/utils/terminal.zig` (isIncomplete function, multiline_buffer)
+`src/shell.zig` is very large and owns many concerns (environment, history, jobs, parsing, execution, prompt, plugins, line editing). The architecture docs already describe a layered design; the code should match that.
 
-### 6. History Expansion (Phase 10) ✅
-- [x] `!!` (last command)
-- [x] `!N` (command N)
-- [x] `!-N` (Nth previous command)
-- [x] `!string` (last command starting with string)
-- [x] `!?string` (last command containing string)
-- [x] `^old^new` (replace in last command)
-- [x] `!#` (current command line)
-- [x] Word designators (`:0`, `:1`, `:$`, `:*`, `:^`, `:n-m`)
-- [x] `!$` (last argument)
-- [x] `!*` (all arguments)
-- [x] Fuzzy search (`searchHistoryFuzzy` - case-insensitive pattern matching)
-- [x] Regex search (`searchHistoryRegex` - `.`, `*`, `^`, `$` patterns)
-- [x] Search result ranking
-- **Implementation**: `src/utils/history_expansion.zig` (900+ lines)
+- [ ] Extract **history** management into a dedicated module (e.g. `src/history/history.zig`) and have `Shell` delegate to it.
+- [ ] Extract **job control** into `src/jobs/` (e.g. `job_manager.zig`) using the existing `BackgroundJob` / `JobStatus` types as a starting point.
+- [ ] Extract **shell options & state flags** (errexit, pipefail, xtrace, nounset, etc.) into a small `ShellOptions` struct under `src/types/`.
+- [ ] Extract **prompt orchestration** (PromptContext / PromptRenderer / GitModule / AsyncGitFetcher wiring) into a dedicated `src/prompt/`-level coordinator so `Shell` doesn’t know prompt internals.
+- [ ] Extract **plugin lifecycle integration** (registry & manager wiring, hook dispatch) into a small adapter in `src/plugins/` and keep `Shell` focused on defining hook points.
+- [ ] Extract **REPL/line-editing integration** logic into `src/repl/` (e.g. `repl_loop.zig`) that:
+  - [ ] Owns the `LineEditor` instance and keybindings.
+  - [ ] Accepts a thin callback to “execute a line of shell code” supplied by `Shell`.
+- [ ] Move misc helpers like `matchRegexAt` and `getConfigMtime` into focused utility modules (`src/utils/regex.zig`, `src/utils/config_watch.zig`) so `shell.zig` is primarily **state + orchestration**.
+- [ ] Target: keep `src/shell.zig` under a reasonable line count and make it read like an orchestration file, not a dump of all functionality.
 
-### 7. Context-Aware Completion (Phase 11) ✅
-- [x] Argument position detection
-- [x] Option/flag completion (`ls -<TAB>`, `grep -<TAB>`, `find -<TAB>`, `curl -<TAB>`)
-- [x] Variable name completion (from shell environment)
-- [x] Environment variable completion (`$<TAB>`)
-- [x] Hostname completion (from ~/.ssh/known_hosts and ~/.ssh/config)
-- [x] Username completion
-- [x] **Command-Specific Completion**
-  - [x] Git completion (branches, tags, remotes, files, subcommands)
-  - [x] npm/bun/yarn/pnpm completion (scripts, subcommands)
-  - [x] Docker completion (containers, images, subcommands)
-  - [x] kubectl completion (subcommands, resources, namespaces)
-  - [x] Custom completion registration ✅ (complete builtin with -f,-d,-c,-a,-b,-e,-u,-W,-S,-P flags)
-- [x] Completion caching with TTL ✅
-- [x] Completion configuration (enable/disable, case sensitivity, max suggestions) ✅
-- **Implementation**: `src/utils/context_completion.zig` (1000+ lines)
+### 1.2 Align code with documented core structure
 
-### 8. Arithmetic Expansion ✅ Complete
-- [x] Basic operators (`+`, `-`, `*`, `/`, `%`, `**`)
-- [x] Comparison operators (`<`, `>`, `<=`, `>=`, `==`, `!=`)
-- [x] Logical operators (`&&`, `||`, `!`)
-- [x] Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
-- [x] Ternary operator (`? :`)
-- [x] Variable references in expressions
-- [x] Hex (0x...), octal (0...) and binary (0b...) number literals
-- [x] Integer overflow handling
-- [x] Expression caching
-- **Implementation**: `src/utils/arithmetic.zig` (530+ lines, 11 tests)
+Architecture docs describe layers: CLI → Shell Core → REPL → Parser/Expansion → Executor, plus cross-cutting features.
 
-### 9. Expansion Features (Partial)
-- [x] **Tilde Expansion** ✅
-  - [x] `~` (current user's home directory)
-  - [x] `~user` (user's home directory via passwd lookup)
-  - [x] `~+` (current working directory - PWD)
-  - [x] `~-` (previous working directory - OLDPWD)
-  - **Implementation**: `src/utils/expansion.zig` (`expandTilde` function, `getUserHomeDir`)
-- [x] **Brace Expansion** ✅
-  - [x] Nested brace expansion
-  - [x] Zero-padding support (`{01..10}`)
-  - [x] Prefix/suffix combination
-  - [x] Cartesian product of multiple braces
-- [x] **Process Substitution** ✅
-  - [x] `<(command)` (create pipe with command output) ✅
-  - [x] `>(command)` (create pipe as command input) ✅
-  - [x] Pipe-based implementation using /dev/fd/N ✅
-  - [x] Cleanup handled by OS on process exit ✅
-- [x] **Quote Removal & Word Splitting** ✅
-  - [x] Quote removal (removeQuotes function)
-  - [x] IFS-based word splitting (WordSplitter struct with default/custom IFS)
-  - [x] Empty argument preservation (`""`)
-  - [x] Field splitting with configurable IFS (splitFieldsIfs function)
-- [x] **Expansion Caching** ✅
-  - [x] LRU cache for variable expansions ✅
-  - [x] LRU cache for arithmetic results ✅
-  - [x] LRU cache for command substitutions ✅ (cmd_cache in Expansion struct)
-  - [x] LRU cache for glob results ✅
+- [ ] Audit each public function in `Shell` and tag it as **core state**, **REPL integration**, **parsing**, **execution**, **history**, **jobs**, or **plugin hooks**.
+- [ ] For each tag that doesn’t belong to the core, move into the corresponding layer/module while keeping API surface stable.
+- [ ] Make sure `src/mod.zig` (if used as an entry module elsewhere) and `docs/ARCHITECTURE.md` reference the same module graph and naming.
 
-### 10. Execution Options ✅
-- [x] `set -x` (xtrace - print commands before execution)
-- [x] `set -u` (nounset - error on unset variable)
-- [x] `set -o pipefail` (pipeline failure detection)
-- [x] `set -n` (noexec - parse only, don't execute)
-- [x] `set -v` (verbose - print input lines)
-- [x] `set -e` (errexit - exit on error) - already implemented
-- [x] `set -E` (errtrace - inherit ERR trap) - already implemented
-- [x] `set -o` (list all options)
-- **Implementation**: `src/shell.zig` (option fields), `src/executor/mod.zig` (builtinSet, executeCommand, pipelines)
+### 1.3 Cross-platform & Windows support
 
-### 11. Scripting Engine (Phase 14 - Partial)
-- [x] **Control Flow Enhancements** ✅
-  - [x] C-style for loop (`for ((i=0; i<10; i++))`) ✅
-  - [x] Iterate over array in for loops (`for i in ${arr[@]}`) ✅
-  - [x] Multiple patterns per case statement (`pattern1|pattern2)`) ✅
-  - [x] Fallthrough with `;&` and `;;&` in case ✅
-  - [x] `select` loops (interactive menu) ✅
-- [x] **Functions** ✅
-  - [x] Function definition (`function name { ... }`, `name() { ... }`)
-  - [x] Function call
-  - [x] Positional parameters in functions (`$1`, `$2`, etc.)
-  - [x] Local variables (`local` builtin)
-  - [x] Return statement (`return` builtin)
-  - [x] Function export (`export -f funcname`, `export -pf`) ✅
-  - [x] Recursive functions (control flow in function bodies) ✅
-  - [x] Function overriding (redefining replaces old definition) ✅
-  - **Note**: Functions work in both scripts and REPL (single-line and multi-line)
-- [x] **Script Execution**
-  - [x] Script context (variables, functions, scope)
-  - [x] Script caching ✅ (content caching with mtime validation in ScriptManager)
-  - [x] Script timeout (`timeout` builtin) ✅
-- [x] **Error Handling** ✅
-  - [x] Error suggestions ✅ (TypoCorrection for "command not found")
-  - [x] Error recovery ✅ (ERR trap support for scripts)
+README lists Windows support as “planned”; code already uses conditional types like `ProcessId` and C APIs.
 
-### 12. Custom Hooks (Phase 16) ✅
-- [x] `git:push` - Before git push ✅
-- [x] `docker:build` - Before docker build ✅
-- [x] `npm:install` - Before npm install ✅
-- [x] Support user-defined custom hooks ✅ (`hook` builtin)
-- [x] Conditional execution (file/env/custom predicates) ✅
-- [x] Script execution from hooks ✅
+- [ ] Introduce a **platform abstraction layer** in `src/utils/process.zig` / `src/utils/terminal.zig` for:
+  - [ ] Process spawning and process groups.
+  - [ ] Signal handling (where applicable on Windows).
+  - [ ] TTY detection and termios-like behavior.
+- [ ] Audit all uses of POSIX-specific APIs (e.g. `std.posix`, raw `fork`/`exec`, `waitpid`, `tcsetpgrp`) and isolate them behind this platform layer.
+- [ ] Implement Windows-compatible job/run behavior behind the abstraction (likely with reduced semantics vs full POSIX job control but a consistent surface API).
+- [ ] Add Windows-targeted tests (even if currently run only in a dedicated CI job) leveraging the existing `build.zig` test targets.
+
+### 1.4 Shell configuration lifecycle
+
+`config_loader.zig` + `types.DenConfig` already cover rich configuration.
+
+- [ ] Ensure **one canonical flow** for configuration:
+  - [ ] CLI → `config_loader.loadAndValidateConfigWithPath`.
+  - [ ] Validation errors/warnings printed once at startup with clear, colorized output.
+  - [ ] `Shell` holds a `DenConfig` snapshot; runtime changes via `set`/`export` should update relevant in-memory state.
+- [ ] Wire **hot reload** more explicitly:
+  - [ ] Use `getConfigMtime` + a small debounce to reload config when `hot_reload` is true.
+  - [ ] Surface reload events to plugins via a hook (`config_reload`).
+- [ ] Audit all uses of `DenConfig` fields across modules (prompt, theme, completion, history, plugins, concurrency) to ensure there are no dead or unused fields.
 
 ---
 
-## 🟢 Low Priority - Extended Features
+## 2. Parsing, AST & Expansion (`src/parser/*`, `src/utils/expansion.zig`)
 
-### 13. Extended Builtins (Phase 13)
-- [x] **Navigation Helpers**
-  - [x] `bookmark` - Bookmark management ✅
-- [x] **Developer Tools**
-  - [x] `reload` - Reload configuration
-  - [x] `code` - Open in VS Code ✅
-  - [x] `pstorm` - Open in PhpStorm ✅
-  - [x] `library` - Library management ✅
-  - [x] `show` / `hide` - Show/hide files (macOS) ✅
-- [x] **System Helpers**
-  - [x] `ip` - Display public IP info ✅
-  - [x] `localip` - Show local IP ✅
-  - [x] `reloaddns` - Reload DNS cache (macOS) ✅
-  - [x] `emptytrash` - Empty trash (macOS) ✅
-  - [x] `copyssh` - Copy SSH key to clipboard ✅
-  - [x] `ft` - Fuzzy file finder ✅
-  - [x] `web` - Open URL in browser ✅
-- [x] **Productivity**
-  - [x] `shrug` - Print shrug emoticon ✅
-  - [x] `wip` - Work-in-progress git helper ✅
-  - [x] `calc` - Calculator with functions ✅
-  - [x] `json` - JSON utilities (parse, format, query) ✅
-  - [x] `http` - HTTP requests ✅
-- [x] **Advanced Tools**
-  - [x] `ifind` - Fuzzy file finder with pattern matching ✅
-  - [x] `tree` - Directory tree ✅
-  - [x] `grep` - Text search with highlighting ✅
-  - [x] `watch` - Execute command repeatedly ✅
-- [ ] **Monitoring & Logging**
-  - [x] `log-tail` - Tail logs with filtering ✅
-  - [x] `log-parse` - Parse structured logs ✅
-  - [x] `proc-monitor` - Process monitoring ✅
-  - [x] `sys-stats` - System statistics ✅
-  - [x] `netstats` - Network statistics ✅
-  - [x] `net-check` - Network connectivity check ✅
-- [x] **Dotfiles**
-  - [x] `dotfiles` - Dotfiles management helper ✅
+### 2.1 Integrate `OptimizedParser` fast path
 
-### 14. Documentation (Phase 21) ✅ Mostly Complete
-- [x] **Code Documentation**
-  - [x] Document all public APIs ✅ (docs/API.md)
-  - [x] Create architecture documentation ✅ (docs/ARCHITECTURE.md - updated with config system)
-  - [x] Document data structures ✅ (docs/DATA_STRUCTURES.md)
-  - [x] Document algorithms (parser, expansion, etc.) ✅ (docs/ALGORITHMS.md)
-  - [x] Create contributor guide ✅ (docs/CONTRIBUTING.md)
-- [x] **User Documentation**
-  - [x] Update README.md for Zig version ✅
-  - [x] Create getting started guide ✅ (docs/intro.md, docs/install.md)
-  - [x] Create configuration guide ✅ (docs/config.md)
-  - [x] Create builtin command reference ✅ (docs/BUILTINS.md - fully updated)
-  - [x] Create scripting guide ✅ (docs/SCRIPTING.md)
-  - [x] Create plugin development guide ✅ (docs/PLUGIN_DEVELOPMENT.md)
-  - [x] Create theme customization guide ✅ (docs/THEMES.md - already exists)
-  - [x] Create troubleshooting guide ✅ (docs/TROUBLESHOOTING.md)
-  - [x] Create man page ✅ (docs/den.1)
-- [x] **Migration Guide** ✅ (docs/MIGRATION.md)
-  - [x] Document breaking changes ✅
-  - [x] Create migration script/tool ✅
-  - [x] Document feature parity status ✅
-- [ ] **Website/Docs Site**
-  - [ ] Port VitePress docs to static site
-  - [ ] Create online playground/demo
-  - [ ] Create feature showcase
-  - [ ] Create comparison table (vs Bash, Zsh, Fish)
+`docs/CPU_OPTIMIZATION.md` describes an optimized parser fast path; `src/parser/optimized_parser.zig` exists but is not yet wired into the main execution path.
 
-### 15. Performance & Optimization (Phase 22)
-- [ ] **Memory Optimization**
-  - [ ] Minimize allocations in hot paths
-  - [ ] Use stack allocation where possible
-  - [ ] Pool frequently allocated objects
-  - [ ] Tune arena allocator sizes
-  - [ ] Fix memory leaks
-  - [ ] Reduce memory fragmentation
-- [ ] **CPU Optimization**
-  - [ ] Optimize parser (reduce passes)
-  - [ ] Optimize expansion engine (reduce copying)
-  - [ ] Optimize completion matching (better algorithms)
-  - [ ] Optimize history search (indexing)
-  - [ ] Use SIMD where applicable
-  - [ ] Cache expensive operations
-- [ ] **I/O Optimization**
-  - [ ] Minimize system calls
-  - [ ] Batch I/O operations
-  - [ ] Use async I/O for long operations
-  - [ ] Optimize file reading/writing
-  - [ ] Reduce terminal escape sequences
-- [ ] **Concurrency**
-  - [ ] Parallelize module detection
-  - [ ] Use thread pool for async operations
-  - [ ] Minimize lock contention
-- [x] **Benchmarking** (partial)
-  - [x] Create comprehensive benchmark suite ✅ (`tests/test_performance.zig`)
-  - [x] Benchmark against Bash ✅ (`tests/bench_comparison.sh`)
-  - [x] Benchmark against Zsh ✅ (`tests/bench_comparison.sh`)
-  - [ ] Benchmark against Fish
-  - [ ] Track performance over time
-  - [ ] Set performance targets
+- [ ] Add a **simple-command fast path** in the command execution pipeline:
+  - [ ] Before invoking the full tokenizer/AST builder, call `OptimizedParser.isSimpleCommand(input)`.
+  - [ ] If true, use `OptimizedParser.parseSimpleCommand` to obtain a `SimpleCommand` and execute directly.
+  - [ ] Fall back to the full parser on any parse error or unsupported construct.
+- [ ] Ensure fast path and full parser have identical semantics for:
+  - [ ] Argument splitting and quoting.
+  - [ ] Basic variable expansion + command substitution boundaries (at least not breaking expectations).
+- [ ] Add benchmarks comparing:
+  - [ ] Full parser vs optimized path on simple commands.
+  - [ ] Cold vs warm cache behavior.
 
-### 16. Foundation Libraries (Phase 4 - Partial) ✅
-- [x] **ANSI/Terminal**
-  - [x] Handle Windows console API differences ✅ (in ansi.zig, terminal.zig)
-- [x] **Terminal I/O**
-  - [x] Non-blocking I/O (in terminal.zig)
-  - [x] Signal-safe I/O (in io.zig)
-- [x] **File System**
-  - [x] Path normalization ✅ (`src/utils/path.zig`)
-  - [x] Recursive directory walking ✅ (`DirWalker` in `src/utils/path.zig`)
-  - [x] Cross-platform path handling (glob.zig path separators)
-- [x] **Process Management** (`src/utils/process.zig`)
-  - [x] ProcessId/FileHandle type abstractions
-  - [x] Cross-platform pipe creation
-  - [x] Cross-platform process waiting
-  - [x] Cross-platform process termination
-  - [x] Process group management (POSIX) / stubs (Windows)
-  - [x] Handle Windows CreateProcess API (via std.process.Child)
-- [x] **Environment** (`src/utils/env.zig`)
-  - [x] PATH parsing with PathList
-  - [x] Cross-platform executable search
-  - [x] Platform detection (Linux, macOS, Windows, BSD, etc.)
-  - [x] Architecture detection (x86_64, aarch64, arm, etc.)
-  - [x] Windows environment cache (thread-local)
+### 2.2 Memory-efficient tokenization & AST building
 
-### 17. Logging & Debugging (Phase 1) ✅
-- [x] Implement logging infrastructure (debug, info, warn, error levels)
-- [x] Add structured logging support
-- [x] Create debug output utilities
-- [x] Implement error formatting
-- [x] Add stack trace utilities
-- [x] Create assertion macros
-- [x] Add timing/profiling utilities
+`docs/MEMORY_OPTIMIZATION.md` recommends using object pools, arenas, and stack arrays for hot paths.
 
-### 18. Memory Management (Phase 1) ✅
-- [x] Design allocator strategy (GPA, Arena, Pool allocators) ✅ (`src/utils/memory.zig`)
-- [x] Implement memory pools for common objects ✅ (`src/utils/shell_pool.zig`)
-- [x] Create arena allocator for request-scoped allocations ✅ (`ShellArena` in memory.zig)
-- [x] Add memory leak detection for debug builds ✅ (`LeakDetector` in `src/utils/leak_detector.zig`)
-- [ ] Implement reference counting where needed
-- [x] Create object pooling for frequently allocated structures ✅ (`ObjectPool`, `StringPool`, `SlabAllocator` in `src/utils/pool.zig`)
+- [ ] Apply **ObjectPool/StackArrayList** patterns to `tokenizer.zig` and `ast_builder.zig` where appropriate:
+  - [ ] Reduce heap allocations for short-lived tokens and AST nodes.
+  - [ ] Ensure we can still fall back to heap allocation in pathological cases (very large commands) without crashes.
+- [ ] Introduce a **command-level arena** for parsing and expansion (leveraging `ShellArena` / `CommandMemoryPool`):
+  - [ ] All allocations for a single command/chain go through this arena.
+  - [ ] Reset the arena after each command finishes (or pipeline of commands).
+- [ ] Confirm leak detection tests cover parsing + expansion, using GPA in tests as suggested in `MEMORY_OPTIMIZATION.md`.
 
-### 19. AST Construction (Phase 5) ✅
-- [x] Design abstract syntax tree structure ✅ (`src/parser/ast.zig`)
-- [x] Implement AST node types (Command, Pipeline, Chain, etc.) ✅
-- [x] Implement AST builder from tokens ✅ (`AstBuilder` in ast_builder.zig)
-- [x] Implement AST pretty-printing (for debugging) ✅ (`PrettyPrinter` in ast.zig)
-- [x] Implement AST optimization ✅ (`AstOptimizer` in ast_optimizer.zig)
+### 2.3 Expansion completeness vs docs
+
+Docs describe advanced expansions (substring operations, parameter indirection via `${!VAR}`, extended test syntax, etc.) that go beyond typical POSIX.
+
+- [ ] Audit `src/utils/expansion.zig` against:
+  - [ ] `docs/FEATURES.md` variable/brace/tilde/glob sections.
+  - [ ] `docs/ADVANCED.md` advanced expansion section.
+- [ ] For each documented feature:
+  - [ ] Confirm it is implemented and thoroughly tested, **or**
+  - [ ] Mark it as “planned” and update docs + TODO with a concrete implementation plan.
+- [ ] Ensure unknown/unsupported forms produce **clear errors** instead of subtle misbehavior.
+
+### 2.4 Error reporting & diagnostics
+
+- [ ] Improve parser error reporting to always include:
+  - [ ] Line and column (leveraging `SourceLoc`/`Span`).
+  - [ ] A short, user-friendly description (using `formatParseError`).
+- [ ] Add tests for edge-case syntax errors, ensuring consistent messages across equivalent failure modes.
 
 ---
 
-## 🔧 Improvements & Fixes
+## 3. Execution & Job Control (`src/executor/*`, `src/utils/process.zig`, `shell` builtins)
 
-### 20. Builtin Command Enhancements
-Many builtins are implemented but missing flags/options:
+### 3.1 Execution pipeline performance & correctness
 
-- [x] **cd**: CDPATH support, `cd -` (OLDPWD), OLDPWD tracking ✅
-- [x] **pwd**: `-L` (logical path), `-P` (physical path) ✅
-- [x] **pushd/popd**: `+N`/`-N` rotation ✅
-- [x] **dirs**: `-c` (clear), `-l` (long), `-p` (one per line), `-v` (with indices) ✅
-- [x] **echo**: `-e` (escape sequences), `-E` (disable escapes) ✅
-- [x] **printf**: Full format string support (`%s`, `%d`, `%f`, etc.) ✅
-- [x] **env**: `env VAR=value command` (temp env), `-i` (ignore env), `-u` (unset) ✅
-- [x] **export**: `-n` (unexport), `-p` (list exports) ✅
-- [x] **unset**: `-v` (variable), `-f` (function) flags ✅
-- [x] **set**: Full option support (`-e`, `-E`, `-u`, `-x`, `-n`, `-v`, `-f`, `-C`, `-o pipefail`, `-o noclobber`, `-o noglob`) ✅
-- [x] **umask**: `-S` (symbolic), `-p` (portable), symbolic mode input ✅
-- [x] **jobs**: `-l` (PIDs), `-p` (PIDs only), `-r` (running), `-s` (stopped) ✅
-- [x] **kill**: `-l` (list signals), `-s signal` ✅
-- [x] **wait**: Wait for specific job by %jobid or PID, exit code return ✅
-- [x] **disown**: `-h` (keep but no SIGHUP), `-a` (all), `-r` (running) ✅
-- [x] **type**: `-a` (all matches), `-p` (path), `-t` (type only) ✅
-- [x] **which**: `-a` (all matches) ✅
-- [x] **hash**: `-r` (clear), `-d name` (delete), `-l` (list), `-p path name` (add), `-t` (print path) ✅
-- [x] **time**: `-p` (POSIX format) ✅
-- [x] **trap**: `-l` (list signals), `-p` (show traps) ✅
-- [x] **timeout**: `-s signal`, `-k duration`, `--preserve-status`, `--foreground` ✅
-- [x] **read**: `-r` (raw), `-p prompt`, `-a` (array), `-n` (nchars), `-d` (delimiter), `-s` (silent), `-t` (timeout) ✅
-- [x] **test**: `[[ ]]` extended test (pattern matching, regex) ✅
+- [ ] Use `CommandMemoryPool` in the execution path to group allocations per command/pipeline and free them in bulk.
+- [ ] Ensure pipeline execution properly handles:
+  - [ ] `set -o pipefail` semantics.
+  - [ ] SIGINT/SIGTERM propagation to all processes in a pipeline.
+  - [ ] Background pipeline behavior (`cmd1 | cmd2 &`).
+- [ ] Add benchmarks in `bench/` that stress:
+  - [ ] Deep pipelines.
+  - [ ] Heavy redirection usage.
+  - [ ] Rapid-fire short-lived commands.
 
-### 21. Code Quality ✅
-- [x] Remove any remaining `undefined` behavior
-- [x] Ensure all error paths are handled
-- [x] Add more inline documentation
-- [x] Consistent error messages across builtins (all use `den: command: message` format)
-- [x] Improve error recovery in parser (user-friendly error messages)
+### 3.2 `/dev/tcp` and `/dev/udp` support
 
-### 22. CI/CD Improvements ✅
-- [x] Set up cross-platform testing (Linux, macOS) ✅
-- [x] Add coverage reporting (benchmark results in artifacts) ✅
-- [x] Performance regression detection (hyperfine benchmarks) ✅
-- [x] Automated release workflow improvements (multi-platform builds) ✅
-- [ ] Binary signing for releases
+`executor/mod.zig` includes an `openDevNet` helper for `/dev/tcp` and `/dev/udp`-style paths.
 
----
+- [ ] Harden `openDevNet`:
+  - [ ] Add validation tests for malformed host/port and IPv4 parsing edge cases.
+  - [ ] Consider IPv6 and hostname lookup support (while balancing minimalism).
+  - [ ] Ensure proper error mapping and closure on failure (no fd leaks).
+- [ ] Document this feature in `docs/FEATURES.md` (Networking or I/O section) and add examples.
 
-## 📊 Summary
+### 3.3 Job control & signals
 
-| Category | Total Items | Priority |
-|----------|-------------|----------|
-| Testing Infrastructure | ~40 ✅ (unit ✅, integration ✅, e2e ✅, regression ✅, fuzzing ✅) | 🔴 Critical |
-| Signal Handling | 4/4 ✅ | 🔴 Critical |
-| Cross-Platform | 11/11 ✅ (Windows + Linux complete) | 🔴 Critical |
-| Configuration System | 15 (10 ✅) | 🟡 Medium |
-| Advanced REPL | 25 (25 ✅) | 🟡 Medium |
-| History Expansion | 13 (12 ✅) | 🟡 Medium |
-| Completion | 15 (12 ✅) | 🟡 Medium |
-| Arithmetic Expansion | 9 (7 ✅) | 🟡 Medium |
-| Expansion Features | 15 (5 ✅ - tilde done) | 🟡 Medium |
-| Execution Options | 8/8 ✅ | 🟡 Medium |
-| Scripting Engine | 20/20 ✅ | 🟡 Medium |
-| Custom Hooks | 6 | 🟡 Medium |
-| Extended Builtins | 30 (15 ✅) | 🟢 Low |
-| Documentation | 20 | 🟢 Low |
-| Performance | 25 | 🟢 Low |
-| Foundation Libraries | 12 (9 ✅) | 🟢 Low |
-| Logging & Debugging | 7/7 ✅ | 🟢 Low |
-| Memory Management | 6 | 🟢 Low |
-| Builtin Enhancements | 25 (22 ✅) | 🔧 Improvement |
-| Code Quality | 5/5 ✅ | 🔧 Improvement |
-| CI/CD | 5 (4 ✅) | 🔧 Improvement |
+- [ ] Centralize job management into a `JobManager` abstraction:
+  - [ ] Maintain job table, statuses, and notifications.
+  - [ ] Provide a clean API for builtins (`jobs`, `fg`, `bg`, `disown`, `wait`, `kill`).
+- [ ] Use `utils/signals.zig` consistently for:
+  - [ ] Foreground job SIGINT/SIGQUIT handling.
+  - [ ] SIGCHLD-driven job status updates.
+- [ ] Extend tests in `tests/test_job_control.zig` to cover:
+  - [ ] Nested jobs.
+  - [ ] Jobs created via pipelines.
+  - [ ] Interaction with `set -e`, `pipefail`, etc.
 
-**Total: ~300+ items**
+### 3.4 `eval`, `source`, and script execution semantics
+
+- [ ] Review `builtinEval` and script execution behavior so that:
+  - [ ] `eval` respects shell options (`errexit`, `nounset`, tracing).
+  - [ ] Nested `source`/`.` invocations behave like bash and match documentation.
+  - [ ] Command line `-c` (`command_string` mode) uses the exact same execution pipeline as interactive input.
+- [ ] Add regression tests in `tests/test_scripting.zig` and `tests/test_parser_regression.zig` for complex eval/source combinations.
 
 ---
 
-## ✅ What's Already Working Well
+## 4. REPL, Line Editing & History (`src/utils/terminal.zig`, `LINE_EDITING.md`, history fields in `Shell`)
 
-The following features are production-ready:
+### 4.1 History storage, limits, and configuration
 
-- **Core Shell**: Parsing, tokenization, command execution
-- **Pipelines**: Multi-stage pipelines with proper error handling
-- **Redirections**: Full I/O redirection (`>`, `>>`, `<`, `2>`, `2>&1`, `&>`, heredoc, herestring)
-- **Job Control**: Background jobs, fg, bg, jobs, kill, wait, disown
-- **Variable Expansion**: `$VAR`, `${VAR}`, `${VAR:-default}`, special vars (`$?`, `$$`, `$!`, `$_`, `$0-$9`, `$@`, `$*`, `$#`)
-- **Command Substitution**: `$(command)` and backticks
-- **Arithmetic Expansion**: Full operators (`+`, `-`, `*`, `/`, `%`, `**`, comparisons, logical, bitwise, ternary)
-- **Brace Expansion**: Sequences `{1..10}`, lists `{foo,bar,baz}`
-- **Tilde Expansion**: `~`, `~user`, `~+`, `~-` for directories
-- **Glob Expansion**: `*`, `?`, `[abc]`, `**`
-- **History**: Persistent history with search
-- **Tab Completion**: Commands, files, paths
-- **54 Builtins**: Core shell functionality
-- **Control Flow**: if/elif/else, while, for, case, until
-- **Plugin System**: Complete with API, hooks, discovery
-- **Theme System**: Colors, terminal detection, prompt rendering
-- **Module System**: Language/cloud/system detection
-- **Prompt**: Git integration, async fetching, customizable
+Currently history is stored in a fixed-size array in `Shell`.
+
+- [ ] Wire `DenConfig.history` (max entries, file path, persistence flags) fully through the shell:
+  - [ ] Respect configured `max_entries` instead of hard-coded `[1000]?[]const u8` where appropriate.
+  - [ ] Keep an upper hard limit to maintain predictable memory usage.
+- [ ] Ensure persisted history file behavior matches `docs/HISTORY_SUBSTRING_SEARCH.md` and `docs/FEATURES.md`.
+- [ ] Add tests for:
+  - [ ] Truncation of very long history files.
+  - [ ] Corrupted history file entries.
+
+### 4.2 History search & `HistoryIndex` integration
+
+`cpu_opt.HistoryIndex` is designed for fast history search but may not yet be fully integrated.
+
+- [ ] Replace any remaining **linear history scans** in:
+  - [ ] Reverse incremental search (`Ctrl+R`).
+  - [ ] Substring search via arrow keys.
+  - [ ] History expansion (`!`, `!!`, `!-N`, `!string`).
+  - with indexed lookups backed by `HistoryIndex`.
+- [ ] Maintain behavior equivalence with bash/zsh for history expansion syntax.
+- [ ] Add micro-benchmarks in `bench/` or `tests/test_performance.zig` comparing linear vs indexed history for 1k, 10k, 100k entries.
+
+### 4.3 Future line-editing features
+
+`docs/LINE_EDITING.md` outlines future features.
+
+- [ ] Implement **kill ring** semantics (Emacs-style) with `Ctrl+Y` yank, compatible with existing delete/kill shortcuts.
+- [ ] Add **undo/redo** support (`Ctrl+_` or similar) for the line editor.
+- [ ] Explore **visual selection mode** (zsh/fish-like) if it can be done without significant complexity.
+- [ ] Evaluate feasibility of **multiple cursors** / advanced editing while preserving performance and low complexity.
+- [ ] Ensure all new features are configurable (enable/disable) via `DenConfig.keybindings` or similar.
+- [ ] Implement Emacs-style **character movement** (`Ctrl+B`/`Ctrl+F`) and **line movement** (`Ctrl+P`/`Ctrl+N`) where it doesn’t conflict with existing bindings.
+- [ ] Add a simple **macro recording/playback** facility (e.g. record sequence of edits and replay) for advanced users, gated behind configuration.
+
+### 4.4 Robust terminal behavior
+
+- [ ] Expand tests in `test_repl.zig` and `test_terminal` for:
+  - [ ] Window resize handling (SIGWINCH) and redraw.
+  - [ ] Mixed wide-character / UTF-8 input.
+  - [ ] Long wrapped lines and multi-line prompts.
+- [ ] Verify that clearing the screen (`Ctrl+L`) always preserves the input buffer and cursor position as documented.
+
+### 4.5 History substring search enhancements
+
+`docs/HISTORY_SUBSTRING_SEARCH.md` documents an initial implementation plus several future improvements.
+
+- [ ] Implement `Ctrl+R` incremental search mode that integrates cleanly with existing substring search behavior.
+- [ ] Highlight the matched substring within history entries shown during search.
+- [ ] Add configuration options for case-insensitive and/or fuzzy history search.
+- [ ] Display simple search statistics (for example, "match 3 of 15") while navigating results.
+- [ ] Add options to filter history (e.g. deduplicate entries, hide failed commands, support multi-pattern search).
+- [ ] Extend tests in `src/utils/terminal.zig` and `tests/test_history.zig` to cover these enhanced behaviors.
 
 ---
 
-*Last updated: December 2, 2025*
-*Based on codebase analysis and ROADMAP.md review*
+## 5. Completion & Suggestions (`src/utils/completion.zig`, `context_completion.zig`, `shell_completion.zig`)
 
-**Recent completions:**
-- Cross-Platform Support:
-  - `src/utils/process.zig` - ProcessId, FileHandle, Pipe abstractions for Windows/POSIX
-  - `src/executor/job_control.zig` - Cross-platform job management
-  - Windows executable detection (.exe, .com, .bat, .cmd, .ps1)
-  - Integrated process abstractions into executor builtins (fg, bg, wait, kill)
-  - Fixed zig-config use-after-free bug causing config loading segfault
-  - Added `-c "command"` CLI flag support
-- Signal Handling (SIGTERM, SIGWINCH, clean exit, signal-safe I/O)
-- Logging & Debugging infrastructure
-- Zig 0.16-dev API compatibility (updated all version references)
-- Testing Infrastructure - Unit Tests:
-  - test_builtins.zig (cd, pwd, echo, export, type, which, true/false, test)
-  - test_completion.zig (file completion, filtering, sorting, special chars)
-  - test_history.zig (recording, clearing, limits, duplicates)
-  - test_alias.zig (create, overwrite, unalias, chained aliases)
-  - test_job_control.zig (background jobs, wait, kill, disown)
-  - test_utils.zig (ShellFixture, TempDir, TestAssert helpers)
-- Testing Infrastructure - Integration Tests:
-  - test_pipeline.zig (30 tests - pipe operations, multi-stage, error handling)
-  - test_chaining.zig (35 tests - &&, ||, ; operators, grouping)
-  - test_scripting.zig (42 tests - if/else, for, while, until, case, functions)
-- Configuration System:
-  - JSONC parsing with comment removal and trailing comma handling
-  - Config file search: ./den.jsonc → config/ → .config/ → ~/.config/
-  - Config-driven aliases (35 default aliases in den.jsonc)
-  - Shell loads aliases from config on startup
-- Advanced REPL (already implemented in src/utils/terminal.zig):
-  - Full cursor movement (arrows, Ctrl+A/E/B/F, Alt+B/F)
-  - History navigation with substring matching
-  - Reverse search (Ctrl+R) with cycling
-  - Tab completion with arrow key navigation
-  - Inline suggestions with Right arrow acceptance
-  - 50-state undo stack
-- E2E Tests (131 total tests):
-  - test_e2e.zig (50 tests) - Variable expansion, command substitution, arithmetic, redirections, globs, subshells, functions, process control, string operations, edge cases
-  - test_repl.zig (35 tests) - Multi-line scripts, variable state, history, input handling, prompts, line continuation, job control, traps, shell options, source command, special variables
-  - test_shell_integration.zig (46 tests) - Environment integration, signal handling, process groups, file descriptors, working directory, exit codes, script mode, quoting, chaining, glob/expansion, builtins, error handling, IPC
-- Regression Tests & Fuzzing Infrastructure:
-  - test_parser_regression.zig (60+ tests) - Edge cases, quoting, operators, redirections, command substitution, unicode, security
-  - test_operators.zig (44 tests) - &&, ||, |, ;, &, redirections, grouping, negation
-  - test_shell_options.zig (25+ tests) - set -e, -u, -x, -o pipefail, -n, -v, -f, -C
-  - test_fuzzing.zig (30+ tests) - Variable expansion, glob, brace expansion, pipelines, grouping, unicode
-  - src/parser/test_fuzz.zig - Parser fuzzing with random inputs
-  - src/parser/test_fuzz_simple.zig - Simple tokenizer fuzzing
-- History Expansion (fully implemented):
-  - src/utils/history_expansion.zig (856 lines)
-  - `!!`, `!N`, `!-N`, `!string`, `!?string?`, `^old^new`
-  - `!$`, `!*`, word designators (`:0`, `:1`, `:$`, `:*`, `:^`, `:n-m`)
-  - Integrated in shell.zig
-- Context-Aware Completion (fully implemented):
-  - src/utils/context_completion.zig (893 lines)
-  - Git completion (branches, tags, remotes, files, subcommands)
-  - npm/bun/yarn/pnpm completion (scripts, subcommands)
-  - Docker completion (containers, images, subcommands)
-  - Environment variable completion ($TAB)
-  - Option/flag completion (ls, grep, find, curl)
-- Multi-line Input (fully implemented):
-  - src/utils/terminal.zig (isIncomplete function, multiline_buffer)
-  - Line continuation detection (`\` at EOL)
-  - Unclosed quote detection (single and double)
-  - Unclosed brackets/parentheses/braces detection
-  - PS2 prompt for continuation lines
-  - Ctrl+C cancels multi-line input
-  - 20+ unit tests for isIncomplete function
-- Execution Options (fully implemented):
-  - src/shell.zig (option fields: errexit, errtrace, xtrace, nounset, pipefail, noexec, verbose)
-  - src/executor/mod.zig (builtinSet handles all options)
-  - `set -x` prints commands before execution with `+ ` prefix
-  - `set -u` errors on unset variable in expansion
-  - `set -o pipefail` returns rightmost non-zero exit in pipeline
-  - `set -n` parses but doesn't execute (syntax check mode)
-  - `set -v` verbose mode
-  - `set -e/-E` were already implemented
-  - `set -o` lists all option settings
-- Config System Enhancements:
-  - `--config <path>` and `--config=path` CLI flag support
-  - `loadConfigWithPath` for custom config file loading
-  - JSONC comment stripping (// and /* */) and trailing comma handling
-  - `initWithConfig` shell initialization with custom config path
-- History Expansion Enhancements:
-  - `!#` current command line support (`expandWithCurrentLine`)
-  - `searchHistoryFuzzy` - case-insensitive fuzzy pattern matching (e.g., "gco" matches "git checkout")
-  - `searchHistoryRegex` - simple regex search with `.`, `*`, `^`, `$` patterns
-- Context-Aware Completion Enhancements:
-  - kubectl completion: subcommands, resources (pods, deployments, services, etc.), namespaces (live from cluster)
-  - Variable name completion from shell environment
-  - Hostname completion from ~/.ssh/known_hosts and ~/.ssh/config
-  - Enhanced context detection for ssh, scp, rsync commands
-- Performance Tests:
-  - tests/test_performance.zig (11 benchmarks)
-  - Tokenizer benchmarks (simple, pipeline, complex commands)
-  - Variable expansion benchmarks
-  - History search benchmarks (20 and 1000 entries)
-  - Completion matching benchmarks
-  - Arena allocator throughput
-  - String splitting benchmarks
-  - Glob pattern matching benchmarks
-- Linux Support Verification:
-  - Cross-compilation verified for x86_64-linux, x86_64-linux-gnu, aarch64-linux
-  - System modules (battery, memory) properly conditionally compiled
-  - Build step added: `zig build test-performance`
-- Arithmetic Expansion (fully implemented):
-  - src/utils/arithmetic.zig (530+ lines, 11 tests)
-  - All operators: `+`, `-`, `*`, `/`, `%`, `**`, comparisons, logical, bitwise, ternary
-  - Variable references in expressions
-  - Hex (0x), octal (0), and binary (0b) number literals
-- Tilde Expansion Enhancements:
-  - `~user` - user's home directory via POSIX getpwnam()
-  - `~+` - current working directory (PWD)
-  - `~-` - previous working directory (OLDPWD)
-  - 4 new unit tests for tilde expansion
-- Extended Builtins (8 complete):
-  - `shrug` - Print shrug emoticon (¯\_(ツ)_/¯)
-  - `localip` - Show local IP address hints
-  - `ip` - Display public IP info hints
-  - `web <url>` - Open URL in browser (platform hints)
-  - `tree` - Directory tree (already implemented)
-  - `calc` - Calculator with functions (already implemented)
-  - `json` - JSON utilities (already implemented)
-  - `reload` - Reload shell configuration
-- REPL Enhancements:
-  - Typo correction with Damerau-Levenshtein distance for "Did you mean..." suggestions
-  - Handles transpositions as single edit (e.g., "gti" → "git")
-  - Searches PATH and shell builtins for suggestions
-- History Expansion Enhancements:
-  - Ranked search results with scoring by match type (exact > prefix > substring > fuzzy)
-  - `RankedSearchResult` struct with command, score, and match type
-  - `searchHistoryRanked()` function for ranked history search
-- Completion Enhancements:
-  - Username completion from /etc/passwd (`~user<TAB>`)
-  - `completeUsername()` and `expandUsername()` functions
-- Arithmetic Enhancements:
-  - Integer overflow handling with `@addWithOverflow`, `@subWithOverflow`, `@mulWithOverflow`
-  - Returns `IntegerOverflow` error instead of undefined behavior
-- Brace Expansion Enhancements:
-  - Zero-padding support for numeric sequences (`{01..10}` → 01, 02, ..., 10)
-  - Detects leading zeros and preserves width in output
-  - `formatZeroPadded()` helper for zero-padded number formatting
-- Extended Builtins (4 new):
-  - `code` - Open file/directory in VS Code (macOS)
-  - `pstorm` - Open file/directory in PhpStorm (macOS)
-  - `show <file>...` - Remove hidden attribute from files (macOS)
-  - `hide <file>...` - Add hidden attribute to files (macOS)
-- Completion Caching:
-  - `CompletionCache` struct with TTL support in `src/utils/completion.zig`
-  - LRU eviction when max entries exceeded
-  - Cache key includes command prefix for command completion
-- Expansion Caching:
-  - `GlobCache` LRU cache in `src/utils/glob.zig`
-  - `ExpansionCache` LRU cache in `src/utils/expansion.zig`
-  - Config limits in `ExpansionConfig.CacheLimits` (glob: 256, variable: 256)
-- Builtin Command Enhancements (December 2025):
-  - `disown`: Added `-h` (keep but no SIGHUP), `-a` (all jobs), `-r` (running only) flags
-  - `hash`: Added `-l` (list reusable), `-d name` (delete), `-p path name` (add specific), `-t name` (print path) flags
-  - `set`: Full option support with `-o optionname` syntax for pipefail, noclobber, noglob
-  - Added `option_noglob` and `option_noclobber` shell options
-  - `umask`: Added `-S` (symbolic output), `-p` (portable output), symbolic mode input (u=rwx,g=rx,o=rx)
-  - `time`: Added `-p` (POSIX format output)
-  - `wait`: Now returns proper exit code of waited job
-  - `read`: Added `-a` (array), `-n` (nchars), `-d` (delimiter), `-s` (silent), `-t` (timeout) flags
-  - `trap`: Already had `-l` and `-p` flags implemented
-  - `env`: Already had `VAR=value command`, `-i`, `-u` implemented
-  - `export`: Already had `-n` and `-p` flags implemented
-  - `jobs`, `kill`, `type`, `which`, `unset` flags already implemented
-- Scripting Engine (December 2, 2025):
-  - Function export: `export -f funcname` marks functions as exported, `export -pf` lists exported functions
-  - Recursive functions: Added ControlFlowExecutor integration to function bodies for proper if/else/for/while handling
-  - Function overriding: Redefining a function replaces the previous definition
-  - Script timeout: Already implemented via `timeout` builtin command
-  - `ifind` builtin: Fuzzy file finder with `-f` (files), `-D` (dirs), `-a` (hidden), `-d N` (depth) options
+### 5.1 Fuzzy completion & ranking
+
+`cpu_opt.fuzzyScore` and `StringHashSet` are designed for completions; docs show planned integration.
+
+- [ ] Integrate `fuzzyScore` into the main completion engine to:
+  - [ ] Rank command/file/variable candidates.
+  - [ ] Prefer prefix matches but still support useful substrings.
+- [ ] Use `StringHashSet` to deduplicate completion results efficiently instead of manual O(n²) duplicate checking.
+- [ ] Expose config toggles in `DenConfig.completion` for:
+  - [ ] `fuzzy` on/off.
+  - [ ] Max suggestions (`max_suggestions`).
+  - [ ] Source ordering (commands vs files vs context completions).
+
+### 5.2 Completion cache & performance
+
+`CompletionCache` supports TTL and LRU-like eviction.
+
+- [ ] Ensure `Completion` uses `CompletionCache` systematically for:
+  - [ ] PATH scanning for commands.
+  - [ ] File completions for hot directories.
+  - [ ] Expensive context completions (e.g. git branches, kubectl resources).
+- [ ] Confirm cache TTL and size defaults are documented and configurable.
+- [ ] Add benchmarks in `bench/` for completion latency with and without cache.
+
+### 5.3 Context-aware completion sources
+
+`ContextCompletion` already supports many CLI patterns (git, npm/bun/yarn/pnpm, docker, kubectl, env vars, options).
+
+- [ ] Extend context detection to more tools commonly used in modern workflows (e.g. `deno`, `zig build`, `cargo`, `terraform`, `aws`, etc.) where it adds clear value.
+- [ ] Allow plugins to **register context providers** so the core doesn’t need to know every tool.
+- [ ] Add tests in `context_completion.zig` for:
+  - [ ] All existing contexts.
+  - [ ] Edge cases when cursor is in the middle of a token, or trailing space vs no space.
+- [ ] Implement remaining git-specific completion enhancements from `docs/GIT_COMPLETION.md`:
+  - [ ] Support completion for git aliases.
+  - [ ] Provide completion for git flags and options (e.g. `git commit --<TAB>`).
+  - [ ] Make git completions more context-aware (e.g. staged vs unstaged files, appropriate contexts for branches/tags).
+  - [ ] Add completions for tags, remote names, commit hashes, and stash entries where relevant.
+
+### 5.4 External shell completion scripts
+
+`docs/AUTOCOMPLETION.md` + `shell_completion.zig` describe bash/zsh/fish integration.
+
+- [ ] Ensure generated scripts:
+  - [ ] Use `den complete` correctly and handle JSON or plain output robustly.
+  - [ ] Include static completions for all supported CLI subcommands and options.
+- [ ] Add regression tests around `den completion <shell>` output stability (e.g. via snapshot tests) so changes don’t inadvertently break users’ completions.
+- [ ] Implement external completion enhancements from `docs/AUTOCOMPLETION.md`:
+  - [ ] Include all built-in Den commands (the 54 builtins) in shell completions.
+  - [ ] Support expansion and completion of user-defined aliases in generated scripts.
+  - [ ] Provide history-based suggestions by wiring shell completions through `den complete` and the history subsystem where appropriate.
+  - [ ] Make shell completions plugin-aware so plugin-defined commands/options are discoverable.
+  - [ ] Improve Fish integration to take advantage of richer Fish completion features (descriptions, conditions, etc.).
+
+### 5.5 Mid-word path completion enhancements
+
+`docs/MID_WORD_COMPLETION.md` describes the existing zsh-style mid-word path completion and outlines future work.
+
+- [ ] Extend mid-word completion to support fuzzy segment matching, not just strict prefixes.
+- [ ] When expansion is ambiguous, optionally show multiple candidate paths instead of failing silently.
+- [ ] Add support for configurable "smart abbreviations" (for example, mapping `doc` → `Documents`).
+- [ ] Expose configuration options to enable/disable mid-word completion and to tweak its behavior.
+- [ ] Support case-insensitive mid-word expansion on case-insensitive filesystems.
+
+### 5.6 Tab completion UI and behavior enhancements
+
+`docs/TAB_COMPLETION.md` describes existing behavior and several future UI features.
+
+- [ ] Add arrow key navigation (↑/↓) through the suggestion list, in addition to cycling with TAB.
+- [ ] Implement a menu selection mode where suggestions remain visible and navigable with arrow keys before committing.
+- [ ] Show completion descriptions (file types, sizes, or short help text) where available, especially in external shell completions and rich interactive lists.
+- [ ] Integrate history-based suggestions into completion ranking so frequently used paths/commands are prioritized.
+- [ ] Ensure alias expansion and plugin-provided completions integrate cleanly with the core completion UI.
+
+---
+
+## 6. Plugins & Modules (`src/plugins/*`, `src/modules/*`)
+
+### 6.1 Plugin lifecycle, isolation, and error handling
+
+Docs describe a rich `PluginAPI`, `PluginRegistry`, and error stats.
+
+- [ ] Ensure all phases (`init`, `start`, `stop`, `shutdown`, hooks, commands, completions) are wired and invoked as documented.
+- [ ] Make plugin error statistics accessible via shell builtins (e.g. `plugin errors`, `plugin clear-errors`).
+- [ ] Add configuration-driven plugin enablement/disablement via `DenConfig.plugins`.
+- [ ] Validate that a misbehaving plugin cannot crash the shell:
+  - [ ] Errors propagated, counted, and optionally throttle/disable the plugin.
+  - [ ] Clear logging for plugin failures with optional verbose mode.
+
+### 6.2 Built-in plugins (syntax highlighting, auto-suggest, git prompt)
+
+- [ ] Ensure built-in advanced plugins are **opt-in** and configurable to respect minimalism:
+  - [ ] Syntax highlighting plugin (colors, token types).
+  - [ ] Autosuggest plugin (history-based suggestions, frequency-based ordering).
+  - [ ] Git prompt integration.
+- [ ] Optimize these plugins to meet prompt performance budgets (<5ms for simple prompts, ~20ms with git) as stated in profiling docs.
+
+### 6.3 Modules (`src/modules/*`)
+
+- [ ] Clearly document the purpose of `modules` (e.g. system info, cloud, language helpers) in `docs/`.
+- [ ] Ensure module APIs are **minimal** and shell-neutral (reusable for other tooling if needed).
+- [ ] Add tests that validate module behavior across platforms (where applicable).
+
+---
+
+## 7. Configuration, Themes & Prompt (`src/config_loader.zig`, `src/prompt/*`, `src/theme/*`)
+
+### 7.1 Config validation coverage & user feedback
+
+- [ ] Extend `validateConfig` to cover more fields in `DenConfig` (theme, plugins, concurrency, scripting, etc.).
+- [ ] Surface validation errors/warnings with:
+  - [ ] Consistent prefix (e.g. `den: config:`).
+  - [ ] Colored output based on severity.
+- [ ] Add tests that:
+  - [ ] Confirm invalid configs fail fast.
+  - [ ] Ensure warnings don’t prevent shell startup.
+
+### 7.2 Prompt performance & async data
+
+Prompt rendering uses git, system info, and async git fetching.
+
+- [ ] Ensure async git fetcher is actually offloading I/O to the thread pool where appropriate.
+- [ ] Cache expensive prompt components (git status, system info) for a short TTL to stay within performance budgets.
+- [ ] Provide config flags to disable or simplify prompt components in low-latency or constrained environments.
+
+### 7.3 Themes & color correctness
+
+- [ ] Fully validate theme color configuration using `isValidColor` and add tests for invalid theme definitions.
+- [ ] Provide a small library of built-in themes and document them in `docs/THEMES.md`.
+- [ ] Ensure themes do not break accessibility (e.g. very low contrast) and provide at least one high-contrast theme.
+- [ ] Consider supporting additional color formats (such as `rgb(r,g,b)` style) in theme files, or explicitly document that only hex/named colors are supported and enforce this in validation.
+
+---
+
+## 8. Performance & Memory Optimization Integration
+
+The CPU and memory optimization docs contain explicit “Future Improvements”; many are partially implemented in utility modules but not fully integrated.
+
+### 8.1 Apply documented optimizations end-to-end
+
+From `docs/CPU_OPTIMIZATION.md`:
+
+- [ ] **Optimized parser fast path**: integrate `OptimizedParser` as the default path for simple commands (see 2.1).
+- [ ] **Fuzzy matching in completion**: use `fuzzyScore` + ranking in core completion (see 5.1).
+- [ ] **History index**: replace linear history searches with `HistoryIndex` (see 4.2).
+- [ ] **Path resolution caching**: create a `PathCache` using `LRUCache` in `utils/path.zig` and wire it into any expensive realpath/path-search operations.
+- [ ] **String matching utilities**: apply `FastStringMatcher` where repeated substring search is used on large buffers.
+
+From `docs/MEMORY_OPTIMIZATION.md`:
+
+- [ ] **Tokenizer object pools**: apply `ObjectPool` to token structures in `tokenizer.zig`.
+- [ ] **CommandMemoryPool in executor**: route executor allocations through `CommandMemoryPool` (see 3.1).
+- [ ] **Memory budget tracking**: add optional tracking (perhaps only in debug/test builds) with thresholds and warnings.
+- [ ] **Allocation flamegraphs**: integrate with profiling/benchmarks to export allocation traces.
+
+### 8.2 Concurrency & parallelism
+
+From `docs/CONCURRENCY.md`:
+
+- [ ] Use thread pool (`ThreadPool`) for:
+  - [ ] Parallel plugin discovery and loading (where I/O-bound).
+  - [ ] Potentially parallel globbing or other heavy I/O tasks (behind a config flag).
+  - [ ] Multi-source completion queries (see 5.3, sample function in docs).
+- [ ] Implement remaining future items:
+  - [ ] Work-stealing thread pool (or equivalent load-balancing improvements).
+  - [ ] Per-thread arena allocators.
+  - [ ] Thread-local caches for hot paths.
+  - [ ] Lock-free hash map or optimized sharded implementations.
+
+### 8.3 Profiling & regression detection
+
+From `docs/profiling.md`:
+
+- [ ] Ensure `DEN_PROFILE` and `DEN_PROFILE_OUTPUT` environment variables are honored consistently.
+- [ ] Add unit/integration tests that:
+  - [ ] Exercise the profiler APIs.
+  - [ ] Verify trace output is valid Chrome trace JSON.
+- [ ] Integrate `den-profile` benchmarks into CI (optional but recommended) with threshold checks to catch regressions early.
+- [ ] Implement profiling enhancements from `docs/profiling.md`:
+  - [ ] Add memory profiling support integrated with the existing `Profiler` abstraction.
+  - [ ] Integrate CPU profiling (sampling or instrumentation-based) and make it accessible via CLI flags.
+  - [ ] Generate flamegraphs from recorded traces for easier hotspot analysis.
+  - [ ] Provide simple comparative analysis tools (e.g. baseline vs current benchmark reports).
+  - [ ] Add explicit performance regression tests in CI that fail builds when targets are exceeded.
+  - [ ] Explore a lightweight real-time monitoring view (e.g. TUI or log-based) for long-running shells in development.
+
+---
+
+## 9. Testing, CI & Tooling (`tests/*`, `.github/workflows/*`, `docs/TESTING.md`)
+
+### 9.1 Coverage goals & enforcement
+
+`TESTING.md` describes ambitious coverage goals (94% total, aiming for 100%).
+
+- [ ] Increase coverage where still below target:
+  - [ ] Builtins from ~89% to ≥95%.
+  - [ ] Completion modules from ~92% to ≥95%.
+- [ ] Add a coverage gate in CI (soft or hard), e.g. fail if overall coverage decreases beyond a small tolerance.
+
+### 9.2 Regression and fuzzing coverage
+
+- [ ] Expand `test_parser_regression.zig` and `tests/test_parser_regression.zig` with cases from real-world scripts.
+- [ ] Ensure fuzz tests cover:
+  - [ ] Parser & tokenizer.
+  - [ ] Expansion.
+  - [ ] Completion & history expansion.
+- [ ] Periodically run heavier fuzz jobs locally or in CI nightlies.
+
+### 9.3 Cross-platform CI matrix
+
+- [ ] Ensure CI runs at least on:
+  - [ ] Linux (glibc + musl if practical).
+  - [ ] macOS.
+  - [ ] Windows (even if a subset of tests initially).
+- [ ] Add build/test jobs for the cross-compiled release targets defined in `build.zig`.
+
+### 9.4 Developer ergonomics
+
+- [ ] Provide a `zig build dev` or similar target to spin up a debug build with profiling/logging enabled.
+- [ ] Provide `scripts/` helpers for common tasks:
+  - [ ] `scripts/test-all.sh` as a thin wrapper around `zig build test-all`.
+  - [ ] `scripts/bench.sh` as a wrapper for `zig build bench` + `den-profile`.
+
+---
+
+## 10. Documentation & Consistency (`README.md`, `docs/*`)
+
+### 10.1 Fix stale references and missing files
+
+- [ ] `README.md` references `ROADMAP.md` and `ZIG_MIGRATION_STATUS.md` which are not currently present in the root.
+  - [ ] Either reintroduce these docs (from previous branches/versions) or update README to reference the current canonical documents.
+- [ ] Ensure all doc references (e.g. to benches, APIs, plugin examples) match current file locations.
+
+### 10.2 Keep reference docs synchronized with implementation
+
+- [ ] Periodically audit:
+  - [ ] `docs/FEATURES.md` vs actual supported syntax & builtins.
+  - [ ] `docs/BUILTINS.md` vs `src/builtins` and help output.
+  - [ ] `docs/API.md` vs Zig types exposed for plugin authors.
+- [ ] Add a lightweight doc-check step (even manual for now) to pull requests that change public behavior.
+
+### 10.3 Power-user guides & comparison docs
+
+Den aims to be a drop-in for people used to bash/zsh/fish.
+
+- [ ] Add a **“Den for zsh users”** guide that maps common features (prompt, keybindings, completion, plugins) to Den equivalents.
+- [ ] Add a **“Den for fish users”** guide focusing on autosuggestions, completions, and scripts.
+- [ ] Clarify which bash-isms are intentionally unsupported to keep the implementation minimal.
+
+---
+
+## 11. Minimalism & Dependency Story
+
+Den’s promise includes “zero dependencies” and a small, self-contained binary, while the build currently relies on `zig-config` as a module.
+
+- [ ] Decide and document what “no dependencies” means in practice:
+  - [ ] No **runtime** dependencies beyond libc? (current state).
+  - [ ] Allow vendored Zig modules like `zig-config` as part of the source tree.
+- [ ] Consider **vendoring** or partially inlining minimal config parsing logic so build doesn’t depend on external module resolution, or at least document the expectation.
+- [ ] Keep binary size and memory usage budgets explicit and tracked in `docs/BENCHMARKS.md` / profiling output.
+
+---
+
+## 12. Nice-to-haves / Future Directions (Longer Term)
+
+These are more speculative improvements that should only be pursued if they don’t compromise core goals of simplicity and predictability.
+
+- [ ] Explore **JIT compilation** or ahead-of-time optimization of frequently-used scripts (as hinted in `ARCHITECTURE.md`) while keeping the shell itself a static binary.
+- [ ] Consider **distributed execution hooks** (remote runners) via plugins, not core.
+- [ ] Add optional **live reload** of plugins and configuration (beyond simple config hot-reload) with strong isolation.
+- [ ] Investigate **async I/O integration** in the long term, especially for network-heavy workflows, in a way that doesn’t leak complexity into the user model.
+
+---
+
+This TODO is intentionally broad and ambitious. The immediate next steps should focus on:
+
+1. Aligning `shell.zig` with the documented architecture (modularization).
+2. Integrating existing optimization utilities (optimized parser, history index, fuzzy completion, memory pools) into the real execution path.
+3. Tightening tests and docs around the current feature set so Den remains rock-solid while it grows toward zsh/fish-level UX.
