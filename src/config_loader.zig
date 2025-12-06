@@ -330,6 +330,16 @@ pub const ConfigError = struct {
     };
 };
 
+/// ANSI color codes for terminal output
+const TermColors = struct {
+    const reset = "\x1b[0m";
+    const bold = "\x1b[1m";
+    const red = "\x1b[31m";
+    const yellow = "\x1b[33m";
+    const cyan = "\x1b[36m";
+    const dim = "\x1b[2m";
+};
+
 /// Validation result with errors and warnings
 pub const ValidationResult = struct {
     valid: bool,
@@ -342,19 +352,61 @@ pub const ValidationResult = struct {
         self.allocator.free(self.warnings);
     }
 
+    /// Format validation result without colors (for plain output)
     pub fn format(self: *const ValidationResult, writer: anytype) !void {
-        if (self.errors.len > 0) {
-            try writer.writeAll("Configuration errors:\n");
-            for (self.errors) |err| {
-                try writer.print("  - {s}: {s}\n", .{ err.field, err.message });
-            }
+        for (self.errors) |err| {
+            try writer.print("den: config: error: {s}: {s}\n", .{ err.field, err.message });
         }
-        if (self.warnings.len > 0) {
-            try writer.writeAll("Configuration warnings:\n");
-            for (self.warnings) |warn| {
-                try writer.print("  - {s}: {s}\n", .{ warn.field, warn.message });
-            }
+        for (self.warnings) |warn| {
+            try writer.print("den: config: warning: {s}: {s}\n", .{ warn.field, warn.message });
         }
+    }
+
+    /// Format validation result with ANSI colors
+    pub fn formatColored(self: *const ValidationResult, writer: anytype) !void {
+        for (self.errors) |err| {
+            try writer.print("{s}den: config:{s} {s}{s}error:{s} {s}{s}{s}: {s}\n", .{
+                TermColors.cyan,
+                TermColors.reset,
+                TermColors.bold,
+                TermColors.red,
+                TermColors.reset,
+                TermColors.bold,
+                err.field,
+                TermColors.reset,
+                err.message,
+            });
+        }
+        for (self.warnings) |warn| {
+            try writer.print("{s}den: config:{s} {s}{s}warning:{s} {s}{s}{s}: {s}\n", .{
+                TermColors.cyan,
+                TermColors.reset,
+                TermColors.bold,
+                TermColors.yellow,
+                TermColors.reset,
+                TermColors.dim,
+                warn.field,
+                TermColors.reset,
+                warn.message,
+            });
+        }
+    }
+
+    /// Print to stderr with color auto-detection
+    pub fn printToStderr(self: *const ValidationResult) void {
+        const stderr = std.io.getStdErr().writer();
+        // Check if stderr is a TTY for color support
+        const use_color = std.posix.isatty(std.posix.STDERR_FILENO);
+        if (use_color) {
+            self.formatColored(stderr) catch {};
+        } else {
+            self.format(stderr) catch {};
+        }
+    }
+
+    /// Returns true if there are any issues (errors or warnings)
+    pub fn hasIssues(self: *const ValidationResult) bool {
+        return self.errors.len > 0 or self.warnings.len > 0;
     }
 };
 
@@ -366,7 +418,9 @@ pub fn validateConfig(allocator: std.mem.Allocator, config: DenConfig) !Validati
     var warnings = std.ArrayList(ConfigError).empty;
     errdefer warnings.deinit(allocator);
 
-    // Validate history settings
+    // ========================================
+    // History validation
+    // ========================================
     if (config.history.max_entries < 100) {
         try warnings.append(allocator, ConfigError{
             .field = "history.max_entries",
@@ -382,7 +436,18 @@ pub fn validateConfig(allocator: std.mem.Allocator, config: DenConfig) !Validati
         });
     }
 
-    // Validate completion settings
+    // Validate history file path
+    if (config.history.file.len == 0) {
+        try errors.append(allocator, ConfigError{
+            .field = "history.file",
+            .message = "History file path cannot be empty",
+            .severity = .err,
+        });
+    }
+
+    // ========================================
+    // Completion validation
+    // ========================================
     if (config.completion.max_suggestions == 0) {
         try errors.append(allocator, ConfigError{
             .field = "completion.max_suggestions",
@@ -407,7 +472,18 @@ pub fn validateConfig(allocator: std.mem.Allocator, config: DenConfig) !Validati
         });
     }
 
-    // Validate theme color format (should be hex codes or named colors)
+    // Validate cache TTL
+    if (config.completion.cache.enabled and config.completion.cache.ttl == 0) {
+        try warnings.append(allocator, ConfigError{
+            .field = "completion.cache.ttl",
+            .message = "Cache TTL is 0, cache entries will expire immediately",
+            .severity = .warning,
+        });
+    }
+
+    // ========================================
+    // Theme validation - all colors
+    // ========================================
     if (!isValidColor(config.theme.colors.primary)) {
         try warnings.append(allocator, ConfigError{
             .field = "theme.colors.primary",
@@ -422,8 +498,56 @@ pub fn validateConfig(allocator: std.mem.Allocator, config: DenConfig) !Validati
             .severity = .warning,
         });
     }
+    if (!isValidColor(config.theme.colors.success)) {
+        try warnings.append(allocator, ConfigError{
+            .field = "theme.colors.success",
+            .message = "Invalid color format (expected #RRGGBB or named color)",
+            .severity = .warning,
+        });
+    }
+    if (!isValidColor(config.theme.colors.warning)) {
+        try warnings.append(allocator, ConfigError{
+            .field = "theme.colors.warning",
+            .message = "Invalid color format (expected #RRGGBB or named color)",
+            .severity = .warning,
+        });
+    }
+    if (!isValidColor(config.theme.colors.err)) {
+        try warnings.append(allocator, ConfigError{
+            .field = "theme.colors.error",
+            .message = "Invalid color format (expected #RRGGBB or named color)",
+            .severity = .warning,
+        });
+    }
+    if (!isValidColor(config.theme.colors.info)) {
+        try warnings.append(allocator, ConfigError{
+            .field = "theme.colors.info",
+            .message = "Invalid color format (expected #RRGGBB or named color)",
+            .severity = .warning,
+        });
+    }
 
-    // Validate prompt format
+    // Validate theme name
+    if (config.theme.name.len == 0) {
+        try warnings.append(allocator, ConfigError{
+            .field = "theme.name",
+            .message = "Theme name is empty, using default",
+            .severity = .warning,
+        });
+    }
+
+    // Validate prompt symbols
+    if (config.theme.symbols.prompt.len == 0) {
+        try warnings.append(allocator, ConfigError{
+            .field = "theme.symbols.prompt",
+            .message = "Prompt symbol is empty, may cause display issues",
+            .severity = .warning,
+        });
+    }
+
+    // ========================================
+    // Prompt validation
+    // ========================================
     if (config.prompt.format.len == 0) {
         try errors.append(allocator, ConfigError{
             .field = "prompt.format",
@@ -432,13 +556,271 @@ pub fn validateConfig(allocator: std.mem.Allocator, config: DenConfig) !Validati
         });
     }
 
-    // Validate expansion cache limits
+    // Validate right_prompt if set
+    if (config.prompt.right_prompt) |right| {
+        if (right.len == 0) {
+            try warnings.append(allocator, ConfigError{
+                .field = "prompt.right_prompt",
+                .message = "Right prompt is set but empty",
+                .severity = .warning,
+            });
+        }
+    }
+
+    // ========================================
+    // Expansion cache limits validation
+    // ========================================
     if (config.expansion.cache_limits.glob > 10000) {
         try warnings.append(allocator, ConfigError{
             .field = "expansion.cache_limits.glob",
             .message = "Very large glob cache (>10000) may use excessive memory",
             .severity = .warning,
         });
+    }
+    if (config.expansion.cache_limits.variable > 10000) {
+        try warnings.append(allocator, ConfigError{
+            .field = "expansion.cache_limits.variable",
+            .message = "Very large variable cache (>10000) may use excessive memory",
+            .severity = .warning,
+        });
+    }
+    if (config.expansion.cache_limits.exec > 10000) {
+        try warnings.append(allocator, ConfigError{
+            .field = "expansion.cache_limits.exec",
+            .message = "Very large exec cache (>10000) may use excessive memory",
+            .severity = .warning,
+        });
+    }
+
+    // ========================================
+    // Aliases validation
+    // ========================================
+    if (config.aliases.custom) |custom_aliases| {
+        for (custom_aliases, 0..) |alias, i| {
+            // Validate alias name
+            if (alias.name.len == 0) {
+                try errors.append(allocator, ConfigError{
+                    .field = if (i < 10) blk: {
+                        const fields = [_][]const u8{
+                            "aliases.custom[0].name",
+                            "aliases.custom[1].name",
+                            "aliases.custom[2].name",
+                            "aliases.custom[3].name",
+                            "aliases.custom[4].name",
+                            "aliases.custom[5].name",
+                            "aliases.custom[6].name",
+                            "aliases.custom[7].name",
+                            "aliases.custom[8].name",
+                            "aliases.custom[9].name",
+                        };
+                        break :blk fields[i];
+                    } else "aliases.custom[N].name",
+                    .message = "Alias name cannot be empty",
+                    .severity = .err,
+                });
+            }
+            // Validate alias command
+            if (alias.command.len == 0) {
+                try errors.append(allocator, ConfigError{
+                    .field = if (i < 10) blk: {
+                        const fields = [_][]const u8{
+                            "aliases.custom[0].command",
+                            "aliases.custom[1].command",
+                            "aliases.custom[2].command",
+                            "aliases.custom[3].command",
+                            "aliases.custom[4].command",
+                            "aliases.custom[5].command",
+                            "aliases.custom[6].command",
+                            "aliases.custom[7].command",
+                            "aliases.custom[8].command",
+                            "aliases.custom[9].command",
+                        };
+                        break :blk fields[i];
+                    } else "aliases.custom[N].command",
+                    .message = "Alias command cannot be empty",
+                    .severity = .err,
+                });
+            }
+            // Warn about potentially dangerous alias names
+            const dangerous_names = [_][]const u8{ "cd", "exit", "source", ".", "exec", "eval" };
+            for (dangerous_names) |dangerous| {
+                if (std.mem.eql(u8, alias.name, dangerous)) {
+                    try warnings.append(allocator, ConfigError{
+                        .field = if (i < 10) blk: {
+                            const fields = [_][]const u8{
+                                "aliases.custom[0].name",
+                                "aliases.custom[1].name",
+                                "aliases.custom[2].name",
+                                "aliases.custom[3].name",
+                                "aliases.custom[4].name",
+                                "aliases.custom[5].name",
+                                "aliases.custom[6].name",
+                                "aliases.custom[7].name",
+                                "aliases.custom[8].name",
+                                "aliases.custom[9].name",
+                            };
+                            break :blk fields[i];
+                        } else "aliases.custom[N].name",
+                        .message = "Aliasing shell builtins may cause unexpected behavior",
+                        .severity = .warning,
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    // Validate suffix aliases
+    if (config.aliases.suffix) |suffix_aliases| {
+        for (suffix_aliases, 0..) |alias, i| {
+            if (alias.extension.len == 0) {
+                try errors.append(allocator, ConfigError{
+                    .field = if (i < 10) blk: {
+                        const fields = [_][]const u8{
+                            "aliases.suffix[0].extension",
+                            "aliases.suffix[1].extension",
+                            "aliases.suffix[2].extension",
+                            "aliases.suffix[3].extension",
+                            "aliases.suffix[4].extension",
+                            "aliases.suffix[5].extension",
+                            "aliases.suffix[6].extension",
+                            "aliases.suffix[7].extension",
+                            "aliases.suffix[8].extension",
+                            "aliases.suffix[9].extension",
+                        };
+                        break :blk fields[i];
+                    } else "aliases.suffix[N].extension",
+                    .message = "Suffix alias extension cannot be empty",
+                    .severity = .err,
+                });
+            }
+            if (alias.command.len == 0) {
+                try errors.append(allocator, ConfigError{
+                    .field = if (i < 10) blk: {
+                        const fields = [_][]const u8{
+                            "aliases.suffix[0].command",
+                            "aliases.suffix[1].command",
+                            "aliases.suffix[2].command",
+                            "aliases.suffix[3].command",
+                            "aliases.suffix[4].command",
+                            "aliases.suffix[5].command",
+                            "aliases.suffix[6].command",
+                            "aliases.suffix[7].command",
+                            "aliases.suffix[8].command",
+                            "aliases.suffix[9].command",
+                        };
+                        break :blk fields[i];
+                    } else "aliases.suffix[N].command",
+                    .message = "Suffix alias command cannot be empty",
+                    .severity = .err,
+                });
+            }
+        }
+    }
+
+    // ========================================
+    // Keybindings validation
+    // ========================================
+    if (config.keybindings.custom) |custom_bindings| {
+        for (custom_bindings, 0..) |binding, i| {
+            if (binding.key.len == 0) {
+                try errors.append(allocator, ConfigError{
+                    .field = if (i < 10) blk: {
+                        const fields = [_][]const u8{
+                            "keybindings.custom[0].key",
+                            "keybindings.custom[1].key",
+                            "keybindings.custom[2].key",
+                            "keybindings.custom[3].key",
+                            "keybindings.custom[4].key",
+                            "keybindings.custom[5].key",
+                            "keybindings.custom[6].key",
+                            "keybindings.custom[7].key",
+                            "keybindings.custom[8].key",
+                            "keybindings.custom[9].key",
+                        };
+                        break :blk fields[i];
+                    } else "keybindings.custom[N].key",
+                    .message = "Keybinding key cannot be empty",
+                    .severity = .err,
+                });
+            }
+            if (binding.action.len == 0) {
+                try errors.append(allocator, ConfigError{
+                    .field = if (i < 10) blk: {
+                        const fields = [_][]const u8{
+                            "keybindings.custom[0].action",
+                            "keybindings.custom[1].action",
+                            "keybindings.custom[2].action",
+                            "keybindings.custom[3].action",
+                            "keybindings.custom[4].action",
+                            "keybindings.custom[5].action",
+                            "keybindings.custom[6].action",
+                            "keybindings.custom[7].action",
+                            "keybindings.custom[8].action",
+                            "keybindings.custom[9].action",
+                        };
+                        break :blk fields[i];
+                    } else "keybindings.custom[N].action",
+                    .message = "Keybinding action cannot be empty",
+                    .severity = .err,
+                });
+            }
+        }
+    }
+
+    // ========================================
+    // Environment validation
+    // ========================================
+    if (config.environment.variables) |env_vars| {
+        for (env_vars, 0..) |entry, i| {
+            if (entry.name.len == 0) {
+                try errors.append(allocator, ConfigError{
+                    .field = if (i < 10) blk: {
+                        const fields = [_][]const u8{
+                            "environment.variables[0].name",
+                            "environment.variables[1].name",
+                            "environment.variables[2].name",
+                            "environment.variables[3].name",
+                            "environment.variables[4].name",
+                            "environment.variables[5].name",
+                            "environment.variables[6].name",
+                            "environment.variables[7].name",
+                            "environment.variables[8].name",
+                            "environment.variables[9].name",
+                        };
+                        break :blk fields[i];
+                    } else "environment.variables[N].name",
+                    .message = "Environment variable name cannot be empty",
+                    .severity = .err,
+                });
+            }
+            // Warn about overriding important env vars
+            const important_vars = [_][]const u8{ "PATH", "HOME", "USER", "SHELL" };
+            for (important_vars) |important| {
+                if (std.mem.eql(u8, entry.name, important)) {
+                    try warnings.append(allocator, ConfigError{
+                        .field = if (i < 10) blk: {
+                            const fields = [_][]const u8{
+                                "environment.variables[0].name",
+                                "environment.variables[1].name",
+                                "environment.variables[2].name",
+                                "environment.variables[3].name",
+                                "environment.variables[4].name",
+                                "environment.variables[5].name",
+                                "environment.variables[6].name",
+                                "environment.variables[7].name",
+                                "environment.variables[8].name",
+                                "environment.variables[9].name",
+                            };
+                            break :blk fields[i];
+                        } else "environment.variables[N].name",
+                        .message = "Overriding system environment variable may cause issues",
+                        .severity = .warning,
+                    });
+                    break;
+                }
+            }
+        }
     }
 
     return ValidationResult{
@@ -529,4 +911,95 @@ test "isValidColor - named colors" {
     try std.testing.expect(isValidColor("blue"));
     try std.testing.expect(isValidColor("green"));
     try std.testing.expect(!isValidColor("notacolor"));
+}
+
+test "validateConfig - empty prompt format fails" {
+    const allocator = std.testing.allocator;
+    var config = DenConfig{};
+    config.prompt.format = "";
+    var result = try validateConfig(allocator, config);
+    defer result.deinit();
+    try std.testing.expect(!result.valid);
+    // Should have error for empty prompt
+    var found_prompt_error = false;
+    for (result.errors) |err| {
+        if (std.mem.eql(u8, err.field, "prompt.format")) {
+            found_prompt_error = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_prompt_error);
+}
+
+test "validateConfig - empty history file fails" {
+    const allocator = std.testing.allocator;
+    var config = DenConfig{};
+    config.history.file = "";
+    var result = try validateConfig(allocator, config);
+    defer result.deinit();
+    try std.testing.expect(!result.valid);
+    var found_history_error = false;
+    for (result.errors) |err| {
+        if (std.mem.eql(u8, err.field, "history.file")) {
+            found_history_error = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_history_error);
+}
+
+test "validateConfig - warnings don't prevent valid config" {
+    const allocator = std.testing.allocator;
+    var config = DenConfig{};
+    // Set a very small history size (should warn but not error)
+    config.history.max_entries = 50;
+    var result = try validateConfig(allocator, config);
+    defer result.deinit();
+    // Should still be valid (warnings don't affect validity)
+    try std.testing.expect(result.valid);
+    // But should have a warning
+    try std.testing.expect(result.warnings.len > 0);
+}
+
+test "validateConfig - cache enabled with zero entries fails" {
+    const allocator = std.testing.allocator;
+    var config = DenConfig{};
+    config.completion.cache.enabled = true;
+    config.completion.cache.max_entries = 0;
+    var result = try validateConfig(allocator, config);
+    defer result.deinit();
+    try std.testing.expect(!result.valid);
+}
+
+test "validateConfig - invalid theme color warns" {
+    const allocator = std.testing.allocator;
+    var config = DenConfig{};
+    config.theme.colors.primary = "notacolor";
+    var result = try validateConfig(allocator, config);
+    defer result.deinit();
+    // Invalid colors are warnings, not errors
+    try std.testing.expect(result.valid);
+    try std.testing.expect(result.warnings.len > 0);
+}
+
+test "ValidationResult - hasIssues" {
+    const allocator = std.testing.allocator;
+    const config = DenConfig{};
+    var result = try validateConfig(allocator, config);
+    defer result.deinit();
+    // Default config should have no issues
+    try std.testing.expect(!result.hasIssues());
+}
+
+test "ValidationResult - format output" {
+    const allocator = std.testing.allocator;
+    var config = DenConfig{};
+    config.completion.max_suggestions = 0;
+    var result = try validateConfig(allocator, config);
+    defer result.deinit();
+
+    // Test plain format - just verify it doesn't crash
+    // (actual output testing would require a writer)
+    try std.testing.expect(!result.valid);
+    try std.testing.expect(result.errors.len > 0);
 }

@@ -454,3 +454,122 @@ test "Expansion: PATH with tilde after colon" {
 
     try std.testing.expectEqualStrings("/usr/bin:/home/testuser/bin", result);
 }
+
+test "Expansion: associative array value lookup" {
+    const allocator = std.testing.allocator;
+
+    var env = std.StringHashMap([]const u8).init(allocator);
+    defer env.deinit();
+
+    // Create an associative array
+    var assoc_arrays = std.StringHashMap(std.StringHashMap([]const u8)).init(allocator);
+    defer {
+        var iter = assoc_arrays.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        assoc_arrays.deinit();
+    }
+
+    var colors = std.StringHashMap([]const u8).init(allocator);
+    try colors.put("red", "#FF0000");
+    try colors.put("green", "#00FF00");
+    try colors.put("blue", "#0000FF");
+    try assoc_arrays.put("colors", colors);
+
+    var expansion = Expansion.init(allocator, &env, 0);
+    expansion.assoc_arrays = &assoc_arrays;
+
+    const result = try expansion.expand("${colors[red]}");
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("#FF0000", result);
+}
+
+test "Expansion: associative array all values" {
+    const allocator = std.testing.allocator;
+
+    var env = std.StringHashMap([]const u8).init(allocator);
+    defer env.deinit();
+
+    var assoc_arrays = std.StringHashMap(std.StringHashMap([]const u8)).init(allocator);
+    defer {
+        var iter = assoc_arrays.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        assoc_arrays.deinit();
+    }
+
+    var arr = std.StringHashMap([]const u8).init(allocator);
+    try arr.put("a", "1");
+    try arr.put("b", "2");
+    try assoc_arrays.put("myarr", arr);
+
+    var expansion = Expansion.init(allocator, &env, 0);
+    expansion.assoc_arrays = &assoc_arrays;
+
+    const result = try expansion.expand("${myarr[@]}");
+    defer allocator.free(result);
+
+    // Values may be in any order since hashmap doesn't preserve insertion order
+    try std.testing.expect(std.mem.eql(u8, result, "1 2") or std.mem.eql(u8, result, "2 1"));
+}
+
+test "Expansion: associative array length" {
+    const allocator = std.testing.allocator;
+
+    var env = std.StringHashMap([]const u8).init(allocator);
+    defer env.deinit();
+
+    var assoc_arrays = std.StringHashMap(std.StringHashMap([]const u8)).init(allocator);
+    defer {
+        var iter = assoc_arrays.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        assoc_arrays.deinit();
+    }
+
+    var arr = std.StringHashMap([]const u8).init(allocator);
+    try arr.put("key1", "val1");
+    try arr.put("key2", "val2");
+    try arr.put("key3", "val3");
+    try assoc_arrays.put("data", arr);
+
+    var expansion = Expansion.init(allocator, &env, 0);
+    expansion.assoc_arrays = &assoc_arrays;
+
+    const result = try expansion.expand("${#data}");
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("3", result);
+}
+
+test "Expansion: associative array missing key returns empty" {
+    const allocator = std.testing.allocator;
+
+    var env = std.StringHashMap([]const u8).init(allocator);
+    defer env.deinit();
+
+    var assoc_arrays = std.StringHashMap(std.StringHashMap([]const u8)).init(allocator);
+    defer {
+        var iter = assoc_arrays.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        assoc_arrays.deinit();
+    }
+
+    var arr = std.StringHashMap([]const u8).init(allocator);
+    try arr.put("exists", "value");
+    try assoc_arrays.put("data", arr);
+
+    var expansion = Expansion.init(allocator, &env, 0);
+    expansion.assoc_arrays = &assoc_arrays;
+
+    const result = try expansion.expand("${data[missing]}");
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("", result);
+}

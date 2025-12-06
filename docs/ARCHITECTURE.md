@@ -124,7 +124,7 @@ pub const Shell = struct {
     environment: std.StringHashMap([]const u8),
     aliases: std.StringHashMap([]const u8),
     history: [1000]?[]const u8,
-    background_jobs: [16]?BackgroundJob,
+    job_manager: JobManager,              // Centralized job control
     script_manager: ScriptManager,
     function_manager: FunctionManager,
     plugin_registry: PluginRegistry,
@@ -133,6 +133,40 @@ pub const Shell = struct {
     // ... more fields
 }
 ```
+
+### 2.1 Job Control (src/jobs/)
+
+**Purpose**: Centralized background job management
+
+**Key Components**:
+- `job_manager.zig`: Job tracking, status monitoring, builtin implementations
+- `mod.zig`: Module exports
+
+**Responsibilities**:
+- Track background jobs (add, remove, status)
+- Non-blocking job completion checks
+- Implement job builtins (jobs, fg, bg, disown, wait)
+- Graceful shutdown with SIGTERM/SIGKILL
+
+### 2.2 Shell Options (src/types/shell_options.zig)
+
+**Purpose**: Centralized shell option management
+
+**Key Components**:
+- `SetOptions`: POSIX set options (-e, -u, -x, etc.)
+- `ShoptOptions`: Bash-style shopt options
+- `ShellOptions`: Combined options with accessor methods
+
+### 2.3 Utility Modules (src/utils/)
+
+**Key Modules**:
+- `regex.zig`: Simple regex matching for shell patterns
+- `config_watch.zig`: File modification tracking for hot-reload
+- `io.zig`: Cross-platform I/O utilities
+- `terminal.zig`: Terminal handling and line editing
+- `completion.zig`: Tab completion engine
+- `expansion.zig`: Variable and glob expansion
+- `signals.zig`: Signal handling
 
 ### 3. REPL Layer (src/repl/)
 

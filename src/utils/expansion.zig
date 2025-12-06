@@ -110,7 +110,8 @@ const types = @import("../types/mod.zig");
 pub const Expansion = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
-    arrays: ?*std.StringHashMap([][]const u8), // Array variables
+    arrays: ?*std.StringHashMap([][]const u8), // Indexed array variables
+    assoc_arrays: ?*std.StringHashMap(std.StringHashMap([]const u8)), // Associative array variables
     local_vars: ?*std.StringHashMap([]const u8), // Function local variables (checked first)
     var_attributes: ?*std.StringHashMap(types.VarAttributes), // Variable attributes for namerefs
     last_exit_code: i32,
@@ -127,6 +128,7 @@ pub const Expansion = struct {
             .allocator = allocator,
             .environment = environment,
             .arrays = null,
+            .assoc_arrays = null,
             .local_vars = null,
             .var_attributes = null,
             .last_exit_code = last_exit_code,
@@ -153,6 +155,7 @@ pub const Expansion = struct {
             .allocator = allocator,
             .environment = environment,
             .arrays = null,
+            .assoc_arrays = null,
             .local_vars = null,
             .var_attributes = null,
             .last_exit_code = last_exit_code,
@@ -180,6 +183,7 @@ pub const Expansion = struct {
             .allocator = allocator,
             .environment = environment,
             .arrays = null,
+            .assoc_arrays = null,
             .local_vars = null,
             .var_attributes = null,
             .last_exit_code = last_exit_code,
@@ -201,6 +205,11 @@ pub const Expansion = struct {
     /// Set variable attributes for nameref resolution
     pub fn setVarAttributes(self: *Expansion, attrs: *std.StringHashMap(types.VarAttributes)) void {
         self.var_attributes = attrs;
+    }
+
+    /// Set associative arrays for expansion
+    pub fn setAssocArrays(self: *Expansion, assoc: *std.StringHashMap(std.StringHashMap([]const u8))) void {
+        self.assoc_arrays = assoc;
     }
 
     /// Resolve a nameref chain - follow the reference to get the actual variable name
@@ -496,7 +505,7 @@ pub const Expansion = struct {
 
         const content = input[2..end];
 
-        // Check for array expansion: ${arr[@]}, ${arr[*]}, ${arr[0]}, ${#arr}
+        // Check for array expansion: ${arr[@]}, ${arr[*]}, ${arr[0]}, ${assoc[key]}, ${#arr}
         if (std.mem.indexOfScalar(u8, content, '[')) |bracket_pos| {
             const var_name = content[0..bracket_pos];
             const close_bracket = std.mem.indexOfScalar(u8, content[bracket_pos..], ']') orelse {
@@ -505,6 +514,7 @@ pub const Expansion = struct {
             };
             const index_part = content[bracket_pos + 1 .. bracket_pos + close_bracket];
 
+            // First try indexed arrays
             if (self.arrays) |arrays| {
                 if (arrays.get(var_name)) |array| {
                     if (std.mem.eql(u8, index_part, "@") or std.mem.eql(u8, index_part, "*")) {
@@ -544,15 +554,71 @@ pub const Expansion = struct {
                     }
                 }
             }
+
+            // Try associative arrays
+            if (self.assoc_arrays) |assoc_arrays| {
+                if (assoc_arrays.get(var_name)) |assoc| {
+                    if (std.mem.eql(u8, index_part, "@") or std.mem.eql(u8, index_part, "*")) {
+                        // ${assoc[@]} or ${assoc[*]} - all values
+                        if (assoc.count() == 0) {
+                            return ExpansionResult{ .value = "", .consumed = end + 1 };
+                        }
+
+                        // Collect all values
+                        var values = std.ArrayList([]const u8).empty;
+                        defer values.deinit(self.allocator);
+
+                        var iter = assoc.iterator();
+                        while (iter.next()) |entry| {
+                            try values.append(self.allocator, entry.value_ptr.*);
+                        }
+
+                        // Calculate total length
+                        var total_len: usize = 0;
+                        for (values.items) |item| {
+                            total_len += item.len;
+                        }
+                        if (values.items.len > 1) {
+                            total_len += values.items.len - 1; // spaces
+                        }
+
+                        var result = try self.allocator.alloc(u8, total_len);
+                        var pos: usize = 0;
+                        for (values.items, 0..) |item, i| {
+                            @memcpy(result[pos..pos + item.len], item);
+                            pos += item.len;
+                            if (i < values.items.len - 1) {
+                                result[pos] = ' ';
+                                pos += 1;
+                            }
+                        }
+                        return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    } else {
+                        // ${assoc[key]} - specific key lookup
+                        if (assoc.get(index_part)) |value| {
+                            const result = try self.allocator.dupe(u8, value);
+                            return ExpansionResult{ .value = result, .consumed = end + 1 };
+                        }
+                        return ExpansionResult{ .value = "", .consumed = end + 1 };
+                    }
+                }
+            }
         }
 
         // Check for string/array length: ${#VAR}
         if (content.len > 0 and content[0] == '#') {
             const var_name = content[1..];
-            // First check arrays
+            // First check indexed arrays
             if (self.arrays) |arrays| {
                 if (arrays.get(var_name)) |array| {
                     const value = try std.fmt.allocPrint(self.allocator, "{d}", .{array.len});
+                    return ExpansionResult{ .value = value, .consumed = end + 1 };
+                }
+            }
+            // Then check associative arrays
+            if (self.assoc_arrays) |assoc_arrays| {
+                if (assoc_arrays.get(var_name)) |assoc| {
+                    const value = try std.fmt.allocPrint(self.allocator, "{d}", .{assoc.count()});
                     return ExpansionResult{ .value = value, .consumed = end + 1 };
                 }
             }
@@ -567,11 +633,96 @@ pub const Expansion = struct {
         }
 
         // Check for variable name prefix expansion: ${!prefix@} or ${!prefix*}
+        // Also handles ${!arr[@]} for array keys
         if (content.len > 1 and content[0] == '!') {
             const last_char = content[content.len - 1];
             if (last_char == '@' or last_char == '*') {
+                const inner = content[1 .. content.len - 1];
+
+                // Check for ${!arr[@]} or ${!arr[*]} - get array indices/keys
+                if (inner.len > 2 and inner[inner.len - 1] == '[') {
+                    const var_name = inner[0 .. inner.len - 1];
+
+                    // Try indexed arrays first
+                    if (self.arrays) |arrays| {
+                        if (arrays.get(var_name)) |array| {
+                            // Return indices 0, 1, 2, ...
+                            if (array.len == 0) {
+                                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                            }
+
+                            // Calculate space needed
+                            var total_len: usize = 0;
+                            for (0..array.len) |i| {
+                                var buf: [20]u8 = undefined;
+                                const num_str = std.fmt.bufPrint(&buf, "{d}", .{i}) catch continue;
+                                total_len += num_str.len;
+                            }
+                            total_len += array.len - 1; // spaces
+
+                            var result = try self.allocator.alloc(u8, total_len);
+                            var pos: usize = 0;
+                            for (0..array.len) |i| {
+                                var buf: [20]u8 = undefined;
+                                const num_str = std.fmt.bufPrint(&buf, "{d}", .{i}) catch continue;
+                                @memcpy(result[pos..][0..num_str.len], num_str);
+                                pos += num_str.len;
+                                if (i < array.len - 1) {
+                                    result[pos] = ' ';
+                                    pos += 1;
+                                }
+                            }
+                            return ExpansionResult{ .value = result, .consumed = end + 1 };
+                        }
+                    }
+
+                    // Try associative arrays
+                    if (self.assoc_arrays) |assoc_arrays| {
+                        if (assoc_arrays.get(var_name)) |assoc| {
+                            if (assoc.count() == 0) {
+                                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                            }
+
+                            // Collect all keys
+                            var keys = std.ArrayList([]const u8).empty;
+                            defer keys.deinit(self.allocator);
+
+                            var iter = assoc.iterator();
+                            while (iter.next()) |entry| {
+                                try keys.append(self.allocator, entry.key_ptr.*);
+                            }
+
+                            // Sort keys for consistent output
+                            std.mem.sort([]const u8, keys.items, {}, struct {
+                                fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+                                    return std.mem.order(u8, a, b) == .lt;
+                                }
+                            }.lessThan);
+
+                            // Calculate total length
+                            var total_len: usize = 0;
+                            for (keys.items) |key| {
+                                total_len += key.len;
+                            }
+                            total_len += keys.items.len - 1; // spaces
+
+                            var result = try self.allocator.alloc(u8, total_len);
+                            var pos: usize = 0;
+                            for (keys.items, 0..) |key, i| {
+                                @memcpy(result[pos..][0..key.len], key);
+                                pos += key.len;
+                                if (i < keys.items.len - 1) {
+                                    result[pos] = ' ';
+                                    pos += 1;
+                                }
+                            }
+                            return ExpansionResult{ .value = result, .consumed = end + 1 };
+                        }
+                    }
+                }
+
                 // ${!prefix@} or ${!prefix*} - expand to variable names with prefix
-                const prefix = content[1 .. content.len - 1];
+                const prefix = inner;
 
                 // Collect all variable names that start with prefix
                 var names = std.ArrayList([]const u8).empty;

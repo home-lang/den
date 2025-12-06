@@ -38,6 +38,20 @@ const CompletionRegistry = @import("utils/completion_registry.zig").CompletionRe
 const CompletionSpec = @import("utils/completion_registry.zig").CompletionSpec;
 const LoadableBuiltins = @import("utils/loadable.zig").LoadableBuiltins;
 const History = @import("history/history.zig").History;
+const jobs_mod = @import("jobs/mod.zig");
+const JobManager = jobs_mod.JobManager;
+const JobStatus = jobs_mod.JobStatus;
+const ProcessId = jobs_mod.ProcessId;
+const BackgroundJob = jobs_mod.BackgroundJob;
+const regex = @import("utils/regex.zig");
+const matchRegexAt = regex.matchRegexAt;
+const config_watch = @import("utils/config_watch.zig");
+const getConfigMtime = config_watch.getConfigMtime;
+
+/// Hard limit for in-memory history entries.
+/// This ensures predictable memory usage regardless of config.history.max_entries.
+/// The effective max is min(config.history.max_entries, HISTORY_HARD_LIMIT).
+const HISTORY_HARD_LIMIT: usize = 1000;
 
 /// Format a parser error into a user-friendly message.
 fn formatParseError(err: anyerror) []const u8 {
@@ -71,169 +85,12 @@ fn getenv(key: []const u8) ?[]const u8 {
     return env_utils.getEnv(key);
 }
 
-/// Get modification time of a config file (for hot-reload)
-fn getConfigMtime(path: ?[]const u8) i128 {
-    const config_path = path orelse return 0;
-    const file = std.fs.cwd().openFile(config_path, .{}) catch return 0;
-    defer file.close();
-    const stat = file.stat() catch return 0;
-    return stat.mtime.nanoseconds;
-}
-
-/// Job status
-const JobStatus = enum {
-    running,
-    stopped,
-    done,
-};
-
-/// Cross-platform process ID type
-const ProcessId = if (builtin.os.tag == .windows) std.os.windows.HANDLE else std.posix.pid_t;
-
-/// Background job information
-const BackgroundJob = struct {
-    pid: ProcessId,
-    job_id: usize,
-    command: []const u8,
-    status: JobStatus,
-};
-
 /// Call stack frame for caller builtin
 pub const CallFrame = struct {
     line_number: usize,
     function_name: []const u8,
     source_file: []const u8,
 };
-
-/// Helper function for regex matching at a specific position
-fn matchRegexAt(string: []const u8, pattern: []const u8, pos: usize, anchored_end: bool) bool {
-    var str_pos = pos;
-    var pat_pos: usize = 0;
-
-    while (pat_pos < pattern.len) {
-        const pat_char = pattern[pat_pos];
-
-        // Check for quantifiers
-        var quantifier: u8 = 0;
-        if (pat_pos + 1 < pattern.len) {
-            const next = pattern[pat_pos + 1];
-            if (next == '*' or next == '+' or next == '?') {
-                quantifier = next;
-            }
-        }
-
-        if (pat_char == '.') {
-            // Match any character
-            if (quantifier != 0) {
-                pat_pos += 2;
-                const min_match: usize = if (quantifier == '+') 1 else 0;
-                var count: usize = 0;
-                // Greedy match
-                while (str_pos < string.len) {
-                    str_pos += 1;
-                    count += 1;
-                }
-                // Backtrack to find match
-                while (count >= min_match) {
-                    if (matchRegexAt(string, pattern[pat_pos..], str_pos, anchored_end)) {
-                        return true;
-                    }
-                    if (count > 0) {
-                        str_pos -= 1;
-                        count -= 1;
-                    } else {
-                        break;
-                    }
-                }
-                return false;
-            } else {
-                if (str_pos >= string.len) return false;
-                str_pos += 1;
-                pat_pos += 1;
-            }
-        } else if (pat_char == '[') {
-            // Character class
-            const class_end = std.mem.indexOfScalarPos(u8, pattern, pat_pos + 1, ']') orelse return false;
-            const class = pattern[pat_pos + 1 .. class_end];
-            const negate = class.len > 0 and class[0] == '^';
-            const actual_class = if (negate) class[1..] else class;
-
-            if (str_pos >= string.len) return false;
-            const ch = string[str_pos];
-            var matches_class = false;
-
-            var i: usize = 0;
-            while (i < actual_class.len) {
-                if (i + 2 < actual_class.len and actual_class[i + 1] == '-') {
-                    // Range
-                    if (ch >= actual_class[i] and ch <= actual_class[i + 2]) {
-                        matches_class = true;
-                        break;
-                    }
-                    i += 3;
-                } else {
-                    if (ch == actual_class[i]) {
-                        matches_class = true;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-
-            if (negate) matches_class = !matches_class;
-            if (!matches_class) return false;
-
-            str_pos += 1;
-            pat_pos = class_end + 1;
-            // Skip quantifier if present
-            if (pat_pos < pattern.len and (pattern[pat_pos] == '*' or pattern[pat_pos] == '+' or pattern[pat_pos] == '?')) {
-                pat_pos += 1;
-            }
-        } else if (pat_char == '\\' and pat_pos + 1 < pattern.len) {
-            // Escaped character
-            pat_pos += 1;
-            const escaped = pattern[pat_pos];
-            if (str_pos >= string.len or string[str_pos] != escaped) return false;
-            str_pos += 1;
-            pat_pos += 1;
-        } else {
-            // Literal character
-            if (quantifier != 0) {
-                pat_pos += 2;
-                const min_match: usize = if (quantifier == '+') 1 else 0;
-                var count: usize = 0;
-                // Match as many as possible
-                while (str_pos < string.len and string[str_pos] == pat_char) {
-                    str_pos += 1;
-                    count += 1;
-                }
-                // Backtrack
-                while (count >= min_match) {
-                    if (matchRegexAt(string, pattern[pat_pos..], str_pos, anchored_end)) {
-                        return true;
-                    }
-                    if (count > 0) {
-                        str_pos -= 1;
-                        count -= 1;
-                    } else {
-                        break;
-                    }
-                }
-                return false;
-            } else {
-                if (str_pos >= string.len or string[str_pos] != pat_char) return false;
-                str_pos += 1;
-                pat_pos += 1;
-            }
-        }
-    }
-
-    // If anchored at end, must have consumed entire string
-    if (anchored_end) {
-        return str_pos == string.len;
-    }
-    return true;
-}
 
 pub const Shell = struct {
     allocator: std.mem.Allocator,
@@ -243,12 +100,13 @@ pub const Shell = struct {
     aliases: std.StringHashMap([]const u8),
     suffix_aliases: std.StringHashMap([]const u8), // extension -> command (zsh-style suffix aliases)
     last_exit_code: i32,
-    background_jobs: [16]?BackgroundJob,
-    background_jobs_count: usize,
-    next_job_id: usize,
-    last_background_pid: std.posix.pid_t,
-    history: [1000]?[]const u8,
+    job_manager: JobManager,
+    // History buffer: fixed-size array with effective_max from config
+    // Note: max hard limit is 1000 for predictable memory; config.history.max_entries
+    // can be smaller but not larger than this.
+    history: [HISTORY_HARD_LIMIT]?[]const u8,
     history_count: usize,
+    history_max: usize, // Effective max from config (capped at HISTORY_HARD_LIMIT)
     history_file_path: []const u8,
     history_expander: HistoryExpansion,
     dir_stack: [32]?[]const u8,
@@ -408,9 +266,15 @@ pub const Shell = struct {
             }
         }
 
-        // Build history file path: ~/.den_history
+        // Build history file path from config (expand ~ to home directory)
         var history_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const history_path = try std.fmt.bufPrint(&history_path_buf, "{s}/.den_history", .{home});
+        const config_history_file = config.history.file;
+        const history_path = if (std.mem.startsWith(u8, config_history_file, "~/"))
+            try std.fmt.bufPrint(&history_path_buf, "{s}/{s}", .{ home, config_history_file[2..] })
+        else if (std.mem.eql(u8, config_history_file, "~"))
+            home
+        else
+            config_history_file;
         const history_path_owned = try allocator.dupe(u8, history_path);
 
         // Initialize thread pool with automatic CPU detection
@@ -429,12 +293,10 @@ pub const Shell = struct {
             .aliases = std.StringHashMap([]const u8).init(allocator),
             .suffix_aliases = std.StringHashMap([]const u8).init(allocator),
             .last_exit_code = 0,
-            .background_jobs = [_]?BackgroundJob{null} ** 16,
-            .background_jobs_count = 0,
-            .next_job_id = 1,
-            .last_background_pid = if (@import("builtin").os.tag == .windows) undefined else 0,
-            .history = [_]?[]const u8{null} ** 1000,
+            .job_manager = JobManager.init(allocator),
+            .history = [_]?[]const u8{null} ** HISTORY_HARD_LIMIT,
             .history_count = 0,
+            .history_max = @min(config.history.max_entries, HISTORY_HARD_LIMIT),
             .history_file_path = history_path_owned,
             .history_expander = HistoryExpansion.init(allocator),
             .dir_stack = [_]?[]const u8{null} ** 32,
@@ -617,16 +479,11 @@ pub const Shell = struct {
         // Clean up completion registry
         self.completion_registry.deinit();
 
-        // Clean up background jobs - kill them first, then free memory
-        self.killAllBackgroundJobs();
-        for (self.background_jobs) |maybe_job| {
-            if (maybe_job) |job| {
-                self.allocator.free(job.command);
-            }
-        }
+        // Clean up job manager (kills and frees all background jobs)
+        self.job_manager.deinit();
 
-        // Clean up history
-        History.deinit(self.allocator, self.history[0..], self.history_file_path);
+        // Clean up history (only clean up entries that were actually used)
+        History.deinit(self.allocator, self.history[0..self.history_max], self.history_file_path);
 
         // Clean up directory stack
         for (self.dir_stack) |maybe_dir| {
@@ -766,7 +623,7 @@ pub const Shell = struct {
             }
 
             // Check for completed background jobs
-            try self.checkBackgroundJobs();
+            try self.job_manager.checkCompleted();
 
             // Read line from stdin
             const line = blk: {
@@ -1311,6 +1168,21 @@ pub const Shell = struct {
         };
         self.plugin_registry.executeHooks(.pre_command, &pre_context) catch {};
 
+        // Fast path for simple commands (no pipes, redirects, operators, or expansions)
+        // This avoids the full tokenizer/parser for common cases like "ls", "echo hello", etc.
+        if (self.tryFastPath(trimmed_input)) |exit_code| {
+            self.last_exit_code = exit_code;
+            // Execute post_command hooks
+            var post_context = HookContext{
+                .hook_type = .post_command,
+                .data = @ptrCast(@alignCast(&cmd_ptr)),
+                .user_data = null,
+                .allocator = self.allocator,
+            };
+            self.plugin_registry.executeHooks(.post_command, &post_context) catch {};
+            return;
+        }
+
         // Tokenize
         var tokenizer = parser_mod.Tokenizer.init(self.allocator, input);
         const tokens = tokenizer.tokenize() catch |err| {
@@ -1373,14 +1245,13 @@ pub const Shell = struct {
         if (chain.commands.len == 1 and chain.operators.len == 0) {
             const cmd = &chain.commands[0];
             if (std.mem.eql(u8, cmd.name, "jobs")) {
-                try self.builtinJobs(cmd);
-                self.last_exit_code = 0;
+                self.last_exit_code = try self.job_manager.builtinJobs(cmd.args);
                 return;
             } else if (std.mem.eql(u8, cmd.name, "fg")) {
-                try self.builtinFg(cmd);
+                self.last_exit_code = try self.job_manager.builtinFg(cmd.args);
                 return;
             } else if (std.mem.eql(u8, cmd.name, "bg")) {
-                try self.builtinBg(cmd);
+                self.last_exit_code = try self.job_manager.builtinBg(cmd.args);
                 return;
             } else if (std.mem.eql(u8, cmd.name, "history")) {
                 try self.builtinHistory(cmd);
@@ -1588,6 +1459,84 @@ pub const Shell = struct {
         self.plugin_registry.executeHooks(.post_command, &post_context) catch {};
     }
 
+    /// Try fast path for simple commands.
+    /// Returns exit code if handled, null to fall back to full parser.
+    fn tryFastPath(self: *Shell, input: []const u8) ?i32 {
+        // Quick check: use OptimizedParser's simple command check
+        if (!parser_mod.OptimizedParser.isSimpleCommand(input)) {
+            return null;
+        }
+
+        // Additional checks for features that require full parser
+        for (input) |c| {
+            switch (c) {
+                // Variable expansion
+                '$' => return null,
+                // Command substitution
+                '`' => return null,
+                // Process substitution, grouping
+                '(' => return null,
+                ')' => return null,
+                // Glob patterns
+                '*' => return null,
+                '?' => return null,
+                '[' => return null,
+                // Brace expansion
+                '{' => return null,
+                '}' => return null,
+                // Escape sequences
+                '\\' => return null,
+                else => {},
+            }
+        }
+
+        // Parse with optimized parser
+        var opt_parser = parser_mod.OptimizedParser.init(self.allocator, input);
+        const simple_cmd = opt_parser.parseSimpleCommand() catch return null;
+        if (simple_cmd == null) return null;
+        const cmd = simple_cmd.?;
+
+        // Skip empty commands
+        if (cmd.name.len == 0) return null;
+
+        // Check if this is an alias - fall back to full parser for alias expansion
+        if (self.aliases.contains(cmd.name)) {
+            return null;
+        }
+
+        // Check if this is a function - fall back to full parser for function calls
+        if (self.function_manager.hasFunction(cmd.name)) {
+            return null;
+        }
+
+        // Handle trivial builtins directly (no I/O, no state changes except exit)
+        if (std.mem.eql(u8, cmd.name, "true")) {
+            return 0;
+        }
+
+        if (std.mem.eql(u8, cmd.name, "false")) {
+            return 1;
+        }
+
+        if (std.mem.eql(u8, cmd.name, ":")) {
+            // Bash no-op command
+            return 0;
+        }
+
+        if (std.mem.eql(u8, cmd.name, "exit")) {
+            const args = cmd.getArgs();
+            if (args.len > 0) {
+                self.last_exit_code = std.fmt.parseInt(i32, args[0], 10) catch 0;
+            }
+            self.running = false;
+            return self.last_exit_code;
+        }
+
+        // For all other commands (cd, echo, externals, etc.)
+        // fall back to full parser to ensure correct handling
+        return null;
+    }
+
     /// Execute ERR trap if one is set
     pub fn executeErrTrap(self: *Shell) void {
         // Check if ERR trap is set
@@ -1639,7 +1588,7 @@ pub const Shell = struct {
             std.posix.exit(@intCast(exit_code));
         } else {
             // Parent process - add to background jobs
-            try self.addBackgroundJob(pid, original_input);
+            try self.job_manager.add(pid, original_input);
         }
     }
 
@@ -1672,7 +1621,7 @@ pub const Shell = struct {
         const pid_for_expansion: i32 = if (@import("builtin").os.tag == .windows)
             0
         else
-            @intCast(self.last_background_pid);
+            @intCast(self.job_manager.getLastPid());
 
         var expander = Expansion.initWithShell(
             self.allocator,
@@ -1684,7 +1633,8 @@ pub const Shell = struct {
             self.last_arg,
             self,
         );
-        expander.arrays = &self.arrays; // Add array support
+        expander.arrays = &self.arrays; // Add indexed array support
+        expander.assoc_arrays = &self.assoc_arrays; // Add associative array support
         expander.var_attributes = &self.var_attributes; // Add nameref support
         // Set local vars pointer if inside a function
         if (self.function_manager.currentFrame()) |frame| {
@@ -1760,315 +1710,22 @@ pub const Shell = struct {
         }
     }
 
-    fn checkBackgroundJobs(self: *Shell) !void {
-        if (builtin.os.tag == .windows) {
-            // Windows: background jobs not fully implemented
-            // Would need to use WaitForSingleObject with WAIT_TIMEOUT
-            return;
-        }
-
-        var i: usize = 0;
-        while (i < self.background_jobs.len) {
-            if (self.background_jobs[i]) |job| {
-                // Check if job has completed (non-blocking waitpid)
-                const result = std.posix.waitpid(job.pid, std.posix.W.NOHANG);
-
-                if (result.pid == job.pid) {
-                    // Job completed
-                    const exit_status = getExitStatus(result.status);
-                    try IO.print("[{d}]  Done ({d})    {s}\n", .{ job.job_id, exit_status, job.command });
-
-                    // Free command string and remove from array
-                    self.allocator.free(job.command);
-                    self.background_jobs[i] = null;
-                    self.background_jobs_count -= 1;
-                    // Don't increment i, check this slot again
-                } else {
-                    // Job still running
-                    i += 1;
-                }
-            } else {
-                // Empty slot
-                i += 1;
-            }
-        }
-    }
-
-    /// Kill all background jobs (for graceful shutdown)
-    fn killAllBackgroundJobs(self: *Shell) void {
-        if (builtin.os.tag == .windows) {
-            // Windows: terminate processes using TerminateProcess
-            const windows = std.os.windows;
-            const PROCESS_TERMINATE: u32 = 0x0001;
-
-            for (self.background_jobs) |maybe_job| {
-                if (maybe_job) |job| {
-                    // Get process handle with terminate permission
-                    const handle = windows.kernel32.OpenProcess(PROCESS_TERMINATE, 0, @intFromPtr(job.pid));
-                    if (handle) |h| {
-                        _ = windows.kernel32.TerminateProcess(h, 1);
-                        _ = windows.kernel32.CloseHandle(h);
-                    }
-                }
-            }
-            return;
-        }
-
-        // Unix: send SIGTERM to all background jobs, then SIGKILL if needed
-        for (self.background_jobs) |maybe_job| {
-            if (maybe_job) |job| {
-                if (job.status == .running) {
-                    // First try SIGTERM for graceful termination
-                    _ = std.posix.kill(job.pid, std.posix.SIG.TERM) catch {};
-
-                    // Give process a short time to exit gracefully
-                    std.posix.nanosleep(0, 100_000_000); // 100ms
-
-                    // Check if still running
-                    const result = std.posix.waitpid(job.pid, std.posix.W.NOHANG);
-                    if (result.pid == 0) {
-                        // Still running, force kill
-                        _ = std.posix.kill(job.pid, std.posix.SIG.KILL) catch {};
-                        // Reap the zombie
-                        _ = std.posix.waitpid(job.pid, 0);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn addBackgroundJob(self: *Shell, pid: ProcessId, command: []const u8) !void {
-        // Find first empty slot
-        var slot_index: ?usize = null;
-        for (self.background_jobs, 0..) |maybe_job, i| {
-            if (maybe_job == null) {
-                slot_index = i;
-                break;
-            }
-        }
-
-        if (slot_index == null) {
-            return error.TooManyBackgroundJobs;
-        }
-
-        const job_id = self.next_job_id;
-        self.next_job_id += 1;
-
-        const command_copy = try self.allocator.dupe(u8, command);
-
-        // Track last background PID
-        self.last_background_pid = pid;
-
-        self.background_jobs[slot_index.?] = BackgroundJob{
-            .pid = pid,
-            .job_id = job_id,
-            .command = command_copy,
-            .status = .running,
-        };
-        self.background_jobs_count += 1;
-
-        try IO.print("[{d}] {d}\n", .{ job_id, pid });
-    }
-
-    /// Builtin: jobs - list background jobs
-    /// Flags: -l (show PIDs), -p (PIDs only), -r (running), -s (stopped)
-    fn builtinJobs(self: *Shell, cmd: *types.ParsedCommand) !void {
-        // Parse flags
-        var show_pids = false;
-        var pids_only = false;
-        var running_only = false;
-        var stopped_only = false;
-
-        for (cmd.args) |arg| {
-            if (arg.len > 0 and arg[0] == '-') {
-                for (arg[1..]) |c| {
-                    switch (c) {
-                        'l' => show_pids = true,
-                        'p' => pids_only = true,
-                        'r' => running_only = true,
-                        's' => stopped_only = true,
-                        else => {
-                            try IO.eprint("den: jobs: -{c}: invalid option\n", .{c});
-                            self.last_exit_code = 1;
-                            return;
-                        },
-                    }
-                }
-            }
-        }
-
-        for (self.background_jobs) |maybe_job| {
-            if (maybe_job) |job| {
-                // Filter by status if requested
-                if (running_only and job.status != .running) continue;
-                if (stopped_only and job.status != .stopped) continue;
-
-                if (pids_only) {
-                    // -p: Just print the PID
-                    try IO.print("{d}\n", .{job.pid});
-                } else if (show_pids) {
-                    // -l: Show PID in output
-                    const status_str = switch (job.status) {
-                        .running => "Running",
-                        .stopped => "Stopped",
-                        .done => "Done",
-                    };
-                    try IO.print("[{d}]  {d} {s: <10} {s}\n", .{ job.job_id, job.pid, status_str, job.command });
-                } else {
-                    // Default output
-                    const status_str = switch (job.status) {
-                        .running => "Running",
-                        .stopped => "Stopped",
-                        .done => "Done",
-                    };
-                    try IO.print("[{d}]  {s: <10} {s}\n", .{ job.job_id, status_str, job.command });
-                }
-            }
-        }
-    }
-
-    /// Builtin: fg - bring background job to foreground
-    fn builtinFg(self: *Shell, cmd: *types.ParsedCommand) !void {
-        // Get job ID from argument (default to most recent)
-        var job_id: ?usize = null;
-        if (cmd.args.len > 0) {
-            job_id = std.fmt.parseInt(usize, cmd.args[0], 10) catch {
-                try IO.eprint("den: fg: {s}: no such job\n", .{cmd.args[0]});
-                self.last_exit_code = 1;
-                return;
-            };
-        } else {
-            // Find most recent job
-            var max_id: usize = 0;
-            for (self.background_jobs) |maybe_job| {
-                if (maybe_job) |job| {
-                    if (job.job_id > max_id) {
-                        max_id = job.job_id;
-                    }
-                }
-            }
-            if (max_id > 0) {
-                job_id = max_id;
-            }
-        }
-
-        if (job_id == null) {
-            try IO.eprint("den: fg: current: no such job\n", .{});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        // Find job in array
-        var job_slot: ?usize = null;
-        for (self.background_jobs, 0..) |maybe_job, i| {
-            if (maybe_job) |job| {
-                if (job.job_id == job_id.?) {
-                    job_slot = i;
-                    break;
-                }
-            }
-        }
-
-        if (job_slot == null) {
-            try IO.eprint("den: fg: {d}: no such job\n", .{job_id.?});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        const job = self.background_jobs[job_slot.?].?;
-        try IO.print("{s}\n", .{job.command});
-
-        // Wait for the job to complete
-        const result = std.posix.waitpid(job.pid, 0);
-        const exit_status = getExitStatus(result.status);
-
-        // Remove from background jobs
-        self.allocator.free(job.command);
-        self.background_jobs[job_slot.?] = null;
-        self.background_jobs_count -= 1;
-
-        self.last_exit_code = @intCast(exit_status);
-    }
-
-    /// Builtin: bg - continue stopped job in background
-    fn builtinBg(self: *Shell, cmd: *types.ParsedCommand) !void {
-        // Get job ID from argument (default to most recent stopped job)
-        var job_id: ?usize = null;
-        if (cmd.args.len > 0) {
-            job_id = std.fmt.parseInt(usize, cmd.args[0], 10) catch {
-                try IO.eprint("den: bg: {s}: no such job\n", .{cmd.args[0]});
-                self.last_exit_code = 1;
-                return;
-            };
-        } else {
-            // Find most recent stopped job
-            var max_id: usize = 0;
-            for (self.background_jobs) |maybe_job| {
-                if (maybe_job) |job| {
-                    if (job.status == .stopped and job.job_id > max_id) {
-                        max_id = job.job_id;
-                    }
-                }
-            }
-            if (max_id > 0) {
-                job_id = max_id;
-            }
-        }
-
-        if (job_id == null) {
-            try IO.eprint("den: bg: current: no such job\n", .{});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        // Find job in array
-        var job_slot: ?usize = null;
-        for (self.background_jobs, 0..) |maybe_job, i| {
-            if (maybe_job) |job| {
-                if (job.job_id == job_id.?) {
-                    job_slot = i;
-                    break;
-                }
-            }
-        }
-
-        if (job_slot == null) {
-            try IO.eprint("den: bg: {d}: no such job\n", .{job_id.?});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        const job = self.background_jobs[job_slot.?].?;
-        if (job.status != .stopped) {
-            try IO.eprint("den: bg: job {d} already in background\n", .{job_id.?});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        // Send SIGCONT to continue the job
-        // Note: In a real implementation, we'd use kill(pid, SIGCONT)
-        // For now, just mark as running
-        self.background_jobs[job_slot.?].?.status = .running;
-        try IO.print("[{d}]+ {s} &\n", .{ job.job_id, job.command });
-        self.last_exit_code = 0;
-    }
-
-    /// Add command to history
+    /// Add command to history (respects config.history.max_entries)
     fn addToHistory(self: *Shell, command: []const u8) !void {
         try History.add(
             self.allocator,
-            self.history[0..],
+            self.history[0..self.history_max],
             &self.history_count,
             self.history_file_path,
             command,
         );
     }
 
-    /// Load history from file
+    /// Load history from file (respects config.history.max_entries)
     fn loadHistory(self: *Shell) !void {
         try History.load(
             self.allocator,
-            self.history[0..],
+            self.history[0..self.history_max],
             &self.history_count,
             self.history_file_path,
         );
@@ -2132,7 +1789,7 @@ pub const Shell = struct {
 
     /// Save history to file
     fn saveHistory(self: *Shell) !void {
-        try History.save(self.history[0..], self.history_file_path);
+        try History.save(self.history[0..self.history_max], self.history_file_path);
     }
 
     /// Append a single command to history file (incremental append)
@@ -2142,7 +1799,7 @@ pub const Shell = struct {
 
     /// Builtin: history - show command history
     fn builtinHistory(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try History.printBuiltin(self.history[0..], self.history_count, cmd);
+        try History.printBuiltin(self.history[0..self.history_max], self.history_count, cmd);
     }
 
     /// Builtin: complete - manage programmable completions (bash-style)
@@ -5562,10 +5219,12 @@ pub const Shell = struct {
             self.last_exit_code,
             positional_params_slice[0..param_count],
             self.shell_name,
-            self.last_background_pid,
+            if (@import("builtin").os.tag == .windows) 0 else @as(i32, @intCast(self.job_manager.getLastPid())),
             self.last_arg,
             self,
         );
+        expander.arrays = &self.arrays; // Add indexed array support
+        expander.assoc_arrays = &self.assoc_arrays; // Add associative array support
         expander.var_attributes = &self.var_attributes; // Add nameref support
         const expanded = expander.expand(trimmed) catch {
             self.last_exit_code = 1;
@@ -6247,68 +5906,7 @@ pub const Shell = struct {
 
     /// Builtin: wait - wait for job completion
     fn builtinWait(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            if (builtin.os.tag == .windows) {
-                // Windows: wait command not yet fully implemented
-                try IO.print("wait: not fully implemented on Windows\n", .{});
-                self.last_exit_code = 0;
-                return;
-            }
-
-            // POSIX: Wait for all background jobs
-            var waited = false;
-            for (&self.background_jobs) |*maybe_job| {
-                if (maybe_job.*) |*job| {
-                    if (job.pid > 0) {
-                        const result = std.posix.waitpid(job.pid, 0);
-                        job.pid = 0; // Mark as completed
-                        waited = true;
-                        _ = result;
-                    }
-                }
-            }
-            self.last_exit_code = if (waited) 0 else 127;
-            return;
-        }
-
-        // Wait for specific job(s)
-        if (builtin.os.tag == .windows) {
-            // Windows: wait command not yet fully implemented
-            try IO.print("wait: not fully implemented on Windows\n", .{});
-            self.last_exit_code = 0;
-            return;
-        }
-
-        for (cmd.args) |arg| {
-            if (arg[0] == '%') {
-                const job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
-                    try IO.eprint("den: wait: {s}: invalid job specification\n", .{arg});
-                    self.last_exit_code = 1;
-                    continue;
-                };
-
-                if (job_id > 0 and job_id <= self.background_jobs.len) {
-                    if (self.background_jobs[job_id - 1]) |*job| {
-                        if (job.pid > 0) {
-                            const result = std.posix.waitpid(job.pid, 0);
-                            job.pid = 0;
-                            self.last_exit_code = 0;
-                            _ = result;
-                        }
-                    }
-                }
-            } else {
-                // Wait by PID
-                const pid = std.fmt.parseInt(i32, arg, 10) catch {
-                    try IO.eprint("den: wait: {s}: not a valid process id\n", .{arg});
-                    self.last_exit_code = 1;
-                    continue;
-                };
-                const result = std.posix.waitpid(pid, 0);
-                self.last_exit_code = 0;
-                _ = result;
-            }
-        }
+        self.last_exit_code = try self.job_manager.builtinWait(cmd.args);
     }
 
     /// Builtin: kill - send signal to job or process
@@ -6446,16 +6044,19 @@ pub const Shell = struct {
                     continue;
                 };
 
-                if (job_id > 0 and job_id <= self.background_jobs.len) {
-                    if (self.background_jobs[job_id - 1]) |job| {
-                        if (job.pid > 0) {
-                            std.posix.kill(job.pid, signal) catch {
-                                try IO.eprint("den: kill: ({d}) - No such process\n", .{job.pid});
-                                self.last_exit_code = 1;
-                                continue;
-                            };
-                        }
+                // Find job by ID and get its PID
+                if (self.job_manager.findByJobId(job_id)) |slot| {
+                    if (self.job_manager.get(slot)) |job| {
+                        std.posix.kill(job.pid, signal) catch {
+                            try IO.eprint("den: kill: ({d}) - No such process\n", .{job.pid});
+                            self.last_exit_code = 1;
+                            continue;
+                        };
                     }
+                } else {
+                    try IO.eprint("den: kill: %{d}: no such job\n", .{job_id});
+                    self.last_exit_code = 1;
+                    continue;
                 }
             } else {
                 // PID specification
@@ -6478,43 +6079,7 @@ pub const Shell = struct {
 
     /// Builtin: disown - remove jobs from job table
     fn builtinDisown(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            // Disown most recent job
-            var found = false;
-            var i: usize = self.background_jobs.len;
-            while (i > 0) {
-                i -= 1;
-                if (self.background_jobs[i]) |_| {
-                    self.background_jobs[i] = null;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                try IO.eprint("den: disown: current: no such job\n", .{});
-                self.last_exit_code = 1;
-            }
-            return;
-        }
-
-        // Disown specific jobs
-        for (cmd.args) |arg| {
-            if (arg[0] == '%') {
-                const job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
-                    try IO.eprint("den: disown: {s}: no such job\n", .{arg});
-                    self.last_exit_code = 1;
-                    continue;
-                };
-
-                if (job_id > 0 and job_id <= self.background_jobs.len) {
-                    self.background_jobs[job_id - 1] = null;
-                } else {
-                    try IO.eprint("den: disown: %{d}: no such job\n", .{job_id});
-                    self.last_exit_code = 1;
-                }
-            }
-        }
-        self.last_exit_code = 0;
+        self.last_exit_code = try self.job_manager.builtinDisown(cmd.args);
     }
 
     /// Builtin: trap - handle signals and special events

@@ -261,8 +261,8 @@ See [ROADMAP.md](ROADMAP.md) for detailed phase breakdown.
 ### Development
 - [Architecture](docs/ARCHITECTURE.md) - System architecture overview
 - [Contributing](docs/CONTRIBUTING.md) - Contribution guidelines
-- [Migration Status](ZIG_MIGRATION_STATUS.md) - Detailed implementation progress
 - [Roadmap](ROADMAP.md) - Full feature roadmap
+- [Testing](docs/TESTING.md) - Test framework and guidelines
 
 ## License
 

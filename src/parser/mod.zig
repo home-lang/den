@@ -2,12 +2,18 @@ pub const tokenizer = @import("tokenizer.zig");
 pub const parser = @import("parser.zig");
 pub const ast = @import("ast.zig");
 pub const ast_builder = @import("ast_builder.zig");
+pub const optimized_parser = @import("optimized_parser.zig");
 
 pub const Tokenizer = tokenizer.Tokenizer;
 pub const Token = tokenizer.Token;
 pub const TokenType = tokenizer.TokenType;
 
 pub const Parser = parser.Parser;
+
+// Optimized parser for simple commands (fast path)
+pub const OptimizedParser = optimized_parser.OptimizedParser;
+pub const FastPathCommand = optimized_parser.SimpleCommand;
+pub const StreamingTokenizer = optimized_parser.StreamingTokenizer;
 
 // AST types
 pub const Node = ast.Node;

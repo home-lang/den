@@ -1,5 +1,6 @@
 const std = @import("std");
 const env_utils = @import("env.zig");
+const cpu_opt = @import("cpu_opt.zig");
 
 /// Completion cache with TTL support
 pub const CompletionCache = struct {
@@ -151,6 +152,28 @@ pub const Completion = struct {
         return .{ .allocator = allocator, .cache = cache };
     }
 
+    /// Context struct for sorting by fuzzy score
+    const SortContext = struct {
+        query: []const u8,
+    };
+
+    /// Comparison function for fuzzy score sorting (higher scores first)
+    fn fuzzyCompare(context: SortContext, a: []const u8, b: []const u8) bool {
+        const score_a = cpu_opt.fuzzyScore(a, context.query);
+        const score_b = cpu_opt.fuzzyScore(b, context.query);
+        // Higher score should come first
+        return score_a > score_b;
+    }
+
+    /// Rank completions by fuzzy score against the query.
+    /// Higher-scoring matches appear first. Prefix matches get highest scores.
+    pub fn rankByFuzzyScore(self: *Completion, completions: [][]const u8, query: []const u8) void {
+        _ = self;
+        if (completions.len <= 1 or query.len == 0) return;
+
+        std.mem.sort([]const u8, completions, SortContext{ .query = query }, fuzzyCompare);
+    }
+
     /// Escape special characters in a filename for shell use
     fn escapeFilename(self: *Completion, filename: []const u8) ![]const u8 {
         // Count how many characters need escaping
@@ -254,8 +277,8 @@ pub const Completion = struct {
             }
         }
 
-        // Sort matches
-        self.sortMatches(matches_buffer[0..match_count]);
+        // Rank matches by fuzzy score (prefix matches score highest)
+        self.rankByFuzzyScore(matches_buffer[0..match_count], prefix);
 
         // Allocate and return results
         const result = try self.allocator.alloc([]const u8, match_count);
@@ -356,8 +379,8 @@ pub const Completion = struct {
             }
         }
 
-        // Sort matches
-        self.sortMatches(matches_buffer[0..match_count]);
+        // Rank matches by fuzzy score
+        self.rankByFuzzyScore(matches_buffer[0..match_count], file_prefix);
 
         // Allocate and return results
         const result = try self.allocator.alloc([]const u8, match_count);
@@ -463,8 +486,8 @@ pub const Completion = struct {
             }
         }
 
-        // Sort matches
-        self.sortMatches(matches_buffer[0..match_count]);
+        // Rank matches by fuzzy score
+        self.rankByFuzzyScore(matches_buffer[0..match_count], file_prefix);
 
         // Allocate and return results
         const result = try self.allocator.alloc([]const u8, match_count);
@@ -518,8 +541,8 @@ pub const Completion = struct {
             }
         }
 
-        // Sort matches
-        self.sortMatches(matches_buffer[0..match_count]);
+        // Rank matches by fuzzy score
+        self.rankByFuzzyScore(matches_buffer[0..match_count], file_prefix);
 
         // Allocate and return results
         const result = try self.allocator.alloc([]const u8, match_count);
@@ -527,7 +550,7 @@ pub const Completion = struct {
         return result;
     }
 
-    /// Sort matches alphabetically
+    /// Sort matches alphabetically (kept for fallback when no prefix)
     fn sortMatches(self: *Completion, matches: [][]const u8) void {
         _ = self;
         if (matches.len <= 1) return;
@@ -796,8 +819,8 @@ pub const Completion = struct {
             return try self.completeCurrentUserOnly(username_prefix);
         }
 
-        // Sort matches
-        self.sortMatches(matches_buffer[0..match_count]);
+        // Sort matches by fuzzy score relevance
+        self.rankByFuzzyScore(matches_buffer[0..match_count], username_prefix);
 
         // Allocate and return results
         const result = try self.allocator.alloc([]const u8, match_count);

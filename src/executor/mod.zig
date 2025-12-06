@@ -37,9 +37,31 @@ const PROCESS_TERMINATE: u32 = 0x0001;
 // File type filter for ifind
 const FileTypeFilter = enum { all, files, dirs };
 
-/// Open a /dev/tcp/host/port or /dev/udp/host/port virtual path as a socket
+/// Open a /dev/tcp/host/port or /dev/udp/host/port virtual path as a socket.
+/// Bash-compatible virtual device paths for network I/O.
+///
+/// Supported formats:
+///   /dev/tcp/127.0.0.1/80      - IPv4 TCP connection
+///   /dev/udp/192.168.1.1/53    - IPv4 UDP connection
+///   /dev/tcp/[::1]/8080        - IPv6 TCP connection
+///   /dev/udp/[fe80::1]/1234    - IPv6 UDP connection
+///
 /// Returns the socket fd on success, null if path is not a /dev/tcp or /dev/udp path
+/// or if the connection fails.
 fn openDevNet(path: []const u8) ?std.posix.socket_t {
+    const parsed = parseDevNetPath(path) orelse return null;
+    return connectToAddress(parsed.host, parsed.port, parsed.is_tcp);
+}
+
+/// Parsed /dev/tcp or /dev/udp path components
+const DevNetPath = struct {
+    host: []const u8,
+    port: u16,
+    is_tcp: bool,
+};
+
+/// Parse a /dev/tcp/host/port or /dev/udp/host/port path
+fn parseDevNetPath(path: []const u8) ?DevNetPath {
     const is_tcp = std.mem.startsWith(u8, path, "/dev/tcp/");
     const is_udp = std.mem.startsWith(u8, path, "/dev/udp/");
 
@@ -49,70 +71,237 @@ fn openDevNet(path: []const u8) ?std.posix.socket_t {
     const prefix_len: usize = 9; // "/dev/tcp/" or "/dev/udp/"
     const rest = path[prefix_len..];
 
+    if (rest.len == 0) return null;
+
+    // Handle IPv6 addresses in brackets: [::1]/port
+    if (rest[0] == '[') {
+        const bracket_end = std.mem.indexOf(u8, rest, "]") orelse return null;
+        if (bracket_end + 1 >= rest.len) return null;
+        if (rest[bracket_end + 1] != '/') return null;
+        if (bracket_end + 2 >= rest.len) return null;
+
+        const host = rest[1..bracket_end];
+        if (host.len == 0) return null;
+
+        const port_str = rest[bracket_end + 2 ..];
+        const port = std.fmt.parseInt(u16, port_str, 10) catch return null;
+        if (port == 0) return null; // Port 0 is not valid for explicit connections
+
+        return DevNetPath{ .host = host, .port = port, .is_tcp = is_tcp };
+    }
+
+    // IPv4 format: host/port
     const port_sep = std.mem.lastIndexOf(u8, rest, "/") orelse return null;
     if (port_sep == 0 or port_sep >= rest.len - 1) return null;
 
     const host = rest[0..port_sep];
     const port_str = rest[port_sep + 1 ..];
 
-    const port = std.fmt.parseInt(u16, port_str, 10) catch return null;
+    // Validate host is not empty
+    if (host.len == 0) return null;
 
-    // Parse IPv4 address
+    // Validate port
+    const port = std.fmt.parseInt(u16, port_str, 10) catch return null;
+    if (port == 0) return null; // Port 0 is not valid for explicit connections
+
+    return DevNetPath{ .host = host, .port = port, .is_tcp = is_tcp };
+}
+
+/// Parse an IPv4 address string into bytes
+fn parseIPv4(host: []const u8) ?[4]u8 {
+    if (host.len == 0 or host.len > 15) return null;
+
     var ip_bytes: [4]u8 = undefined;
     var byte_idx: usize = 0;
     var num: u16 = 0;
+    var digit_count: usize = 0;
 
     for (host) |c| {
         if (c == '.') {
-            if (byte_idx >= 4 or num > 255) return null;
+            if (byte_idx >= 3 or digit_count == 0) return null;
             ip_bytes[byte_idx] = @intCast(num);
             byte_idx += 1;
             num = 0;
+            digit_count = 0;
         } else if (c >= '0' and c <= '9') {
             num = num * 10 + (c - '0');
-            if (num > 255) return null;
+            digit_count += 1;
+            if (num > 255 or digit_count > 3) return null;
         } else {
             return null;
         }
     }
-    if (byte_idx != 3 or num > 255) return null;
+
+    if (byte_idx != 3 or digit_count == 0) return null;
     ip_bytes[byte_idx] = @intCast(num);
 
-    // Create socket
+    return ip_bytes;
+}
+
+/// Connect to a host:port using TCP or UDP
+fn connectToAddress(host: []const u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
+    // Try IPv4 first
+    if (parseIPv4(host)) |ip_bytes| {
+        return connectIPv4(ip_bytes, port, is_tcp);
+    }
+
+    // Try IPv6
+    if (parseIPv6(host)) |ip6_bytes| {
+        return connectIPv6(ip6_bytes, port, is_tcp);
+    }
+
+    return null;
+}
+
+/// Parse an IPv6 address string into bytes.
+/// Supports full form (2001:db8::1) and loopback (::1).
+fn parseIPv6(host: []const u8) ?[16]u8 {
+    if (host.len == 0 or host.len > 45) return null;
+
+    var result: [16]u8 = std.mem.zeroes([16]u8);
+    var groups: [8]u16 = undefined;
+    var group_count: usize = 0;
+    var double_colon_pos: ?usize = null;
+    var current_group: u16 = 0;
+    var digit_count: usize = 0;
+    var i: usize = 0;
+
+    // Handle leading ::
+    if (host.len >= 2 and host[0] == ':' and host[1] == ':') {
+        double_colon_pos = 0;
+        i = 2;
+        if (i >= host.len) {
+            // Just "::" - all zeros
+            return result;
+        }
+    }
+
+    while (i < host.len) {
+        const c = host[i];
+        if (c == ':') {
+            if (digit_count == 0) {
+                // Double colon
+                if (double_colon_pos != null) return null; // Only one :: allowed
+                double_colon_pos = group_count;
+                i += 1;
+                if (i < host.len and host[i] == ':') {
+                    i += 1; // Skip second colon of ::
+                }
+                continue;
+            }
+            if (group_count >= 8) return null;
+            groups[group_count] = current_group;
+            group_count += 1;
+            current_group = 0;
+            digit_count = 0;
+            i += 1;
+        } else if ((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F')) {
+            const val: u16 = if (c >= '0' and c <= '9')
+                c - '0'
+            else if (c >= 'a' and c <= 'f')
+                c - 'a' + 10
+            else
+                c - 'A' + 10;
+            current_group = current_group * 16 + val;
+            digit_count += 1;
+            if (digit_count > 4) return null;
+            i += 1;
+        } else {
+            return null;
+        }
+    }
+
+    // Handle last group
+    if (digit_count > 0) {
+        if (group_count >= 8) return null;
+        groups[group_count] = current_group;
+        group_count += 1;
+    }
+
+    // Expand :: (double colon)
+    if (double_colon_pos) |pos| {
+        if (group_count > 8) return null;
+        const zeros_needed = 8 - group_count;
+        // Shift groups after :: to the right position
+        var j: usize = 7;
+        var src: usize = group_count;
+        while (src > pos) {
+            src -= 1;
+            groups[j] = groups[src];
+            j -= 1;
+        }
+        // Fill zeros
+        var k: usize = pos;
+        while (k < pos + zeros_needed) {
+            groups[k] = 0;
+            k += 1;
+        }
+    } else {
+        if (group_count != 8) return null;
+    }
+
+    // Convert groups to bytes (big-endian)
+    for (groups, 0..) |group, idx| {
+        result[idx * 2] = @intCast(group >> 8);
+        result[idx * 2 + 1] = @intCast(group & 0xFF);
+    }
+
+    return result;
+}
+
+/// Connect to an IPv4 address
+fn connectIPv4(ip_bytes: [4]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
     const sock_type: c_uint = if (is_tcp) std.c.SOCK.STREAM else std.c.SOCK.DGRAM;
     const sock = std.c.socket(std.c.AF.INET, sock_type, 0);
     if (sock < 0) return null;
 
-    // Build sockaddr
     var addr: std.c.sockaddr.in = std.mem.zeroes(std.c.sockaddr.in);
     addr.len = @sizeOf(std.c.sockaddr.in);
     addr.family = std.c.AF.INET;
     addr.port = std.mem.nativeToBig(u16, port);
     addr.addr = @bitCast(ip_bytes);
 
-    // Connect with retry on EINTR
-    var connect_result: c_int = -1;
-    var retry_count: u32 = 0;
-    while (retry_count < 5) : (retry_count += 1) {
-        connect_result = std.c.connect(sock, @ptrCast(&addr), @sizeOf(std.c.sockaddr.in));
-        if (connect_result >= 0) break;
-
-        const errno = std.c._errno().*;
-        if (errno == 4) continue; // EINTR - retry
-        if (errno == 56) { // EISCONN - already connected
-            connect_result = 0;
-            break;
-        }
-        _ = std.c.close(sock);
-        return null;
-    }
-
-    if (connect_result < 0) {
+    if (!doConnect(sock, @ptrCast(&addr), @sizeOf(std.c.sockaddr.in))) {
         _ = std.c.close(sock);
         return null;
     }
 
     return sock;
+}
+
+/// Connect to an IPv6 address
+fn connectIPv6(ip_bytes: [16]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
+    const sock_type: c_uint = if (is_tcp) std.c.SOCK.STREAM else std.c.SOCK.DGRAM;
+    const sock = std.c.socket(std.c.AF.INET6, sock_type, 0);
+    if (sock < 0) return null;
+
+    var addr: std.c.sockaddr.in6 = std.mem.zeroes(std.c.sockaddr.in6);
+    addr.len = @sizeOf(std.c.sockaddr.in6);
+    addr.family = std.c.AF.INET6;
+    addr.port = std.mem.nativeToBig(u16, port);
+    addr.addr = ip_bytes;
+
+    if (!doConnect(sock, @ptrCast(&addr), @sizeOf(std.c.sockaddr.in6))) {
+        _ = std.c.close(sock);
+        return null;
+    }
+
+    return sock;
+}
+
+/// Perform connect with retry on EINTR
+fn doConnect(sock: std.posix.socket_t, addr: *const std.c.sockaddr, addrlen: std.c.socklen_t) bool {
+    var retry_count: u32 = 0;
+    while (retry_count < 5) : (retry_count += 1) {
+        const connect_result = std.c.connect(sock, addr, addrlen);
+        if (connect_result >= 0) return true;
+
+        const errno = std.c._errno().*;
+        if (errno == 4) continue; // EINTR - retry
+        if (errno == 56) return true; // EISCONN - already connected
+        return false;
+    }
+    return false;
 }
 
 pub const Executor = struct {
@@ -628,6 +817,8 @@ pub const Executor = struct {
                             if (self.shell) |shell| {
                                 expansion.option_nounset = shell.option_nounset;
                                 expansion.var_attributes = &shell.var_attributes;
+                                expansion.arrays = &shell.arrays;
+                                expansion.assoc_arrays = &shell.assoc_arrays;
                             }
                             const expanded = expansion.expand(redir.target) catch redir.target;
                             // Add newline for herestring
@@ -3902,64 +4093,7 @@ pub const Executor = struct {
             try IO.eprint("den: jobs: shell context not available\n", .{});
             return 1;
         };
-
-        // Parse flags: -l (PIDs), -p (PIDs only), -r (running), -s (stopped)
-        var show_pids = false;
-        var pids_only = false;
-        var running_only = false;
-        var stopped_only = false;
-
-        for (command.args) |arg| {
-            if (arg.len > 0 and arg[0] == '-') {
-                for (arg[1..]) |c| {
-                    switch (c) {
-                        'l' => show_pids = true,
-                        'p' => pids_only = true,
-                        'r' => running_only = true,
-                        's' => stopped_only = true,
-                        else => {
-                            try IO.eprint("den: jobs: -{c}: invalid option\n", .{c});
-                            return 1;
-                        },
-                    }
-                }
-            }
-        }
-
-        // List all background jobs
-        if (shell_ref.background_jobs_count == 0) {
-            return 0;
-        }
-
-        for (shell_ref.background_jobs) |maybe_job| {
-            if (maybe_job) |job| {
-                // Filter by status if requested
-                if (running_only and job.status != .running) continue;
-                if (stopped_only and job.status != .stopped) continue;
-
-                if (pids_only) {
-                    // -p: Just print the PID
-                    try IO.print("{d}\n", .{job.pid});
-                } else if (show_pids) {
-                    // -l: Show PID in output
-                    const status_str = switch (job.status) {
-                        .running => "Running",
-                        .stopped => "Stopped",
-                        .done => "Done",
-                    };
-                    try IO.print("[{d}]  {d} {s}                    {s}\n", .{ job.job_id, job.pid, status_str, job.command });
-                } else {
-                    // Default output
-                    const status_str = switch (job.status) {
-                        .running => "Running",
-                        .stopped => "Stopped",
-                        .done => "Done",
-                    };
-                    try IO.print("[{d}]  {s}                    {s}\n", .{ job.job_id, status_str, job.command });
-                }
-            }
-        }
-        return 0;
+        return try shell_ref.job_manager.builtinJobs(command.args);
     }
 
     fn builtinFg(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -3967,73 +4101,7 @@ pub const Executor = struct {
             try IO.eprint("den: fg: shell context not available\n", .{});
             return 1;
         };
-
-        if (shell_ref.background_jobs_count == 0) {
-            try IO.eprint("den: fg: no current job\n", .{});
-            return 1;
-        }
-
-        // Parse job ID or use most recent job
-        var target_job_id: ?usize = null;
-        if (command.args.len > 0) {
-            const arg = command.args[0];
-            if (arg.len > 0 and arg[0] == '%') {
-                target_job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
-                    try IO.eprint("den: fg: {s}: no such job\n", .{arg});
-                    return 1;
-                };
-            } else {
-                target_job_id = std.fmt.parseInt(usize, arg, 10) catch {
-                    try IO.eprint("den: fg: {s}: no such job\n", .{arg});
-                    return 1;
-                };
-            }
-        }
-
-        // Find the job to foreground
-        var job_index: ?usize = null;
-        if (target_job_id) |jid| {
-            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
-                if (maybe_job) |job| {
-                    if (job.job_id == jid) {
-                        job_index = i;
-                        break;
-                    }
-                }
-            }
-        } else {
-            // Use most recent job
-            var i = shell_ref.background_jobs.len;
-            while (i > 0) {
-                i -= 1;
-                if (shell_ref.background_jobs[i]) |_| {
-                    job_index = i;
-                    break;
-                }
-            }
-        }
-
-        if (job_index == null) {
-            try IO.eprint("den: fg: no such job\n", .{});
-            return 1;
-        }
-
-        const job = shell_ref.background_jobs[job_index.?].?;
-        try IO.print("{s}\n", .{job.command});
-
-        // Wait for the process to complete
-        const result = process.waitProcess(job.pid, .{}) catch |err| {
-            try IO.eprint("den: fg: failed to wait for job: {}\n", .{err});
-            return 1;
-        };
-        shell_ref.last_exit_code = result.status.code;
-
-        // Remove from job list
-        self.allocator.free(job.command);
-        shell_ref.background_jobs[job_index.?] = null;
-        shell_ref.background_jobs_count -= 1;
-
-        return shell_ref.last_exit_code;
+        return try shell_ref.job_manager.builtinFg(command.args);
     }
 
     fn builtinBg(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -4041,71 +4109,7 @@ pub const Executor = struct {
             try IO.eprint("den: bg: shell context not available\n", .{});
             return 1;
         };
-
-        if (shell_ref.background_jobs_count == 0) {
-            try IO.eprint("den: bg: no current job\n", .{});
-            return 1;
-        }
-
-        // Parse job ID or use most recent stopped job
-        var target_job_id: ?usize = null;
-        if (command.args.len > 0) {
-            const arg = command.args[0];
-            if (arg.len > 0 and arg[0] == '%') {
-                target_job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
-                    try IO.eprint("den: bg: {s}: no such job\n", .{arg});
-                    return 1;
-                };
-            } else {
-                target_job_id = std.fmt.parseInt(usize, arg, 10) catch {
-                    try IO.eprint("den: bg: {s}: no such job\n", .{arg});
-                    return 1;
-                };
-            }
-        }
-
-        // Find the job to continue in background
-        var job_index: ?usize = null;
-        if (target_job_id) |jid| {
-            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
-                if (maybe_job) |job| {
-                    if (job.job_id == jid) {
-                        job_index = i;
-                        break;
-                    }
-                }
-            }
-        } else {
-            // Use most recent stopped job
-            var i = shell_ref.background_jobs.len;
-            while (i > 0) {
-                i -= 1;
-                if (shell_ref.background_jobs[i]) |job| {
-                    if (job.status == .stopped) {
-                        job_index = i;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (job_index == null) {
-            try IO.eprint("den: bg: no such job\n", .{});
-            return 1;
-        }
-
-        var job = &shell_ref.background_jobs[job_index.?].?;
-
-        // Send SIGCONT to continue the process (POSIX only, no-op on Windows)
-        process.continueProcess(job.pid) catch |err| {
-            try IO.eprint("den: bg: failed to continue job: {}\n", .{err});
-            return 1;
-        };
-
-        job.status = .running;
-        try IO.print("[{d}] {s} &\n", .{ job.job_id, job.command });
-
-        return 0;
+        return try shell_ref.job_manager.builtinBg(command.args);
     }
 
     fn builtinWait(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -4113,96 +4117,7 @@ pub const Executor = struct {
             try IO.eprint("den: wait: shell context not available\n", .{});
             return 1;
         };
-
-        // If no arguments, wait for all background jobs
-        if (command.args.len == 0) {
-            var last_status: i32 = 0;
-            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
-                if (maybe_job) |job| {
-                    if (job.status == .running) {
-                        const wait_result = process.waitProcess(job.pid, .{}) catch continue;
-                        last_status = wait_result.status.code;
-                        self.allocator.free(job.command);
-                        shell_ref.background_jobs[i] = null;
-                        shell_ref.background_jobs_count -= 1;
-                    }
-                }
-            }
-            return last_status;
-        }
-
-        // Wait for specific job(s)
-        for (command.args) |arg| {
-            // Parse job ID or PID
-            var target_job_index: ?usize = null;
-            var target_pid: ?process.ProcessId = null;
-
-            if (arg.len > 0 and arg[0] == '%') {
-                const job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
-                    try IO.eprint("den: wait: {s}: no such job\n", .{arg});
-                    continue;
-                };
-
-                // Find job by ID
-                for (shell_ref.background_jobs, 0..) |maybe_job, i| {
-                    if (maybe_job) |job| {
-                        if (job.job_id == job_id) {
-                            target_job_index = i;
-                            target_pid = job.pid;
-                            break;
-                        }
-                    }
-                }
-
-                if (target_pid == null) {
-                    try IO.eprint("den: wait: {s}: no such job\n", .{arg});
-                    continue;
-                }
-            } else {
-                // Raw PID - only supported on POSIX
-                if (builtin.os.tag == .windows) {
-                    try IO.eprint("den: wait: {s}: raw PIDs not supported on Windows, use %%jobid\n", .{arg});
-                    continue;
-                }
-                const pid_num = std.fmt.parseInt(i32, arg, 10) catch {
-                    try IO.eprint("den: wait: {s}: not a pid or valid job spec\n", .{arg});
-                    continue;
-                };
-                // Find job by PID
-                for (shell_ref.background_jobs, 0..) |maybe_job, i| {
-                    if (maybe_job) |job| {
-                        if (@as(i32, @intCast(job.pid)) == pid_num) {
-                            target_job_index = i;
-                            target_pid = job.pid;
-                            break;
-                        }
-                    }
-                }
-                if (target_pid == null) {
-                    // PID not in our job list, try to wait for it directly (POSIX only)
-                    target_pid = @intCast(pid_num);
-                }
-            }
-
-            // Wait for the process
-            const wait_result = process.waitProcess(target_pid.?, .{}) catch |err| {
-                try IO.eprint("den: wait: failed to wait: {}\n", .{err});
-                continue;
-            };
-            shell_ref.last_exit_code = wait_result.status.code;
-
-            // Remove from job list if it was a tracked job
-            if (target_job_index) |idx| {
-                if (shell_ref.background_jobs[idx]) |job| {
-                    self.allocator.free(job.command);
-                }
-                shell_ref.background_jobs[idx] = null;
-                shell_ref.background_jobs_count -= 1;
-            }
-        }
-
-        // Return the exit status of the last job waited for
-        return shell_ref.last_exit_code;
+        return try shell_ref.job_manager.builtinWait(command.args);
     }
 
     fn builtinDisown(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -4210,103 +4125,7 @@ pub const Executor = struct {
             try IO.eprint("den: disown: shell context not available\n", .{});
             return 1;
         };
-
-        // Parse flags: -h (keep but no SIGHUP), -a (all), -r (running only)
-        var no_hup = false; // -h: Mark for no SIGHUP but keep in job table
-        var all_jobs = false; // -a: All jobs
-        var running_only = false; // -r: Running jobs only
-        var arg_start: usize = 0;
-
-        for (command.args, 0..) |arg, i| {
-            if (arg.len > 0 and arg[0] == '-' and arg.len > 1 and arg[1] != '%') {
-                for (arg[1..]) |c| {
-                    switch (c) {
-                        'h' => no_hup = true,
-                        'a' => all_jobs = true,
-                        'r' => running_only = true,
-                        else => {
-                            try IO.eprint("den: disown: -{c}: invalid option\n", .{c});
-                            try IO.eprint("disown: usage: disown [-h] [-ar] [jobspec ... | pid ...]\n", .{});
-                            return 1;
-                        },
-                    }
-                }
-                arg_start = i + 1;
-            } else {
-                break;
-            }
-        }
-
-        // If -a flag or no job specs, operate on all (or filtered) jobs
-        if (all_jobs or arg_start >= command.args.len) {
-            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
-                if (maybe_job) |job| {
-                    // Filter by running status if -r is set
-                    if (running_only and job.status != .running) continue;
-
-                    if (no_hup) {
-                        // -h: Just mark for no SIGHUP (we don't actually send SIGHUP on exit anyway,
-                        // but this is for compatibility - job stays in table)
-                        // In practice, this is a no-op for our shell, but we acknowledge it
-                        continue;
-                    } else {
-                        // Remove from job table
-                        self.allocator.free(job.command);
-                        shell_ref.background_jobs[i] = null;
-                        shell_ref.background_jobs_count -= 1;
-                    }
-                }
-            }
-            return 0;
-        }
-
-        // Disown specific job(s)
-        for (command.args[arg_start..]) |arg| {
-            var target_job_id: usize = 0;
-
-            if (arg.len > 0 and arg[0] == '%') {
-                target_job_id = std.fmt.parseInt(usize, arg[1..], 10) catch {
-                    try IO.eprint("den: disown: {s}: no such job\n", .{arg});
-                    continue;
-                };
-            } else {
-                target_job_id = std.fmt.parseInt(usize, arg, 10) catch {
-                    try IO.eprint("den: disown: {s}: not a valid job spec\n", .{arg});
-                    continue;
-                };
-            }
-
-            // Find and optionally remove job
-            var found = false;
-            for (shell_ref.background_jobs, 0..) |maybe_job, i| {
-                if (maybe_job) |job| {
-                    if (job.job_id == target_job_id) {
-                        // Filter by running status if -r is set
-                        if (running_only and job.status != .running) {
-                            found = true; // Found but skipped due to filter
-                            break;
-                        }
-
-                        if (no_hup) {
-                            // -h: Keep in job table, just mark for no SIGHUP
-                            found = true;
-                        } else {
-                            self.allocator.free(job.command);
-                            shell_ref.background_jobs[i] = null;
-                            shell_ref.background_jobs_count -= 1;
-                            found = true;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            if (!found) {
-                try IO.eprint("den: disown: {s}: no such job\n", .{arg});
-            }
-        }
-
-        return 0;
+        return try shell_ref.job_manager.builtinDisown(command.args);
     }
 
     fn builtinKill(self: *Executor, command: *types.ParsedCommand) !i32 {
@@ -10560,4 +10379,123 @@ fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
         try IO.eprint("den: hook: run 'hook' for usage.\n", .{});
         return 1;
     }
+}
+
+// ========================================
+// Tests for /dev/tcp and /dev/udp support
+// ========================================
+
+test "parseDevNetPath - valid IPv4 TCP" {
+    const result = parseDevNetPath("/dev/tcp/127.0.0.1/80");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("127.0.0.1", result.?.host);
+    try std.testing.expectEqual(@as(u16, 80), result.?.port);
+    try std.testing.expect(result.?.is_tcp);
+}
+
+test "parseDevNetPath - valid IPv4 UDP" {
+    const result = parseDevNetPath("/dev/udp/192.168.1.1/53");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("192.168.1.1", result.?.host);
+    try std.testing.expectEqual(@as(u16, 53), result.?.port);
+    try std.testing.expect(!result.?.is_tcp);
+}
+
+test "parseDevNetPath - valid IPv6 TCP" {
+    const result = parseDevNetPath("/dev/tcp/[::1]/8080");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("::1", result.?.host);
+    try std.testing.expectEqual(@as(u16, 8080), result.?.port);
+    try std.testing.expect(result.?.is_tcp);
+}
+
+test "parseDevNetPath - valid IPv6 full address" {
+    const result = parseDevNetPath("/dev/tcp/[2001:db8::1]/443");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("2001:db8::1", result.?.host);
+    try std.testing.expectEqual(@as(u16, 443), result.?.port);
+}
+
+test "parseDevNetPath - invalid: not /dev/tcp or /dev/udp" {
+    try std.testing.expect(parseDevNetPath("/dev/null") == null);
+    try std.testing.expect(parseDevNetPath("/dev/tty") == null);
+    try std.testing.expect(parseDevNetPath("/tmp/foo") == null);
+    try std.testing.expect(parseDevNetPath("") == null);
+}
+
+test "parseDevNetPath - invalid: missing port" {
+    try std.testing.expect(parseDevNetPath("/dev/tcp/127.0.0.1") == null);
+    try std.testing.expect(parseDevNetPath("/dev/tcp/127.0.0.1/") == null);
+}
+
+test "parseDevNetPath - invalid: missing host" {
+    try std.testing.expect(parseDevNetPath("/dev/tcp//80") == null);
+    try std.testing.expect(parseDevNetPath("/dev/tcp/") == null);
+}
+
+test "parseDevNetPath - invalid: port 0" {
+    try std.testing.expect(parseDevNetPath("/dev/tcp/127.0.0.1/0") == null);
+}
+
+test "parseDevNetPath - invalid: non-numeric port" {
+    try std.testing.expect(parseDevNetPath("/dev/tcp/127.0.0.1/abc") == null);
+}
+
+test "parseDevNetPath - invalid: port too large" {
+    try std.testing.expect(parseDevNetPath("/dev/tcp/127.0.0.1/65536") == null);
+}
+
+test "parseIPv4 - valid addresses" {
+    const result1 = parseIPv4("127.0.0.1");
+    try std.testing.expect(result1 != null);
+    try std.testing.expectEqual([4]u8{ 127, 0, 0, 1 }, result1.?);
+
+    const result2 = parseIPv4("192.168.1.1");
+    try std.testing.expect(result2 != null);
+    try std.testing.expectEqual([4]u8{ 192, 168, 1, 1 }, result2.?);
+
+    const result3 = parseIPv4("0.0.0.0");
+    try std.testing.expect(result3 != null);
+    try std.testing.expectEqual([4]u8{ 0, 0, 0, 0 }, result3.?);
+
+    const result4 = parseIPv4("255.255.255.255");
+    try std.testing.expect(result4 != null);
+    try std.testing.expectEqual([4]u8{ 255, 255, 255, 255 }, result4.?);
+}
+
+test "parseIPv4 - invalid addresses" {
+    try std.testing.expect(parseIPv4("") == null);
+    try std.testing.expect(parseIPv4("127.0.0") == null);
+    try std.testing.expect(parseIPv4("127.0.0.1.2") == null);
+    try std.testing.expect(parseIPv4("256.0.0.1") == null);
+    try std.testing.expect(parseIPv4("127.0.0.256") == null);
+    try std.testing.expect(parseIPv4("abc.def.ghi.jkl") == null);
+    try std.testing.expect(parseIPv4("127.0.0.1a") == null);
+    try std.testing.expect(parseIPv4("127..0.1") == null);
+}
+
+test "parseIPv6 - loopback" {
+    const result = parseIPv6("::1");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqual([16]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 }, result.?);
+}
+
+test "parseIPv6 - all zeros" {
+    const result = parseIPv6("::");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqual([16]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, result.?);
+}
+
+test "parseIPv6 - full address" {
+    const result = parseIPv6("2001:db8:0:0:0:0:0:1");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqual([16]u8{ 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 }, result.?);
+}
+
+test "parseIPv6 - invalid: too many groups" {
+    try std.testing.expect(parseIPv6("1:2:3:4:5:6:7:8:9") == null);
+}
+
+test "parseIPv6 - invalid: multiple ::" {
+    try std.testing.expect(parseIPv6("::1::2") == null);
 }

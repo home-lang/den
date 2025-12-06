@@ -258,6 +258,19 @@ pub const EscapeSequence = enum {
 /// Takes the current input and returns a list of completions
 pub const CompletionFn = *const fn (input: []const u8, allocator: std.mem.Allocator) anyerror![][]const u8;
 
+/// Editing mode (Emacs or Vi)
+pub const EditingMode = enum {
+    emacs,
+    vi,
+};
+
+/// Vi mode state (for vi editing mode)
+pub const ViMode = enum {
+    insert, // Insert mode - characters are inserted
+    normal, // Normal mode - navigation and commands
+    replace, // Replace mode - characters replace existing
+};
+
 /// Line editor with history support
 pub const LineEditor = struct {
     allocator: std.mem.Allocator,
@@ -297,6 +310,17 @@ pub const LineEditor = struct {
     // Multi-line input support
     multiline_buffer: ?std.ArrayList(u8) = null, // Accumulated multi-line input
     in_multiline: bool = false, // Currently in multi-line mode
+    // Editing mode (Emacs or Vi)
+    editing_mode: EditingMode = .emacs,
+    // Vi mode state
+    vi_mode: ViMode = .insert,
+    // Vi pending operator (for d, c, y commands)
+    vi_pending_op: ?u8 = null,
+    // Vi repeat count
+    vi_count: usize = 0,
+    // Vi last command for repeat with '.'
+    vi_last_cmd: ?u8 = null,
+    vi_last_count: usize = 1,
 
     const UndoState = struct {
         buffer: [4096]u8,
@@ -326,6 +350,289 @@ pub const LineEditor = struct {
 
     pub fn setPs2Prompt(self: *LineEditor, ps2: []const u8) void {
         self.ps2_prompt = ps2;
+    }
+
+    /// Set the editing mode (Emacs or Vi)
+    pub fn setEditingMode(self: *LineEditor, mode: EditingMode) void {
+        self.editing_mode = mode;
+        if (mode == .vi) {
+            // Vi mode starts in insert mode
+            self.vi_mode = .insert;
+        }
+    }
+
+    /// Switch to Vi insert mode
+    fn viEnterInsertMode(self: *LineEditor) void {
+        self.vi_mode = .insert;
+        self.vi_pending_op = null;
+        self.vi_count = 0;
+    }
+
+    /// Switch to Vi normal mode
+    fn viEnterNormalMode(self: *LineEditor) void {
+        self.vi_mode = .normal;
+        self.vi_pending_op = null;
+        self.vi_count = 0;
+        // Move cursor back one if not at start (vi convention)
+        if (self.cursor > 0 and self.cursor == self.length) {
+            self.cursor -= 1;
+        }
+    }
+
+    /// Handle Vi normal mode key press
+    fn handleViNormalKey(self: *LineEditor, char: u8) !bool {
+        const count = if (self.vi_count == 0) 1 else self.vi_count;
+
+        switch (char) {
+            // Mode switching
+            'i' => {
+                self.viEnterInsertMode();
+                return false;
+            },
+            'I' => {
+                self.cursor = 0;
+                self.viEnterInsertMode();
+                return false;
+            },
+            'a' => {
+                if (self.cursor < self.length) {
+                    self.cursor += 1;
+                }
+                self.viEnterInsertMode();
+                return false;
+            },
+            'A' => {
+                self.cursor = self.length;
+                self.viEnterInsertMode();
+                return false;
+            },
+            'o', 'O' => {
+                // In line editor, just go to end and insert
+                self.cursor = self.length;
+                self.viEnterInsertMode();
+                return false;
+            },
+            's' => {
+                // Substitute: delete char and enter insert mode
+                if (self.cursor < self.length) {
+                    try self.deleteChar();
+                }
+                self.viEnterInsertMode();
+                return false;
+            },
+            'S', 'C' => {
+                // Change line from cursor / substitute entire line
+                self.length = if (char == 'S') 0 else self.cursor;
+                if (char == 'S') self.cursor = 0;
+                self.viEnterInsertMode();
+                try self.redrawLine();
+                return false;
+            },
+            'R' => {
+                self.vi_mode = .replace;
+                return false;
+            },
+
+            // Navigation
+            'h' => {
+                for (0..count) |_| {
+                    try self.moveCursorLeft();
+                }
+                return false;
+            },
+            'l' => {
+                for (0..count) |_| {
+                    try self.moveCursorRight();
+                }
+                return false;
+            },
+            '0' => {
+                if (self.vi_count == 0) {
+                    // Go to beginning of line
+                    self.cursor = 0;
+                    try self.redrawLine();
+                } else {
+                    // It's a count digit
+                    self.vi_count = self.vi_count * 10;
+                }
+                return false;
+            },
+            '$' => {
+                self.cursor = if (self.length > 0) self.length - 1 else 0;
+                try self.redrawLine();
+                return false;
+            },
+            '^' => {
+                // Go to first non-blank
+                self.cursor = 0;
+                while (self.cursor < self.length and (self.buffer[self.cursor] == ' ' or self.buffer[self.cursor] == '\t')) {
+                    self.cursor += 1;
+                }
+                try self.redrawLine();
+                return false;
+            },
+            'w' => {
+                // Move forward word
+                for (0..count) |_| {
+                    self.moveForwardWord();
+                }
+                try self.redrawLine();
+                return false;
+            },
+            'b' => {
+                // Move backward word
+                for (0..count) |_| {
+                    self.moveBackwardWord();
+                }
+                try self.redrawLine();
+                return false;
+            },
+            'e' => {
+                // Move to end of word
+                for (0..count) |_| {
+                    self.moveToEndOfWord();
+                }
+                try self.redrawLine();
+                return false;
+            },
+
+            // Editing
+            'x' => {
+                // Delete character under cursor
+                for (0..count) |_| {
+                    if (self.cursor < self.length) {
+                        try self.deleteChar();
+                    }
+                }
+                return false;
+            },
+            'X' => {
+                // Delete character before cursor
+                for (0..count) |_| {
+                    if (self.cursor > 0) {
+                        try self.backspace();
+                    }
+                }
+                return false;
+            },
+            'D' => {
+                // Delete to end of line
+                self.length = self.cursor;
+                try self.redrawLine();
+                return false;
+            },
+            'd' => {
+                if (self.vi_pending_op == 'd') {
+                    // dd - delete entire line
+                    self.length = 0;
+                    self.cursor = 0;
+                    self.vi_pending_op = null;
+                    try self.redrawLine();
+                } else {
+                    self.vi_pending_op = 'd';
+                }
+                return false;
+            },
+            'c' => {
+                if (self.vi_pending_op == 'c') {
+                    // cc - change entire line
+                    self.length = 0;
+                    self.cursor = 0;
+                    self.vi_pending_op = null;
+                    self.viEnterInsertMode();
+                    try self.redrawLine();
+                } else {
+                    self.vi_pending_op = 'c';
+                }
+                return false;
+            },
+
+            // History
+            'j' => {
+                try self.historyNext();
+                return false;
+            },
+            'k' => {
+                try self.historyPrevious();
+                return false;
+            },
+
+            // Undo/Redo
+            'u' => {
+                try self.undo();
+                return false;
+            },
+
+            // Search
+            '/' => {
+                try self.startReverseSearch();
+                return false;
+            },
+            'n' => {
+                try self.continueReverseSearch();
+                return false;
+            },
+
+            // Count digits
+            '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
+                self.vi_count = self.vi_count * 10 + (char - '0');
+                return false;
+            },
+
+            // Execute line
+            '\r', '\n' => {
+                return true; // Signal to execute
+            },
+
+            else => {
+                self.vi_pending_op = null;
+                self.vi_count = 0;
+                return false;
+            },
+        }
+    }
+
+    /// Move forward by one word (vi style)
+    fn moveForwardWord(self: *LineEditor) void {
+        // Skip current word
+        while (self.cursor < self.length and !isWordChar(self.buffer[self.cursor])) {
+            self.cursor += 1;
+        }
+        while (self.cursor < self.length and isWordChar(self.buffer[self.cursor])) {
+            self.cursor += 1;
+        }
+    }
+
+    /// Move backward by one word (vi style)
+    fn moveBackwardWord(self: *LineEditor) void {
+        if (self.cursor == 0) return;
+        self.cursor -= 1;
+        // Skip spaces
+        while (self.cursor > 0 and !isWordChar(self.buffer[self.cursor])) {
+            self.cursor -= 1;
+        }
+        // Find start of word
+        while (self.cursor > 0 and isWordChar(self.buffer[self.cursor - 1])) {
+            self.cursor -= 1;
+        }
+    }
+
+    /// Move to end of current word
+    fn moveToEndOfWord(self: *LineEditor) void {
+        if (self.cursor >= self.length) return;
+        self.cursor += 1;
+        // Skip spaces
+        while (self.cursor < self.length and !isWordChar(self.buffer[self.cursor])) {
+            self.cursor += 1;
+        }
+        // Find end of word
+        while (self.cursor < self.length - 1 and isWordChar(self.buffer[self.cursor + 1])) {
+            self.cursor += 1;
+        }
+    }
+
+    fn isWordChar(c: u8) bool {
+        return std.ascii.isAlphanumeric(c) or c == '_';
     }
 
     /// Check if input is incomplete and needs continuation
@@ -453,6 +760,24 @@ pub const LineEditor = struct {
 
             // Check for escape start
             if (byte == 0x1B) {
+                // In Vi insert mode, ESC switches to normal mode
+                if (self.editing_mode == .vi and (self.vi_mode == .insert or self.vi_mode == .replace)) {
+                    // Wait briefly to see if this is an escape sequence
+                    std.posix.nanosleep(0, 50_000_000); // 50ms
+                    if (try self.terminal.readByte()) |next_byte| {
+                        // There's a follow-up - it's an escape sequence, handle normally
+                        escape_buffer[0] = byte;
+                        escape_buffer[1] = next_byte;
+                        escape_len = 2;
+                        in_escape = true;
+                        continue;
+                    } else {
+                        // No follow-up byte - this is just ESC, switch to normal mode
+                        self.viEnterNormalMode();
+                        try self.redrawLine();
+                        continue;
+                    }
+                }
                 escape_buffer[0] = byte;
                 escape_len = 1;
                 in_escape = true;
@@ -656,7 +981,34 @@ pub const LineEditor = struct {
                             }
                             try self.updateReverseSearch();
                         }
+                    } else if (self.editing_mode == .vi and self.vi_mode == .normal) {
+                        // Vi normal mode - handle navigation/commands
+                        const should_execute = try self.handleViNormalKey(byte);
+                        if (should_execute) {
+                            // Check for multi-line
+                            const current_input = self.buffer[0..self.length];
+                            if (isIncomplete(current_input)) {
+                                try self.writeBytes("\r\n");
+                                try self.displayPrompt();
+                                continue;
+                            }
+                            try self.writeBytes("\r\n");
+                            try self.terminal.disableRawMode();
+                            return try self.allocator.dupe(u8, self.buffer[0..self.length]);
+                        }
+                    } else if (self.editing_mode == .vi and self.vi_mode == .replace) {
+                        // Vi replace mode - replace character under cursor
+                        if (self.cursor < self.length) {
+                            self.buffer[self.cursor] = byte;
+                            if (self.cursor < self.length - 1) {
+                                self.cursor += 1;
+                            }
+                            try self.redrawLine();
+                        } else {
+                            try self.insertChar(byte);
+                        }
                     } else {
+                        // Emacs mode or Vi insert mode
                         self.clearCompletionState();
                         try self.insertChar(byte);
                     }

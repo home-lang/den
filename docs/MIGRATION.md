@@ -34,9 +34,9 @@ Den is highly compatible with Bash. Most Bash scripts will work without modifica
 | Control flow | ✅ Full | if, for, while, until, case, select |
 | Functions | ✅ Full | Both syntaxes |
 | Job control | ✅ Full | bg, fg, jobs, disown |
-| Arrays | ⚠️ Partial | Basic indexed arrays |
-| Associative arrays | ❌ Not yet | Planned |
-| `shopt` options | ⚠️ Partial | Common options only |
+| Arrays | ✅ Full | Indexed and associative arrays |
+| Associative arrays | ✅ Full | declare -A supported |
+| `shopt` options | ✅ Full | 30+ options supported |
 
 ### Configuration Migration
 
@@ -411,17 +411,16 @@ echo '}'
 
 ### Partially Implemented
 
-- ⚠️ Arrays: Basic indexed arrays work, associative arrays planned
-- ⚠️ `shopt` options: Common options implemented
 - ⚠️ Bash completion scripts: Native completion preferred
 
-### Not Yet Implemented
+### Implemented
 
-- ❌ Vi editing mode
-- ❌ Associative arrays
-- ❌ Coprocesses
-- ❌ Network redirections (`/dev/tcp`)
-- ❌ Loadable builtins
+- ✅ Arrays: Both indexed arrays and associative arrays (declare -A)
+- ✅ Network redirections (`/dev/tcp`, `/dev/udp`) with IPv4 and IPv6 support
+- ✅ `shopt` options: 30+ options including extglob, globstar, autocd, cdspell, etc.
+- ✅ Vi editing mode: Normal, insert, and replace modes with navigation keys (h,j,k,l,w,b,e,0,$)
+- ✅ Coprocesses: `coproc [NAME] command` with bidirectional pipes
+- ✅ Loadable builtins: `enable -f <library.so> <name>` with dlopen support
 
 ### Den-Specific Features
 
@@ -534,6 +533,154 @@ zig build -Doptimize=ReleaseFast
 - **Troubleshooting**: See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
 - **Issues**: Report at https://github.com/anthropics/den/issues
 - **Discussions**: Ask questions in GitHub Discussions
+
+---
+
+## Intentionally Unsupported Features
+
+Some features from Bash/Zsh are intentionally not supported in Den to keep the implementation minimal, predictable, and secure.
+
+### From Bash
+
+| Feature | Reason |
+|---------|--------|
+| `eval` | Security risk; use functions or command substitution instead |
+| `source` from network | Security risk; only local files supported |
+| Bash-specific `[[` extensions | Some regex features differ; use standard test or grep |
+| `compgen`/`complete` bash API | Den uses native completion; different architecture |
+| `PROMPT_COMMAND` | Use Den's prompt config instead |
+
+### From Zsh
+
+| Feature | Reason |
+|---------|--------|
+| Global aliases (`-g`) | Confusing behavior; use functions |
+| Suffix aliases (`-s`) | Available in config as `aliases.suffix` |
+| `zparseopts` | Use standard `getopts` or manual parsing |
+| `zle` widgets | Different line editing architecture |
+| `zmodload` | Den uses plugin system |
+| `precmd`/`preexec` hooks | Use config-based hooks |
+
+### From Fish
+
+| Feature | Reason |
+|---------|--------|
+| Fish syntax | Den uses POSIX/Bash syntax for compatibility |
+| Universal variables | Use environment + config instead |
+| Abbreviations | Use aliases (similar functionality) |
+| `string` builtin | Use standard shell tools or Den builtins |
+| Event handlers | Use trap or config hooks |
+
+### Design Philosophy
+
+Den prioritizes:
+
+1. **POSIX compatibility**: Scripts should be portable
+2. **Predictable behavior**: No magic or implicit behavior
+3. **Security**: No features that commonly lead to vulnerabilities
+4. **Simplicity**: Features must justify their complexity cost
+5. **Performance**: Features shouldn't impact startup or runtime
+
+If you need an unsupported feature, consider:
+- Writing a function that achieves the same goal
+- Using a Den plugin
+- Using standard Unix tools in combination
+
+---
+
+## Zsh Power User Quick Reference
+
+Quick mapping for common Zsh workflows:
+
+### Prompt
+
+| Zsh | Den |
+|-----|-----|
+| `%n` | `{user}` |
+| `%m` | `{host}` |
+| `%~` | `{cwd}` or `{path}` |
+| `%#` | `{symbol}` |
+| `%?` | `{exit_code}` |
+| `%(?..)` | Use `show_exit_code` option |
+
+### Keybindings
+
+| Zsh | Den |
+|-----|-----|
+| `bindkey '^R' history-incremental-search-backward` | Built-in, Ctrl+R |
+| `bindkey '^[[A' up-line-or-history` | Built-in, Arrow Up |
+| `bindkey '^A' beginning-of-line` | Built-in (Emacs mode) |
+| `bindkey '^E' end-of-line` | Built-in (Emacs mode) |
+
+### Completion
+
+| Zsh | Den |
+|-----|-----|
+| `compinit` | Automatic, no setup needed |
+| `_git`, `_docker` | Built-in context-aware completion |
+| `zstyle ':completion:*'` | Use `completion` config section |
+| `fpath+=` | Use `plugins` config |
+
+### History
+
+| Zsh | Den |
+|-----|-----|
+| `HISTSIZE`, `SAVEHIST` | `history.max_entries` |
+| `HISTFILE` | `history.file` |
+| `setopt SHARE_HISTORY` | Default behavior |
+| `setopt HIST_IGNORE_DUPS` | `history.ignore_duplicates` |
+| `setopt HIST_IGNORE_SPACE` | `history.ignore_space` |
+
+---
+
+## Fish Power User Quick Reference
+
+Quick mapping for common Fish workflows:
+
+### Variables
+
+| Fish | Den |
+|------|-----|
+| `set var value` | `var=value` |
+| `set -x var value` | `export var=value` |
+| `set -e var` | `unset var` |
+| `set -g var` | `export var` (in init) |
+| `set -U var` | Use config `environment` |
+
+### Functions
+
+| Fish | Den |
+|------|-----|
+| `function name; ...; end` | `name() { ...; }` |
+| `$argv` | `$@`, `$1`, `$2`, ... |
+| `$argv[1]` | `$1` |
+| `count $argv` | `$#` |
+
+### Control Flow
+
+| Fish | Den |
+|------|-----|
+| `if; ...; end` | `if ...; then ...; fi` |
+| `for x in ...; ...; end` | `for x in ...; do ...; done` |
+| `while; ...; end` | `while ...; do ...; done` |
+| `switch/case` | `case ... in ...) ;; esac` |
+| `and`, `or` | `&&`, `||` |
+
+### Prompt
+
+| Fish | Den |
+|------|-----|
+| `fish_prompt` function | `prompt.format` config |
+| `fish_right_prompt` | `prompt.right_prompt` config |
+| `set_color` | Use theme colors |
+| `fish_git_prompt` | `{git}` in prompt format |
+
+### Autosuggestions
+
+Fish's autosuggestions are built into Den:
+- Suggestions appear inline (dimmed)
+- Press Right Arrow or End to accept
+- Configure in `completion` section
 
 ---
 

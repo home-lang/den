@@ -268,6 +268,7 @@ pub const ControlFlowExecutor = struct {
         // Create expansion context
         var expander = Expansion.init(self.allocator, &self.shell.environment, self.shell.last_exit_code);
         expander.arrays = &self.shell.arrays;
+        expander.assoc_arrays = &self.shell.assoc_arrays;
 
         for (loop.items) |item| {
             // Check if item is an array expansion
