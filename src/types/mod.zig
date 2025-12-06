@@ -19,6 +19,7 @@ pub const Redirection = command.Redirection;
 pub const CommandChain = command.CommandChain;
 
 pub const Variable = variable.Variable;
+pub const VarAttributes = variable.VarAttributes;
 
 test {
     std.testing.refAllDecls(@This());

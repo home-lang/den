@@ -176,15 +176,15 @@ pub const CaseClause = struct {
 pub const ControlFlowExecutor = struct {
     shell: *Shell,
     allocator: std.mem.Allocator,
-    break_requested: bool,
-    continue_requested: bool,
+    break_levels: u32,
+    continue_levels: u32,
 
     pub fn init(shell: *Shell) ControlFlowExecutor {
         return .{
             .shell = shell,
             .allocator = shell.allocator,
-            .break_requested = false,
-            .continue_requested = false,
+            .break_levels = 0,
+            .continue_levels = 0,
         };
     }
 
@@ -229,14 +229,16 @@ pub const ControlFlowExecutor = struct {
             last_exit = self.executeBody(loop.body);
 
             // Check for break
-            if (self.break_requested) {
-                self.break_requested = false;
+            if (self.break_levels > 0) {
+                self.break_levels -= 1;
+                if (self.break_levels > 0) return last_exit; // Still need to break outer loops
                 break;
             }
 
-            // Reset continue flag
-            if (self.continue_requested) {
-                self.continue_requested = false;
+            // Handle continue
+            if (self.continue_levels > 0) {
+                self.continue_levels -= 1;
+                if (self.continue_levels > 0) return last_exit; // Continue outer loop
                 continue;
             }
 
@@ -312,14 +314,16 @@ pub const ControlFlowExecutor = struct {
             last_exit = self.executeBody(loop.body);
 
             // Check for break
-            if (self.break_requested) {
-                self.break_requested = false;
+            if (self.break_levels > 0) {
+                self.break_levels -= 1;
+                if (self.break_levels > 0) return last_exit; // Still need to break outer loops
                 break;
             }
 
-            // Reset continue flag
-            if (self.continue_requested) {
-                self.continue_requested = false;
+            // Handle continue
+            if (self.continue_levels > 0) {
+                self.continue_levels -= 1;
+                if (self.continue_levels > 0) return last_exit; // Continue outer loop
                 continue;
             }
 
@@ -353,8 +357,9 @@ pub const ControlFlowExecutor = struct {
             last_exit = self.executeBody(loop.body);
 
             // Check for break
-            if (self.break_requested) {
-                self.break_requested = false;
+            if (self.break_levels > 0) {
+                self.break_levels -= 1;
+                if (self.break_levels > 0) return last_exit; // Still need to break outer loops
                 break;
             }
 
@@ -363,9 +368,10 @@ pub const ControlFlowExecutor = struct {
                 _ = try self.executeStatement(update);
             }
 
-            // Reset continue flag (after update)
-            if (self.continue_requested) {
-                self.continue_requested = false;
+            // Handle continue (after update)
+            if (self.continue_levels > 0) {
+                self.continue_levels -= 1;
+                if (self.continue_levels > 0) return last_exit; // Continue outer loop
                 continue;
             }
 
@@ -450,14 +456,16 @@ pub const ControlFlowExecutor = struct {
             last_exit = self.executeBody(menu.body);
 
             // Check for break
-            if (self.break_requested) {
-                self.break_requested = false;
+            if (self.break_levels > 0) {
+                self.break_levels -= 1;
+                if (self.break_levels > 0) return last_exit; // Still need to break outer loops
                 break;
             }
 
-            // Reset continue flag
-            if (self.continue_requested) {
-                self.continue_requested = false;
+            // Handle continue
+            if (self.continue_levels > 0) {
+                self.continue_levels -= 1;
+                if (self.continue_levels > 0) return last_exit; // Continue outer loop
                 continue;
             }
 
@@ -506,7 +514,7 @@ pub const ControlFlowExecutor = struct {
                 last_exit = self.executeBody(case_clause.body);
 
                 // Check for break/continue in body
-                if (self.break_requested or self.continue_requested) {
+                if (self.break_levels > 0 or self.continue_levels > 0) {
                     return last_exit;
                 }
 
@@ -550,15 +558,27 @@ pub const ControlFlowExecutor = struct {
             const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
             if (trimmed.len == 0 or trimmed[0] == '#') continue;
 
-            // Check for break
-            if (std.mem.eql(u8, trimmed, "break")) {
-                self.break_requested = true;
+            // Check for break (with optional level)
+            if (std.mem.eql(u8, trimmed, "break") or std.mem.startsWith(u8, trimmed, "break ")) {
+                if (std.mem.startsWith(u8, trimmed, "break ")) {
+                    const level_str = std.mem.trim(u8, trimmed[6..], &std.ascii.whitespace);
+                    self.break_levels = std.fmt.parseInt(u32, level_str, 10) catch 1;
+                    if (self.break_levels == 0) self.break_levels = 1;
+                } else {
+                    self.break_levels = 1;
+                }
                 return 0;
             }
 
-            // Check for continue
-            if (std.mem.eql(u8, trimmed, "continue")) {
-                self.continue_requested = true;
+            // Check for continue (with optional level)
+            if (std.mem.eql(u8, trimmed, "continue") or std.mem.startsWith(u8, trimmed, "continue ")) {
+                if (std.mem.startsWith(u8, trimmed, "continue ")) {
+                    const level_str = std.mem.trim(u8, trimmed[9..], &std.ascii.whitespace);
+                    self.continue_levels = std.fmt.parseInt(u32, level_str, 10) catch 1;
+                    if (self.continue_levels == 0) self.continue_levels = 1;
+                } else {
+                    self.continue_levels = 1;
+                }
                 return 0;
             }
 
@@ -570,7 +590,7 @@ pub const ControlFlowExecutor = struct {
             last_exit = self.shell.last_exit_code;
 
             // Check for break/continue request
-            if (self.break_requested or self.continue_requested) {
+            if (self.break_levels > 0 or self.continue_levels > 0) {
                 return last_exit;
             }
 

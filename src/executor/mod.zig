@@ -729,7 +729,7 @@ pub const Executor = struct {
             "localip", "shrug", "web", "ip", "return", "local", "copyssh",
             "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
             "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor", "log-parse", "dotfiles", "library", "hook",
-            "ifind",
+            "ifind", "coproc",
         };
         for (builtins) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -903,6 +903,8 @@ pub const Executor = struct {
             return try builtinHook(self, command);
         } else if (std.mem.eql(u8, command.name, "ifind")) {
             return try self.builtinIfind(command);
+        } else if (std.mem.eql(u8, command.name, "coproc")) {
+            return try self.builtinCoproc(command);
         }
 
         try IO.eprint("den: builtin not implemented: {s}\n", .{command.name});
@@ -4765,6 +4767,7 @@ pub const Executor = struct {
     fn builtinTime(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Parse flags
         var posix_format = false; // -p: POSIX format output
+        var verbose = false; // -v: verbose output with more details
         var arg_start: usize = 0;
 
         while (arg_start < command.args.len) {
@@ -4772,6 +4775,9 @@ pub const Executor = struct {
             if (arg.len > 0 and arg[0] == '-') {
                 if (std.mem.eql(u8, arg, "-p")) {
                     posix_format = true;
+                    arg_start += 1;
+                } else if (std.mem.eql(u8, arg, "-v")) {
+                    verbose = true;
                     arg_start += 1;
                 } else if (std.mem.eql(u8, arg, "--")) {
                     arg_start += 1;
@@ -4791,7 +4797,6 @@ pub const Executor = struct {
         }
 
         // Time the execution of an external command
-        // For now, we only support timing external commands to avoid circular dependencies
         const start_time = std.time.Instant.now() catch return 1;
 
         var new_cmd = types.ParsedCommand{
@@ -4806,12 +4811,27 @@ pub const Executor = struct {
         const end_time = std.time.Instant.now() catch return exit_code;
         const elapsed_ns = end_time.since(start_time);
         const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000_000.0;
+        const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
 
         if (posix_format) {
             // POSIX format: "real %f\nuser %f\nsys %f\n"
             try IO.eprint("real {d:.2}\n", .{elapsed_s});
             try IO.eprint("user 0.00\n", .{});
             try IO.eprint("sys 0.00\n", .{});
+        } else if (verbose) {
+            // Verbose format with more details
+            try IO.eprint("\n", .{});
+            try IO.eprint("        Command: {s}", .{command.args[arg_start]});
+            for (command.args[arg_start + 1 ..]) |arg| {
+                try IO.eprint(" {s}", .{arg});
+            }
+            try IO.eprint("\n", .{});
+            try IO.eprint("    Exit status: {d}\n", .{exit_code});
+            if (elapsed_s >= 1.0) {
+                try IO.eprint("      Real time: {d:.3}s\n", .{elapsed_s});
+            } else {
+                try IO.eprint("      Real time: {d:.1}ms\n", .{elapsed_ms});
+            }
         } else {
             // Default format with tabs
             try IO.eprint("\nreal\t{d:.3}s\n", .{elapsed_s});
@@ -8972,6 +8992,182 @@ pub const Executor = struct {
             try IO.eprint("den: library: unknown command '{s}'\n", .{subcmd});
             return 1;
         }
+    }
+
+    /// Coproc: run a command as a coprocess with bidirectional pipes
+    /// Usage: coproc [NAME] command [args...]
+    /// Sets COPROC[0] (read fd), COPROC[1] (write fd), COPROC_PID
+    fn builtinCoproc(self: *Executor, command: *types.ParsedCommand) !i32 {
+        if (command.args.len == 0) {
+            try IO.eprint("coproc: command required\n", .{});
+            return 1;
+        }
+
+        // Parse optional name and command
+        var name: []const u8 = "COPROC";
+        var cmd_start: usize = 0;
+
+        // Check if first arg looks like a name (all caps, alphanumeric)
+        if (command.args.len > 1) {
+            const first = command.args[0];
+            var is_name = true;
+            for (first) |c| {
+                if (!std.ascii.isAlphanumeric(c) and c != '_') {
+                    is_name = false;
+                    break;
+                }
+            }
+            // If it looks like a valid name and there's a command after it
+            if (is_name and std.ascii.isUpper(first[0])) {
+                name = first;
+                cmd_start = 1;
+            }
+        }
+
+        if (cmd_start >= command.args.len) {
+            try IO.eprint("coproc: command required after name\n", .{});
+            return 1;
+        }
+
+        // Create pipes for bidirectional communication
+        // pipe_to_coproc: parent writes to [1], coproc reads from [0]
+        // pipe_from_coproc: coproc writes to [1], parent reads from [0]
+        const pipe_to_coproc = std.posix.pipe() catch |err| {
+            try IO.eprint("coproc: failed to create pipe: {s}\n", .{@errorName(err)});
+            return 1;
+        };
+        const pipe_from_coproc = std.posix.pipe() catch |err| {
+            std.posix.close(pipe_to_coproc[0]);
+            std.posix.close(pipe_to_coproc[1]);
+            try IO.eprint("coproc: failed to create pipe: {s}\n", .{@errorName(err)});
+            return 1;
+        };
+
+        // Fork to create coprocess
+        const pid = std.posix.fork() catch |err| {
+            std.posix.close(pipe_to_coproc[0]);
+            std.posix.close(pipe_to_coproc[1]);
+            std.posix.close(pipe_from_coproc[0]);
+            std.posix.close(pipe_from_coproc[1]);
+            try IO.eprint("coproc: failed to fork: {s}\n", .{@errorName(err)});
+            return 1;
+        };
+
+        if (pid == 0) {
+            // Child process (coprocess)
+            // Close parent's ends
+            std.posix.close(pipe_to_coproc[1]);
+            std.posix.close(pipe_from_coproc[0]);
+
+            // Redirect stdin from pipe_to_coproc[0]
+            std.posix.dup2(pipe_to_coproc[0], std.posix.STDIN_FILENO) catch std.process.exit(1);
+            std.posix.close(pipe_to_coproc[0]);
+
+            // Redirect stdout to pipe_from_coproc[1]
+            std.posix.dup2(pipe_from_coproc[1], std.posix.STDOUT_FILENO) catch std.process.exit(1);
+            std.posix.close(pipe_from_coproc[1]);
+
+            // Execute the command
+            const cmd_name = command.args[cmd_start];
+
+            // Convert command name to null-terminated
+            const cmd_z = std.posix.toPosixPath(cmd_name) catch {
+                std.process.exit(127);
+            };
+
+            // Build argv - allocate on stack
+            var argv_storage: [64][std.fs.max_path_bytes:0]u8 = undefined;
+            var argv: [64:null]?[*:0]const u8 = undefined;
+            var argv_idx: usize = 0;
+
+            for (command.args[cmd_start..]) |arg| {
+                if (argv_idx >= 63) break;
+                const arg_z = std.posix.toPosixPath(arg) catch {
+                    std.process.exit(127);
+                };
+                @memcpy(argv_storage[argv_idx][0..arg_z.len], arg_z[0..arg_z.len]);
+                argv_storage[argv_idx][arg_z.len] = 0;
+                argv[argv_idx] = &argv_storage[argv_idx];
+                argv_idx += 1;
+            }
+            argv[argv_idx] = null;
+
+            // Execute
+            _ = std.posix.execvpeZ(&cmd_z, @ptrCast(argv[0..argv_idx :null]), getCEnviron()) catch {
+                std.process.exit(127);
+            };
+
+            // If exec failed
+            std.process.exit(127);
+        }
+
+        // Parent process
+        // Close child's ends
+        std.posix.close(pipe_to_coproc[0]);
+        std.posix.close(pipe_from_coproc[1]);
+
+        // Set up variables:
+        // NAME[0] = fd for reading from coproc (pipe_from_coproc[0])
+        // NAME[1] = fd for writing to coproc (pipe_to_coproc[1])
+        // NAME_PID = pid of coprocess
+        if (self.shell) |shell| {
+            // Set NAME_PID
+            var pid_name_buf: [128]u8 = undefined;
+            const pid_name = std.fmt.bufPrint(&pid_name_buf, "{s}_PID", .{name}) catch {
+                try IO.eprint("coproc: name too long\n", .{});
+                return 1;
+            };
+            var pid_val_buf: [32]u8 = undefined;
+            const pid_str = std.fmt.bufPrint(&pid_val_buf, "{d}", .{pid}) catch "0";
+
+            // Duplicate strings for the hash map
+            const pid_name_dup = self.allocator.dupe(u8, pid_name) catch {
+                return 1;
+            };
+            const pid_str_dup = self.allocator.dupe(u8, pid_str) catch {
+                self.allocator.free(pid_name_dup);
+                return 1;
+            };
+            shell.environment.put(pid_name_dup, pid_str_dup) catch {};
+
+            // For array-like access, we store as NAME_0 and NAME_1
+            // (full array support is a separate feature)
+            var read_fd_name_buf: [128]u8 = undefined;
+            const read_fd_name = std.fmt.bufPrint(&read_fd_name_buf, "{s}_0", .{name}) catch name;
+            var fd_buf: [32]u8 = undefined;
+            const read_fd_str = std.fmt.bufPrint(&fd_buf, "{d}", .{pipe_from_coproc[0]}) catch "0";
+
+            const read_name_dup = self.allocator.dupe(u8, read_fd_name) catch {
+                return 1;
+            };
+            const read_str_dup = self.allocator.dupe(u8, read_fd_str) catch {
+                self.allocator.free(read_name_dup);
+                return 1;
+            };
+            shell.environment.put(read_name_dup, read_str_dup) catch {};
+
+            var write_fd_name_buf: [128]u8 = undefined;
+            const write_fd_name = std.fmt.bufPrint(&write_fd_name_buf, "{s}_1", .{name}) catch name;
+            var fd_buf2: [32]u8 = undefined;
+            const write_fd_str = std.fmt.bufPrint(&fd_buf2, "{d}", .{pipe_to_coproc[1]}) catch "0";
+
+            const write_name_dup = self.allocator.dupe(u8, write_fd_name) catch {
+                return 1;
+            };
+            const write_str_dup = self.allocator.dupe(u8, write_fd_str) catch {
+                self.allocator.free(write_name_dup);
+                return 1;
+            };
+            shell.environment.put(write_name_dup, write_str_dup) catch {};
+
+            // Store coproc info in shell for later cleanup
+            shell.coproc_pid = pid;
+            shell.coproc_read_fd = pipe_from_coproc[0];
+            shell.coproc_write_fd = pipe_to_coproc[1];
+        }
+
+        try IO.print("[coproc] {d}\n", .{pid});
+        return 0;
     }
 
     /// Interactive file finder with fuzzy matching and selection

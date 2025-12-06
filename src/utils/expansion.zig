@@ -488,14 +488,117 @@ pub const Expansion = struct {
             }
         }
 
-        // Check for array length: ${#arr}
+        // Check for string/array length: ${#VAR}
         if (content.len > 0 and content[0] == '#') {
             const var_name = content[1..];
+            // First check arrays
             if (self.arrays) |arrays| {
                 if (arrays.get(var_name)) |array| {
                     const value = try std.fmt.allocPrint(self.allocator, "{d}", .{array.len});
                     return ExpansionResult{ .value = value, .consumed = end + 1 };
                 }
+            }
+            // Then check scalar variables for string length
+            if (self.environment.get(var_name)) |value| {
+                const len_str = try std.fmt.allocPrint(self.allocator, "{d}", .{value.len});
+                return ExpansionResult{ .value = len_str, .consumed = end + 1 };
+            }
+            // Variable not found - length is 0
+            const zero = try self.allocator.dupe(u8, "0");
+            return ExpansionResult{ .value = zero, .consumed = end + 1 };
+        }
+
+        // Check for indirect expansion: ${!VAR}
+        if (content.len > 0 and content[0] == '!' and !std.mem.containsAtLeast(u8, content, 1, "@") and !std.mem.containsAtLeast(u8, content, 1, "*")) {
+            const indirect_name = content[1..];
+            // Get the value of the named variable, then use that as a variable name
+            if (self.environment.get(indirect_name)) |ref_name| {
+                if (self.environment.get(ref_name)) |value| {
+                    const result = try self.allocator.dupe(u8, value);
+                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                }
+            }
+            return ExpansionResult{ .value = "", .consumed = end + 1 };
+        }
+
+        // Check for substring extraction: ${VAR:offset} or ${VAR:offset:length}
+        if (std.mem.indexOf(u8, content, ":")) |colon_pos| {
+            // Make sure this isn't :- := :? :+ operators
+            if (colon_pos + 1 < content.len) {
+                const after_colon = content[colon_pos + 1];
+                if (after_colon != '-' and after_colon != '=' and after_colon != '?' and after_colon != '+') {
+                    // This is substring extraction
+                    const var_name = content[0..colon_pos];
+                    const params = content[colon_pos + 1 ..];
+
+                    if (self.environment.get(var_name)) |value| {
+                        // Parse offset and optional length
+                        var offset: i64 = 0;
+                        var length: ?usize = null;
+
+                        if (std.mem.indexOf(u8, params, ":")) |second_colon| {
+                            // ${VAR:offset:length}
+                            offset = std.fmt.parseInt(i64, params[0..second_colon], 10) catch 0;
+                            length = std.fmt.parseInt(usize, params[second_colon + 1 ..], 10) catch null;
+                        } else {
+                            // ${VAR:offset}
+                            offset = std.fmt.parseInt(i64, params, 10) catch 0;
+                        }
+
+                        // Handle negative offset (from end of string)
+                        var start: usize = 0;
+                        if (offset < 0) {
+                            const abs_offset: usize = @intCast(-offset);
+                            if (abs_offset <= value.len) {
+                                start = value.len - abs_offset;
+                            }
+                        } else {
+                            start = @min(@as(usize, @intCast(offset)), value.len);
+                        }
+
+                        // Calculate end position
+                        const end_pos = if (length) |len| @min(start + len, value.len) else value.len;
+
+                        if (start <= end_pos and start <= value.len) {
+                            const result = try self.allocator.dupe(u8, value[start..end_pos]);
+                            return ExpansionResult{ .value = result, .consumed = end + 1 };
+                        }
+                        return ExpansionResult{ .value = "", .consumed = end + 1 };
+                    }
+                    return ExpansionResult{ .value = "", .consumed = end + 1 };
+                }
+            }
+        }
+
+        // Check for replacement: ${VAR/pattern/replacement} or ${VAR//pattern/replacement}
+        if (std.mem.indexOf(u8, content, "/")) |slash_pos| {
+            if (slash_pos > 0) {
+                const var_name = content[0..slash_pos];
+                const rest = content[slash_pos..];
+
+                // Check if it's // (replace all) or / (replace first)
+                const replace_all = rest.len > 1 and rest[1] == '/';
+                const pattern_start: usize = if (replace_all) 2 else 1;
+
+                // Find the second slash for the replacement
+                if (std.mem.indexOf(u8, rest[pattern_start..], "/")) |second_slash| {
+                    const pattern = rest[pattern_start .. pattern_start + second_slash];
+                    const replacement = rest[pattern_start + second_slash + 1 ..];
+
+                    if (self.environment.get(var_name)) |value| {
+                        const result = try self.replaceInString(value, pattern, replacement, replace_all);
+                        return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    }
+                } else {
+                    // No second slash - replacement is empty string (deletion)
+                    const pattern = rest[pattern_start..];
+
+                    if (self.environment.get(var_name)) |value| {
+                        const result = try self.replaceInString(value, pattern, "", replace_all);
+                        return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    }
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1 };
             }
         }
 
@@ -514,6 +617,66 @@ pub const Expansion = struct {
             // Use default value
             const result = try self.allocator.dupe(u8, default_value);
             return ExpansionResult{ .value = result, .consumed = end + 1 };
+        }
+
+        // Check for assign default syntax: ${VAR:=default}
+        if (std.mem.indexOf(u8, content, ":=")) |sep_pos| {
+            const var_name = content[0..sep_pos];
+            const default_value = content[sep_pos + 2 ..];
+
+            if (self.environment.get(var_name)) |value| {
+                if (value.len > 0) {
+                    const result = try self.allocator.dupe(u8, value);
+                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                }
+            }
+
+            // Assign and use default value
+            const value_copy = try self.allocator.dupe(u8, default_value);
+            const name_copy = try self.allocator.dupe(u8, var_name);
+            self.environment.put(name_copy, value_copy) catch {};
+            const result = try self.allocator.dupe(u8, default_value);
+            return ExpansionResult{ .value = result, .consumed = end + 1 };
+        }
+
+        // Check for error if unset syntax: ${VAR:?message}
+        if (std.mem.indexOf(u8, content, ":?")) |sep_pos| {
+            const var_name = content[0..sep_pos];
+            const error_msg = content[sep_pos + 2 ..];
+
+            if (self.environment.get(var_name)) |value| {
+                if (value.len > 0) {
+                    const result = try self.allocator.dupe(u8, value);
+                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                }
+            }
+
+            // Print error message and return empty (shell should exit)
+            const posix = std.posix;
+            var buf: [512]u8 = undefined;
+            const msg = if (error_msg.len > 0)
+                std.fmt.bufPrint(&buf, "den: {s}: {s}\n", .{ var_name, error_msg }) catch "den: parameter null or not set\n"
+            else
+                std.fmt.bufPrint(&buf, "den: {s}: parameter null or not set\n", .{var_name}) catch "den: parameter null or not set\n";
+            _ = posix.write(posix.STDERR_FILENO, msg) catch {};
+            return error.ParameterNullOrNotSet;
+        }
+
+        // Check for use alternative value syntax: ${VAR:+value}
+        if (std.mem.indexOf(u8, content, ":+")) |sep_pos| {
+            const var_name = content[0..sep_pos];
+            const alt_value = content[sep_pos + 2 ..];
+
+            if (self.environment.get(var_name)) |value| {
+                if (value.len > 0) {
+                    // Variable is set and non-empty, use alternative value
+                    const result = try self.allocator.dupe(u8, alt_value);
+                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                }
+            }
+
+            // Variable is unset or empty, return empty string
+            return ExpansionResult{ .value = "", .consumed = end + 1 };
         }
 
         // Check for parameter expansion patterns
@@ -641,6 +804,54 @@ pub const Expansion = struct {
 
         // Pattern not found, return original value
         return try self.allocator.dupe(u8, value);
+    }
+
+    /// Replace pattern in string with replacement
+    /// If replace_all is true, replace all occurrences; otherwise just first
+    fn replaceInString(self: *Expansion, value: []const u8, pattern: []const u8, replacement: []const u8, replace_all: bool) ![]u8 {
+        if (pattern.len == 0) {
+            return try self.allocator.dupe(u8, value);
+        }
+
+        var result = std.ArrayList(u8).empty;
+        errdefer result.deinit(self.allocator);
+
+        var i: usize = 0;
+        var replaced = false;
+
+        while (i < value.len) {
+            // Check if pattern matches at current position
+            var match_len: usize = 0;
+            if (self.findPatternMatch(value[i..], pattern)) |len| {
+                match_len = len;
+            }
+
+            if (match_len > 0 and (replace_all or !replaced)) {
+                // Pattern matches - add replacement instead
+                try result.appendSlice(self.allocator, replacement);
+                i += match_len;
+                replaced = true;
+            } else {
+                // No match - copy character
+                try result.append(self.allocator, value[i]);
+                i += 1;
+            }
+        }
+
+        return try result.toOwnedSlice(self.allocator);
+    }
+
+    /// Find pattern match at start of string, return length of match or null
+    fn findPatternMatch(self: *Expansion, str: []const u8, pattern: []const u8) ?usize {
+        _ = self;
+        // Try matching pattern at different lengths
+        var len: usize = 1;
+        while (len <= str.len) : (len += 1) {
+            if (matchPattern(pattern, str[0..len])) {
+                return len;
+            }
+        }
+        return null;
     }
 
     /// Match a shell glob pattern against a string

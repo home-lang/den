@@ -337,34 +337,14 @@ pub const Glob = struct {
 
     /// Match a single filename against a glob pattern
     /// Supports: * (any chars), ? (single char), [abc] (char class), (a|b) (alternation)
+    /// Extended glob (extglob): ?(pat), *(pat), +(pat), @(pat), !(pat)
     fn matchPattern(self: *Glob, pattern: []const u8, name: []const u8) bool {
         _ = self;
-        // Check for alternation pattern: *.(sh|zsh)
-        if (std.mem.indexOfScalar(u8, pattern, '(')) |paren_pos| {
-            if (std.mem.indexOfScalar(u8, pattern[paren_pos..], ')')) |close_offset| {
-                const close_pos = paren_pos + close_offset;
-                const prefix = pattern[0..paren_pos];
-                const suffix = if (close_pos + 1 < pattern.len) pattern[close_pos + 1..] else "";
-                const alternatives = pattern[paren_pos + 1..close_pos];
-
-                // Split alternatives by |
-                var iter = std.mem.splitScalar(u8, alternatives, '|');
-                while (iter.next()) |alt| {
-                    // Build pattern: prefix + alt + suffix
-                    var buf: [std.fs.max_path_bytes]u8 = undefined;
-                    const full_pattern = std.fmt.bufPrint(&buf, "{s}{s}{s}", .{ prefix, alt, suffix }) catch continue;
-                    if (matchPatternImpl(full_pattern, name, 0, 0)) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-        }
-
-        return matchPatternImpl(pattern, name, 0, 0);
+        return matchPatternExtended(pattern, name, 0, 0);
     }
 
-    fn matchPatternImpl(pattern: []const u8, name: []const u8, p_idx: usize, n_idx: usize) bool {
+    /// Extended pattern matching with extglob support
+    fn matchPatternExtended(pattern: []const u8, name: []const u8, p_idx: usize, n_idx: usize) bool {
         // End of pattern
         if (p_idx >= pattern.len) {
             return n_idx >= name.len;
@@ -372,67 +352,331 @@ pub const Glob = struct {
 
         // End of name but not pattern
         if (n_idx >= name.len) {
-            // Only valid if rest of pattern is all *
-            for (pattern[p_idx..]) |char| {
-                if (char != '*') return false;
+            // Only valid if rest of pattern is all * or nullable extglob
+            var i = p_idx;
+            while (i < pattern.len) : (i += 1) {
+                const c = pattern[i];
+                if (c == '*') continue;
+                // Check for ?(pattern) or *(pattern) which can match zero
+                if ((c == '?' or c == '*') and i + 1 < pattern.len and pattern[i + 1] == '(') {
+                    // Find closing paren
+                    if (findClosingParen(pattern, i + 1)) |close_pos| {
+                        i = close_pos;
+                        continue;
+                    }
+                }
+                return false;
             }
             return true;
         }
 
         const p_char = pattern[p_idx];
 
+        // Check for extglob patterns: ?(pattern), *(pattern), +(pattern), @(pattern), !(pattern)
+        if (p_idx + 1 < pattern.len and pattern[p_idx + 1] == '(' and
+            (p_char == '?' or p_char == '*' or p_char == '+' or p_char == '@' or p_char == '!'))
+        {
+            return matchExtglob(pattern, name, p_idx, n_idx);
+        }
+
+        // Check for alternation pattern: (a|b)
+        if (p_char == '(') {
+            if (findClosingParen(pattern, p_idx)) |close_pos| {
+                const alternatives = pattern[p_idx + 1 .. close_pos];
+                const suffix = if (close_pos + 1 < pattern.len) pattern[close_pos + 1 ..] else "";
+
+                // Split alternatives by |
+                var iter = std.mem.splitScalar(u8, alternatives, '|');
+                while (iter.next()) |alt| {
+                    // Try matching alt + suffix
+                    var buf: [std.fs.max_path_bytes]u8 = undefined;
+                    const combined = std.fmt.bufPrint(&buf, "{s}{s}", .{ alt, suffix }) catch continue;
+                    if (matchPatternExtended(combined, name, 0, n_idx)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
         switch (p_char) {
             '*' => {
                 // Try matching zero or more characters
                 // First try zero chars (skip the *)
-                if (matchPatternImpl(pattern, name, p_idx + 1, n_idx)) {
+                if (matchPatternExtended(pattern, name, p_idx + 1, n_idx)) {
                     return true;
                 }
                 // Try matching one or more chars
-                return matchPatternImpl(pattern, name, p_idx, n_idx + 1);
+                return matchPatternExtended(pattern, name, p_idx, n_idx + 1);
             },
             '?' => {
                 // Match any single character
-                return matchPatternImpl(pattern, name, p_idx + 1, n_idx + 1);
+                return matchPatternExtended(pattern, name, p_idx + 1, n_idx + 1);
             },
             '[' => {
-                // Character class - simplified implementation
-                // Find closing bracket
-                var end: usize = p_idx + 1;
-                while (end < pattern.len and pattern[end] != ']') {
-                    end += 1;
-                }
-                if (end >= pattern.len) {
-                    // No closing bracket - treat [ as literal
-                    if (name[n_idx] == '[') {
-                        return matchPatternImpl(pattern, name, p_idx + 1, n_idx + 1);
-                    }
-                    return false;
-                }
-
-                const char_class = pattern[p_idx + 1 .. end];
-                const n_char = name[n_idx];
-
-                // Check if char is in class
-                var matched = false;
-                for (char_class) |c| {
-                    if (c == n_char) {
-                        matched = true;
-                        break;
-                    }
-                }
-
-                if (!matched) return false;
-                return matchPatternImpl(pattern, name, end + 1, n_idx + 1);
+                // Character class
+                return matchCharClass(pattern, name, p_idx, n_idx);
             },
             else => {
                 // Literal character match
                 if (p_char != name[n_idx]) {
                     return false;
                 }
-                return matchPatternImpl(pattern, name, p_idx + 1, n_idx + 1);
+                return matchPatternExtended(pattern, name, p_idx + 1, n_idx + 1);
             },
         }
+    }
+
+    /// Match extended glob patterns: ?(pat), *(pat), +(pat), @(pat), !(pat)
+    fn matchExtglob(pattern: []const u8, name: []const u8, p_idx: usize, n_idx: usize) bool {
+        const op = pattern[p_idx];
+        const open_paren = p_idx + 1;
+
+        // Find matching close paren
+        const close_pos = findClosingParen(pattern, open_paren) orelse return false;
+        const alternatives = pattern[open_paren + 1 .. close_pos];
+        const suffix = if (close_pos + 1 < pattern.len) pattern[close_pos + 1 ..] else "";
+
+        // Split alternatives by |
+        var alts: [32][]const u8 = undefined;
+        var alt_count: usize = 0;
+        var iter = std.mem.splitScalar(u8, alternatives, '|');
+        while (iter.next()) |alt| {
+            if (alt_count < 32) {
+                alts[alt_count] = alt;
+                alt_count += 1;
+            }
+        }
+
+        switch (op) {
+            '?' => {
+                // ?(pattern) - zero or one occurrence
+                // Try zero occurrences (skip extglob, match suffix)
+                if (matchPatternExtended(suffix, name, 0, n_idx)) {
+                    return true;
+                }
+                // Try one occurrence of each alternative
+                for (alts[0..alt_count]) |alt| {
+                    const alt_len = alt.len;
+                    if (n_idx + alt_len <= name.len) {
+                        // Check if alt matches at current position
+                        if (matchPatternExtended(alt, name[n_idx .. n_idx + alt_len], 0, 0)) {
+                            // If alt matched, check if suffix matches rest
+                            if (matchPatternExtended(suffix, name, 0, n_idx + alt_len)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            },
+            '*' => {
+                // *(pattern) - zero or more occurrences
+                return matchExtglobStar(alts[0..alt_count], suffix, name, n_idx);
+            },
+            '+' => {
+                // +(pattern) - one or more occurrences
+                // Must match at least one occurrence
+                for (alts[0..alt_count]) |alt| {
+                    const alt_len = alt.len;
+                    if (n_idx + alt_len <= name.len) {
+                        if (matchPatternExtended(alt, name[n_idx .. n_idx + alt_len], 0, 0)) {
+                            // After matching one, try zero or more additional
+                            if (matchExtglobStar(alts[0..alt_count], suffix, name, n_idx + alt_len)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            },
+            '@' => {
+                // @(pattern) - exactly one occurrence
+                for (alts[0..alt_count]) |alt| {
+                    const alt_len = alt.len;
+                    if (n_idx + alt_len <= name.len) {
+                        if (matchPatternExtended(alt, name[n_idx .. n_idx + alt_len], 0, 0)) {
+                            if (matchPatternExtended(suffix, name, 0, n_idx + alt_len)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            },
+            '!' => {
+                // !(pattern) - anything except the pattern
+                // Must not match any of the alternatives followed by suffix
+                for (alts[0..alt_count]) |alt| {
+                    const alt_len = alt.len;
+                    if (n_idx + alt_len <= name.len) {
+                        if (matchPatternExtended(alt, name[n_idx .. n_idx + alt_len], 0, 0)) {
+                            if (matchPatternExtended(suffix, name, 0, n_idx + alt_len)) {
+                                // This alternative matches - fail
+                                return false;
+                            }
+                        }
+                    }
+                }
+                // None of the alternatives matched at this position
+                // Match any single character and continue
+                if (n_idx < name.len) {
+                    // Try matching more characters with !(pattern) or just the suffix
+                    // Rebuild the extglob pattern for continued matching
+                    var buf: [std.fs.max_path_bytes]u8 = undefined;
+                    const extglob_pattern = std.fmt.bufPrint(&buf, "{s}{s}", .{ pattern[p_idx .. close_pos + 1], suffix }) catch return false;
+
+                    // Try: skip one char and continue with !(pattern)
+                    if (matchPatternExtended(extglob_pattern, name, 0, n_idx + 1)) {
+                        return true;
+                    }
+                    // Also try: current char is start of suffix match
+                    if (matchPatternExtended(suffix, name, 0, n_idx)) {
+                        return true;
+                    }
+                }
+                // Only suffix remains
+                return matchPatternExtended(suffix, name, 0, n_idx);
+            },
+            else => return false,
+        }
+    }
+
+    /// Match zero or more occurrences for *(pattern)
+    fn matchExtglobStar(alts: []const []const u8, suffix: []const u8, name: []const u8, n_idx: usize) bool {
+        // Base case: try matching suffix directly
+        if (matchPatternExtended(suffix, name, 0, n_idx)) {
+            return true;
+        }
+
+        // Try each alternative
+        for (alts) |alt| {
+            const alt_len = alt.len;
+            if (n_idx + alt_len <= name.len) {
+                if (matchPatternExtended(alt, name[n_idx .. n_idx + alt_len], 0, 0)) {
+                    // Recursively try more occurrences
+                    if (matchExtglobStar(alts, suffix, name, n_idx + alt_len)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /// Find closing paren, handling nested parens
+    fn findClosingParen(pattern: []const u8, open_pos: usize) ?usize {
+        var depth: u32 = 1;
+        var i = open_pos + 1;
+        while (i < pattern.len) : (i += 1) {
+            if (pattern[i] == '(') {
+                depth += 1;
+            } else if (pattern[i] == ')') {
+                depth -= 1;
+                if (depth == 0) return i;
+            }
+        }
+        return null;
+    }
+
+    /// Match character class [abc] or [a-z] or [[:alpha:]]
+    fn matchCharClass(pattern: []const u8, name: []const u8, p_idx: usize, n_idx: usize) bool {
+        if (n_idx >= name.len) return false;
+
+        // Find closing bracket
+        var end: usize = p_idx + 1;
+        var negated = false;
+
+        // Check for negation
+        if (end < pattern.len and (pattern[end] == '!' or pattern[end] == '^')) {
+            negated = true;
+            end += 1;
+        }
+
+        while (end < pattern.len and pattern[end] != ']') {
+            end += 1;
+        }
+        if (end >= pattern.len) {
+            // No closing bracket - treat [ as literal
+            if (name[n_idx] == '[') {
+                return matchPatternExtended(pattern, name, p_idx + 1, n_idx + 1);
+            }
+            return false;
+        }
+
+        const class_start = if (negated) p_idx + 2 else p_idx + 1;
+        const char_class = pattern[class_start..end];
+        const n_char = name[n_idx];
+
+        // Check if char is in class
+        var matched = matchCharInClass(char_class, n_char);
+
+        if (negated) matched = !matched;
+        if (!matched) return false;
+
+        return matchPatternExtended(pattern, name, end + 1, n_idx + 1);
+    }
+
+    /// Check if a character matches a character class definition
+    fn matchCharInClass(char_class: []const u8, c: u8) bool {
+        var i: usize = 0;
+        while (i < char_class.len) {
+            // Check for POSIX character class [[:alpha:]]
+            if (i + 1 < char_class.len and char_class[i] == '[' and char_class[i + 1] == ':') {
+                // Find closing :]]
+                if (std.mem.indexOf(u8, char_class[i + 2 ..], ":]]")) |end_offset| {
+                    const class_name = char_class[i + 2 .. i + 2 + end_offset];
+                    if (matchPosixClass(class_name, c)) return true;
+                    i += end_offset + 5; // Skip past :]]
+                    continue;
+                }
+            }
+
+            // Check for range a-z
+            if (i + 2 < char_class.len and char_class[i + 1] == '-' and char_class[i + 2] != ']') {
+                const start = char_class[i];
+                const end_char = char_class[i + 2];
+                if (c >= start and c <= end_char) return true;
+                i += 3;
+                continue;
+            }
+
+            // Single character
+            if (char_class[i] == c) return true;
+            i += 1;
+        }
+        return false;
+    }
+
+    /// Match POSIX character classes
+    fn matchPosixClass(class_name: []const u8, c: u8) bool {
+        if (std.mem.eql(u8, class_name, "alpha")) {
+            return std.ascii.isAlphabetic(c);
+        } else if (std.mem.eql(u8, class_name, "digit")) {
+            return std.ascii.isDigit(c);
+        } else if (std.mem.eql(u8, class_name, "alnum")) {
+            return std.ascii.isAlphanumeric(c);
+        } else if (std.mem.eql(u8, class_name, "space")) {
+            return std.ascii.isWhitespace(c);
+        } else if (std.mem.eql(u8, class_name, "upper")) {
+            return std.ascii.isUpper(c);
+        } else if (std.mem.eql(u8, class_name, "lower")) {
+            return std.ascii.isLower(c);
+        } else if (std.mem.eql(u8, class_name, "punct")) {
+            return (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or
+                (c >= '[' and c <= '`') or (c >= '{' and c <= '~');
+        } else if (std.mem.eql(u8, class_name, "xdigit")) {
+            return std.ascii.isHex(c);
+        } else if (std.mem.eql(u8, class_name, "blank")) {
+            return c == ' ' or c == '\t';
+        } else if (std.mem.eql(u8, class_name, "cntrl")) {
+            return std.ascii.isControl(c);
+        } else if (std.mem.eql(u8, class_name, "graph")) {
+            return c > 0x20 and c < 0x7f;
+        } else if (std.mem.eql(u8, class_name, "print")) {
+            return c >= 0x20 and c < 0x7f;
+        }
+        return false;
     }
 
     /// Simple bubble sort for alphabetical ordering
@@ -479,4 +723,112 @@ test "glob has glob chars" {
     try std.testing.expect(glob.hasGlobChars("test?.rs"));
     try std.testing.expect(glob.hasGlobChars("file[123].txt"));
     try std.testing.expect(!glob.hasGlobChars("regular.txt"));
+}
+
+test "extglob ?(pattern) - zero or one" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    // ?(foo) matches "" or "foo"
+    try std.testing.expect(glob.matchPattern("?(foo)bar", "bar"));
+    try std.testing.expect(glob.matchPattern("?(foo)bar", "foobar"));
+    try std.testing.expect(!glob.matchPattern("?(foo)bar", "foofoobar"));
+
+    // With alternatives
+    try std.testing.expect(glob.matchPattern("?(foo|bar)baz", "baz"));
+    try std.testing.expect(glob.matchPattern("?(foo|bar)baz", "foobaz"));
+    try std.testing.expect(glob.matchPattern("?(foo|bar)baz", "barbaz"));
+}
+
+test "extglob *(pattern) - zero or more" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    // *(foo) matches "", "foo", "foofoo", etc.
+    try std.testing.expect(glob.matchPattern("*(foo)bar", "bar"));
+    try std.testing.expect(glob.matchPattern("*(foo)bar", "foobar"));
+    try std.testing.expect(glob.matchPattern("*(foo)bar", "foofoobar"));
+    try std.testing.expect(glob.matchPattern("*(foo)bar", "foofoofoobar"));
+}
+
+test "extglob +(pattern) - one or more" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    // +(foo) matches "foo", "foofoo", etc. but not ""
+    try std.testing.expect(!glob.matchPattern("+(foo)bar", "bar"));
+    try std.testing.expect(glob.matchPattern("+(foo)bar", "foobar"));
+    try std.testing.expect(glob.matchPattern("+(foo)bar", "foofoobar"));
+}
+
+test "extglob @(pattern) - exactly one" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    // @(foo|bar) matches exactly "foo" or "bar"
+    try std.testing.expect(glob.matchPattern("@(foo|bar).txt", "foo.txt"));
+    try std.testing.expect(glob.matchPattern("@(foo|bar).txt", "bar.txt"));
+    try std.testing.expect(!glob.matchPattern("@(foo|bar).txt", "baz.txt"));
+    try std.testing.expect(!glob.matchPattern("@(foo|bar).txt", "foobar.txt"));
+}
+
+test "extglob !(pattern) - negation" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    // !(foo) matches anything except "foo"
+    try std.testing.expect(glob.matchPattern("!(foo).txt", "bar.txt"));
+    try std.testing.expect(glob.matchPattern("!(foo).txt", "baz.txt"));
+    try std.testing.expect(!glob.matchPattern("!(foo).txt", "foo.txt"));
+}
+
+test "character class with ranges" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    try std.testing.expect(glob.matchPattern("file[a-z].txt", "filea.txt"));
+    try std.testing.expect(glob.matchPattern("file[a-z].txt", "filez.txt"));
+    try std.testing.expect(!glob.matchPattern("file[a-z].txt", "file1.txt"));
+
+    try std.testing.expect(glob.matchPattern("file[0-9].txt", "file5.txt"));
+    try std.testing.expect(!glob.matchPattern("file[0-9].txt", "filea.txt"));
+}
+
+test "character class negation" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    try std.testing.expect(glob.matchPattern("file[!0-9].txt", "filea.txt"));
+    try std.testing.expect(!glob.matchPattern("file[!0-9].txt", "file1.txt"));
+
+    try std.testing.expect(glob.matchPattern("file[^abc].txt", "filed.txt"));
+    try std.testing.expect(!glob.matchPattern("file[^abc].txt", "filea.txt"));
+}
+
+test "POSIX character classes" {
+    // Test the matchPosixClass function directly
+    try std.testing.expect(Glob.matchPosixClass("alpha", 'a'));
+    try std.testing.expect(Glob.matchPosixClass("alpha", 'Z'));
+    try std.testing.expect(!Glob.matchPosixClass("alpha", '5'));
+
+    try std.testing.expect(Glob.matchPosixClass("digit", '0'));
+    try std.testing.expect(Glob.matchPosixClass("digit", '9'));
+    try std.testing.expect(!Glob.matchPosixClass("digit", 'a'));
+
+    try std.testing.expect(Glob.matchPosixClass("alnum", 'a'));
+    try std.testing.expect(Glob.matchPosixClass("alnum", '5'));
+
+    try std.testing.expect(Glob.matchPosixClass("upper", 'A'));
+    try std.testing.expect(!Glob.matchPosixClass("upper", 'a'));
+
+    try std.testing.expect(Glob.matchPosixClass("lower", 'a'));
+    try std.testing.expect(!Glob.matchPosixClass("lower", 'A'));
+
+    try std.testing.expect(Glob.matchPosixClass("space", ' '));
+    try std.testing.expect(Glob.matchPosixClass("space", '\t'));
+
+    try std.testing.expect(Glob.matchPosixClass("xdigit", 'a'));
+    try std.testing.expect(Glob.matchPosixClass("xdigit", 'F'));
+    try std.testing.expect(Glob.matchPosixClass("xdigit", '5'));
+    try std.testing.expect(!Glob.matchPosixClass("xdigit", 'g'));
 }

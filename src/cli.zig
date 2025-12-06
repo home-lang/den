@@ -3,6 +3,7 @@ const shell = @import("shell.zig");
 const Completion = @import("utils/completion.zig").Completion;
 const ShellCompletion = @import("shell_completion.zig").ShellCompletion;
 const env_utils = @import("utils/env.zig");
+const IO = @import("utils/io.zig").IO;
 
 /// Den Shell CLI
 /// Provides command-line interface and subcommand handling
@@ -30,6 +31,7 @@ pub const CliArgs = struct {
     args: []const []const u8,
     allocator: std.mem.Allocator,
     config_path: ?[]const u8 = null, // Custom config path from --config flag
+    json_output: bool = false, // Output results in JSON format (for -c commands)
 
     pub fn deinit(self: *CliArgs) void {
         _ = self;
@@ -56,8 +58,9 @@ pub fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
 
     const argv = argv_buffer[0..argv_count];
 
-    // Parse global flags first (--config)
+    // Parse global flags first (--config, --json)
     var config_path: ?[]const u8 = null;
+    var json_output: bool = false;
     var remaining_argv_buffer: [64][]const u8 = undefined;
     var remaining_count: usize = 0;
     var i: usize = 0;
@@ -77,6 +80,11 @@ pub fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
         } else if (std.mem.startsWith(u8, arg, "--config=")) {
             // --config=path format
             config_path = arg["--config=".len..];
+            i += 1;
+            continue;
+        } else if (std.mem.eql(u8, arg, "--json")) {
+            // Enable JSON output mode
+            json_output = true;
             i += 1;
             continue;
         }
@@ -179,6 +187,7 @@ pub fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
             .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
             .allocator = allocator,
             .config_path = config_path,
+            .json_output = json_output,
         };
     } else {
         // Assume it's a script file
@@ -205,7 +214,7 @@ pub fn execute(cli_args: CliArgs) !void {
         .version => try showVersion(),
         .help => try showHelp(),
         .script => try runScript(cli_args.allocator, cli_args.args, cli_args.config_path),
-        .command_string => try runCommandString(cli_args.allocator, cli_args.args, cli_args.config_path),
+        .command_string => try runCommandString(cli_args.allocator, cli_args.args, cli_args.config_path, cli_args.json_output),
     }
 }
 
@@ -496,6 +505,7 @@ fn showHelp() !void {
         \\  -v, --version             Show version
         \\  -c <command>              Execute command string
         \\  --config <path>           Use custom config file
+        \\  --json                    Output results in JSON format (with -c)
         \\
         \\Completion:
         \\  den completion bash       Generate Bash completion script
@@ -532,9 +542,13 @@ fn runScript(allocator: std.mem.Allocator, args: []const []const u8, config_path
 }
 
 /// Run command string (-c "command")
-fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, config_path: ?[]const u8) !void {
+fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, config_path: ?[]const u8, json_output: bool) !void {
     if (args.len == 0) {
-        std.debug.print("Error: -c requires a command string\n", .{});
+        if (json_output) {
+            try IO.print("{{\"error\":\"missing command string\",\"exit_code\":1}}\n", .{});
+        } else {
+            std.debug.print("Error: -c requires a command string\n", .{});
+        }
         return error.MissingCommandString;
     }
 
@@ -543,7 +557,18 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
     var den_shell = try shell.Shell.initWithConfig(allocator, config_path);
     defer den_shell.deinit();
 
-    try den_shell.executeCommand(command);
+    // Execute the command
+    den_shell.executeCommand(command) catch |err| {
+        if (json_output) {
+            try IO.print("{{\"error\":\"{s}\",\"exit_code\":{d}}}\n", .{ @errorName(err), den_shell.last_exit_code });
+        }
+        return err;
+    };
+
+    // Output JSON result if requested
+    if (json_output) {
+        try IO.print("{{\"exit_code\":{d}}}\n", .{den_shell.last_exit_code});
+    }
 }
 
 // Tests

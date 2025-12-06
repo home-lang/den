@@ -96,6 +96,13 @@ const BackgroundJob = struct {
     status: JobStatus,
 };
 
+/// Call stack frame for caller builtin
+pub const CallFrame = struct {
+    line_number: usize,
+    function_name: []const u8,
+    source_file: []const u8,
+};
+
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     running: bool,
@@ -167,11 +174,37 @@ pub const Shell = struct {
     multiline_mode: MultilineMode,
     // Flag to prevent re-entrancy in C-style for loop execution
     in_cstyle_for_body: bool,
-    // Flag for break statement in loops
-    break_requested: bool,
+    // Counter for break statement in loops (0 = no break, N = break N levels)
+    break_levels: u32,
+    // Counter for continue statement in loops (0 = no continue, N = continue N levels)
+    continue_levels: u32,
+    // Coprocess tracking
+    coproc_pid: ?std.posix.pid_t,
+    coproc_read_fd: ?std.posix.fd_t,
+    coproc_write_fd: ?std.posix.fd_t,
     // Config hot-reload tracking
     config_source: config_loader.ConfigSource,
     config_last_mtime: i128,
+    // Variable attributes (for declare/typeset)
+    var_attributes: std.StringHashMap(types.VarAttributes),
+    // Associative arrays (declare -A)
+    assoc_arrays: std.StringHashMap(std.StringHashMap([]const u8)),
+    // Shopt options
+    shopt_extglob: bool, // Extended glob patterns
+    shopt_nullglob: bool, // Patterns that match nothing expand to empty
+    shopt_dotglob: bool, // Patterns match dotfiles
+    shopt_nocaseglob: bool, // Case-insensitive globbing
+    shopt_globstar: bool, // ** matches recursively
+    shopt_failglob: bool, // Failed globs cause error
+    shopt_expand_aliases: bool, // Expand aliases in non-interactive shells
+    shopt_sourcepath: bool, // Search PATH for source command
+    shopt_checkwinsize: bool, // Check window size after each command
+    shopt_histappend: bool, // Append to history file
+    shopt_cmdhist: bool, // Save multi-line commands in history
+    shopt_autocd: bool, // Directory names auto-cd
+    // Call stack for caller builtin
+    call_stack: [64]CallFrame,
+    call_stack_depth: usize,
 
     const MultilineMode = enum {
         none,
@@ -309,9 +342,29 @@ pub const Shell = struct {
             .multiline_brace_count = 0,
             .multiline_mode = .none,
             .in_cstyle_for_body = false,
-            .break_requested = false,
+            .break_levels = 0,
+            .continue_levels = 0,
+            .coproc_pid = null,
+            .coproc_read_fd = null,
+            .coproc_write_fd = null,
             .config_source = config_source,
             .config_last_mtime = config_mtime,
+            .var_attributes = std.StringHashMap(types.VarAttributes).init(allocator),
+            .assoc_arrays = std.StringHashMap(std.StringHashMap([]const u8)).init(allocator),
+            .shopt_extglob = true, // Enabled by default (we implemented it)
+            .shopt_nullglob = false,
+            .shopt_dotglob = false,
+            .shopt_nocaseglob = false,
+            .shopt_globstar = false,
+            .shopt_failglob = false,
+            .shopt_expand_aliases = true,
+            .shopt_sourcepath = true,
+            .shopt_checkwinsize = true,
+            .shopt_histappend = false,
+            .shopt_cmdhist = true,
+            .shopt_autocd = false,
+            .call_stack = [_]CallFrame{CallFrame{ .line_number = 0, .function_name = "", .source_file = "" }} ** 64,
+            .call_stack_depth = 0,
         };
 
         // Detect if stdin is a TTY
@@ -3776,17 +3829,43 @@ pub const Shell = struct {
 
     /// Builtin: time - time command execution
     fn builtinTime(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
+        // Parse flags
+        var posix_format = false; // -p: POSIX format output
+        var verbose = false; // -v: verbose output with more details
+        var arg_start: usize = 0;
+
+        while (arg_start < cmd.args.len) {
+            const arg = cmd.args[arg_start];
+            if (arg.len > 0 and arg[0] == '-') {
+                if (std.mem.eql(u8, arg, "-p")) {
+                    posix_format = true;
+                    arg_start += 1;
+                } else if (std.mem.eql(u8, arg, "-v")) {
+                    verbose = true;
+                    arg_start += 1;
+                } else if (std.mem.eql(u8, arg, "--")) {
+                    arg_start += 1;
+                    break;
+                } else {
+                    // Unknown flag or start of command
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if (arg_start >= cmd.args.len) {
             try IO.eprint("den: time: missing command\n", .{});
             self.last_exit_code = 1;
             return;
         }
 
-        // Join arguments to form command
+        // Join remaining arguments to form command
         var cmd_buf: [4096]u8 = undefined;
         var cmd_len: usize = 0;
 
-        for (cmd.args, 0..) |arg, i| {
+        for (cmd.args[arg_start..], 0..) |arg, i| {
             if (i > 0 and cmd_len < cmd_buf.len) {
                 cmd_buf[cmd_len] = ' ';
                 cmd_len += 1;
@@ -3840,12 +3919,33 @@ pub const Shell = struct {
             self.last_exit_code = exit_code;
             return;
         };
-        const duration_ns: i128 = @intCast(end_time.since(start_time));
-        const duration_ms = @divFloor(duration_ns, 1_000_000);
-        const duration_s = @divFloor(duration_ms, 1000);
-        const remaining_ms = @mod(duration_ms, 1000);
+        const elapsed_ns = end_time.since(start_time);
+        const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000_000.0;
+        const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
 
-        try IO.eprint("\nreal\t{d}.{d:0>3}s\n", .{ duration_s, remaining_ms });
+        if (posix_format) {
+            // POSIX format: "real %f\nuser %f\nsys %f\n"
+            try IO.eprint("real {d:.2}\n", .{elapsed_s});
+            try IO.eprint("user 0.00\n", .{});
+            try IO.eprint("sys 0.00\n", .{});
+        } else if (verbose) {
+            // Verbose format with more details
+            try IO.eprint("\n", .{});
+            try IO.eprint("        Command: {s}\n", .{command_str});
+            try IO.eprint("    Exit status: {d}\n", .{exit_code});
+            if (elapsed_s >= 1.0) {
+                try IO.eprint("      Real time: {d:.3}s\n", .{elapsed_s});
+            } else {
+                try IO.eprint("      Real time: {d:.1}ms\n", .{elapsed_ms});
+            }
+        } else {
+            // Default format with tabs
+            const duration_ns: i128 = @intCast(elapsed_ns);
+            const duration_ms = @divFloor(duration_ns, 1_000_000);
+            const duration_s = @divFloor(duration_ms, 1000);
+            const remaining_ms = @mod(duration_ms, 1000);
+            try IO.eprint("\nreal\t{d}.{d:0>3}s\n", .{ duration_s, remaining_ms });
+        }
 
         self.last_exit_code = exit_code;
     }
@@ -4045,30 +4145,29 @@ pub const Shell = struct {
     }
 
     /// Builtin: break - exit from loop
+    /// Supports `break N` to break out of N nested loops
     fn builtinBreak(self: *Shell, cmd: *types.ParsedCommand) !void {
         const levels = if (cmd.args.len > 0)
             std.fmt.parseInt(u32, cmd.args[0], 10) catch 1
         else
             1;
 
-        // Signal break to the loop
-        _ = levels; // TODO: support breaking multiple levels
-        self.break_requested = true;
+        // Signal break to the loop with the number of levels to break
+        self.break_levels = if (levels > 0) levels else 1;
         self.last_exit_code = 0;
     }
 
     /// Builtin: continue - skip to next loop iteration
+    /// Supports `continue N` to continue the Nth enclosing loop
     fn builtinContinue(self: *Shell, cmd: *types.ParsedCommand) !void {
         const levels = if (cmd.args.len > 0)
             std.fmt.parseInt(u32, cmd.args[0], 10) catch 1
         else
             1;
 
-        // In a full implementation, this would continue N levels of loops
-        // For now, just acknowledge the command
-        _ = levels;
+        // Signal continue to the loop with the number of levels
+        self.continue_levels = if (levels > 0) levels else 1;
         self.last_exit_code = 0;
-        try IO.print("den: continue: loop control not yet fully implemented\n", .{});
     }
 
     /// Builtin: local - declare local variables (function scope)
@@ -4586,9 +4685,14 @@ pub const Shell = struct {
                 self.setArithVariable(variable, "");
                 self.setArithVariable("REPLY", user_input);
                 self.executeSelectBody(body_str);
-                if (self.break_requested) {
-                    self.break_requested = false;
+                if (self.break_levels > 0) {
+                    self.break_levels -= 1;
+                    if (self.break_levels > 0) return; // Still need to break outer loops
                     break;
+                }
+                if (self.continue_levels > 0) {
+                    self.continue_levels -= 1;
+                    if (self.continue_levels > 0) return; // Continue outer loop
                 }
                 continue;
             };
@@ -4600,9 +4704,14 @@ pub const Shell = struct {
                 const reply_str = std.fmt.bufPrint(&reply_buf, "{d}", .{selection}) catch continue;
                 self.setArithVariable("REPLY", reply_str);
                 self.executeSelectBody(body_str);
-                if (self.break_requested) {
-                    self.break_requested = false;
+                if (self.break_levels > 0) {
+                    self.break_levels -= 1;
+                    if (self.break_levels > 0) return;
                     break;
+                }
+                if (self.continue_levels > 0) {
+                    self.continue_levels -= 1;
+                    if (self.continue_levels > 0) return;
                 }
                 continue;
             }
@@ -4618,9 +4727,15 @@ pub const Shell = struct {
             self.executeSelectBody(body_str);
 
             // Check for break
-            if (self.break_requested) {
-                self.break_requested = false;
+            if (self.break_levels > 0) {
+                self.break_levels -= 1;
+                if (self.break_levels > 0) return; // Still need to break outer loops
                 break;
+            }
+            // Check for continue (at current level)
+            if (self.continue_levels > 0) {
+                self.continue_levels -= 1;
+                if (self.continue_levels > 0) return; // Continue outer loop
             }
         }
 
@@ -4635,16 +4750,22 @@ pub const Shell = struct {
             const trimmed_cmd = std.mem.trim(u8, cmd, &std.ascii.whitespace);
             if (trimmed_cmd.len == 0) continue;
 
-            // Check for break
-            if (std.mem.eql(u8, trimmed_cmd, "break")) {
-                self.break_requested = true;
+            // Check for break (with optional level)
+            if (std.mem.eql(u8, trimmed_cmd, "break") or std.mem.startsWith(u8, trimmed_cmd, "break ")) {
+                if (std.mem.startsWith(u8, trimmed_cmd, "break ")) {
+                    const level_str = std.mem.trim(u8, trimmed_cmd[6..], &std.ascii.whitespace);
+                    self.break_levels = std.fmt.parseInt(u32, level_str, 10) catch 1;
+                    if (self.break_levels == 0) self.break_levels = 1;
+                } else {
+                    self.break_levels = 1;
+                }
                 return;
             }
 
             // Execute the command using executeCStyleLoopBodyCommand which handles recursion safely
             self.executeCStyleLoopBodyCommand(trimmed_cmd);
 
-            if (self.break_requested) return;
+            if (self.break_levels > 0) return;
         }
     }
 
