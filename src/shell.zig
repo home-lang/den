@@ -37,6 +37,7 @@ const ContextCompletion = @import("utils/context_completion.zig").ContextComplet
 const CompletionRegistry = @import("utils/completion_registry.zig").CompletionRegistry;
 const CompletionSpec = @import("utils/completion_registry.zig").CompletionSpec;
 const LoadableBuiltins = @import("utils/loadable.zig").LoadableBuiltins;
+const History = @import("history/history.zig").History;
 
 /// Format a parser error into a user-friendly message.
 fn formatParseError(err: anyerror) []const u8 {
@@ -462,7 +463,7 @@ pub const Shell = struct {
             .plugin_registry = PluginRegistry.init(allocator),
             .plugin_manager = PluginManager.init(allocator),
             .auto_suggest = null, // Initialized on demand
-            .highlighter = null,  // Initialized on demand
+            .highlighter = null, // Initialized on demand
             .script_suggester = null, // Initialized on demand
             .thread_pool = thread_pool,
             .is_interactive = false,
@@ -625,12 +626,7 @@ pub const Shell = struct {
         }
 
         // Clean up history
-        for (self.history) |maybe_entry| {
-            if (maybe_entry) |entry| {
-                self.allocator.free(entry);
-            }
-        }
-        self.allocator.free(self.history_file_path);
+        History.deinit(self.allocator, self.history[0..], self.history_file_path);
 
         // Clean up directory stack
         for (self.dir_stack) |maybe_dir| {
@@ -2059,114 +2055,23 @@ pub const Shell = struct {
 
     /// Add command to history
     fn addToHistory(self: *Shell, command: []const u8) !void {
-        // Don't add empty commands or duplicate of last command
-        if (command.len == 0) return;
-
-        // Skip if same as last command (consecutive deduplication)
-        if (self.history_count > 0) {
-            if (self.history[self.history_count - 1]) |last_cmd| {
-                if (std.mem.eql(u8, last_cmd, command)) {
-                    return; // Skip consecutive duplicate
-                }
-            }
-        }
-
-        // Optional: Also check for duplicates in recent history (more aggressive)
-        // This prevents duplicate commands even if they're not consecutive
-        const check_last_n = @min(self.history_count, 50); // Check last 50 commands
-        var i: usize = 0;
-        while (i < check_last_n) : (i += 1) {
-            const idx = self.history_count - 1 - i;
-            if (self.history[idx]) |cmd| {
-                if (std.mem.eql(u8, cmd, command)) {
-                    // Found duplicate in recent history - remove old one and add at end
-                    self.allocator.free(cmd);
-
-                    // Shift entries to remove the duplicate
-                    var j = idx;
-                    while (j < self.history_count - 1) : (j += 1) {
-                        self.history[j] = self.history[j + 1];
-                    }
-                    self.history[self.history_count - 1] = null;
-                    self.history_count -= 1;
-                    break;
-                }
-            }
-        }
-
-        // If history is full, shift everything left
-        if (self.history_count >= self.history.len) {
-            // Free oldest entry
-            if (self.history[0]) |oldest| {
-                self.allocator.free(oldest);
-            }
-
-            // Shift all entries left
-            var m: usize = 0;
-            while (m < self.history.len - 1) : (m += 1) {
-                self.history[m] = self.history[m + 1];
-            }
-            self.history[self.history.len - 1] = null;
-            self.history_count -= 1;
-        }
-
-        // Add new entry
-        const cmd_copy = try self.allocator.dupe(u8, command);
-        self.history[self.history_count] = cmd_copy;
-        self.history_count += 1;
-
-        // Incremental append to history file (zsh-style)
-        self.appendToHistoryFile(command) catch {
-            // Ignore errors when appending to history file
-        };
+        try History.add(
+            self.allocator,
+            self.history[0..],
+            &self.history_count,
+            self.history_file_path,
+            command,
+        );
     }
 
     /// Load history from file
     fn loadHistory(self: *Shell) !void {
-        const file = std.fs.cwd().openFile(self.history_file_path, .{}) catch |err| {
-            if (err == error.FileNotFound) return; // File doesn't exist yet
-            return err;
-        };
-        defer file.close();
-
-        // Read entire file
-        const max_size = 1024 * 1024; // 1MB max
-        const file_size = try file.getEndPos();
-        const read_size: usize = @min(file_size, max_size);
-        const buffer = try self.allocator.alloc(u8, read_size);
-        defer self.allocator.free(buffer);
-        var total_read: usize = 0;
-        while (total_read < read_size) {
-            const bytes_read = try file.read(buffer[total_read..]);
-            if (bytes_read == 0) break;
-            total_read += bytes_read;
-        }
-        const content = buffer[0..total_read];
-
-        // Split by newlines and add to history (with deduplication)
-        var iter = std.mem.splitScalar(u8, content, '\n');
-        while (iter.next()) |line| {
-            const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
-            if (trimmed.len > 0 and self.history_count < self.history.len) {
-                // Check for duplicates before adding
-                var is_duplicate = false;
-                var k: usize = 0;
-                while (k < self.history_count) : (k += 1) {
-                    if (self.history[k]) |existing| {
-                        if (std.mem.eql(u8, existing, trimmed)) {
-                            is_duplicate = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (!is_duplicate) {
-                    const cmd_copy = try self.allocator.dupe(u8, trimmed);
-                    self.history[self.history_count] = cmd_copy;
-                    self.history_count += 1;
-                }
-            }
-        }
+        try History.load(
+            self.allocator,
+            self.history[0..],
+            &self.history_count,
+            self.history_file_path,
+        );
     }
 
     /// Load aliases from configuration
@@ -2227,54 +2132,17 @@ pub const Shell = struct {
 
     /// Save history to file
     fn saveHistory(self: *Shell) !void {
-        const file = try std.fs.cwd().createFile(self.history_file_path, .{});
-        defer file.close();
-
-        for (self.history) |maybe_entry| {
-            if (maybe_entry) |entry| {
-                _ = try file.writeAll(entry);
-                _ = try file.write("\n");
-            }
-        }
+        try History.save(self.history[0..], self.history_file_path);
     }
 
     /// Append a single command to history file (incremental append)
     fn appendToHistoryFile(self: *Shell, command: []const u8) !void {
-        const file = try std.fs.cwd().openFile(self.history_file_path, .{ .mode = .write_only });
-        defer file.close();
-
-        // Seek to end of file
-        try file.seekFromEnd(0);
-
-        // Append the command
-        _ = try file.writeAll(command);
-        _ = try file.write("\n");
+        try History.appendToFile(self.history_file_path, command);
     }
 
     /// Builtin: history - show command history
     fn builtinHistory(self: *Shell, cmd: *types.ParsedCommand) !void {
-        // Parse optional argument for number of entries to show
-        var num_entries: usize = self.history_count;
-        if (cmd.args.len > 0) {
-            num_entries = std.fmt.parseInt(usize, cmd.args[0], 10) catch {
-                try IO.eprint("den: history: {s}: numeric argument required\n", .{cmd.args[0]});
-                return;
-            };
-            if (num_entries > self.history_count) {
-                num_entries = self.history_count;
-            }
-        }
-
-        // Calculate starting index
-        const start_idx = if (num_entries >= self.history_count) 0 else self.history_count - num_entries;
-
-        // Print history with line numbers
-        var idx = start_idx;
-        while (idx < self.history_count) : (idx += 1) {
-            if (self.history[idx]) |entry| {
-                try IO.print("{d:5}  {s}\n", .{ idx + 1, entry });
-            }
-        }
+        try History.printBuiltin(self.history[0..], self.history_count, cmd);
     }
 
     /// Builtin: complete - manage programmable completions (bash-style)
@@ -2583,7 +2451,7 @@ pub const Shell = struct {
                         // Remove quotes if present
                         const clean_value = if (value.len >= 2 and
                             ((value[0] == '\'' and value[value.len - 1] == '\'') or
-                            (value[0] == '"' and value[value.len - 1] == '"')))
+                                (value[0] == '"' and value[value.len - 1] == '"')))
                             value[1 .. value.len - 1]
                         else
                             value;
@@ -2627,7 +2495,7 @@ pub const Shell = struct {
                         // Remove quotes if present
                         const clean_value = if (value.len >= 2 and
                             ((value[0] == '\'' and value[value.len - 1] == '\'') or
-                            (value[0] == '"' and value[value.len - 1] == '"')))
+                                (value[0] == '"' and value[value.len - 1] == '"')))
                             value[1 .. value.len - 1]
                         else
                             value;
@@ -2708,10 +2576,10 @@ pub const Shell = struct {
         }
 
         const builtins = [_][]const u8{
-            "cd",      "pwd",      "echo",    "exit",  "env",
-            "export",  "set",      "unset",   "jobs",  "fg",
-            "bg",      "history",  "complete", "alias", "unalias",
-            "type",    "which",
+            "cd",     "pwd",     "echo",     "exit",  "env",
+            "export", "set",     "unset",    "jobs",  "fg",
+            "bg",     "history", "complete", "alias", "unalias",
+            "type",   "which",
         };
 
         for (cmd.args) |name| {
@@ -5310,14 +5178,14 @@ pub const Shell = struct {
             },
             .builtin => {
                 const builtins_list = [_][]const u8{
-                    "cd", "pwd", "echo", "exit", "export", "set", "unset",
-                    "alias", "unalias", "history", "type", "which", "source",
-                    "read", "test", "pushd", "popd", "dirs", "printf", "true",
-                    "false", "help", "eval", "shift", "time", "umask", "clear",
-                    "hash", "return", "break", "continue", "local", "declare",
-                    "typeset", "readonly", "let", "shopt", "mapfile", "readarray",
-                    "caller", "compgen", "complete", "exec", "wait", "kill",
-                    "disown", "getopts", "times", "builtin", "jobs", "fg", "bg",
+                    "cd",     "pwd",     "echo",     "exit",      "export",  "set",     "unset",
+                    "alias",  "unalias", "history",  "type",      "which",   "source",  "read",
+                    "test",   "pushd",   "popd",     "dirs",      "printf",  "true",    "false",
+                    "help",   "eval",    "shift",    "time",      "umask",   "clear",   "hash",
+                    "return", "break",   "continue", "local",     "declare", "typeset", "readonly",
+                    "let",    "shopt",   "mapfile",  "readarray", "caller",  "compgen", "complete",
+                    "exec",   "wait",    "kill",     "disown",    "getopts", "times",   "builtin",
+                    "jobs",   "fg",      "bg",
                 };
                 for (builtins_list) |b| {
                     if (prefix.len == 0 or std.mem.startsWith(u8, b, prefix)) {
@@ -5451,15 +5319,15 @@ pub const Shell = struct {
         if (list_all) {
             // List built-in commands
             const builtin_names = [_][]const u8{
-                "cd",       "pwd",      "echo",     "exit",     "env",       "export",
-                "set",      "unset",    "true",     "false",    "test",      "[",
-                "[[",       "alias",    "unalias",  "which",    "type",      "help",
-                "read",     "printf",   "source",   ".",        "history",   "pushd",
-                "popd",     "dirs",     "eval",     "exec",     "command",   "builtin",
-                "jobs",     "fg",       "bg",       "wait",     "disown",    "kill",
-                "trap",     "times",    "umask",    "getopts",  "clear",     "time",
-                "hash",     "return",   "local",    "declare",  "readonly",  "typeset",
-                "let",      "shopt",    "mapfile",  "readarray", "caller",   "compgen",
+                "cd",       "pwd",    "echo",    "exit",      "env",      "export",
+                "set",      "unset",  "true",    "false",     "test",     "[",
+                "[[",       "alias",  "unalias", "which",     "type",     "help",
+                "read",     "printf", "source",  ".",         "history",  "pushd",
+                "popd",     "dirs",   "eval",    "exec",      "command",  "builtin",
+                "jobs",     "fg",     "bg",      "wait",      "disown",   "kill",
+                "trap",     "times",  "umask",   "getopts",   "clear",    "time",
+                "hash",     "return", "local",   "declare",   "readonly", "typeset",
+                "let",      "shopt",  "mapfile", "readarray", "caller",   "compgen",
                 "complete", "enable",
             };
             try IO.print("Built-in commands:\n", .{});
@@ -6264,7 +6132,7 @@ pub const Shell = struct {
         if (input[eq_pos + 1] != '(') return false;
 
         // Check for closing paren
-        return std.mem.indexOfScalar(u8, input[eq_pos + 2..], ')') != null;
+        return std.mem.indexOfScalar(u8, input[eq_pos + 2 ..], ')') != null;
     }
 
     /// Parse and execute array assignment
@@ -6307,7 +6175,7 @@ pub const Shell = struct {
         }
 
         // Parse array elements
-        const content = std.mem.trim(u8, input[start_paren + 1..end_paren], &std.ascii.whitespace);
+        const content = std.mem.trim(u8, input[start_paren + 1 .. end_paren], &std.ascii.whitespace);
 
         // Count elements first
         var count: usize = 0;
@@ -6907,7 +6775,7 @@ pub const Shell = struct {
 
                     // Parse "go version go1.22.0 darwin/arm64" to get just "1.22.0"
                     if (std.mem.indexOf(u8, trimmed, "go")) |idx| {
-                        const after_go = trimmed[idx + 2..];
+                        const after_go = trimmed[idx + 2 ..];
                         if (std.mem.indexOf(u8, after_go, "go")) |version_idx| {
                             const version_start = version_idx + 2;
                             var version_end = version_start;
@@ -6984,7 +6852,6 @@ pub const Shell = struct {
         return error.NotFound;
     }
 };
-
 
 /// Tab completion function for line editor
 /// Callback to refresh the prompt (e.g., when Cmd+K clears screen)
@@ -7166,10 +7033,10 @@ fn completeGit(allocator: std.mem.Allocator, input: []const u8, prefix: []const 
     const subcommand = tokens.next(); // Get subcommand (if any)
 
     const git_commands = [_][]const u8{
-        "add", "bisect", "branch", "checkout", "cherry-pick", "clone", "commit",
-        "diff", "fetch", "grep", "init", "log", "merge", "mv", "pull", "push",
-        "rebase", "reset", "restore", "revert", "rm", "show", "stash", "status",
-        "switch", "tag",
+        "add",  "bisect", "branch", "checkout", "cherry-pick", "clone",  "commit",
+        "diff", "fetch",  "grep",   "init",     "log",         "merge",  "mv",
+        "pull", "push",   "rebase", "reset",    "restore",     "revert", "rm",
+        "show", "stash",  "status", "switch",   "tag",
     };
 
     // If no subcommand yet, or if we're still typing the subcommand (prefix matches subcommand),
@@ -7298,8 +7165,9 @@ fn completeBun(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
 
     // Bun built-in commands
     const bun_commands = [_][]const u8{
-        "add", "bun", "create", "dev", "help",
-        "install", "pm", "remove", "run", "upgrade", "x",
+        "add",     "bun", "create", "dev", "help",
+        "install", "pm",  "remove", "run", "upgrade",
+        "x",
     };
 
     // Add matching bun commands (mark with \x02 for default styling)
@@ -7417,10 +7285,10 @@ fn completeNpm(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
 
     // NPM built-in commands
     const npm_commands = [_][]const u8{
-        "install", "i", "add", "run", "test", "start", "build",
-        "init", "update", "uninstall", "remove", "rm", "publish",
-        "version", "outdated", "ls", "link", "unlink", "cache",
-        "audit", "fund", "doctor", "exec", "ci", "prune",
+        "install",  "i",      "add",       "run",    "test",  "start",   "build",
+        "init",     "update", "uninstall", "remove", "rm",    "publish", "version",
+        "outdated", "ls",     "link",      "unlink", "cache", "audit",   "fund",
+        "doctor",   "exec",   "ci",        "prune",
     };
 
     // Add matching npm commands (mark with \x02 for default styling)
@@ -7539,13 +7407,13 @@ fn completeYarn(allocator: std.mem.Allocator, input: []const u8, prefix: []const
 
     // Yarn built-in commands
     const yarn_commands = [_][]const u8{
-        "add", "audit", "autoclean", "bin", "cache", "config",
-        "create", "dedupe", "dlx", "exec", "explain", "info",
-        "init", "install", "link", "node", "npm", "pack",
-        "patch", "patch-commit", "plugin", "rebuild", "remove",
-        "run", "search", "set", "stage", "start", "test",
-        "unlink", "unplug", "up", "upgrade", "upgrade-interactive",
-        "version", "why", "workspace", "workspaces",
+        "add",       "audit",        "autoclean", "bin",                 "cache",   "config",
+        "create",    "dedupe",       "dlx",       "exec",                "explain", "info",
+        "init",      "install",      "link",      "node",                "npm",     "pack",
+        "patch",     "patch-commit", "plugin",    "rebuild",             "remove",  "run",
+        "search",    "set",          "stage",     "start",               "test",    "unlink",
+        "unplug",    "up",           "upgrade",   "upgrade-interactive", "version", "why",
+        "workspace", "workspaces",
     };
 
     // Add matching yarn commands
@@ -7577,13 +7445,12 @@ fn completePnpm(allocator: std.mem.Allocator, input: []const u8, prefix: []const
 
     // pnpm built-in commands
     const pnpm_commands = [_][]const u8{
-        "add", "audit", "bin", "config", "create", "dedupe",
-        "dlx", "env", "exec", "fetch", "import", "init",
-        "install", "install-test", "link", "list", "outdated",
-        "pack", "patch", "patch-commit", "prune", "publish",
-        "rebuild", "recursive", "remove", "root", "run",
-        "server", "setup", "start", "store", "test", "unlink",
-        "update", "why",
+        "add",     "audit",        "bin",    "config",  "create",   "dedupe",
+        "dlx",     "env",          "exec",   "fetch",   "import",   "init",
+        "install", "install-test", "link",   "list",    "outdated", "pack",
+        "patch",   "patch-commit", "prune",  "publish", "rebuild",  "recursive",
+        "remove",  "root",         "run",    "server",  "setup",    "start",
+        "store",   "test",         "unlink", "update",  "why",
     };
 
     // Add matching pnpm commands
@@ -7619,15 +7486,15 @@ fn completeDocker(allocator: std.mem.Allocator, input: []const u8, prefix: []con
 
     // Docker subcommands
     const docker_commands = [_][]const u8{
-        "attach", "build", "commit", "compose", "container", "cp",
-        "create", "diff", "events", "exec", "export", "history",
-        "image", "images", "import", "info", "inspect", "kill",
-        "load", "login", "logout", "logs", "network", "node",
-        "pause", "plugin", "port", "ps", "pull", "push", "rename",
-        "restart", "rm", "rmi", "run", "save", "search", "service",
-        "stack", "start", "stats", "stop", "swarm", "system",
-        "tag", "top", "trust", "unpause", "update", "version",
-        "volume", "wait",
+        "attach", "build",   "commit", "compose", "container", "cp",
+        "create", "diff",    "events", "exec",    "export",    "history",
+        "image",  "images",  "import", "info",    "inspect",   "kill",
+        "load",   "login",   "logout", "logs",    "network",   "node",
+        "pause",  "plugin",  "port",   "ps",      "pull",      "push",
+        "rename", "restart", "rm",     "rmi",     "run",       "save",
+        "search", "service", "stack",  "start",   "stats",     "stop",
+        "swarm",  "system",  "tag",    "top",     "trust",     "unpause",
+        "update", "version", "volume", "wait",
     };
 
     // If no subcommand yet, show docker subcommands
@@ -7682,89 +7549,89 @@ test "shell initialization" {
     try std.testing.expect(!sh.running);
 }
 
-    fn detectPackageVersion(self: *Shell, cwd: []const u8) ![]const u8 {
-        // Try package.json, package.jsonc, pantry.json, pantry.jsonc
-        const filenames = [_][]const u8{ "package.json", "package.jsonc", "pantry.json", "pantry.jsonc" };
+fn detectPackageVersion(self: *Shell, cwd: []const u8) ![]const u8 {
+    // Try package.json, package.jsonc, pantry.json, pantry.jsonc
+    const filenames = [_][]const u8{ "package.json", "package.jsonc", "pantry.json", "pantry.jsonc" };
 
-        for (filenames) |filename| {
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
+    for (filenames) |filename| {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
 
-            const file = std.fs.cwd().openFile(path, .{}) catch continue;
-            defer file.close();
+        const file = std.fs.cwd().openFile(path, .{}) catch continue;
+        defer file.close();
 
-            // Read file (limit to 8KB for safety)
-            const max_size: usize = 8192;
-            const file_size = file.getEndPos() catch continue;
-            const read_size: usize = @min(file_size, max_size);
-            const buffer = self.allocator.alloc(u8, read_size) catch continue;
-            defer self.allocator.free(buffer);
-            var total_read: usize = 0;
-            while (total_read < read_size) {
-                const n = file.read(buffer[total_read..]) catch break;
-                if (n == 0) break;
-                total_read += n;
-            }
-            const content = buffer[0..total_read];
+        // Read file (limit to 8KB for safety)
+        const max_size: usize = 8192;
+        const file_size = file.getEndPos() catch continue;
+        const read_size: usize = @min(file_size, max_size);
+        const buffer = self.allocator.alloc(u8, read_size) catch continue;
+        defer self.allocator.free(buffer);
+        var total_read: usize = 0;
+        while (total_read < read_size) {
+            const n = file.read(buffer[total_read..]) catch break;
+            if (n == 0) break;
+            total_read += n;
+        }
+        const content = buffer[0..total_read];
 
-            // Simple JSON parsing to find "version": "x.y.z"
-            var i: usize = 0;
-            while (i < content.len) : (i += 1) {
-                if (std.mem.startsWith(u8, content[i..], "\"version\"")) {
-                    // Find the value
-                    var j = i + 9; // Skip "version"
-                    while (j < content.len and (content[j] == ' ' or content[j] == '\t' or content[j] == ':')) : (j += 1) {}
-                    if (j < content.len and content[j] == '"') {
-                        j += 1; // Skip opening quote
-                        const start = j;
-                        while (j < content.len and content[j] != '"') : (j += 1) {}
-                        if (j > start) {
-                            return self.allocator.dupe(u8, content[start..j]) catch continue;
-                        }
+        // Simple JSON parsing to find "version": "x.y.z"
+        var i: usize = 0;
+        while (i < content.len) : (i += 1) {
+            if (std.mem.startsWith(u8, content[i..], "\"version\"")) {
+                // Find the value
+                var j = i + 9; // Skip "version"
+                while (j < content.len and (content[j] == ' ' or content[j] == '\t' or content[j] == ':')) : (j += 1) {}
+                if (j < content.len and content[j] == '"') {
+                    j += 1; // Skip opening quote
+                    const start = j;
+                    while (j < content.len and content[j] != '"') : (j += 1) {}
+                    if (j > start) {
+                        return self.allocator.dupe(u8, content[start..j]) catch continue;
                     }
                 }
             }
         }
-
-        return error.NotFound;
     }
 
-    fn detectBunVersion(self: *Shell) ![]const u8 {
-        // Check if bun exists and get version
-        const result = std.process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = &[_][]const u8{ "bun", "--version" },
-        }) catch return error.NotFound;
+    return error.NotFound;
+}
 
-        defer self.allocator.free(result.stdout);
-        defer self.allocator.free(result.stderr);
+fn detectBunVersion(self: *Shell) ![]const u8 {
+    // Check if bun exists and get version
+    const result = std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = &[_][]const u8{ "bun", "--version" },
+    }) catch return error.NotFound;
 
-        if (result.term.Exited == 0) {
-            const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
-            if (trimmed.len > 0) {
-                return try self.allocator.dupe(u8, trimmed);
-            }
+    defer self.allocator.free(result.stdout);
+    defer self.allocator.free(result.stderr);
+
+    if (result.term.Exited == 0) {
+        const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+        if (trimmed.len > 0) {
+            return try self.allocator.dupe(u8, trimmed);
         }
-
-        return error.NotFound;
     }
 
-    fn detectZigVersion(self: *Shell) ![]const u8 {
-        // Check if zig exists and get version  
-        const result = std.process.Child.run(.{
-            .allocator = self.allocator,
-            .argv = &[_][]const u8{ "zig", "version" },
-        }) catch return error.NotFound;
+    return error.NotFound;
+}
 
-        defer self.allocator.free(result.stdout);
-        defer self.allocator.free(result.stderr);
+fn detectZigVersion(self: *Shell) ![]const u8 {
+    // Check if zig exists and get version
+    const result = std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = &[_][]const u8{ "zig", "version" },
+    }) catch return error.NotFound;
 
-        if (result.term.Exited == 0) {
-            const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
-            if (trimmed.len > 0) {
-                return try self.allocator.dupe(u8, trimmed);
-            }
+    defer self.allocator.free(result.stdout);
+    defer self.allocator.free(result.stderr);
+
+    if (result.term.Exited == 0) {
+        const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
+        if (trimmed.len > 0) {
+            return try self.allocator.dupe(u8, trimmed);
         }
-
-        return error.NotFound;
     }
+
+    return error.NotFound;
+}

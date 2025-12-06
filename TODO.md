@@ -22,7 +22,7 @@ This document aggregates improvement ideas from the codebase and docs (`ARCHITEC
 
 `src/shell.zig` is very large and owns many concerns (environment, history, jobs, parsing, execution, prompt, plugins, line editing). The architecture docs already describe a layered design; the code should match that.
 
-- [ ] Extract **history** management into a dedicated module (e.g. `src/history/history.zig`) and have `Shell` delegate to it.
+- [x] Extract **history** management into a dedicated module (e.g. `src/history/history.zig`) and have `Shell` delegate to it.
 - [ ] Extract **job control** into `src/jobs/` (e.g. `job_manager.zig`) using the existing `BackgroundJob` / `JobStatus` types as a starting point.
 - [ ] Extract **shell options & state flags** (errexit, pipefail, xtrace, nounset, etc.) into a small `ShellOptions` struct under `src/types/`.
 - [ ] Extract **prompt orchestration** (PromptContext / PromptRenderer / GitModule / AsyncGitFetcher wiring) into a dedicated `src/prompt/`-level coordinator so `Shell` doesn’t know prompt internals.
