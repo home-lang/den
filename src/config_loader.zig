@@ -149,6 +149,9 @@ fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
     defer allocator.free(json);
 
     // Parse JSON
+    // Note: We don't call parsed.deinit() because even with .alloc_always,
+    // the value struct still contains pointers to arena memory for slices.
+    // The arena will be cleaned up when the allocator is destroyed.
     const parsed = std.json.parseFromSlice(DenConfig, allocator, json, .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,

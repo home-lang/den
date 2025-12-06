@@ -512,8 +512,56 @@ pub const Expansion = struct {
             return ExpansionResult{ .value = zero, .consumed = end + 1 };
         }
 
-        // Check for indirect expansion: ${!VAR}
-        if (content.len > 0 and content[0] == '!' and !std.mem.containsAtLeast(u8, content, 1, "@") and !std.mem.containsAtLeast(u8, content, 1, "*")) {
+        // Check for variable name prefix expansion: ${!prefix@} or ${!prefix*}
+        if (content.len > 1 and content[0] == '!') {
+            const last_char = content[content.len - 1];
+            if (last_char == '@' or last_char == '*') {
+                // ${!prefix@} or ${!prefix*} - expand to variable names with prefix
+                const prefix = content[1 .. content.len - 1];
+
+                // Collect all variable names that start with prefix
+                var names = std.ArrayList([]const u8).empty;
+                defer names.deinit(self.allocator);
+
+                var env_iter = self.environment.iterator();
+                while (env_iter.next()) |entry| {
+                    if (std.mem.startsWith(u8, entry.key_ptr.*, prefix)) {
+                        try names.append(self.allocator, entry.key_ptr.*);
+                    }
+                }
+
+                // Sort the names for consistent output
+                std.mem.sort([]const u8, names.items, {}, struct {
+                    fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+                        return std.mem.order(u8, a, b) == .lt;
+                    }
+                }.lessThan);
+
+                if (names.items.len == 0) {
+                    return ExpansionResult{ .value = "", .consumed = end + 1 };
+                }
+
+                // Join with spaces
+                var total_len: usize = 0;
+                for (names.items) |name| {
+                    total_len += name.len;
+                }
+                total_len += names.items.len - 1; // spaces between names
+
+                var result = try self.allocator.alloc(u8, total_len);
+                var pos: usize = 0;
+                for (names.items, 0..) |name, i| {
+                    @memcpy(result[pos..][0..name.len], name);
+                    pos += name.len;
+                    if (i < names.items.len - 1) {
+                        result[pos] = ' ';
+                        pos += 1;
+                    }
+                }
+                return ExpansionResult{ .value = result, .consumed = end + 1 };
+            }
+
+            // Check for indirect expansion: ${!VAR}
             const indirect_name = content[1..];
             // Get the value of the named variable, then use that as a variable name
             if (self.environment.get(indirect_name)) |ref_name| {

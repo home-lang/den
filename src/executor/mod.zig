@@ -40,108 +40,78 @@ const FileTypeFilter = enum { all, files, dirs };
 /// Open a /dev/tcp/host/port or /dev/udp/host/port virtual path as a socket
 /// Returns the socket fd on success, null if path is not a /dev/tcp or /dev/udp path
 fn openDevNet(path: []const u8) ?std.posix.socket_t {
-    // Debug: print path to see what we're receiving
-    IO.eprint("DEBUG openDevNet: path='{s}' len={}\n", .{ path, path.len }) catch {};
-
     const is_tcp = std.mem.startsWith(u8, path, "/dev/tcp/");
     const is_udp = std.mem.startsWith(u8, path, "/dev/udp/");
 
-    if (!is_tcp and !is_udp) {
-        IO.eprint("DEBUG: not tcp/udp path\n", .{}) catch {};
-        return null;
-    }
+    if (!is_tcp and !is_udp) return null;
 
-    IO.eprint("DEBUG: is_tcp={} is_udp={}\n", .{ is_tcp, is_udp }) catch {};
-
-    // Parse host/port from path
-    const prefix_len: usize = if (is_tcp) 9 else 9; // "/dev/tcp/" or "/dev/udp/"
+    // Parse host/port from path: /dev/tcp/host/port or /dev/udp/host/port
+    const prefix_len: usize = 9; // "/dev/tcp/" or "/dev/udp/"
     const rest = path[prefix_len..];
 
-    IO.eprint("DEBUG: rest='{s}'\n", .{rest}) catch {};
-
-    // Find port separator (last /)
-    const port_sep = std.mem.lastIndexOf(u8, rest, "/") orelse {
-        IO.eprint("DEBUG: no port separator found\n", .{}) catch {};
-        return null;
-    };
-    if (port_sep == 0 or port_sep >= rest.len - 1) {
-        IO.eprint("DEBUG: invalid port_sep={}\n", .{port_sep}) catch {};
-        return null;
-    }
+    const port_sep = std.mem.lastIndexOf(u8, rest, "/") orelse return null;
+    if (port_sep == 0 or port_sep >= rest.len - 1) return null;
 
     const host = rest[0..port_sep];
     const port_str = rest[port_sep + 1 ..];
 
-    IO.eprint("DEBUG: host='{s}' port_str='{s}'\n", .{ host, port_str }) catch {};
+    const port = std.fmt.parseInt(u16, port_str, 10) catch return null;
 
-    // Parse port
-    const port = std.fmt.parseInt(u16, port_str, 10) catch {
-        IO.eprint("DEBUG: invalid port\n", .{}) catch {};
-        return null;
-    };
-
-    IO.eprint("DEBUG: port={}\n", .{port}) catch {};
-
-    // Parse IPv4 address bytes directly
+    // Parse IPv4 address
     var ip_bytes: [4]u8 = undefined;
     var byte_idx: usize = 0;
     var num: u16 = 0;
 
     for (host) |c| {
         if (c == '.') {
-            if (byte_idx >= 4 or num > 255) {
-                IO.eprint("DEBUG: invalid IP octet\n", .{}) catch {};
-                return null;
-            }
+            if (byte_idx >= 4 or num > 255) return null;
             ip_bytes[byte_idx] = @intCast(num);
             byte_idx += 1;
             num = 0;
         } else if (c >= '0' and c <= '9') {
             num = num * 10 + (c - '0');
-            if (num > 255) {
-                IO.eprint("DEBUG: octet overflow\n", .{}) catch {};
-                return null;
-            }
+            if (num > 255) return null;
         } else {
-            IO.eprint("DEBUG: invalid char in IP: {}\n", .{c}) catch {};
-            return null; // Invalid character
+            return null;
         }
     }
-    if (byte_idx != 3 or num > 255) {
-        IO.eprint("DEBUG: invalid byte_idx={} num={}\n", .{ byte_idx, num }) catch {};
-        return null;
-    }
+    if (byte_idx != 3 or num > 255) return null;
     ip_bytes[byte_idx] = @intCast(num);
 
-    IO.eprint("DEBUG: ip_bytes={}.{}.{}.{}\n", .{ ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3] }) catch {};
-
-    // Create socket (TCP or UDP) using libc directly
+    // Create socket
     const sock_type: c_uint = if (is_tcp) std.c.SOCK.STREAM else std.c.SOCK.DGRAM;
     const sock = std.c.socket(std.c.AF.INET, sock_type, 0);
-    if (sock < 0) {
-        IO.eprint("DEBUG: socket() failed\n", .{}) catch {};
-        return null;
-    }
+    if (sock < 0) return null;
 
-    IO.eprint("DEBUG: socket created: {}\n", .{sock}) catch {};
-
-    // Build sockaddr manually with correct types for Darwin
+    // Build sockaddr
     var addr: std.c.sockaddr.in = std.mem.zeroes(std.c.sockaddr.in);
     addr.len = @sizeOf(std.c.sockaddr.in);
     addr.family = std.c.AF.INET;
     addr.port = std.mem.nativeToBig(u16, port);
     addr.addr = @bitCast(ip_bytes);
 
-    // Connect using libc directly (to avoid panic on certain errors)
-    const result = std.c.connect(sock, @ptrCast(&addr), @sizeOf(std.c.sockaddr.in));
-    if (result < 0) {
+    // Connect with retry on EINTR
+    var connect_result: c_int = -1;
+    var retry_count: u32 = 0;
+    while (retry_count < 5) : (retry_count += 1) {
+        connect_result = std.c.connect(sock, @ptrCast(&addr), @sizeOf(std.c.sockaddr.in));
+        if (connect_result >= 0) break;
+
         const errno = std.c._errno().*;
-        IO.eprint("DEBUG: connect() failed with errno={}\n", .{errno}) catch {};
+        if (errno == 4) continue; // EINTR - retry
+        if (errno == 56) { // EISCONN - already connected
+            connect_result = 0;
+            break;
+        }
         _ = std.c.close(sock);
         return null;
     }
 
-    IO.eprint("DEBUG: connected successfully!\n", .{}) catch {};
+    if (connect_result < 0) {
+        _ = std.c.close(sock);
+        return null;
+    }
+
     return sock;
 }
 

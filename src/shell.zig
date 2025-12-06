@@ -1268,7 +1268,7 @@ pub const Shell = struct {
             self.last_exit_code = 1;
             return;
         };
-        defer self.allocator.free(tokens);
+        defer tokenizer.deinitTokens(tokens);
 
         if (tokens.len == 0) return;
 
@@ -1547,7 +1547,7 @@ pub const Shell = struct {
                 // Parse and execute the trap handler command
                 var tokenizer = parser_mod.Tokenizer.init(self.allocator, handler);
                 const tokens = tokenizer.tokenize() catch return;
-                defer self.allocator.free(tokens);
+                defer tokenizer.deinitTokens(tokens);
 
                 if (tokens.len == 0) return;
 
@@ -2817,7 +2817,7 @@ pub const Shell = struct {
                 self.last_exit_code = 1;
                 continue; // Continue with next line instead of returning
             };
-            defer self.allocator.free(tokens);
+            defer tokenizer.deinitTokens(tokens);
 
             // Parse tokens
             var p = parser_mod.Parser.init(self.allocator, tokens);

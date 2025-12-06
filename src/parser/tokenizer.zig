@@ -97,6 +97,23 @@ pub const Tokenizer = struct {
         };
     }
 
+    /// Free all allocated token values (words and process substitutions)
+    pub fn deinitTokens(self: *Tokenizer, tokens: []const Token) void {
+        for (tokens) |token| {
+            switch (token.type) {
+                // These token types have dynamically allocated values
+                .word, .process_sub_in, .process_sub_out => {
+                    if (token.value.len > 0) {
+                        self.allocator.free(token.value);
+                    }
+                },
+                // All other types use static strings or slices from input
+                else => {},
+            }
+        }
+        self.allocator.free(tokens);
+    }
+
     pub fn nextToken(self: *Tokenizer) !?Token {
         // Skip whitespace
         while (self.pos < self.input.len and std.ascii.isWhitespace(self.input[self.pos])) {
