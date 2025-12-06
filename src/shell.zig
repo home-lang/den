@@ -98,6 +98,7 @@ pub const Shell = struct {
     config: types.DenConfig,
     environment: std.StringHashMap([]const u8),
     aliases: std.StringHashMap([]const u8),
+    global_aliases: std.StringHashMap([]const u8), // zsh-style global aliases (expanded anywhere, not just command position)
     suffix_aliases: std.StringHashMap([]const u8), // extension -> command (zsh-style suffix aliases)
     last_exit_code: i32,
     job_manager: JobManager,
@@ -291,6 +292,7 @@ pub const Shell = struct {
             .config = config,
             .environment = env,
             .aliases = std.StringHashMap([]const u8).init(allocator),
+            .global_aliases = std.StringHashMap([]const u8).init(allocator),
             .suffix_aliases = std.StringHashMap([]const u8).init(allocator),
             .last_exit_code = 0,
             .job_manager = JobManager.init(allocator),
@@ -519,6 +521,14 @@ pub const Shell = struct {
             self.allocator.free(entry.value_ptr.*);
         }
         self.aliases.deinit();
+
+        // Clean up global aliases (keys and values were allocated)
+        var global_iter = self.global_aliases.iterator();
+        while (global_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.global_aliases.deinit();
 
         // Clean up suffix aliases (keys and values were allocated)
         var suffix_iter = self.suffix_aliases.iterator();

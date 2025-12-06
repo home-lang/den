@@ -2,6 +2,7 @@ const std = @import("std");
 const posix = std.posix;
 const builtin = @import("builtin");
 const SyntaxHighlighter = @import("syntax_highlight.zig").SyntaxHighlighter;
+const cpu_opt = @import("cpu_opt.zig");
 
 /// Windows console mode flags and APIs
 const windows = if (builtin.os.tag == .windows) struct {
@@ -321,6 +322,22 @@ pub const LineEditor = struct {
     // Vi last command for repeat with '.'
     vi_last_cmd: ?u8 = null,
     vi_last_count: usize = 1,
+    // Emacs-style kill ring
+    kill_ring: [16][4096]u8 = undefined,
+    kill_ring_lens: [16]usize = [_]usize{0} ** 16,
+    kill_ring_count: usize = 0,
+    kill_ring_index: usize = 0, // Current position for yank-pop
+    // Fuzzy search mode (Ctrl+S to toggle during reverse search)
+    fuzzy_search_mode: bool = false,
+    // Visual selection mode (Ctrl+Space to start, movement keys to expand)
+    visual_mode: bool = false,
+    visual_start: usize = 0, // Start of selection
+    // Macro recording/playback
+    macro_recording: bool = false,
+    macro_buffer: [1024]u8 = undefined,
+    macro_len: usize = 0,
+    macro_stored: [1024]u8 = undefined,
+    macro_stored_len: usize = 0,
 
     const UndoState = struct {
         buffer: [4096]u8,
@@ -778,6 +795,22 @@ pub const LineEditor = struct {
                         continue;
                     }
                 }
+                // Cancel visual mode on ESC (if standalone)
+                if (self.visual_mode) {
+                    std.posix.nanosleep(0, 50_000_000); // 50ms
+                    if (try self.terminal.readByte()) |next_byte| {
+                        // There's a follow-up - it's an escape sequence, handle normally
+                        escape_buffer[0] = byte;
+                        escape_buffer[1] = next_byte;
+                        escape_len = 2;
+                        in_escape = true;
+                        continue;
+                    } else {
+                        // No follow-up byte - cancel visual mode
+                        try self.cancelVisualMode();
+                        continue;
+                    }
+                }
                 escape_buffer[0] = byte;
                 escape_len = 1;
                 in_escape = true;
@@ -925,13 +958,42 @@ pub const LineEditor = struct {
                     self.clearCompletionState();
                     try self.transposeChars(); // Ctrl+T
                 },
+                0x00 => {
+                    // Ctrl+Space - start visual selection mode
+                    if (!self.visual_mode) {
+                        try self.startVisualMode();
+                    }
+                },
                 0x15 => {
                     self.clearCompletionState();
-                    try self.killToStart(); // Ctrl+U
+                    if (self.visual_mode) {
+                        try self.cutSelection(); // Cut selection in visual mode
+                    } else {
+                        try self.killToStart(); // Ctrl+U
+                    }
                 },
                 0x17 => {
                     self.clearCompletionState();
-                    try self.deleteWord(); // Ctrl+W
+                    if (self.visual_mode) {
+                        try self.copySelection(); // Copy selection in visual mode
+                    } else {
+                        try self.killWordBackward(); // Ctrl+W - kill word backward (saves to kill ring)
+                    }
+                },
+                0x18 => {
+                    // Ctrl+X prefix for extended commands
+                    // Read next character for the command
+                    const next_byte = (try self.terminal.readByte()) orelse continue;
+                    switch (next_byte) {
+                        '(' => try self.startMacroRecording(),
+                        ')' => try self.stopMacroRecording(),
+                        'e' => try self.playMacro(),
+                        else => {},
+                    }
+                },
+                0x19 => {
+                    self.clearCompletionState();
+                    try self.yank(); // Ctrl+Y - yank (paste from kill ring)
                 },
                 0x1F => {
                     self.clearCompletionState();
@@ -945,6 +1007,12 @@ pub const LineEditor = struct {
                     } else {
                         // Enter reverse search mode
                         try self.startReverseSearch();
+                    }
+                },
+                0x13 => {
+                    // Ctrl+S - toggle fuzzy search mode (during reverse search)
+                    if (self.reverse_search_mode) {
+                        try self.toggleFuzzySearch();
                     }
                 },
                 0x09 => {
@@ -1072,29 +1140,71 @@ pub const LineEditor = struct {
     }
 
     /// Update reverse search with current query
+    /// Supports both substring match (default) and fuzzy match (toggle with Ctrl+S)
     fn updateReverseSearch(self: *LineEditor) !void {
         const history = self.history orelse return;
         _ = self.history_count orelse return;
 
         const query = self.reverse_search_query[0..self.reverse_search_query_len];
 
-        // Search backwards from current position
-        var i = self.reverse_search_history_index;
-        while (i > 0) {
-            i -= 1;
-            if (history[i]) |entry| {
-                // Check if entry contains the query
-                if (query.len == 0 or std.mem.indexOf(u8, entry, query) != null) {
-                    self.reverse_search_match = entry;
-                    self.reverse_search_history_index = i;
-                    try self.redrawReverseSearch();
-                    return;
+        if (self.fuzzy_search_mode) {
+            // Fuzzy search: find best matching entry by score
+            var best_match: ?[]const u8 = null;
+            var best_score: u8 = 0;
+            var best_index: usize = 0;
+
+            var i = self.reverse_search_history_index;
+            while (i > 0) {
+                i -= 1;
+                if (history[i]) |entry| {
+                    if (query.len == 0) {
+                        self.reverse_search_match = entry;
+                        self.reverse_search_history_index = i;
+                        try self.redrawReverseSearch();
+                        return;
+                    }
+                    const score = cpu_opt.fuzzyScore(entry, query);
+                    if (score > best_score) {
+                        best_score = score;
+                        best_match = entry;
+                        best_index = i;
+                    }
+                }
+            }
+
+            if (best_match) |match| {
+                self.reverse_search_match = match;
+                self.reverse_search_history_index = best_index;
+            }
+        } else {
+            // Substring search: find exact substring match
+            var i = self.reverse_search_history_index;
+            while (i > 0) {
+                i -= 1;
+                if (history[i]) |entry| {
+                    // Check if entry contains the query
+                    if (query.len == 0 or std.mem.indexOf(u8, entry, query) != null) {
+                        self.reverse_search_match = entry;
+                        self.reverse_search_history_index = i;
+                        try self.redrawReverseSearch();
+                        return;
+                    }
                 }
             }
         }
 
         // No match found - keep current match or show no results
         try self.redrawReverseSearch();
+    }
+
+    /// Toggle between fuzzy and substring search modes
+    fn toggleFuzzySearch(self: *LineEditor) !void {
+        self.fuzzy_search_mode = !self.fuzzy_search_mode;
+        // Re-run search with new mode
+        if (self.history_count) |count| {
+            self.reverse_search_history_index = count.*;
+        }
+        try self.updateReverseSearch();
     }
 
     /// Continue reverse search (find next match) - called when user presses Ctrl+R again
@@ -1111,13 +1221,14 @@ pub const LineEditor = struct {
         // Clear current line
         try self.writeBytes("\r\x1B[K");
 
-        // Show reverse search prompt
+        // Show reverse search prompt (indicate fuzzy mode with 'f')
         const query = self.reverse_search_query[0..self.reverse_search_query_len];
+        const mode_prefix = if (self.fuzzy_search_mode) "fuzzy-" else "";
         var prompt_buf: [512]u8 = undefined;
         const search_prompt = if (self.reverse_search_match) |match|
-            try std.fmt.bufPrint(&prompt_buf, "(reverse-i-search)`{s}': {s}", .{ query, match })
+            try std.fmt.bufPrint(&prompt_buf, "({s}reverse-i-search)`{s}': {s}", .{ mode_prefix, query, match })
         else
-            try std.fmt.bufPrint(&prompt_buf, "(failed reverse-i-search)`{s}': ", .{query});
+            try std.fmt.bufPrint(&prompt_buf, "(failed {s}reverse-i-search)`{s}': ", .{ mode_prefix, query });
 
         try self.writeBytes(search_prompt);
     }
@@ -1148,6 +1259,142 @@ pub const LineEditor = struct {
 
         // Move cursor to end
         self.cursor = self.length;
+    }
+
+    /// Start visual selection mode (Ctrl+Space)
+    fn startVisualMode(self: *LineEditor) !void {
+        self.visual_mode = true;
+        self.visual_start = self.cursor;
+        try self.redrawWithSelection();
+    }
+
+    /// Cancel visual selection mode (Escape)
+    fn cancelVisualMode(self: *LineEditor) !void {
+        self.visual_mode = false;
+        try self.redrawLine();
+    }
+
+    /// Get the selected text range (start, end)
+    fn getSelectionRange(self: *LineEditor) struct { start: usize, end: usize } {
+        if (self.cursor < self.visual_start) {
+            return .{ .start = self.cursor, .end = self.visual_start };
+        } else {
+            return .{ .start = self.visual_start, .end = self.cursor };
+        }
+    }
+
+    /// Copy selected text to kill ring
+    fn copySelection(self: *LineEditor) !void {
+        if (!self.visual_mode) return;
+
+        const range = self.getSelectionRange();
+        if (range.end > range.start) {
+            self.pushToKillRing(self.buffer[range.start..range.end]);
+        }
+        try self.cancelVisualMode();
+    }
+
+    /// Cut selected text (copy to kill ring and delete)
+    fn cutSelection(self: *LineEditor) !void {
+        if (!self.visual_mode) return;
+
+        self.saveUndoState();
+        const range = self.getSelectionRange();
+
+        if (range.end > range.start) {
+            // Save to kill ring
+            self.pushToKillRing(self.buffer[range.start..range.end]);
+
+            // Delete the selection
+            const deleted_len = range.end - range.start;
+            const remaining = self.length - range.end;
+            var i: usize = 0;
+            while (i < remaining) : (i += 1) {
+                self.buffer[range.start + i] = self.buffer[range.end + i];
+            }
+            self.length -= deleted_len;
+            self.cursor = range.start;
+        }
+
+        self.visual_mode = false;
+        try self.redrawLine();
+    }
+
+    /// Redraw line with selection highlighting
+    fn redrawWithSelection(self: *LineEditor) !void {
+        try self.writeBytes("\r\x1B[K");
+        try self.writeBytes(self.prompt);
+
+        const range = self.getSelectionRange();
+
+        // Write text before selection
+        if (range.start > 0) {
+            try self.writeBytes(self.buffer[0..range.start]);
+        }
+
+        // Write selected text with inverted colors
+        if (range.end > range.start) {
+            try self.writeBytes("\x1B[7m"); // Inverse video (highlight)
+            try self.writeBytes(self.buffer[range.start..range.end]);
+            try self.writeBytes("\x1B[27m"); // Normal video
+        }
+
+        // Write text after selection
+        if (range.end < self.length) {
+            try self.writeBytes(self.buffer[range.end..self.length]);
+        }
+
+        // Move cursor to correct position
+        const prompt_len = self.prompt.len;
+        const cursor_col = prompt_len + self.cursor;
+        var buf: [32]u8 = undefined;
+        const pos_cmd = std.fmt.bufPrint(&buf, "\r\x1B[{d}C", .{cursor_col}) catch return;
+        try self.writeBytes(pos_cmd);
+    }
+
+    /// Start macro recording (Ctrl+X ()
+    fn startMacroRecording(self: *LineEditor) !void {
+        self.macro_recording = true;
+        self.macro_len = 0;
+        // Could show indicator in prompt
+    }
+
+    /// Stop macro recording and save (Ctrl+X ))
+    fn stopMacroRecording(self: *LineEditor) !void {
+        if (self.macro_recording) {
+            self.macro_recording = false;
+            // Copy to stored macro
+            @memcpy(self.macro_stored[0..self.macro_len], self.macro_buffer[0..self.macro_len]);
+            self.macro_stored_len = self.macro_len;
+        }
+    }
+
+    /// Record a key to the macro buffer
+    fn recordKey(self: *LineEditor, key: u8) void {
+        if (self.macro_recording and self.macro_len < self.macro_buffer.len) {
+            self.macro_buffer[self.macro_len] = key;
+            self.macro_len += 1;
+        }
+    }
+
+    /// Play back the stored macro (Ctrl+X e)
+    fn playMacro(self: *LineEditor) !void {
+        if (self.macro_stored_len == 0) return;
+
+        // Temporarily disable recording during playback
+        const was_recording = self.macro_recording;
+        self.macro_recording = false;
+
+        // Replay each key
+        for (self.macro_stored[0..self.macro_stored_len]) |key| {
+            // For printable characters, insert them
+            if (key >= 0x20 and key <= 0x7E) {
+                try self.insertChar(key);
+            }
+            // Control characters could be handled here too
+        }
+
+        self.macro_recording = was_recording;
     }
 
     fn insertChar(self: *LineEditor, char: u8) !void {
@@ -1445,8 +1692,13 @@ pub const LineEditor = struct {
         // Clear history search when user kills text
         self.clearHistorySearch();
 
+        // Save killed text to kill ring
+        const killed_len = self.length - self.cursor;
+        self.pushToKillRing(self.buffer[self.cursor..self.length]);
+
         try self.writeBytes("\x1B[K"); // Clear to end of line
         self.length = self.cursor;
+        _ = killed_len;
     }
 
     fn killToStart(self: *LineEditor) !void {
@@ -1457,6 +1709,9 @@ pub const LineEditor = struct {
 
         // Clear history search when user kills text
         self.clearHistorySearch();
+
+        // Save killed text to kill ring
+        self.pushToKillRing(self.buffer[0..self.cursor]);
 
         // Move remaining characters to start
         const remaining = self.length - self.cursor;
@@ -1481,6 +1736,145 @@ pub const LineEditor = struct {
             try self.writeBytes("\x1B[D");
         }
         self.cursor = 0;
+    }
+
+    /// Push text to the kill ring
+    fn pushToKillRing(self: *LineEditor, text: []const u8) void {
+        if (text.len == 0 or text.len > 4096) return;
+
+        // Rotate ring if full
+        const idx = self.kill_ring_count % 16;
+        @memcpy(self.kill_ring[idx][0..text.len], text);
+        self.kill_ring_lens[idx] = text.len;
+
+        if (self.kill_ring_count < 16) {
+            self.kill_ring_count += 1;
+        }
+        // Reset yank-pop index to most recent
+        self.kill_ring_index = idx;
+    }
+
+    /// Yank (paste) from kill ring (Ctrl+Y)
+    fn yank(self: *LineEditor) !void {
+        if (self.kill_ring_count == 0) return;
+
+        const idx = self.kill_ring_index;
+        const len = self.kill_ring_lens[idx];
+        if (len == 0) return;
+
+        // Save state for undo
+        self.saveUndoState();
+
+        // Check if there's room
+        if (self.length + len > self.buffer.len) return;
+
+        // Make room for yanked text
+        var i = self.length;
+        while (i > self.cursor) {
+            i -= 1;
+            self.buffer[i + len] = self.buffer[i];
+        }
+
+        // Insert yanked text
+        @memcpy(self.buffer[self.cursor .. self.cursor + len], self.kill_ring[idx][0..len]);
+        self.length += len;
+        self.cursor += len;
+
+        // Redraw line
+        try self.redrawLine();
+    }
+
+    /// Yank-pop: replace last yank with previous kill ring entry (Alt+Y / Esc Y)
+    fn yankPop(self: *LineEditor) !void {
+        if (self.kill_ring_count <= 1) return;
+
+        // Move to previous entry in kill ring
+        if (self.kill_ring_index == 0) {
+            self.kill_ring_index = @min(self.kill_ring_count, 16) - 1;
+        } else {
+            self.kill_ring_index -= 1;
+        }
+
+        // Get new text
+        const idx = self.kill_ring_index;
+        const new_len = self.kill_ring_lens[idx];
+
+        // For simplicity, just yank the new text at cursor
+        // (A full implementation would replace the previous yank)
+        try self.yank();
+        _ = new_len;
+    }
+
+    /// Kill word forward (Alt+D / Esc D)
+    fn killWordForward(self: *LineEditor) !void {
+        if (self.cursor >= self.length) return;
+
+        // Save state for undo
+        self.saveUndoState();
+
+        // Find end of word
+        var end = self.cursor;
+        // Skip whitespace
+        while (end < self.length and std.ascii.isWhitespace(self.buffer[end])) {
+            end += 1;
+        }
+        // Skip word characters
+        while (end < self.length and !std.ascii.isWhitespace(self.buffer[end])) {
+            end += 1;
+        }
+
+        if (end == self.cursor) return;
+
+        // Save to kill ring
+        self.pushToKillRing(self.buffer[self.cursor..end]);
+
+        // Remove the word
+        const remaining = self.length - end;
+        var i: usize = 0;
+        while (i < remaining) : (i += 1) {
+            self.buffer[self.cursor + i] = self.buffer[end + i];
+        }
+        self.length = self.cursor + remaining;
+
+        // Redraw
+        try self.redrawLine();
+    }
+
+    /// Kill word backward (Ctrl+W)
+    fn killWordBackward(self: *LineEditor) !void {
+        if (self.cursor == 0) return;
+
+        // Save state for undo
+        self.saveUndoState();
+
+        // Find start of word
+        var start = self.cursor;
+        // Skip whitespace backward
+        while (start > 0 and std.ascii.isWhitespace(self.buffer[start - 1])) {
+            start -= 1;
+        }
+        // Skip word characters backward
+        while (start > 0 and !std.ascii.isWhitespace(self.buffer[start - 1])) {
+            start -= 1;
+        }
+
+        if (start == self.cursor) return;
+
+        // Save to kill ring
+        self.pushToKillRing(self.buffer[start..self.cursor]);
+
+        // Remove the word
+        const killed_len = self.cursor - start;
+        const remaining = self.length - self.cursor;
+        var i: usize = 0;
+        while (i < remaining) : (i += 1) {
+            self.buffer[start + i] = self.buffer[self.cursor + i];
+        }
+        self.length -= killed_len;
+        self.cursor = start;
+
+        // Redraw
+        try self.redrawLine();
     }
 
     fn clearScreen(self: *LineEditor) !void {

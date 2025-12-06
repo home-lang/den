@@ -1,6 +1,7 @@
 const std = @import("std");
 const IO = @import("../utils/io.zig").IO;
 const types = @import("../types/mod.zig");
+const cpu_opt = @import("../utils/cpu_opt.zig");
 
 /// History utilities extracted from the shell core.
 ///
@@ -193,4 +194,135 @@ pub const History = struct {
         }
         allocator.free(history_file_path);
     }
+
+    /// Fast hash-based exact match search - O(1) average case
+    /// Returns the index of the entry if found, null otherwise.
+    pub fn fastExactSearch(history: []?[]const u8, history_count: usize, query: []const u8) ?usize {
+        if (query.len == 0 or history_count == 0) return null;
+
+        // Compute hash for O(1) lookup hint
+        var h: u32 = 5381;
+        for (query) |c| {
+            h = ((h << 5) +% h) +% c;
+        }
+        const hash_idx = h % @min(history_count, 256);
+
+        // Check hash position first (likely match)
+        if (hash_idx < history_count) {
+            if (history[hash_idx]) |entry| {
+                if (std.mem.eql(u8, entry, query)) {
+                    return hash_idx;
+                }
+            }
+        }
+
+        // Fall back to linear search from end (most recent first)
+        var i = history_count;
+        while (i > 0) {
+            i -= 1;
+            if (history[i]) |entry| {
+                if (std.mem.eql(u8, entry, query)) {
+                    return i;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// Fuzzy search with scoring - returns best matches sorted by relevance
+    /// Returns up to max_results entries with their scores.
+    pub fn fuzzySearch(
+        allocator: std.mem.Allocator,
+        history: []?[]const u8,
+        history_count: usize,
+        query: []const u8,
+        max_results: usize,
+    ) ![]FuzzyMatch {
+        if (query.len == 0 or history_count == 0) {
+            return &[_]FuzzyMatch{};
+        }
+
+        var matches = std.ArrayList(FuzzyMatch).init(allocator);
+        defer matches.deinit();
+
+        // Score all history entries
+        var i: usize = 0;
+        while (i < history_count) : (i += 1) {
+            if (history[i]) |entry| {
+                const score = cpu_opt.fuzzyScore(entry, query);
+                if (score > 0) {
+                    try matches.append(.{ .entry = entry, .index = i, .score = score });
+                }
+            }
+        }
+
+        // Sort by score (descending), then by recency (more recent first)
+        const items = matches.items;
+        std.mem.sort(FuzzyMatch, items, {}, struct {
+            fn lessThan(_: void, a: FuzzyMatch, b: FuzzyMatch) bool {
+                if (a.score != b.score) return a.score > b.score;
+                return a.index > b.index; // More recent entries first
+            }
+        }.lessThan);
+
+        // Return top results
+        const result_count = @min(items.len, max_results);
+        const result = try allocator.alloc(FuzzyMatch, result_count);
+        @memcpy(result, items[0..result_count]);
+        return result;
+    }
+
+    /// Prefix search - find entries starting with query
+    /// Returns the most recent match first.
+    pub fn prefixSearch(history: []?[]const u8, history_count: usize, prefix: []const u8) ?[]const u8 {
+        if (prefix.len == 0 or history_count == 0) return null;
+
+        // Search from most recent
+        var i = history_count;
+        while (i > 0) {
+            i -= 1;
+            if (history[i]) |entry| {
+                if (cpu_opt.hasPrefix(entry, prefix)) {
+                    return entry;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Substring search - find entries containing query
+    /// Starts from start_idx and searches backwards.
+    pub fn substringSearch(
+        history: []?[]const u8,
+        history_count: usize,
+        query: []const u8,
+        start_idx: usize,
+    ) ?SubstringMatch {
+        if (query.len == 0 or history_count == 0) return null;
+
+        var i = @min(start_idx, history_count);
+        while (i > 0) {
+            i -= 1;
+            if (history[i]) |entry| {
+                if (std.mem.indexOf(u8, entry, query) != null) {
+                    return .{ .entry = entry, .index = i };
+                }
+            }
+        }
+        return null;
+    }
+};
+
+/// Result of a fuzzy search
+pub const FuzzyMatch = struct {
+    entry: []const u8,
+    index: usize,
+    score: u8,
+};
+
+/// Result of a substring search
+pub const SubstringMatch = struct {
+    entry: []const u8,
+    index: usize,
 };

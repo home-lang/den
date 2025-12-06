@@ -2754,18 +2754,36 @@ pub const Executor = struct {
     }
 
     /// Supports -s flag for suffix aliases (zsh-style): alias -s ts='bun'
+    /// Supports -g flag for global aliases (zsh-style): alias -g L='| less'
     fn builtinAlias(self: *Executor, command: *types.ParsedCommand) !i32 {
         const shell_ref = self.shell orelse {
             try IO.eprint("den: alias: shell context not available\n", .{});
             return 1;
         };
 
-        // Check for -s flag (suffix alias)
+        // Check for flags
         var is_suffix_alias = false;
+        var is_global_alias = false;
         var args_start: usize = 0;
-        if (command.args.len > 0 and std.mem.eql(u8, command.args[0], "-s")) {
-            is_suffix_alias = true;
-            args_start = 1;
+
+        // Parse flags (can be combined like -gs)
+        while (args_start < command.args.len) {
+            const arg = command.args[args_start];
+            if (arg.len > 0 and arg[0] == '-') {
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        's' => is_suffix_alias = true,
+                        'g' => is_global_alias = true,
+                        else => {
+                            try IO.eprint("den: alias: invalid option: -{c}\n", .{c});
+                            return 1;
+                        },
+                    }
+                }
+                args_start += 1;
+            } else {
+                break;
+            }
         }
 
         const effective_args = command.args[args_start..];
@@ -2819,16 +2837,66 @@ pub const Executor = struct {
             return 0;
         }
 
-        // Handle regular aliases
-        if (effective_args.len == 0) {
-            // Display all aliases
-            if (shell_ref.aliases.count() == 0) {
+        if (is_global_alias) {
+            // Handle global aliases (expanded anywhere in the command line)
+            if (effective_args.len == 0) {
+                // Display all global aliases
+                var iter = shell_ref.global_aliases.iterator();
+                while (iter.next()) |entry| {
+                    try IO.print("alias -g {s}='{s}'\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                }
                 return 0;
             }
 
+            // Parse global alias definition: name=value
+            const arg = effective_args[0];
+            const eq_pos = std.mem.indexOf(u8, arg, "=") orelse {
+                // No '=', just show the global alias value
+                if (shell_ref.global_aliases.get(arg)) |value| {
+                    try IO.print("alias -g {s}='{s}'\n", .{ arg, value });
+                } else {
+                    try IO.eprint("den: alias: global alias {s}: not found\n", .{arg});
+                    return 1;
+                }
+                return 0;
+            };
+
+            const name = arg[0..eq_pos];
+            var value = arg[eq_pos + 1 ..];
+
+            // Remove quotes if present
+            if (value.len >= 2 and
+                ((value[0] == '\'' and value[value.len - 1] == '\'') or
+                (value[0] == '"' and value[value.len - 1] == '"')))
+            {
+                value = value[1 .. value.len - 1];
+            }
+
+            // Store the global alias
+            const name_owned = try self.allocator.dupe(u8, name);
+            const value_owned = try self.allocator.dupe(u8, value);
+
+            const gop = try shell_ref.global_aliases.getOrPut(name_owned);
+            if (gop.found_existing) {
+                self.allocator.free(name_owned); // We don't need the new key
+                self.allocator.free(gop.value_ptr.*); // Free old value
+            }
+            gop.value_ptr.* = value_owned;
+
+            return 0;
+        }
+
+        // Handle regular aliases
+        if (effective_args.len == 0) {
+            // Display all aliases (regular + global)
             var iter = shell_ref.aliases.iterator();
             while (iter.next()) |entry| {
                 try IO.print("alias {s}='{s}'\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+            }
+            // Also show global aliases
+            var global_iter = shell_ref.global_aliases.iterator();
+            while (global_iter.next()) |entry| {
+                try IO.print("alias -g {s}='{s}'\n", .{ entry.key_ptr.*, entry.value_ptr.* });
             }
             return 0;
         }
@@ -2836,9 +2904,11 @@ pub const Executor = struct {
         // Parse alias definition: name=value
         const arg = effective_args[0];
         const eq_pos = std.mem.indexOf(u8, arg, "=") orelse {
-            // No '=', just show the alias value
+            // No '=', just show the alias value (check both regular and global)
             if (shell_ref.aliases.get(arg)) |value| {
                 try IO.print("alias {s}='{s}'\n", .{ arg, value });
+            } else if (shell_ref.global_aliases.get(arg)) |value| {
+                try IO.print("alias -g {s}='{s}'\n", .{ arg, value });
             } else {
                 try IO.eprint("den: alias: {s}: not found\n", .{arg});
                 return 1;
@@ -2864,6 +2934,7 @@ pub const Executor = struct {
     }
 
     /// Supports -s flag for suffix aliases: unalias -s ts
+    /// Supports -g flag for global aliases: unalias -g L
     fn builtinUnalias(self: *Executor, command: *types.ParsedCommand) !i32 {
         const shell_ref = self.shell orelse {
             try IO.eprint("den: unalias: shell context not available\n", .{});
@@ -2871,22 +2942,39 @@ pub const Executor = struct {
         };
 
         if (command.args.len == 0) {
-            try IO.eprint("den: unalias: usage: unalias [-s] [-a] name [name ...]\n", .{});
+            try IO.eprint("den: unalias: usage: unalias [-s|-g] [-a] name [name ...]\n", .{});
             return 1;
         }
 
-        // Check for -s flag (suffix alias)
+        // Check for flags
         var is_suffix_alias = false;
+        var is_global_alias = false;
         var args_start: usize = 0;
-        if (command.args.len > 0 and std.mem.eql(u8, command.args[0], "-s")) {
-            is_suffix_alias = true;
-            args_start = 1;
+
+        // Parse flags
+        while (args_start < command.args.len) {
+            const arg = command.args[args_start];
+            if (arg.len > 0 and arg[0] == '-' and arg.len > 1 and arg[1] != 'a') {
+                for (arg[1..]) |c| {
+                    switch (c) {
+                        's' => is_suffix_alias = true,
+                        'g' => is_global_alias = true,
+                        else => {
+                            try IO.eprint("den: unalias: invalid option: -{c}\n", .{c});
+                            return 1;
+                        },
+                    }
+                }
+                args_start += 1;
+            } else {
+                break;
+            }
         }
 
         const effective_args = command.args[args_start..];
 
         if (effective_args.len == 0) {
-            try IO.eprint("den: unalias: usage: unalias [-s] [-a] name [name ...]\n", .{});
+            try IO.eprint("den: unalias: usage: unalias [-s|-g] [-a] name [name ...]\n", .{});
             return 1;
         }
 
@@ -2915,7 +3003,32 @@ pub const Executor = struct {
             return 0;
         }
 
-        // Support -a flag to remove all aliases
+        if (is_global_alias) {
+            // Support -a flag to remove all global aliases
+            if (std.mem.eql(u8, effective_args[0], "-a")) {
+                var iter = shell_ref.global_aliases.iterator();
+                while (iter.next()) |entry| {
+                    self.allocator.free(entry.key_ptr.*);
+                    self.allocator.free(entry.value_ptr.*);
+                }
+                shell_ref.global_aliases.clearRetainingCapacity();
+                return 0;
+            }
+
+            // Remove specific global alias
+            for (effective_args) |name| {
+                if (shell_ref.global_aliases.fetchRemove(name)) |kv| {
+                    self.allocator.free(kv.key);
+                    self.allocator.free(kv.value);
+                } else {
+                    try IO.eprint("den: unalias: global alias {s}: not found\n", .{name});
+                    return 1;
+                }
+            }
+            return 0;
+        }
+
+        // Support -a flag to remove all aliases (regular + global)
         if (std.mem.eql(u8, effective_args[0], "-a")) {
             var iter = shell_ref.aliases.iterator();
             while (iter.next()) |entry| {
@@ -2923,12 +3036,22 @@ pub const Executor = struct {
                 self.allocator.free(entry.value_ptr.*);
             }
             shell_ref.aliases.clearRetainingCapacity();
+
+            var global_iter = shell_ref.global_aliases.iterator();
+            while (global_iter.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+                self.allocator.free(entry.value_ptr.*);
+            }
+            shell_ref.global_aliases.clearRetainingCapacity();
             return 0;
         }
 
-        // Remove specific alias
+        // Remove specific alias (check both regular and global)
         for (effective_args) |name| {
             if (shell_ref.aliases.fetchRemove(name)) |kv| {
+                self.allocator.free(kv.key);
+                self.allocator.free(kv.value);
+            } else if (shell_ref.global_aliases.fetchRemove(name)) |kv| {
                 self.allocator.free(kv.key);
                 self.allocator.free(kv.value);
             } else {

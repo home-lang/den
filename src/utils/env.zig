@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const cpu_opt = @import("cpu_opt.zig");
 
 /// Windows environment variable cache to avoid memory leaks
 /// Uses a simple LRU-style cache with fixed size
@@ -457,6 +458,198 @@ pub const PathList = struct {
         self.paths.clearRetainingCapacity();
     }
 };
+
+/// Cache for executable path lookups
+/// Uses LRU eviction with 64 entries - enough for most common commands
+pub const ExecutableCache = struct {
+    const CACHE_SIZE = 64;
+
+    /// Cache entry: command name -> full path
+    const Entry = struct {
+        name: []const u8,
+        path: []const u8,
+        age: u64,
+    };
+
+    entries: [CACHE_SIZE]?Entry,
+    allocator: std.mem.Allocator,
+    current_age: u64,
+    hits: u64,
+    misses: u64,
+
+    pub fn init(allocator: std.mem.Allocator) ExecutableCache {
+        return .{
+            .entries = [_]?Entry{null} ** CACHE_SIZE,
+            .allocator = allocator,
+            .current_age = 0,
+            .hits = 0,
+            .misses = 0,
+        };
+    }
+
+    pub fn deinit(self: *ExecutableCache) void {
+        for (&self.entries) |*entry_opt| {
+            if (entry_opt.*) |entry| {
+                self.allocator.free(entry.name);
+                self.allocator.free(entry.path);
+                entry_opt.* = null;
+            }
+        }
+    }
+
+    /// Look up cached path for a command
+    pub fn get(self: *ExecutableCache, name: []const u8) ?[]const u8 {
+        for (&self.entries) |*entry_opt| {
+            if (entry_opt.*) |*entry| {
+                if (std.mem.eql(u8, entry.name, name)) {
+                    entry.age = self.current_age;
+                    self.current_age +%= 1;
+                    self.hits += 1;
+                    return entry.path;
+                }
+            }
+        }
+        self.misses += 1;
+        return null;
+    }
+
+    /// Cache a command path lookup result
+    pub fn put(self: *ExecutableCache, name: []const u8, path: []const u8) void {
+        // Check if already exists
+        for (&self.entries) |*entry_opt| {
+            if (entry_opt.*) |*entry| {
+                if (std.mem.eql(u8, entry.name, name)) {
+                    // Update existing entry
+                    self.allocator.free(entry.path);
+                    entry.path = self.allocator.dupe(u8, path) catch return;
+                    entry.age = self.current_age;
+                    self.current_age +%= 1;
+                    return;
+                }
+            }
+        }
+
+        // Find empty slot or evict oldest
+        var oldest_idx: usize = 0;
+        var oldest_age: u64 = std.math.maxInt(u64);
+
+        for (self.entries, 0..) |entry_opt, i| {
+            if (entry_opt == null) {
+                // Found empty slot
+                self.entries[i] = Entry{
+                    .name = self.allocator.dupe(u8, name) catch return,
+                    .path = self.allocator.dupe(u8, path) catch return,
+                    .age = self.current_age,
+                };
+                self.current_age +%= 1;
+                return;
+            } else if (entry_opt.?.age < oldest_age) {
+                oldest_age = entry_opt.?.age;
+                oldest_idx = i;
+            }
+        }
+
+        // Evict oldest entry
+        if (self.entries[oldest_idx]) |old_entry| {
+            self.allocator.free(old_entry.name);
+            self.allocator.free(old_entry.path);
+        }
+
+        self.entries[oldest_idx] = Entry{
+            .name = self.allocator.dupe(u8, name) catch return,
+            .path = self.allocator.dupe(u8, path) catch return,
+            .age = self.current_age,
+        };
+        self.current_age +%= 1;
+    }
+
+    /// Invalidate cache entry (call when PATH changes)
+    pub fn invalidate(self: *ExecutableCache, name: []const u8) void {
+        for (&self.entries) |*entry_opt| {
+            if (entry_opt.*) |entry| {
+                if (std.mem.eql(u8, entry.name, name)) {
+                    self.allocator.free(entry.name);
+                    self.allocator.free(entry.path);
+                    entry_opt.* = null;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Clear entire cache (call when PATH is modified)
+    pub fn clear(self: *ExecutableCache) void {
+        for (&self.entries) |*entry_opt| {
+            if (entry_opt.*) |entry| {
+                self.allocator.free(entry.name);
+                self.allocator.free(entry.path);
+                entry_opt.* = null;
+            }
+        }
+        self.current_age = 0;
+    }
+
+    /// Get cache statistics
+    pub fn getStats(self: *const ExecutableCache) struct { hits: u64, misses: u64, hit_rate: f64 } {
+        const total = self.hits + self.misses;
+        const hit_rate = if (total > 0) @as(f64, @floatFromInt(self.hits)) / @as(f64, @floatFromInt(total)) else 0.0;
+        return .{ .hits = self.hits, .misses = self.misses, .hit_rate = hit_rate };
+    }
+};
+
+/// Global executable cache instance
+var global_exec_cache: ?ExecutableCache = null;
+
+/// Initialize the global executable cache
+pub fn initExecutableCache(allocator: std.mem.Allocator) void {
+    if (global_exec_cache == null) {
+        global_exec_cache = ExecutableCache.init(allocator);
+    }
+}
+
+/// Deinitialize the global executable cache
+pub fn deinitExecutableCache() void {
+    if (global_exec_cache) |*cache| {
+        cache.deinit();
+        global_exec_cache = null;
+    }
+}
+
+/// Find executable with caching - O(1) for cached lookups
+pub fn findExecutableCached(path_list: *const PathList, allocator: std.mem.Allocator, name: []const u8) !?[]const u8 {
+    // Check cache first
+    if (global_exec_cache) |*cache| {
+        if (cache.get(name)) |cached_path| {
+            // Verify the cached path still exists
+            std.fs.accessAbsolute(cached_path, .{}) catch {
+                // Path no longer valid, invalidate and fall through
+                cache.invalidate(name);
+                return try findAndCacheExecutable(path_list, allocator, name);
+            };
+            return try allocator.dupe(u8, cached_path);
+        }
+    }
+
+    return try findAndCacheExecutable(path_list, allocator, name);
+}
+
+/// Find executable and cache the result
+fn findAndCacheExecutable(path_list: *const PathList, allocator: std.mem.Allocator, name: []const u8) !?[]const u8 {
+    const result = try path_list.findExecutable(allocator, name);
+    if (result) |path| {
+        if (global_exec_cache) |*cache| {
+            cache.put(name, path);
+        }
+    }
+    return result;
+}
+
+/// Invalidate executable cache (call when PATH changes)
+pub fn invalidateExecutableCache() void {
+    if (global_exec_cache) |*cache| {
+        cache.clear();
+    }
+}
 
 /// Get PATH separator for the current platform
 pub fn pathSeparator() u8 {
