@@ -9,9 +9,16 @@ const env_utils = @import("../utils/env.zig");
 const networking = @import("networking.zig");
 const memory_pool = @import("memory_pool.zig");
 const redirection = @import("redirection.zig");
-const utilities = @import("builtins/utilities.zig");
-const file_ops = @import("builtins/file_ops.zig");
-const test_builtins = @import("builtins/test_builtins.zig");
+const builtins = @import("builtins/mod.zig");
+const utilities = builtins.utilities;
+const file_ops = builtins.file_ops;
+const test_builtins = builtins.test_builtins;
+const io_builtins = builtins.io_builtins;
+const shell_builtins = builtins.shell_builtins;
+const env_builtins = builtins.env_builtins;
+const dir_builtins = builtins.dir_builtins;
+const alias_builtins = builtins.alias_builtins;
+const BuiltinContext = builtins.BuiltinContext;
 
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
@@ -658,7 +665,7 @@ pub const Executor = struct {
 
     /// Check if a command name is a shell builtin.
     fn isBuiltin(self: *Executor, name: []const u8) bool {
-        const builtins = [_][]const u8{
+        const builtin_names = [_][]const u8{
             "cd", "pwd", "echo", "exit", "env", "export", "set", "unset",
             "true", "false", "test", "[", "[[", "alias", "unalias", "which",
             "type", "help", "read", "printf", "source", ".", "history",
@@ -672,7 +679,7 @@ pub const Executor = struct {
             "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor", "log-parse", "dotfiles", "library", "hook",
             "ifind", "coproc",
         };
-        for (builtins) |builtin_name| {
+        for (builtin_names) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
         }
         // Check for loadable builtins
@@ -682,26 +689,33 @@ pub const Executor = struct {
         return false;
     }
 
+    /// Get a BuiltinContext for calling extracted builtins
+    fn getBuiltinContext(self: *Executor) BuiltinContext {
+        return BuiltinContext.init(self.allocator, self.environment, self.shell);
+    }
+
     /// Dispatch and execute a builtin command.
     fn executeBuiltin(self: *Executor, command: *types.ParsedCommand) !i32 {
+        var ctx = self.getBuiltinContext();
+
         if (std.mem.eql(u8, command.name, "echo")) {
-            return try self.builtinEcho(command);
+            return try io_builtins.echo(command);
         } else if (std.mem.eql(u8, command.name, "pwd")) {
-            return try self.builtinPwd(command);
+            return try shell_builtins.pwd(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "cd")) {
-            return try self.builtinCd(command);
+            return try shell_builtins.cd(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "env")) {
             return try self.builtinEnvCmd(command);
         } else if (std.mem.eql(u8, command.name, "export")) {
-            return try self.builtinExport(command);
+            return try env_builtins.exportBuiltin(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "set")) {
-            return try self.builtinSet(command);
+            return try env_builtins.set(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "unset")) {
-            return try self.builtinUnset(command);
+            return try env_builtins.unset(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "true")) {
-            return try self.builtinTrue();
+            return 0;
         } else if (std.mem.eql(u8, command.name, "false")) {
-            return try self.builtinFalse();
+            return 1;
         } else if (std.mem.eql(u8, command.name, "test") or std.mem.eql(u8, command.name, "[")) {
             return try test_builtins.testBuiltin(command);
         } else if (std.mem.eql(u8, command.name, "[[")) {
@@ -713,23 +727,23 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "help")) {
             return try self.builtinHelp(command);
         } else if (std.mem.eql(u8, command.name, "alias")) {
-            return try self.builtinAlias(command);
+            return try alias_builtins.alias(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "unalias")) {
-            return try self.builtinUnalias(command);
+            return try alias_builtins.unalias(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "read")) {
-            return try self.builtinRead(command);
+            return try shell_builtins.read(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "printf")) {
-            return try self.builtinPrintf(command);
+            return try io_builtins.printf(command);
         } else if (std.mem.eql(u8, command.name, "source") or std.mem.eql(u8, command.name, ".")) {
-            return try self.builtinSource(command);
+            return try shell_builtins.source(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "history")) {
-            return try self.builtinHistory(command);
+            return try shell_builtins.history(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "pushd")) {
-            return try self.builtinPushd(command);
+            return try dir_builtins.pushd(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "popd")) {
-            return try self.builtinPopd(command);
+            return try dir_builtins.popd(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "dirs")) {
-            return try self.builtinDirs(command);
+            return try dir_builtins.dirs(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "eval")) {
             return try self.builtinEval(command);
         } else if (std.mem.eql(u8, command.name, "exec")) {
@@ -870,327 +884,13 @@ pub const Executor = struct {
         return 1;
     }
 
-    fn builtinEcho(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-
-        var no_newline = false;
-        var interpret_escapes = false;
-        var arg_start: usize = 0;
-
-        // Parse flags (only at the beginning)
-        for (command.args, 0..) |arg, i| {
-            if (arg.len > 0 and arg[0] == '-' and arg.len > 1) {
-                var valid_flag = true;
-                var temp_no_newline = no_newline;
-                var temp_interpret = interpret_escapes;
-
-                for (arg[1..]) |c| {
-                    switch (c) {
-                        'n' => temp_no_newline = true,
-                        'e' => temp_interpret = true,
-                        'E' => temp_interpret = false,
-                        else => {
-                            valid_flag = false;
-                            break;
-                        },
-                    }
-                }
-
-                if (valid_flag) {
-                    no_newline = temp_no_newline;
-                    interpret_escapes = temp_interpret;
-                    arg_start = i + 1;
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        // Print arguments
-        for (command.args[arg_start..], 0..) |arg, i| {
-            if (interpret_escapes) {
-                try printWithEscapes(arg);
-            } else {
-                try IO.print("{s}", .{arg});
-            }
-            if (i < command.args[arg_start..].len - 1) {
-                try IO.print(" ", .{});
-            }
-        }
-
-        if (!no_newline) {
-            try IO.print("\n", .{});
-        }
-        return 0;
-    }
-
-    /// Helper function to print string with escape sequence interpretation
-    fn printWithEscapes(s: []const u8) !void {
-        var i: usize = 0;
-        while (i < s.len) {
-            if (s[i] == '\\' and i + 1 < s.len) {
-                switch (s[i + 1]) {
-                    'n' => {
-                        try IO.print("\n", .{});
-                        i += 2;
-                    },
-                    't' => {
-                        try IO.print("\t", .{});
-                        i += 2;
-                    },
-                    'r' => {
-                        try IO.print("\r", .{});
-                        i += 2;
-                    },
-                    '\\' => {
-                        try IO.print("\\", .{});
-                        i += 2;
-                    },
-                    'a' => {
-                        try IO.print("\x07", .{}); // Bell
-                        i += 2;
-                    },
-                    'b' => {
-                        try IO.print("\x08", .{}); // Backspace
-                        i += 2;
-                    },
-                    'f' => {
-                        try IO.print("\x0c", .{}); // Form feed
-                        i += 2;
-                    },
-                    'v' => {
-                        try IO.print("\x0b", .{}); // Vertical tab
-                        i += 2;
-                    },
-                    'e' => {
-                        try IO.print("\x1b", .{}); // Escape
-                        i += 2;
-                    },
-                    '0' => {
-                        // Octal escape \0nnn
-                        var val: u8 = 0;
-                        var j: usize = i + 2;
-                        var count: usize = 0;
-                        while (j < s.len and count < 3) : (j += 1) {
-                            if (s[j] >= '0' and s[j] <= '7') {
-                                val = val * 8 + (s[j] - '0');
-                                count += 1;
-                            } else {
-                                break;
-                            }
-                        }
-                        if (count > 0) {
-                            try IO.print("{c}", .{val});
-                            i = j;
-                        } else {
-                            try IO.print("{c}", .{s[i]});
-                            i += 1;
-                        }
-                    },
-                    'x' => {
-                        // Hex escape \xHH
-                        if (i + 3 < s.len) {
-                            const hex = s[i + 2 .. i + 4];
-                            if (std.fmt.parseInt(u8, hex, 16)) |val| {
-                                try IO.print("{c}", .{val});
-                                i += 4;
-                            } else |_| {
-                                try IO.print("{c}", .{s[i]});
-                                i += 1;
-                            }
-                        } else {
-                            try IO.print("{c}", .{s[i]});
-                            i += 1;
-                        }
-                    },
-                    else => {
-                        try IO.print("{c}", .{s[i]});
-                        i += 1;
-                    },
-                }
-            } else {
-                try IO.print("{c}", .{s[i]});
-                i += 1;
-            }
-        }
-    }
-
-    fn builtinPwd(self: *Executor, command: *types.ParsedCommand) !i32 {
-        var use_physical = false;
-
-        // Parse flags
-        for (command.args) |arg| {
-            if (std.mem.eql(u8, arg, "-P")) {
-                use_physical = true;
-            } else if (std.mem.eql(u8, arg, "-L")) {
-                use_physical = false;
-            } else if (arg.len > 0 and arg[0] == '-') {
-                try IO.eprint("den: pwd: {s}: invalid option\n", .{arg});
-                return 1;
-            }
-        }
-
-        // Get current directory
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
-
-        if (use_physical) {
-            // -P: Physical path (resolve symlinks)
-            const cwd = std.posix.getcwd(&buf) catch |err| {
-                try IO.eprint("den: pwd: error getting current directory: {}\n", .{err});
-                return 1;
-            };
-            try IO.print("{s}\n", .{cwd});
-        } else {
-            // -L: Logical path (default) - use PWD env var if set and valid
-            if (self.environment.get("PWD")) |pwd| {
-                // Verify the PWD env var points to current directory
-                var real_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const real_cwd = std.posix.getcwd(&real_buf) catch null;
-
-                if (real_cwd) |_| {
-                    // PWD exists, use it (trust the logical path)
-                    try IO.print("{s}\n", .{pwd});
-                    return 0;
-                }
-            }
-            // Fallback to physical path if PWD not set or invalid
-            const cwd = std.posix.getcwd(&buf) catch |err| {
-                try IO.eprint("den: pwd: error getting current directory: {}\n", .{err});
-                return 1;
-            };
-            try IO.print("{s}\n", .{cwd});
-        }
-        return 0;
-    }
-
-    fn builtinCd(self: *Executor, command: *types.ParsedCommand) !i32 {
-        var path = if (command.args.len > 0) command.args[0] else blk: {
-            // Default to HOME
-            if (self.environment.get("HOME")) |home| {
-                break :blk home;
-            }
-            try IO.eprint("den: cd: HOME not set\n", .{});
-            return 1;
-        };
-
-        // Handle special cd - (go to OLDPWD)
-        if (std.mem.eql(u8, path, "-")) {
-            if (self.environment.get("OLDPWD")) |oldpwd| {
-                path = oldpwd;
-                try IO.print("{s}\n", .{path});
-            } else {
-                try IO.eprint("den: cd: OLDPWD not set\n", .{});
-                return 1;
-            }
-        }
-
-        // Expand ~name for named directories (zsh-style)
-        var expanded_path: ?[]const u8 = null;
-        defer if (expanded_path) |p| self.allocator.free(p);
-
-        if (path.len > 0 and path[0] == '~') {
-            if (self.shell) |shell| {
-                if (path.len > 1 and path[1] != '/') {
-                    // ~name format - look up in named directories
-                    const name_end = std.mem.indexOfAny(u8, path[1..], &[_]u8{ '/' }) orelse path.len - 1;
-                    const name = path[1 .. name_end + 1];
-
-                    if (shell.named_dirs.get(name)) |named_path| {
-                        if (name_end + 1 < path.len) {
-                            // ~name/rest format
-                            expanded_path = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ named_path, path[name_end + 1 ..] });
-                            path = expanded_path.?;
-                        } else {
-                            // Just ~name
-                            path = named_path;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Save current directory as OLDPWD before changing
-        var old_cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const old_cwd = std.posix.getcwd(&old_cwd_buf) catch null;
-
-        // Check if path is relative (doesn't start with / or ~ or .)
-        const is_relative = path.len > 0 and path[0] != '/' and path[0] != '~' and path[0] != '.';
-
-        // Try direct path first
-        if (std.posix.chdir(path)) |_| {
-            // Success - update OLDPWD
-            if (old_cwd) |cwd| {
-                const oldpwd_value = try self.allocator.dupe(u8, cwd);
-                const gop = try self.environment.getOrPut("OLDPWD");
-                if (gop.found_existing) {
-                    self.allocator.free(gop.value_ptr.*);
-                } else {
-                    gop.key_ptr.* = try self.allocator.dupe(u8, "OLDPWD");
-                }
-                gop.value_ptr.* = oldpwd_value;
-            }
-            return 0;
-        } else |direct_err| {
-            // If relative path and CDPATH is set, try CDPATH directories
-            if (is_relative) {
-                if (self.environment.get("CDPATH")) |cdpath| {
-                    var cdpath_path: ?[]const u8 = null;
-                    defer if (cdpath_path) |p| self.allocator.free(p);
-
-                    var iter = std.mem.splitScalar(u8, cdpath, ':');
-                    while (iter.next()) |dir| {
-                        // Build full path: dir/path
-                        const full_path = if (dir.len == 0)
-                            path // Empty entry means current directory
-                        else blk: {
-                            if (cdpath_path) |p| self.allocator.free(p);
-                            cdpath_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ dir, path });
-                            break :blk cdpath_path.?;
-                        };
-
-                        if (std.posix.chdir(full_path)) |_| {
-                            // Success via CDPATH - print directory and update OLDPWD
-                            try IO.print("{s}\n", .{full_path});
-                            if (old_cwd) |cwd| {
-                                const oldpwd_value = try self.allocator.dupe(u8, cwd);
-                                const gop = try self.environment.getOrPut("OLDPWD");
-                                if (gop.found_existing) {
-                                    self.allocator.free(gop.value_ptr.*);
-                                } else {
-                                    gop.key_ptr.* = try self.allocator.dupe(u8, "OLDPWD");
-                                }
-                                gop.value_ptr.* = oldpwd_value;
-                            }
-                            return 0;
-                        } else |_| {
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            // All attempts failed
-            try IO.eprint("den: cd: {s}: {}\n", .{ path, direct_err });
-            return 1;
-        }
-    }
-
-    fn builtinEnv(self: *Executor) !i32 {
-        var iter = self.environment.iterator();
-        while (iter.next()) |entry| {
-            try IO.print("{s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-        }
-        return 0;
-    }
-
     /// env command with VAR=value support
     /// Usage: env [-i] [-u name] [name=value]... [command [args]...]
     fn builtinEnvCmd(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
         // No args - just print environment
         if (command.args.len == 0) {
-            return try self.builtinEnv();
+            var ctx = self.getBuiltinContext();
+            return try env_builtins.env(&ctx);
         }
 
         // Parse flags and VAR=value assignments
@@ -2569,311 +2269,6 @@ pub const Executor = struct {
         }
 
         return 0;
-    }
-
-    fn builtinPrintf(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        if (command.args.len == 0) {
-            try IO.eprint("den: printf: missing format string\n", .{});
-            return 1;
-        }
-
-        const format = command.args[0];
-        var arg_idx: usize = 1;
-        var i: usize = 0;
-
-        while (i < format.len) {
-            if (format[i] == '%' and i + 1 < format.len) {
-                // Parse optional flags, width, and precision
-                var j = i + 1;
-                var left_justify = false;
-                var zero_pad = false;
-                var width: usize = 0;
-                var precision: usize = 6; // Default precision for floats
-                var has_precision = false;
-
-                // Parse flags
-                while (j < format.len) {
-                    if (format[j] == '-') {
-                        left_justify = true;
-                        j += 1;
-                    } else if (format[j] == '0') {
-                        zero_pad = true;
-                        j += 1;
-                    } else if (format[j] == '+' or format[j] == ' ' or format[j] == '#') {
-                        j += 1; // Skip unsupported flags
-                    } else {
-                        break;
-                    }
-                }
-
-                // Parse width
-                while (j < format.len and format[j] >= '0' and format[j] <= '9') {
-                    width = width * 10 + (format[j] - '0');
-                    j += 1;
-                }
-
-                // Parse precision
-                if (j < format.len and format[j] == '.') {
-                    j += 1;
-                    precision = 0;
-                    has_precision = true;
-                    while (j < format.len and format[j] >= '0' and format[j] <= '9') {
-                        precision = precision * 10 + (format[j] - '0');
-                        j += 1;
-                    }
-                }
-
-                if (j >= format.len) {
-                    try IO.print("{c}", .{format[i]});
-                    i += 1;
-                    continue;
-                }
-
-                const spec = format[j];
-                if (spec == 's') {
-                    // String format
-                    if (arg_idx < command.args.len) {
-                        var str = command.args[arg_idx];
-                        // Apply precision (truncate)
-                        if (has_precision and str.len > precision) {
-                            str = str[0..precision];
-                        }
-                        // Apply width (padding)
-                        if (width > 0 and str.len < width) {
-                            const pad = width - str.len;
-                            if (left_justify) {
-                                try IO.print("{s}", .{str});
-                                var p: usize = 0;
-                                while (p < pad) : (p += 1) try IO.print(" ", .{});
-                            } else {
-                                var p: usize = 0;
-                                while (p < pad) : (p += 1) try IO.print(" ", .{});
-                                try IO.print("{s}", .{str});
-                            }
-                        } else {
-                            try IO.print("{s}", .{str});
-                        }
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == 'd' or spec == 'i') {
-                    // Integer format
-                    if (arg_idx < command.args.len) {
-                        const num = std.fmt.parseInt(i64, command.args[arg_idx], 10) catch 0;
-                        try printfInt(num, width, zero_pad, left_justify);
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == 'u') {
-                    // Unsigned integer format
-                    if (arg_idx < command.args.len) {
-                        const num = std.fmt.parseInt(u64, command.args[arg_idx], 10) catch 0;
-                        try printfUint(num, width, zero_pad, left_justify, 10, false);
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == 'x') {
-                    // Hex lowercase
-                    if (arg_idx < command.args.len) {
-                        const num = std.fmt.parseInt(u64, command.args[arg_idx], 10) catch 0;
-                        try printfUint(num, width, zero_pad, left_justify, 16, false);
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == 'X') {
-                    // Hex uppercase
-                    if (arg_idx < command.args.len) {
-                        const num = std.fmt.parseInt(u64, command.args[arg_idx], 10) catch 0;
-                        try printfUint(num, width, zero_pad, left_justify, 16, true);
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == 'o') {
-                    // Octal format
-                    if (arg_idx < command.args.len) {
-                        const num = std.fmt.parseInt(u64, command.args[arg_idx], 10) catch 0;
-                        try printfUint(num, width, zero_pad, left_justify, 8, false);
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == 'c') {
-                    // Character format
-                    if (arg_idx < command.args.len) {
-                        const arg = command.args[arg_idx];
-                        if (arg.len > 0) {
-                            try IO.print("{c}", .{arg[0]});
-                        }
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == 'f' or spec == 'F') {
-                    // Float format
-                    if (arg_idx < command.args.len) {
-                        const num = std.fmt.parseFloat(f64, command.args[arg_idx]) catch 0.0;
-                        try printfFloat(num, width, precision, left_justify);
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == '%') {
-                    // Escaped %
-                    try IO.print("%", .{});
-                    i = j + 1;
-                } else if (spec == 'b') {
-                    // String with escape interpretation (bash extension)
-                    if (arg_idx < command.args.len) {
-                        try printWithEscapes(command.args[arg_idx]);
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else if (spec == 'q') {
-                    // Shell-quoted string (bash extension)
-                    if (arg_idx < command.args.len) {
-                        try IO.print("'{s}'", .{command.args[arg_idx]});
-                        arg_idx += 1;
-                    }
-                    i = j + 1;
-                } else {
-                    // Unknown format, just print it
-                    try IO.print("{c}", .{format[i]});
-                    i += 1;
-                }
-            } else if (format[i] == '\\' and i + 1 < format.len) {
-                const esc = format[i + 1];
-                switch (esc) {
-                    'n' => try IO.print("\n", .{}),
-                    't' => try IO.print("\t", .{}),
-                    'r' => try IO.print("\r", .{}),
-                    '\\' => try IO.print("\\", .{}),
-                    'a' => try IO.print("\x07", .{}),
-                    'b' => try IO.print("\x08", .{}),
-                    'f' => try IO.print("\x0c", .{}),
-                    'v' => try IO.print("\x0b", .{}),
-                    'e' => try IO.print("\x1b", .{}),
-                    '0' => {
-                        // Octal escape
-                        var val: u8 = 0;
-                        var k: usize = i + 2;
-                        var count: usize = 0;
-                        while (k < format.len and count < 3) : (k += 1) {
-                            if (format[k] >= '0' and format[k] <= '7') {
-                                val = val * 8 + (format[k] - '0');
-                                count += 1;
-                            } else break;
-                        }
-                        try IO.print("{c}", .{val});
-                        i = k;
-                        continue;
-                    },
-                    'x' => {
-                        // Hex escape \xNN
-                        if (i + 3 < format.len) {
-                            const hex = format[i + 2 .. i + 4];
-                            const val = std.fmt.parseInt(u8, hex, 16) catch {
-                                try IO.print("{c}", .{format[i]});
-                                i += 1;
-                                continue;
-                            };
-                            try IO.print("{c}", .{val});
-                            i += 4;
-                            continue;
-                        } else {
-                            try IO.print("{c}", .{format[i]});
-                            i += 1;
-                            continue;
-                        }
-                    },
-                    else => try IO.print("{c}", .{format[i]}),
-                }
-                i += 2;
-            } else {
-                try IO.print("{c}", .{format[i]});
-                i += 1;
-            }
-        }
-
-        return 0;
-    }
-
-    /// Helper for printf - format signed integer with width/padding
-    fn printfInt(num: i64, width: usize, zero_pad: bool, left_justify: bool) !void {
-        var buf: [32]u8 = undefined;
-        const str = std.fmt.bufPrint(&buf, "{d}", .{num}) catch return;
-        if (width > 0 and str.len < width) {
-            const pad = width - str.len;
-            const pad_char: u8 = if (zero_pad and !left_justify) '0' else ' ';
-            if (left_justify) {
-                try IO.print("{s}", .{str});
-                var p: usize = 0;
-                while (p < pad) : (p += 1) try IO.print(" ", .{});
-            } else {
-                var p: usize = 0;
-                while (p < pad) : (p += 1) try IO.print("{c}", .{pad_char});
-                try IO.print("{s}", .{str});
-            }
-        } else {
-            try IO.print("{s}", .{str});
-        }
-    }
-
-    /// Helper for printf - format unsigned integer with base and width
-    fn printfUint(num: u64, width: usize, zero_pad: bool, left_justify: bool, base: u8, uppercase: bool) !void {
-        var buf: [32]u8 = undefined;
-        const str = if (base == 16)
-            if (uppercase)
-                std.fmt.bufPrint(&buf, "{X}", .{num}) catch return
-            else
-                std.fmt.bufPrint(&buf, "{x}", .{num}) catch return
-        else if (base == 8)
-            std.fmt.bufPrint(&buf, "{o}", .{num}) catch return
-        else
-            std.fmt.bufPrint(&buf, "{d}", .{num}) catch return;
-
-        if (width > 0 and str.len < width) {
-            const pad = width - str.len;
-            const pad_char: u8 = if (zero_pad and !left_justify) '0' else ' ';
-            if (left_justify) {
-                try IO.print("{s}", .{str});
-                var p: usize = 0;
-                while (p < pad) : (p += 1) try IO.print(" ", .{});
-            } else {
-                var p: usize = 0;
-                while (p < pad) : (p += 1) try IO.print("{c}", .{pad_char});
-                try IO.print("{s}", .{str});
-            }
-        } else {
-            try IO.print("{s}", .{str});
-        }
-    }
-
-    /// Helper for printf - format float with precision and width
-    fn printfFloat(num: f64, width: usize, precision: usize, left_justify: bool) !void {
-        var buf: [64]u8 = undefined;
-        // Zig doesn't support runtime precision, so use fixed cases
-        const str = switch (precision) {
-            0 => std.fmt.bufPrint(&buf, "{d:.0}", .{num}) catch return,
-            1 => std.fmt.bufPrint(&buf, "{d:.1}", .{num}) catch return,
-            2 => std.fmt.bufPrint(&buf, "{d:.2}", .{num}) catch return,
-            3 => std.fmt.bufPrint(&buf, "{d:.3}", .{num}) catch return,
-            4 => std.fmt.bufPrint(&buf, "{d:.4}", .{num}) catch return,
-            5 => std.fmt.bufPrint(&buf, "{d:.5}", .{num}) catch return,
-            else => std.fmt.bufPrint(&buf, "{d:.6}", .{num}) catch return,
-        };
-
-        if (width > 0 and str.len < width) {
-            const pad = width - str.len;
-            if (left_justify) {
-                try IO.print("{s}", .{str});
-                var p: usize = 0;
-                while (p < pad) : (p += 1) try IO.print(" ", .{});
-            } else {
-                var p: usize = 0;
-                while (p < pad) : (p += 1) try IO.print(" ", .{});
-                try IO.print("{s}", .{str});
-            }
-        } else {
-            try IO.print("{s}", .{str});
-        }
     }
 
     fn builtinSource(self: *Executor, command: *types.ParsedCommand) !i32 {
