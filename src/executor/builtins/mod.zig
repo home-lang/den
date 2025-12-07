@@ -10,6 +10,8 @@
 /// - dir_builtins: Directory stack builtins (pushd, popd, dirs)
 /// - alias_builtins: Alias builtins (alias, unalias)
 /// - monitoring_builtins: System monitoring (sys-stats, netstats, net-check, log-tail, proc-monitor, log-parse)
+/// - process_builtins: Process-related builtins (times, umask, timeout)
+/// - macos_builtins: macOS/system utilities (copyssh, reloaddns, emptytrash, show, hide, dotfiles, library)
 /// - context: BuiltinContext interface for state-dependent builtins
 
 pub const utilities = @import("utilities.zig");
@@ -21,6 +23,8 @@ pub const env_builtins = @import("env_builtins.zig");
 pub const dir_builtins = @import("dir_builtins.zig");
 pub const alias_builtins = @import("alias_builtins.zig");
 pub const monitoring_builtins = @import("monitoring_builtins.zig");
+pub const process_builtins = @import("process_builtins.zig");
+pub const macos_builtins = @import("macos_builtins.zig");
 pub const context = @import("context.zig");
 
 pub const BuiltinContext = context.BuiltinContext;
