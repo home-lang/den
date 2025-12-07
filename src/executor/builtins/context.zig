@@ -10,6 +10,12 @@ pub const IsBuiltinFn = *const fn (name: []const u8) bool;
 /// Callback type for executing a command and returning exit code
 pub const ExecuteCommandFn = *const fn (ctx: *anyopaque, name: []const u8, args: [][]const u8) anyerror!i32;
 
+/// Callback type for executing a builtin command directly
+pub const ExecuteBuiltinFn = *const fn (ctx: *anyopaque, cmd: *types.ParsedCommand) anyerror!i32;
+
+/// Callback type for executing an external command (bypassing builtins)
+pub const ExecuteExternalFn = *const fn (ctx: *anyopaque, cmd: *types.ParsedCommand) anyerror!i32;
+
 /// BuiltinContext provides a unified interface for builtins to access shell state.
 /// This decouples builtins from the Executor implementation, enabling better
 /// modularity and testability.
@@ -21,7 +27,11 @@ pub const BuiltinContext = struct {
     is_builtin_fn: ?IsBuiltinFn,
     /// Callback to execute a command (for eval, time, etc.)
     execute_command_fn: ?ExecuteCommandFn,
-    /// Opaque pointer to executor for execute_command_fn
+    /// Callback to execute a builtin directly
+    execute_builtin_fn: ?ExecuteBuiltinFn,
+    /// Callback to execute external command (bypassing builtins)
+    execute_external_fn: ?ExecuteExternalFn,
+    /// Opaque pointer to executor for callbacks
     executor_ptr: ?*anyopaque,
 
     /// Create a context from an allocator, environment, and optional shell reference
@@ -36,6 +46,8 @@ pub const BuiltinContext = struct {
             .shell = shell,
             .is_builtin_fn = null,
             .execute_command_fn = null,
+            .execute_builtin_fn = null,
+            .execute_external_fn = null,
             .executor_ptr = null,
         };
     }
@@ -47,6 +59,8 @@ pub const BuiltinContext = struct {
         shell: ?*Shell,
         is_builtin_fn: IsBuiltinFn,
         execute_command_fn: ExecuteCommandFn,
+        execute_builtin_fn: ExecuteBuiltinFn,
+        execute_external_fn: ExecuteExternalFn,
         executor_ptr: *anyopaque,
     ) BuiltinContext {
         return .{
@@ -55,6 +69,8 @@ pub const BuiltinContext = struct {
             .shell = shell,
             .is_builtin_fn = is_builtin_fn,
             .execute_command_fn = execute_command_fn,
+            .execute_builtin_fn = execute_builtin_fn,
+            .execute_external_fn = execute_external_fn,
             .executor_ptr = executor_ptr,
         };
     }
@@ -343,15 +359,35 @@ pub const BuiltinContext = struct {
     }
 
     /// Execute a shell command string (for eval)
-    pub fn executeShellCommand(self: *BuiltinContext, command_str: []const u8) !void {
-        const shell_ref = self.shell orelse return error.NoShellContext;
-        _ = shell_ref.executeCommand(command_str) catch {};
+    pub fn executeShellCommand(self: *BuiltinContext, command_str: []const u8) void {
+        const shell_ref = self.shell orelse return;
+        shell_ref.executeCommand(command_str) catch {};
     }
 
     /// Get the shell's last exit code
     pub fn getShellExitCode(self: *const BuiltinContext) i32 {
         const shell_ref = self.shell orelse return 0;
         return shell_ref.last_exit_code;
+    }
+
+    /// Execute a builtin command directly (bypasses aliases/functions)
+    pub fn executeBuiltinCmd(self: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
+        if (self.execute_builtin_fn) |func| {
+            if (self.executor_ptr) |ptr| {
+                return try func(ptr, cmd);
+            }
+        }
+        return error.NoExecutor;
+    }
+
+    /// Execute an external command (bypasses builtins)
+    pub fn executeExternalCmd(self: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
+        if (self.execute_external_fn) |func| {
+            if (self.executor_ptr) |ptr| {
+                return try func(ptr, cmd);
+            }
+        }
+        return error.NoExecutor;
     }
 
     // ============ Signal Handlers (trap) ============

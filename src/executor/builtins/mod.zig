@@ -31,6 +31,7 @@ pub const interactive_builtins = @import("interactive_builtins.zig");
 pub const job_builtins = @import("job_builtins.zig");
 pub const command_builtins = @import("command_builtins.zig");
 pub const state_builtins = @import("state_builtins.zig");
+pub const exec_builtins = @import("exec_builtins.zig");
 pub const context = @import("context.zig");
 
 pub const BuiltinContext = context.BuiltinContext;

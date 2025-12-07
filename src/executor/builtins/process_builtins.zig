@@ -2,9 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
+const BuiltinContext = @import("context.zig").BuiltinContext;
+const utils = @import("../../utils.zig");
 
-/// Process-related builtins: times, umask, timeout
-/// Note: builtinTime remains in executor/mod.zig as it requires executeExternal
+/// Process-related builtins: times, umask, timeout, time, watch
 
 /// times builtin - display accumulated process times
 pub fn times(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
@@ -428,4 +429,156 @@ fn getCEnviron() [*:null]const ?[*:0]const u8 {
         const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
         return @ptrCast(c_environ.*);
     }
+}
+
+/// time - measure command execution time
+pub fn time(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
+    // Parse flags
+    var posix_format = false; // -p: POSIX format output
+    var verbose = false; // -v: verbose output with more details
+    var arg_start: usize = 0;
+
+    while (arg_start < cmd.args.len) {
+        const arg = cmd.args[arg_start];
+        if (arg.len > 0 and arg[0] == '-') {
+            if (std.mem.eql(u8, arg, "-p")) {
+                posix_format = true;
+                arg_start += 1;
+            } else if (std.mem.eql(u8, arg, "-v")) {
+                verbose = true;
+                arg_start += 1;
+            } else if (std.mem.eql(u8, arg, "--")) {
+                arg_start += 1;
+                break;
+            } else {
+                // Unknown flag or start of command (like -c for some commands)
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if (arg_start >= cmd.args.len) {
+        try IO.eprint("den: time: missing command\n", .{});
+        return 1;
+    }
+
+    // Time the execution of an external command
+    const start_time = std.time.Instant.now() catch return 1;
+
+    var new_cmd = types.ParsedCommand{
+        .name = cmd.args[arg_start],
+        .args = if (arg_start + 1 < cmd.args.len) cmd.args[arg_start + 1 ..] else &[_][]const u8{},
+        .redirections = cmd.redirections,
+    };
+
+    // Execute as external command
+    const exit_code = try ctx.executeExternalCmd(&new_cmd);
+
+    const end_time = std.time.Instant.now() catch return exit_code;
+    const elapsed_ns = end_time.since(start_time);
+    const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000_000.0;
+    const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
+
+    if (posix_format) {
+        // POSIX format: "real %f\nuser %f\nsys %f\n"
+        try IO.eprint("real {d:.2}\n", .{elapsed_s});
+        try IO.eprint("user 0.00\n", .{});
+        try IO.eprint("sys 0.00\n", .{});
+    } else if (verbose) {
+        // Verbose format with more details
+        try IO.eprint("\n", .{});
+        try IO.eprint("        Command: {s}", .{cmd.args[arg_start]});
+        for (cmd.args[arg_start + 1 ..]) |arg| {
+            try IO.eprint(" {s}", .{arg});
+        }
+        try IO.eprint("\n", .{});
+        try IO.eprint("    Exit status: {d}\n", .{exit_code});
+        if (elapsed_s >= 1.0) {
+            try IO.eprint("      Real time: {d:.3}s\n", .{elapsed_s});
+        } else {
+            try IO.eprint("      Real time: {d:.1}ms\n", .{elapsed_ms});
+        }
+    } else {
+        // Default format with tabs
+        try IO.eprint("\nreal\t{d:.3}s\n", .{elapsed_s});
+        try IO.eprint("user\t0.000s\n", .{});
+        try IO.eprint("sys\t0.000s\n", .{});
+    }
+
+    return exit_code;
+}
+
+/// watch - repeatedly execute a command
+pub fn watch(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
+    // watch [-n seconds] command [args...]
+    // Repeatedly execute a command and display output
+
+    if (cmd.args.len == 0) {
+        try IO.eprint("den: watch: missing command\n", .{});
+        try IO.eprint("den: watch: usage: watch [-n seconds] command [args...]\n", .{});
+        return 1;
+    }
+
+    var interval_seconds: u64 = 2; // default 2 seconds
+    var cmd_start: usize = 0;
+
+    // Parse -n flag if present
+    if (cmd.args.len >= 2 and std.mem.eql(u8, cmd.args[0], "-n")) {
+        interval_seconds = std.fmt.parseInt(u64, cmd.args[1], 10) catch {
+            try IO.eprint("den: watch: invalid interval: {s}\n", .{cmd.args[1]});
+            return 1;
+        };
+        cmd_start = 2;
+    }
+
+    if (cmd_start >= cmd.args.len) {
+        try IO.eprint("den: watch: missing command\n", .{});
+        return 1;
+    }
+
+    // Repeatedly execute the command
+    while (true) {
+        // Clear screen and show header
+        try IO.print("{s}", .{utils.ansi.Sequences.clear_screen});
+        try IO.print("{s}", .{utils.ansi.Sequences.cursor_home});
+        try IO.print("Every {d}s: {s}", .{ interval_seconds, cmd.args[cmd_start] });
+        for (cmd.args[cmd_start + 1 ..]) |arg| {
+            try IO.print(" {s}", .{arg});
+        }
+        try IO.print("\n\n", .{});
+
+        // Execute the command
+        var new_cmd = types.ParsedCommand{
+            .name = cmd.args[cmd_start],
+            .args = if (cmd_start + 1 < cmd.args.len) cmd.args[cmd_start + 1 ..] else &[_][]const u8{},
+            .redirections = cmd.redirections,
+        };
+
+        // Execute as external command
+        _ = ctx.executeExternalCmd(&new_cmd) catch |err| {
+            try IO.eprint("den: watch: error executing command: {}\n", .{err});
+        };
+
+        // Sleep for the interval
+        std.posix.nanosleep(interval_seconds, 0);
+    }
+
+    return 0;
+}
+
+/// parallel - stub for running commands in parallel
+pub fn parallel(cmd: *types.ParsedCommand) !i32 {
+    if (cmd.args.len == 0) {
+        try IO.eprint("den: parallel: missing command\nden: parallel: usage: parallel command [args...]\n", .{});
+        try IO.eprint("den: parallel: note: parallel is a stub implementation\n", .{});
+        return 1;
+    }
+
+    // Stub implementation - just notify the user
+    try IO.print("parallel: stub implementation - command would run in parallel\n", .{});
+    try IO.print("Command: {s}\n", .{cmd.args[0]});
+
+    return 0;
 }

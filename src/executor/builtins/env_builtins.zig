@@ -3,7 +3,13 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 
-/// Environment builtins: env, export, set, unset
+// C library extern declarations for environment manipulation
+const libc_env = struct {
+    extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+    extern "c" fn unsetenv(name: [*:0]const u8) c_int;
+};
+
+/// Environment builtins: env, export, set, unset, envCmd
 
 pub fn env(ctx: *BuiltinContext) !i32 {
     var iter = ctx.envIterator();
@@ -302,4 +308,208 @@ pub fn unset(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     return 0;
+}
+
+/// env command with VAR=value support
+/// Usage: env [-i] [-u name] [name=value]... [command [args]...]
+pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
+    // No args - just print environment
+    if (command.args.len == 0) {
+        return try env(ctx);
+    }
+
+    // Parse flags and VAR=value assignments
+    var ignore_env = false;
+    var unset_vars = std.ArrayList([]const u8){};
+    defer unset_vars.deinit(ctx.allocator);
+    var env_overrides = std.ArrayList(struct { key: []const u8, value: []const u8 }){};
+    defer env_overrides.deinit(ctx.allocator);
+
+    var cmd_start: ?usize = null;
+    var i: usize = 0;
+
+    while (i < command.args.len) : (i += 1) {
+        const arg = command.args[i];
+
+        if (arg.len > 0 and arg[0] == '-') {
+            // Parse flags
+            if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--ignore-environment")) {
+                ignore_env = true;
+            } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--unset")) {
+                // Next arg is the var name to unset
+                if (i + 1 < command.args.len) {
+                    i += 1;
+                    try unset_vars.append(ctx.allocator, command.args[i]);
+                } else {
+                    try IO.eprint("den: env: option requires an argument -- 'u'\n", .{});
+                    return 1;
+                }
+            } else if (std.mem.eql(u8, arg, "--")) {
+                // End of options
+                cmd_start = i + 1;
+                break;
+            } else if (std.mem.eql(u8, arg, "--help")) {
+                try IO.print("Usage: env [-i] [-u name] [name=value]... [command [args]...]\n", .{});
+                try IO.print("  -i, --ignore-environment  Start with empty environment\n", .{});
+                try IO.print("  -u, --unset=NAME          Unset variable NAME\n", .{});
+                return 0;
+            } else {
+                try IO.eprint("den: env: invalid option -- '{s}'\n", .{arg});
+                return 1;
+            }
+        } else if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
+            // VAR=value assignment (but only if key is valid - starts with letter/underscore)
+            if (eq_pos > 0 and (std.ascii.isAlphabetic(arg[0]) or arg[0] == '_')) {
+                const key = arg[0..eq_pos];
+                const value = arg[eq_pos + 1 ..];
+                try env_overrides.append(ctx.allocator, .{ .key = key, .value = value });
+            } else {
+                // Looks like a command (e.g., "/usr/bin/foo=bar" or "=foo")
+                cmd_start = i;
+                break;
+            }
+        } else {
+            // This is the command to execute
+            cmd_start = i;
+            break;
+        }
+    }
+
+    // If no command specified, just print modified environment
+    if (cmd_start == null) {
+        if (ignore_env) {
+            // Only print overrides
+            for (env_overrides.items) |override| {
+                try IO.print("{s}={s}\n", .{ override.key, override.value });
+            }
+        } else {
+            // Print modified environment
+            var iter = ctx.environment.iterator();
+            while (iter.next()) |entry| {
+                // Skip if unset
+                var is_unset = false;
+                for (unset_vars.items) |unset_var| {
+                    if (std.mem.eql(u8, entry.key_ptr.*, unset_var)) {
+                        is_unset = true;
+                        break;
+                    }
+                }
+                if (is_unset) continue;
+
+                // Check if overridden
+                var is_overridden = false;
+                for (env_overrides.items) |override| {
+                    if (std.mem.eql(u8, entry.key_ptr.*, override.key)) {
+                        is_overridden = true;
+                        break;
+                    }
+                }
+                if (!is_overridden) {
+                    try IO.print("{s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+                }
+            }
+            // Print overrides
+            for (env_overrides.items) |override| {
+                try IO.print("{s}={s}\n", .{ override.key, override.value });
+            }
+        }
+        return 0;
+    }
+
+    // Execute command with modified environment
+    // Save original OS env values to restore later
+    var saved_os_env = std.StringHashMap(?[]const u8).init(ctx.allocator);
+    defer {
+        // Free any allocated values
+        var iter = saved_os_env.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value_ptr.*) |v| {
+                ctx.allocator.free(v);
+            }
+        }
+        saved_os_env.deinit();
+    }
+
+    // Apply unsets to OS environment
+    for (unset_vars.items) |unset_var| {
+        // Save original OS env value
+        const original = std.posix.getenv(unset_var);
+        if (original) |orig| {
+            try saved_os_env.put(unset_var, try ctx.allocator.dupe(u8, orig));
+        } else {
+            try saved_os_env.put(unset_var, null);
+        }
+        // Unset in OS environment
+        const unset_var_z = try ctx.allocator.dupeZ(u8, unset_var);
+        defer ctx.allocator.free(unset_var_z);
+        _ = libc_env.unsetenv(unset_var_z.ptr);
+    }
+
+    // Apply overrides to OS environment
+    for (env_overrides.items) |override| {
+        // Save original OS env value
+        if (!saved_os_env.contains(override.key)) {
+            const original = std.posix.getenv(override.key);
+            if (original) |orig| {
+                try saved_os_env.put(override.key, try ctx.allocator.dupe(u8, orig));
+            } else {
+                try saved_os_env.put(override.key, null);
+            }
+        }
+        // Set in OS environment
+        const key_z = try ctx.allocator.dupeZ(u8, override.key);
+        defer ctx.allocator.free(key_z);
+        const value_z = try ctx.allocator.dupeZ(u8, override.value);
+        defer ctx.allocator.free(value_z);
+        _ = libc_env.setenv(key_z.ptr, value_z.ptr, 1);
+    }
+
+    // Build new command from remaining args
+    const start = cmd_start.?; // We know it's set if we got here
+
+    // Reconstruct the full command string
+    var cmd_buf = std.ArrayList(u8){};
+    defer cmd_buf.deinit(ctx.allocator);
+
+    for (command.args[start..]) |arg| {
+        if (cmd_buf.items.len > 0) {
+            try cmd_buf.append(ctx.allocator, ' ');
+        }
+        // Quote args with spaces
+        if (std.mem.indexOfScalar(u8, arg, ' ') != null) {
+            try cmd_buf.append(ctx.allocator, '"');
+            try cmd_buf.appendSlice(ctx.allocator, arg);
+            try cmd_buf.append(ctx.allocator, '"');
+        } else {
+            try cmd_buf.appendSlice(ctx.allocator, arg);
+        }
+    }
+
+    // Execute the command using shell's executeCommand
+    ctx.executeShellCommand(cmd_buf.items);
+    const result = ctx.getShellExitCode();
+
+    // Restore OS environment
+    restoreOsEnv(ctx.allocator, &saved_os_env);
+
+    return result;
+}
+
+fn restoreOsEnv(allocator: std.mem.Allocator, saved_os_env: *std.StringHashMap(?[]const u8)) void {
+    var iter = saved_os_env.iterator();
+    while (iter.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const key_z = allocator.dupeZ(u8, key) catch continue;
+        defer allocator.free(key_z);
+
+        if (entry.value_ptr.*) |original_value| {
+            // Restore original value
+            const value_z = allocator.dupeZ(u8, original_value) catch continue;
+            defer allocator.free(value_z);
+            _ = libc_env.setenv(key_z.ptr, value_z.ptr, 1);
+        } else {
+            // Was not set originally, unset it
+            _ = libc_env.unsetenv(key_z.ptr);
+        }
+    }
 }
