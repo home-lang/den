@@ -1810,7 +1810,7 @@ pub const Shell = struct {
 
     /// Builtin: history - show command history
     fn builtinHistory(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try History.printBuiltin(self.history[0..self.history_max], self.history_count, cmd);
+        try shell_mod.builtinHistory(self, cmd);
     }
 
     /// Builtin: complete - manage programmable completions (bash-style)
@@ -2129,267 +2129,23 @@ pub const Shell = struct {
     /// Builtin: alias - define or list aliases
     /// Supports -s flag for suffix aliases (zsh-style): alias -s ts='bun'
     fn builtinAlias(self: *Shell, cmd: *types.ParsedCommand) !void {
-        // Check for -s flag (suffix alias)
-        var is_suffix_alias = false;
-        var args_start: usize = 0;
-        if (cmd.args.len > 0 and std.mem.eql(u8, cmd.args[0], "-s")) {
-            is_suffix_alias = true;
-            args_start = 1;
-        }
-
-        const effective_args = cmd.args[args_start..];
-
-        if (is_suffix_alias) {
-            // Handle suffix aliases
-            if (effective_args.len == 0) {
-                // List all suffix aliases
-                var iter = self.suffix_aliases.iterator();
-                while (iter.next()) |entry| {
-                    try IO.print("alias -s {s}='{s}'\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-                }
-            } else {
-                // Parse suffix alias definition: extension=command
-                for (effective_args) |arg| {
-                    if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
-                        const extension = arg[0..eq_pos];
-                        const value = arg[eq_pos + 1 ..];
-
-                        // Remove quotes if present
-                        const clean_value = if (value.len >= 2 and
-                            ((value[0] == '\'' and value[value.len - 1] == '\'') or
-                                (value[0] == '"' and value[value.len - 1] == '"')))
-                            value[1 .. value.len - 1]
-                        else
-                            value;
-
-                        // Store suffix alias
-                        const value_copy = try self.allocator.dupe(u8, clean_value);
-
-                        // Free old key and value if exists
-                        if (self.suffix_aliases.fetchRemove(extension)) |old_kv| {
-                            self.allocator.free(old_kv.key);
-                            self.allocator.free(old_kv.value);
-                        }
-
-                        const ext_copy = try self.allocator.dupe(u8, extension);
-                        try self.suffix_aliases.put(ext_copy, value_copy);
-                    } else {
-                        // Show specific suffix alias
-                        if (self.suffix_aliases.get(arg)) |value| {
-                            try IO.print("alias -s {s}='{s}'\n", .{ arg, value });
-                        } else {
-                            try IO.eprint("den: alias: suffix alias {s}: not found\n", .{arg});
-                        }
-                    }
-                }
-            }
-        } else {
-            // Handle regular aliases
-            if (effective_args.len == 0) {
-                // List all aliases
-                var iter = self.aliases.iterator();
-                while (iter.next()) |entry| {
-                    try IO.print("alias {s}='{s}'\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-                }
-            } else {
-                // Parse alias definition: name=value
-                for (effective_args) |arg| {
-                    if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
-                        const name = arg[0..eq_pos];
-                        const value = arg[eq_pos + 1 ..];
-
-                        // Remove quotes if present
-                        const clean_value = if (value.len >= 2 and
-                            ((value[0] == '\'' and value[value.len - 1] == '\'') or
-                                (value[0] == '"' and value[value.len - 1] == '"')))
-                            value[1 .. value.len - 1]
-                        else
-                            value;
-
-                        // Store alias
-                        const value_copy = try self.allocator.dupe(u8, clean_value);
-
-                        // Free old key and value if exists
-                        if (self.aliases.fetchRemove(name)) |old_kv| {
-                            self.allocator.free(old_kv.key);
-                            self.allocator.free(old_kv.value);
-                        }
-
-                        const name_copy = try self.allocator.dupe(u8, name);
-                        try self.aliases.put(name_copy, value_copy);
-                    } else {
-                        // Show specific alias
-                        if (self.aliases.get(arg)) |value| {
-                            try IO.print("alias {s}='{s}'\n", .{ arg, value });
-                        } else {
-                            try IO.eprint("den: alias: {s}: not found\n", .{arg});
-                        }
-                    }
-                }
-            }
-        }
+        try shell_mod.builtinAlias(self, cmd);
     }
 
     /// Builtin: unalias - remove alias
     /// Supports -s flag for suffix aliases: unalias -s ts
     fn builtinUnalias(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            try IO.eprint("den: unalias: usage: unalias [-s] name [name ...]\n", .{});
-            return;
-        }
-
-        // Check for -s flag (suffix alias)
-        var is_suffix_alias = false;
-        var args_start: usize = 0;
-        if (cmd.args.len > 0 and std.mem.eql(u8, cmd.args[0], "-s")) {
-            is_suffix_alias = true;
-            args_start = 1;
-        }
-
-        const effective_args = cmd.args[args_start..];
-
-        if (effective_args.len == 0) {
-            try IO.eprint("den: unalias: usage: unalias [-s] name [name ...]\n", .{});
-            return;
-        }
-
-        if (is_suffix_alias) {
-            for (effective_args) |extension| {
-                if (self.suffix_aliases.fetchRemove(extension)) |kv| {
-                    self.allocator.free(kv.key);
-                    self.allocator.free(kv.value);
-                } else {
-                    try IO.eprint("den: unalias: suffix alias {s}: not found\n", .{extension});
-                }
-            }
-        } else {
-            for (effective_args) |name| {
-                if (self.aliases.fetchRemove(name)) |kv| {
-                    self.allocator.free(kv.key);
-                    self.allocator.free(kv.value);
-                } else {
-                    try IO.eprint("den: unalias: {s}: not found\n", .{name});
-                }
-            }
-        }
+        try shell_mod.builtinUnalias(self, cmd);
     }
 
     /// Builtin: type - identify command type
     fn builtinType(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            try IO.eprint("den: type: usage: type name [name ...]\n", .{});
-            return;
-        }
-
-        const builtins = [_][]const u8{
-            "cd",     "pwd",     "echo",     "exit",  "env",
-            "export", "set",     "unset",    "jobs",  "fg",
-            "bg",     "history", "complete", "alias", "unalias",
-            "type",   "which",
-        };
-
-        for (cmd.args) |name| {
-            // Check if it's an alias
-            if (self.aliases.get(name)) |alias_value| {
-                try IO.print("{s} is aliased to `{s}'\n", .{ name, alias_value });
-                continue;
-            }
-
-            // Check if it's a suffix alias (looks like a file with matching extension)
-            if (std.mem.lastIndexOfScalar(u8, name, '.')) |dot_pos| {
-                if (dot_pos < name.len - 1) {
-                    const extension = name[dot_pos + 1 ..];
-                    if (self.suffix_aliases.get(extension)) |suffix_cmd| {
-                        // Check if file exists
-                        std.fs.cwd().access(name, .{}) catch {
-                            // File doesn't exist, continue to other checks
-                            try IO.print("{s} would use suffix alias (if file existed): {s} {s}\n", .{ name, suffix_cmd, name });
-                            continue;
-                        };
-                        try IO.print("{s} is handled by suffix alias: {s} {s}\n", .{ name, suffix_cmd, name });
-                        continue;
-                    }
-                }
-            }
-
-            // Check if it's a builtin
-            var is_builtin = false;
-            for (builtins) |builtin_name| {
-                if (std.mem.eql(u8, name, builtin_name)) {
-                    try IO.print("{s} is a shell builtin\n", .{name});
-                    is_builtin = true;
-                    break;
-                }
-            }
-            if (is_builtin) continue;
-
-            // Check if it's in PATH
-            var completion = Completion.init(self.allocator);
-            const matches = try completion.completeCommand(name);
-            defer {
-                for (matches) |match| {
-                    self.allocator.free(match);
-                }
-                self.allocator.free(matches);
-            }
-
-            if (matches.len > 0) {
-                // Find exact match
-                for (matches) |match| {
-                    if (std.mem.eql(u8, match, name)) {
-                        // Find full path
-                        const path = getenv("PATH") orelse "";
-                        var path_iter = std.mem.splitScalar(u8, path, ':');
-                        while (path_iter.next()) |dir_path| {
-                            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                            const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, name }) catch continue;
-
-                            // Check if file exists
-                            std.fs.cwd().access(full_path, .{}) catch continue;
-                            try IO.print("{s} is {s}\n", .{ name, full_path });
-                            break;
-                        }
-                        break;
-                    }
-                }
-            } else {
-                try IO.eprint("den: type: {s}: not found\n", .{name});
-            }
-        }
+        try shell_mod.builtinType(self, cmd);
     }
 
     /// Builtin: which - locate command in PATH
     fn builtinWhich(self: *Shell, cmd: *types.ParsedCommand) !void {
-        _ = self;
-        if (cmd.args.len == 0) {
-            try IO.eprint("den: which: usage: which name [name ...]\n", .{});
-            return;
-        }
-
-        for (cmd.args) |name| {
-            const path = getenv("PATH") orelse "";
-            var path_iter = std.mem.splitScalar(u8, path, ':');
-            var found = false;
-
-            while (path_iter.next()) |dir_path| {
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, name }) catch continue;
-
-                // Check if file exists and is executable
-                const stat = std.fs.cwd().statFile(full_path) catch continue;
-                const is_executable = (stat.mode & 0o111) != 0;
-
-                if (is_executable) {
-                    try IO.print("{s}\n", .{full_path});
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
-                try IO.eprint("den: which: {s}: not found\n", .{name});
-            }
-        }
+        try shell_mod.builtinWhich(self, cmd);
     }
 
     /// Builtin: source - execute commands from file
@@ -3392,161 +3148,27 @@ pub const Shell = struct {
 
     /// Builtin: sleep - pause for specified seconds
     fn builtinSleep(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            try IO.eprint("den: sleep: missing operand\n", .{});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        const seconds = std.fmt.parseInt(u32, cmd.args[0], 10) catch {
-            try IO.eprint("den: sleep: invalid time interval '{s}'\n", .{cmd.args[0]});
-            self.last_exit_code = 1;
-            return;
-        };
-
-        std.posix.nanosleep(seconds, 0);
-        self.last_exit_code = 0;
+        try shell_mod.builtinSleep(self, cmd);
     }
 
     /// Builtin: help - show available builtins
     fn builtinHelp(self: *Shell, cmd: *types.ParsedCommand) !void {
-        _ = self;
-        _ = cmd;
-
-        try IO.print("Den Shell - Built-in Commands\n\n", .{});
-        try IO.print("Core Commands:\n", .{});
-        try IO.print("  exit              Exit the shell\n", .{});
-        try IO.print("  help              Show this help message\n", .{});
-        try IO.print("  history [n]       Show command history\n", .{});
-        try IO.print("\nFile System:\n", .{});
-        try IO.print("  cd [dir]          Change directory\n", .{});
-        try IO.print("  pwd               Print working directory\n", .{});
-        try IO.print("  pushd [dir]       Push directory to stack and cd\n", .{});
-        try IO.print("  popd              Pop directory from stack and cd\n", .{});
-        try IO.print("  dirs              Show directory stack\n", .{});
-        try IO.print("\nEnvironment:\n", .{});
-        try IO.print("  env               Show environment variables\n", .{});
-        try IO.print("  export VAR=val    Set and export variable\n", .{});
-        try IO.print("  set VAR=val       Set shell variable\n", .{});
-        try IO.print("  unset VAR         Unset variable\n", .{});
-        try IO.print("\nAliases:\n", .{});
-        try IO.print("  alias [name=val]  Define or list aliases\n", .{});
-        try IO.print("  unalias name      Remove alias\n", .{});
-        try IO.print("\nIntrospection:\n", .{});
-        try IO.print("  type name         Identify command type\n", .{});
-        try IO.print("  which name        Locate command in PATH\n", .{});
-        try IO.print("  complete [-c|-f] prefix  Show completions\n", .{});
-        try IO.print("\nJob Control:\n", .{});
-        try IO.print("  jobs              List background jobs\n", .{});
-        try IO.print("  fg [job_id]       Bring job to foreground\n", .{});
-        try IO.print("  bg [job_id]       Continue job in background\n", .{});
-        try IO.print("\nScripting:\n", .{});
-        try IO.print("  source file       Execute commands from file\n", .{});
-        try IO.print("  read var          Read line into variable\n", .{});
-        try IO.print("  test expr         Evaluate conditional\n", .{});
-        try IO.print("  [ expr ]          Evaluate conditional\n", .{});
-        try IO.print("  true              Return success (exit code 0)\n", .{});
-        try IO.print("  false             Return failure (exit code 1)\n", .{});
-        try IO.print("  sleep n           Pause for n seconds\n", .{});
-        try IO.print("  eval args         Execute arguments as command\n", .{});
-        try IO.print("  command cmd       Execute bypassing aliases\n", .{});
-        try IO.print("  shift [n]         Shift positional parameters\n", .{});
-        try IO.print("\nPath Utilities:\n", .{});
-        try IO.print("  basename path     Extract filename from path\n", .{});
-        try IO.print("  dirname path      Extract directory from path\n", .{});
-        try IO.print("  realpath path     Resolve absolute path\n", .{});
-        try IO.print("\nSystem Info:\n", .{});
-        try IO.print("  uname [-a]        Print system information\n", .{});
-        try IO.print("  whoami            Print current username\n", .{});
-        try IO.print("  umask [mode]      Get/set file creation mask\n", .{});
-        try IO.print("\nPerformance:\n", .{});
-        try IO.print("  time command      Measure execution time\n", .{});
-        try IO.print("  hash [-r] [cmd]   Command path caching\n", .{});
-        try IO.print("\nOutput:\n", .{});
-        try IO.print("  echo [args...]    Print arguments\n", .{});
-        try IO.print("  printf fmt args   Formatted output\n", .{});
-        try IO.print("  clear             Clear terminal screen\n", .{});
-        try IO.print("\nScript Control:\n", .{});
-        try IO.print("  return [n]        Return from function/script\n", .{});
-        try IO.print("  break [n]         Exit from loop\n", .{});
-        try IO.print("  continue [n]      Skip to next loop iteration\n", .{});
-        try IO.print("  local VAR=val     Declare local variable\n", .{});
-        try IO.print("  declare VAR=val   Declare variable with attributes\n", .{});
-        try IO.print("  readonly VAR=val  Declare readonly variable\n", .{});
-        try IO.print("\nJob Management:\n", .{});
-        try IO.print("  kill [-s sig] pid Send signal to process/job\n", .{});
-        try IO.print("  wait [pid|job]    Wait for job completion\n", .{});
-        try IO.print("  disown [job]      Remove job from table\n", .{});
-        try IO.print("\nAdvanced Execution:\n", .{});
-        try IO.print("  exec command      Replace shell with command\n", .{});
-        try IO.print("  builtin cmd       Execute builtin bypassing functions\n", .{});
-        try IO.print("  trap cmd sig      Handle signals (stub)\n", .{});
-        try IO.print("  getopts spec var  Parse command options (stub)\n", .{});
-        try IO.print("  timeout [-s sig] [-k dur] dur cmd  Execute with timeout\n", .{});
-        try IO.print("  times             Display process times\n", .{});
-        try IO.print("\nTotal: 54 builtin commands available\n", .{});
-        try IO.print("For more help, use 'man bash' or visit docs.den.sh\n", .{});
+        try shell_mod.builtinHelp(self, cmd);
     }
 
     /// Builtin: basename - extract filename from path
     fn builtinBasename(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            try IO.eprint("den: basename: missing operand\n", .{});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        const path = cmd.args[0];
-        const base = std.fs.path.basename(path);
-
-        // Handle optional suffix removal
-        if (cmd.args.len > 1) {
-            const suffix = cmd.args[1];
-            if (std.mem.endsWith(u8, base, suffix)) {
-                const trimmed = base[0 .. base.len - suffix.len];
-                try IO.print("{s}\n", .{trimmed});
-            } else {
-                try IO.print("{s}\n", .{base});
-            }
-        } else {
-            try IO.print("{s}\n", .{base});
-        }
-
-        self.last_exit_code = 0;
+        try shell_mod.builtinBasename(self, cmd);
     }
 
     /// Builtin: dirname - extract directory from path
     fn builtinDirname(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            try IO.eprint("den: dirname: missing operand\n", .{});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        const path = cmd.args[0];
-        const dir = std.fs.path.dirname(path) orelse ".";
-        try IO.print("{s}\n", .{dir});
-        self.last_exit_code = 0;
+        try shell_mod.builtinDirname(self, cmd);
     }
 
     /// Builtin: realpath - resolve absolute path
     fn builtinRealpath(self: *Shell, cmd: *types.ParsedCommand) !void {
-        if (cmd.args.len == 0) {
-            try IO.eprint("den: realpath: missing operand\n", .{});
-            self.last_exit_code = 1;
-            return;
-        }
-
-        const path = cmd.args[0];
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
-        const real = std.fs.cwd().realpath(path, &buf) catch |err| {
-            try IO.eprint("den: realpath: {s}: {}\n", .{ path, err });
-            self.last_exit_code = 1;
-            return;
-        };
-
-        try IO.print("{s}\n", .{real});
-        self.last_exit_code = 0;
+        try shell_mod.builtinRealpath(self, cmd);
     }
 
     /// Builtin: command - run command bypassing aliases/builtins
@@ -3832,58 +3454,17 @@ pub const Shell = struct {
 
     /// Builtin: clear - clear the terminal screen
     fn builtinClear(self: *Shell, cmd: *types.ParsedCommand) !void {
-        _ = self;
-        _ = cmd;
-        // ANSI escape sequence to clear screen and move cursor to top-left
-        try IO.print("\x1b[2J\x1b[H", .{});
+        try shell_mod.builtinClear(self, cmd);
     }
 
     /// Builtin: uname - print system information
     fn builtinUname(self: *Shell, cmd: *types.ParsedCommand) !void {
-        _ = self;
-
-        const show_all = cmd.args.len > 0 and std.mem.eql(u8, cmd.args[0], "-a");
-        const show_system = cmd.args.len == 0 or show_all or
-            (cmd.args.len > 0 and std.mem.eql(u8, cmd.args[0], "-s"));
-
-        if (show_system or show_all) {
-            if (builtin.os.tag == .windows) {
-                // Windows: simple system identification
-                try IO.print("Windows", .{});
-                if (show_all) {
-                    const machine = if (builtin.cpu.arch == .x86_64) "x86_64" else if (builtin.cpu.arch == .aarch64) "ARM64" else "unknown";
-                    try IO.print(" {s} {s} {s} {s}", .{ "localhost", "NT", "10.0", machine });
-                }
-            } else {
-                // POSIX: Get system name from uname
-                var utsname: std.posix.utsname = undefined;
-                const result = std.c.uname(&utsname);
-                if (result == 0) {
-                    const sysname = std.mem.sliceTo(&utsname.sysname, 0);
-                    try IO.print("{s}", .{sysname});
-
-                    if (show_all) {
-                        const nodename = std.mem.sliceTo(&utsname.nodename, 0);
-                        const release = std.mem.sliceTo(&utsname.release, 0);
-                        const version = std.mem.sliceTo(&utsname.version, 0);
-                        const machine = std.mem.sliceTo(&utsname.machine, 0);
-                        try IO.print(" {s} {s} {s} {s}", .{ nodename, release, version, machine });
-                    }
-                }
-            }
-            try IO.print("\n", .{});
-        }
+        try shell_mod.builtinUname(self, cmd);
     }
 
     /// Builtin: whoami - print current username
     fn builtinWhoami(self: *Shell, cmd: *types.ParsedCommand) !void {
-        _ = self;
-        _ = cmd;
-
-        const user = getenv("USER") orelse
-            getenv("LOGNAME") orelse
-            "unknown";
-        try IO.print("{s}\n", .{user});
+        try shell_mod.builtinWhoami(self, cmd);
     }
 
     /// Builtin: hash - remember/display command paths (simplified)
@@ -3984,49 +3565,19 @@ pub const Shell = struct {
 
     /// Builtin: return - return from function or script
     fn builtinReturn(self: *Shell, cmd: *types.ParsedCommand) !void {
-        const code = if (cmd.args.len > 0)
-            std.fmt.parseInt(i32, cmd.args[0], 10) catch 0
-        else
-            self.last_exit_code;
-
-        // Check if we're inside a function
-        if (self.function_manager.currentFrame() != null) {
-            // Signal return from function
-            self.function_manager.requestReturn(code) catch {
-                try IO.eprint("return: can only return from a function or sourced script\n", .{});
-                self.last_exit_code = 1;
-                return;
-            };
-        }
-
-        // Set exit code
-        self.last_exit_code = code;
+        try shell_mod.builtinReturn(self, cmd);
     }
 
     /// Builtin: break - exit from loop
     /// Supports `break N` to break out of N nested loops
     fn builtinBreak(self: *Shell, cmd: *types.ParsedCommand) !void {
-        const levels = if (cmd.args.len > 0)
-            std.fmt.parseInt(u32, cmd.args[0], 10) catch 1
-        else
-            1;
-
-        // Signal break to the loop with the number of levels to break
-        self.break_levels = if (levels > 0) levels else 1;
-        self.last_exit_code = 0;
+        try shell_mod.builtinBreak(self, cmd);
     }
 
     /// Builtin: continue - skip to next loop iteration
     /// Supports `continue N` to continue the Nth enclosing loop
     fn builtinContinue(self: *Shell, cmd: *types.ParsedCommand) !void {
-        const levels = if (cmd.args.len > 0)
-            std.fmt.parseInt(u32, cmd.args[0], 10) catch 1
-        else
-            1;
-
-        // Signal continue to the loop with the number of levels
-        self.continue_levels = if (levels > 0) levels else 1;
-        self.last_exit_code = 0;
+        try shell_mod.builtinContinue(self, cmd);
     }
 
     /// Builtin: local - declare local variables (function scope)
