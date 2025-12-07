@@ -342,6 +342,18 @@ pub const BuiltinContext = struct {
         return error.NoExecutor;
     }
 
+    /// Execute a shell command string (for eval)
+    pub fn executeShellCommand(self: *BuiltinContext, command_str: []const u8) !void {
+        const shell_ref = self.shell orelse return error.NoShellContext;
+        _ = shell_ref.executeCommand(command_str) catch {};
+    }
+
+    /// Get the shell's last exit code
+    pub fn getShellExitCode(self: *const BuiltinContext) i32 {
+        const shell_ref = self.shell orelse return 0;
+        return shell_ref.last_exit_code;
+    }
+
     // ============ Signal Handlers (trap) ============
 
     /// Get signal handler for a signal name
@@ -597,6 +609,45 @@ pub const BuiltinContext = struct {
         if (self.shell) |shell_ref| {
             shell_ref.option_pipefail = value;
         }
+    }
+
+    // ============ Function Manager Operations ============
+
+    /// Request return from current function with given exit code
+    pub fn requestFunctionReturn(self: *BuiltinContext, return_code: i32) !void {
+        const shell_ref = self.shell orelse return error.NoShellContext;
+        try shell_ref.function_manager.requestReturn(return_code);
+    }
+
+    /// Set a local variable in current function scope
+    pub fn setLocalVariable(self: *BuiltinContext, name: []const u8, value: []const u8) !void {
+        const shell_ref = self.shell orelse return error.NoShellContext;
+        try shell_ref.function_manager.setLocal(name, value);
+    }
+
+    /// Get current function frame's local variables iterator
+    pub fn localVariablesIterator(self: *BuiltinContext) ?*std.StringHashMap([]const u8).Iterator {
+        const shell_ref = self.shell orelse return null;
+        if (shell_ref.function_manager.currentFrame()) |frame| {
+            _ = frame;
+            return null; // Can't return iterator to temporary
+        }
+        return null;
+    }
+
+    /// Check if currently in a function context
+    pub fn hasCurrentFrame(self: *const BuiltinContext) bool {
+        const shell_ref = self.shell orelse return false;
+        return shell_ref.function_manager.currentFrame() != null;
+    }
+
+    /// Get local variables from current frame
+    pub fn getCurrentFrameLocals(self: *BuiltinContext) ?*std.StringHashMap([]const u8) {
+        const shell_ref = self.shell orelse return null;
+        if (shell_ref.function_manager.currentFrame()) |frame| {
+            return &frame.local_vars;
+        }
+        return null;
     }
 };
 

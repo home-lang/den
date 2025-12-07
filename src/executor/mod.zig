@@ -809,7 +809,7 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "umask")) {
             return try builtins.process_builtins.umask(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "getopts")) {
-            return try self.builtinGetopts(command);
+            return try builtins.state_builtins.getopts(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "clear")) {
             return try utilities.clear(command);
         } else if (std.mem.eql(u8, command.name, "time")) {
@@ -859,9 +859,9 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "web")) {
             return try utilities.web(command);
         } else if (std.mem.eql(u8, command.name, "return")) {
-            return try self.builtinReturn(command);
+            return try builtins.state_builtins.returnBuiltin(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "local")) {
-            return try self.builtinLocal(command);
+            return try builtins.state_builtins.local(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "copyssh")) {
             return try builtins.macos_builtins.copyssh(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "reloaddns")) {
@@ -1362,83 +1362,6 @@ pub const Executor = struct {
         return try self.executeBuiltin(&builtin_cmd);
     }
 
-    fn builtinGetopts(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: getopts: shell context not available\n", .{});
-            return 1;
-        };
-
-        // getopts optstring name [args...]
-        if (command.args.len < 2) {
-            try IO.eprint("den: getopts: usage: getopts optstring name [args]\n", .{});
-            return 2;
-        }
-
-        const optstring = command.args[0];
-        const var_name = command.args[1];
-        const params = if (command.args.len > 2) command.args[2..] else &[_][]const u8{};
-
-        // Get OPTIND from environment (defaults to 1)
-        const optind_str = shell_ref.environment.get("OPTIND") orelse "1";
-        const optind = std.fmt.parseInt(usize, optind_str, 10) catch 1;
-
-        // Check if we're past the end of params
-        if (optind > params.len) {
-            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
-            return 1;
-        }
-
-        const current = params[optind - 1];
-
-        // Check if current param doesn't start with '-' or is just '-'
-        if (current.len == 0 or current[0] != '-' or std.mem.eql(u8, current, "-")) {
-            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
-            return 1;
-        }
-
-        // Handle '--' (end of options)
-        if (std.mem.eql(u8, current, "--")) {
-            const new_optind = try std.fmt.allocPrint(self.allocator, "{d}", .{optind + 1});
-            try shell_ref.environment.put("OPTIND", new_optind);
-            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
-            return 1;
-        }
-
-        // Extract the flag (first character after '-')
-        if (current.len < 2) {
-            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
-            return 1;
-        }
-
-        const flag = current[1..2];
-
-        // Check if this flag expects an argument (has ':' after it in optstring)
-        var expects_arg = false;
-        for (optstring, 0..) |c, i| {
-            if (c == flag[0] and i + 1 < optstring.len and optstring[i + 1] == ':') {
-                expects_arg = true;
-                break;
-            }
-        }
-
-        // Set the variable to the flag character
-        try shell_ref.environment.put(var_name, try self.allocator.dupe(u8, flag));
-
-        // Handle argument if needed
-        if (expects_arg) {
-            const arg_value = if (optind < params.len) params[optind] else "";
-            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, arg_value));
-            const new_optind = try std.fmt.allocPrint(self.allocator, "{d}", .{optind + 2});
-            try shell_ref.environment.put("OPTIND", new_optind);
-        } else {
-            try shell_ref.environment.put("OPTARG", try self.allocator.dupe(u8, ""));
-            const new_optind = try std.fmt.allocPrint(self.allocator, "{d}", .{optind + 1});
-            try shell_ref.environment.put("OPTIND", new_optind);
-        }
-
-        return 0;
-    }
-
     fn builtinTime(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Parse flags
         var posix_format = false; // -p: POSIX format output
@@ -1903,69 +1826,6 @@ pub const Executor = struct {
         // Stub implementation - just notify the user
         try IO.print("parallel: stub implementation - command would run in parallel\n", .{});
         try IO.print("Command: {s}\n", .{command.args[0]});
-
-        return 0;
-    }
-
-    fn builtinReturn(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const shell = self.shell orelse {
-            try IO.eprint("den: return: can only return from a function or sourced script\n", .{});
-            return 1;
-        };
-
-        // Parse return code (default 0)
-        var return_code: i32 = 0;
-        if (command.args.len > 0) {
-            return_code = std.fmt.parseInt(i32, command.args[0], 10) catch {
-                try IO.eprint("den: return: {s}: numeric argument required\n", .{command.args[0]});
-                return 2;
-            };
-        }
-
-        // Request return from current function
-        shell.function_manager.requestReturn(return_code) catch {
-            try IO.eprint("den: return: can only return from a function or sourced script\n", .{});
-            return 1;
-        };
-
-        return return_code;
-    }
-
-    fn builtinLocal(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const shell = self.shell orelse {
-            try IO.eprint("den: local: can only be used in a function\n", .{});
-            return 1;
-        };
-
-        if (command.args.len == 0) {
-            // List local variables
-            if (shell.function_manager.currentFrame()) |frame| {
-                var iter = frame.local_vars.iterator();
-                while (iter.next()) |entry| {
-                    try IO.print("{s}={s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-                }
-            }
-            return 0;
-        }
-
-        // Set local variables
-        for (command.args) |arg| {
-            // Parse name=value or just name
-            if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
-                const name = arg[0..eq_pos];
-                const value = arg[eq_pos + 1 ..];
-                shell.function_manager.setLocal(name, value) catch {
-                    try IO.eprint("den: local: {s}: can only be used in a function\n", .{name});
-                    return 1;
-                };
-            } else {
-                // Just declare as empty
-                shell.function_manager.setLocal(arg, "") catch {
-                    try IO.eprint("den: local: {s}: can only be used in a function\n", .{arg});
-                    return 1;
-                };
-            }
-        }
 
         return 0;
     }
