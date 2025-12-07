@@ -22,6 +22,10 @@ pub const misc_builtins = @import("misc_builtins.zig");
 pub const eval_builtins = @import("eval_builtins.zig");
 pub const loop_execution = @import("loop_execution.zig");
 pub const function_definition = @import("function_definition.zig");
+pub const prompt_context = @import("prompt_context.zig");
+pub const command_expansion = @import("command_expansion.zig");
+pub const variable_handling = @import("variable_handling.zig");
+pub const command_execution = @import("command_execution.zig");
 
 // Re-export version detection functions for convenience
 pub const detectPackageVersion = version.detectPackageVersion;
@@ -122,3 +126,24 @@ pub const checkFunctionDefinitionStart = function_definition.checkFunctionDefini
 pub const handleMultilineContinuation = function_definition.handleMultilineContinuation;
 pub const finishFunctionDefinition = function_definition.finishFunctionDefinition;
 pub const resetMultilineState = function_definition.resetMultilineState;
+
+// Re-export prompt context functions
+pub const renderPrompt = prompt_context.renderPrompt;
+pub const getPromptString = prompt_context.getPromptString;
+pub const updatePromptContext = prompt_context.updatePromptContext;
+
+// Re-export command expansion functions
+pub const expandCommandChain = command_expansion.expandCommandChain;
+pub const expandAliases = command_expansion.expandAliases;
+
+// Re-export variable handling functions
+pub const resolveNameref = variable_handling.resolveNameref;
+pub const getVariableValue = variable_handling.getVariableValue;
+pub const setVariableValue = variable_handling.setVariableValue;
+pub const isArrayAssignment = variable_handling.isArrayAssignment;
+pub const executeArrayAssignment = variable_handling.executeArrayAssignment;
+
+// Re-export command execution functions
+pub const tryFastPath = command_execution.tryFastPath;
+pub const executeErrTrap = command_execution.executeErrTrap;
+pub const executeInBackground = command_execution.executeInBackground;

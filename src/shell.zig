@@ -766,152 +766,15 @@ pub const Shell = struct {
     }
 
     fn renderPrompt(self: *Shell) !void {
-        const prompt = try self.getPromptString();
-        defer self.allocator.free(prompt);
-        try IO.print("{s}", .{prompt});
+        try shell_mod.renderPrompt(self);
     }
 
-    fn getPromptString(self: *const Shell) ![]const u8 {
-        // Initialize prompt renderer if not already done
-        var self_mut = @constCast(self);
-        if (self_mut.prompt_renderer == null) {
-            const template = try PromptTemplate.initDefault(self.allocator);
-            self_mut.prompt_renderer = try PromptRenderer.init(self.allocator, template);
-        }
-
-        // Update prompt context with current information
-        try self_mut.updatePromptContext();
-
-        // Render prompt
-        const term_size = ansi.getTerminalSize() catch ansi.TerminalSize{ .rows = 24, .cols = 80 };
-        return try self_mut.prompt_renderer.?.render(&self_mut.prompt_context, term_size.cols);
+    fn getPromptString(self: *Shell) ![]const u8 {
+        return try shell_mod.getPromptString(self);
     }
 
     fn updatePromptContext(self: *Shell) !void {
-        var sysinfo = SystemInfo.init(self.allocator);
-
-        // Get current directory
-        const cwd = try sysinfo.getCurrentDir();
-        defer self.allocator.free(cwd);
-
-        // Get home directory
-        const home = try sysinfo.getHomeDir();
-
-        // Get username
-        const username = try sysinfo.getUsername();
-        defer self.allocator.free(username);
-
-        // Get hostname
-        const hostname = try sysinfo.getHostname();
-        defer self.allocator.free(hostname);
-
-        // Update context
-        self.prompt_context.current_dir = try self.allocator.dupe(u8, cwd);
-        if (self.prompt_context.home_dir) |old_home| {
-            self.allocator.free(old_home);
-        }
-        self.prompt_context.home_dir = home;
-
-        // Free old username/hostname if they exist
-        if (self.prompt_context.username.len > 0) {
-            self.allocator.free(self.prompt_context.username);
-        }
-        self.prompt_context.username = try self.allocator.dupe(u8, username);
-
-        if (self.prompt_context.hostname.len > 0) {
-            self.allocator.free(self.prompt_context.hostname);
-        }
-        self.prompt_context.hostname = try self.allocator.dupe(u8, hostname);
-
-        self.prompt_context.is_root = sysinfo.isRoot();
-        self.prompt_context.last_exit_code = self.last_exit_code;
-
-        // Get git info asynchronously (with caching and timeout)
-        var git_info = try self.async_git.getInfo(cwd);
-        defer git_info.deinit();
-
-        if (self.prompt_context.git_branch) |old_branch| {
-            self.allocator.free(old_branch);
-        }
-        self.prompt_context.git_branch = if (git_info.branch) |branch|
-            try self.allocator.dupe(u8, branch)
-        else
-            null;
-
-        self.prompt_context.git_dirty = git_info.is_dirty;
-        self.prompt_context.git_ahead = git_info.ahead;
-        self.prompt_context.git_behind = git_info.behind;
-        self.prompt_context.git_staged = git_info.staged_count;
-        self.prompt_context.git_unstaged = git_info.unstaged_count;
-        self.prompt_context.git_untracked = git_info.untracked_count;
-        self.prompt_context.git_stash = git_info.stash_count;
-
-        // Detect package version from package.json/package.jsonc/pantry.json/pantry.jsonc
-        if (self.prompt_context.package_version) |old_ver| {
-            self.allocator.free(old_ver);
-        }
-        self.prompt_context.package_version = self.detectPackageVersion(cwd) catch null;
-
-        // Detect primary package manager (bun takes precedence over node)
-        const has_bun_lock = self.hasBunLock(cwd);
-
-        if (has_bun_lock) {
-            // Bun project - only show bun
-            if (self.prompt_context.bun_version) |old_ver| {
-                self.allocator.free(old_ver);
-            }
-            self.prompt_context.bun_version = self.detectBunVersion() catch null;
-
-            // Clear node version
-            if (self.prompt_context.node_version) |old_ver| {
-                self.allocator.free(old_ver);
-            }
-            self.prompt_context.node_version = null;
-        } else {
-            // Node project or no lock file - show node
-            if (self.prompt_context.node_version) |old_ver| {
-                self.allocator.free(old_ver);
-            }
-            self.prompt_context.node_version = self.detectNodeVersion() catch null;
-
-            // Clear bun version
-            if (self.prompt_context.bun_version) |old_ver| {
-                self.allocator.free(old_ver);
-            }
-            self.prompt_context.bun_version = null;
-        }
-
-        // Detect python version
-        if (self.prompt_context.python_version) |old_ver| {
-            self.allocator.free(old_ver);
-        }
-        self.prompt_context.python_version = self.detectPythonVersion() catch null;
-
-        // Detect ruby version
-        if (self.prompt_context.ruby_version) |old_ver| {
-            self.allocator.free(old_ver);
-        }
-        self.prompt_context.ruby_version = self.detectRubyVersion() catch null;
-
-        // Detect go version
-        if (self.prompt_context.go_version) |old_ver| {
-            self.allocator.free(old_ver);
-        }
-        self.prompt_context.go_version = self.detectGoVersion() catch null;
-
-        // Detect rust version
-        if (self.prompt_context.rust_version) |old_ver| {
-            self.allocator.free(old_ver);
-        }
-        self.prompt_context.rust_version = self.detectRustVersion() catch null;
-
-        // Detect zig version
-        if (self.prompt_context.zig_version) |old_ver| {
-            self.allocator.free(old_ver);
-        }
-        self.prompt_context.zig_version = self.detectZigVersion() catch null;
-
-        self.prompt_context.current_time = if (std.time.Instant.now()) |instant| @intCast(instant.timestamp.sec) else |_| 0;
+        try shell_mod.updatePromptContext(self);
     }
 
     pub fn executeCommand(self: *Shell, input: []const u8) !void {
@@ -1295,252 +1158,19 @@ pub const Shell = struct {
     /// Try fast path for simple commands.
     /// Returns exit code if handled, null to fall back to full parser.
     fn tryFastPath(self: *Shell, input: []const u8) ?i32 {
-        // Quick check: use OptimizedParser's simple command check
-        if (!parser_mod.OptimizedParser.isSimpleCommand(input)) {
-            return null;
-        }
-
-        // Additional checks for features that require full parser
-        for (input) |c| {
-            switch (c) {
-                // Variable expansion
-                '$' => return null,
-                // Command substitution
-                '`' => return null,
-                // Process substitution, grouping
-                '(' => return null,
-                ')' => return null,
-                // Glob patterns
-                '*' => return null,
-                '?' => return null,
-                '[' => return null,
-                // Brace expansion
-                '{' => return null,
-                '}' => return null,
-                // Escape sequences
-                '\\' => return null,
-                else => {},
-            }
-        }
-
-        // Parse with optimized parser
-        var opt_parser = parser_mod.OptimizedParser.init(self.allocator, input);
-        const simple_cmd = opt_parser.parseSimpleCommand() catch return null;
-        if (simple_cmd == null) return null;
-        const cmd = simple_cmd.?;
-
-        // Skip empty commands
-        if (cmd.name.len == 0) return null;
-
-        // Check if this is an alias - fall back to full parser for alias expansion
-        if (self.aliases.contains(cmd.name)) {
-            return null;
-        }
-
-        // Check if this is a function - fall back to full parser for function calls
-        if (self.function_manager.hasFunction(cmd.name)) {
-            return null;
-        }
-
-        // Handle trivial builtins directly (no I/O, no state changes except exit)
-        if (std.mem.eql(u8, cmd.name, "true")) {
-            return 0;
-        }
-
-        if (std.mem.eql(u8, cmd.name, "false")) {
-            return 1;
-        }
-
-        if (std.mem.eql(u8, cmd.name, ":")) {
-            // Bash no-op command
-            return 0;
-        }
-
-        if (std.mem.eql(u8, cmd.name, "exit")) {
-            const args = cmd.getArgs();
-            if (args.len > 0) {
-                self.last_exit_code = std.fmt.parseInt(i32, args[0], 10) catch 0;
-            }
-            self.running = false;
-            return self.last_exit_code;
-        }
-
-        // For all other commands (cd, echo, externals, etc.)
-        // fall back to full parser to ensure correct handling
-        return null;
+        return shell_mod.tryFastPath(self, input);
     }
 
-    /// Execute ERR trap if one is set
     pub fn executeErrTrap(self: *Shell) void {
-        // Check if ERR trap is set
-        if (self.signal_handlers.get("ERR")) |handler| {
-            if (handler.len > 0) {
-                // Execute the trap handler
-                // Note: Save and restore last_exit_code to preserve $? for the trap
-                const saved_exit_code = self.last_exit_code;
-
-                // Parse and execute the trap handler command
-                var tokenizer = parser_mod.Tokenizer.init(self.allocator, handler);
-                const tokens = tokenizer.tokenize() catch return;
-                defer tokenizer.deinitTokens(tokens);
-
-                if (tokens.len == 0) return;
-
-                var parser = parser_mod.Parser.init(self.allocator, tokens);
-                var chain = parser.parse() catch return;
-                defer chain.deinit(self.allocator);
-
-                // Expand the command chain (for $?, etc)
-                self.expandCommandChain(&chain) catch return;
-
-                // Execute the trap handler (without triggering ERR trap again)
-                var executor = executor_mod.Executor.initWithShell(self.allocator, &self.environment, self);
-                _ = executor.executeChain(&chain) catch {};
-
-                // Restore the original exit code
-                self.last_exit_code = saved_exit_code;
-            }
-        }
+        shell_mod.executeErrTrap(self);
     }
 
     fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_input: []const u8) !void {
-        if (builtin.os.tag == .windows) {
-            // Windows: background jobs not yet fully implemented
-            try IO.print("background jobs: not fully implemented on Windows\n", .{});
-            self.last_exit_code = 0;
-            return;
-        }
-
-        // Fork the process
-        const pid = try std.posix.fork();
-
-        if (pid == 0) {
-            // Child process - execute the chain
-            var executor = executor_mod.Executor.init(self.allocator, &self.environment);
-            const exit_code = executor.executeChain(chain) catch 1;
-            std.posix.exit(@intCast(exit_code));
-        } else {
-            // Parent process - add to background jobs
-            try self.job_manager.add(pid, original_input);
-        }
+        try shell_mod.executeInBackground(self, chain, original_input);
     }
 
     pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
-        // Collect positional params for the expander
-        // If inside a function, use function's positional params instead of shell's
-        var positional_params_slice: [64][]const u8 = undefined;
-        var param_count: usize = 0;
-
-        if (self.function_manager.currentFrame()) |frame| {
-            // Inside a function - use function's positional params
-            var i: usize = 0;
-            while (i < frame.positional_params_count) : (i += 1) {
-                if (frame.positional_params[i]) |param| {
-                    positional_params_slice[param_count] = param;
-                    param_count += 1;
-                }
-            }
-        } else {
-            // Not inside a function - use shell's positional params
-            for (self.positional_params) |maybe_param| {
-                if (maybe_param) |param| {
-                    positional_params_slice[param_count] = param;
-                    param_count += 1;
-                }
-            }
-        }
-
-        // Convert PID to i32 for expansion (0 on Windows where we don't track PIDs)
-        const pid_for_expansion: i32 = if (@import("builtin").os.tag == .windows)
-            0
-        else
-            @intCast(self.job_manager.getLastPid());
-
-        var expander = Expansion.initWithShell(
-            self.allocator,
-            &self.environment,
-            self.last_exit_code,
-            positional_params_slice[0..param_count],
-            self.shell_name,
-            pid_for_expansion,
-            self.last_arg,
-            self,
-        );
-        expander.arrays = &self.arrays; // Add indexed array support
-        expander.assoc_arrays = &self.assoc_arrays; // Add associative array support
-        expander.var_attributes = &self.var_attributes; // Add nameref support
-        // Set local vars pointer if inside a function
-        if (self.function_manager.currentFrame()) |frame| {
-            expander.local_vars = &frame.local_vars;
-        }
-        var glob = Glob.init(self.allocator);
-        var brace = BraceExpander.init(self.allocator);
-
-        // Get current working directory for glob expansion
-        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const cwd = try std.posix.getcwd(&cwd_buf);
-
-        for (chain.commands) |*cmd| {
-            // Expand command name (variables only, no globs for command names)
-            const expanded_name = try expander.expand(cmd.name);
-            self.allocator.free(cmd.name);
-            cmd.name = expanded_name;
-
-            // Expand arguments (variables + braces + globs)
-            var expanded_args_buffer: [128][]const u8 = undefined;
-            var expanded_args_count: usize = 0;
-
-            for (cmd.args) |arg| {
-                // First expand variables
-                const var_expanded = try expander.expand(arg);
-                defer self.allocator.free(var_expanded);
-
-                // Then expand braces
-                const brace_expanded = try brace.expand(var_expanded);
-                defer {
-                    for (brace_expanded) |item| {
-                        self.allocator.free(item);
-                    }
-                    self.allocator.free(brace_expanded);
-                }
-
-                // Then expand globs on each brace expansion result
-                for (brace_expanded) |brace_item| {
-                    const glob_expanded = try glob.expand(brace_item, cwd);
-                    defer {
-                        for (glob_expanded) |path| {
-                            self.allocator.free(path);
-                        }
-                        self.allocator.free(glob_expanded);
-                    }
-
-                    // Add all glob matches to args
-                    for (glob_expanded) |path| {
-                        if (expanded_args_count >= expanded_args_buffer.len) {
-                            return error.TooManyArguments;
-                        }
-                        expanded_args_buffer[expanded_args_count] = try self.allocator.dupe(u8, path);
-                        expanded_args_count += 1;
-                    }
-                }
-
-                // Free original arg
-                self.allocator.free(arg);
-            }
-
-            // Replace args with expanded version
-            self.allocator.free(cmd.args);
-            const new_args = try self.allocator.alloc([]const u8, expanded_args_count);
-            @memcpy(new_args, expanded_args_buffer[0..expanded_args_count]);
-            cmd.args = new_args;
-
-            // Expand redirection targets (variables only, no globs)
-            for (cmd.redirections, 0..) |*redir, i| {
-                const expanded_target = try expander.expand(redir.target);
-                self.allocator.free(cmd.redirections[i].target);
-                cmd.redirections[i].target = expanded_target;
-            }
-        }
+        try shell_mod.expandCommandChain(self, chain);
     }
 
     /// Add command to history (respects config.history.max_entries)
@@ -1647,52 +1277,7 @@ pub const Shell = struct {
 
     /// Expand aliases in command chain with circular reference detection
     pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
-        // Track seen aliases to detect circular references
-        var seen_aliases: [32][]const u8 = undefined;
-        var seen_count: usize = 0;
-
-        for (chain.commands) |*cmd| {
-            seen_count = 0; // Reset for each command
-            var current_name = cmd.name;
-            var expanded = false;
-
-            // Expand aliases iteratively with circular detection
-            while (self.aliases.get(current_name)) |alias_value| {
-                // Check for circular reference
-                for (seen_aliases[0..seen_count]) |seen| {
-                    if (std.mem.eql(u8, seen, current_name)) {
-                        try IO.eprint("den: alias: circular reference detected: {s}\n", .{current_name});
-                        return; // Stop expansion on circular reference
-                    }
-                }
-
-                // Track this alias
-                if (seen_count < seen_aliases.len) {
-                    seen_aliases[seen_count] = current_name;
-                    seen_count += 1;
-                } else {
-                    // Too many nested aliases
-                    try IO.eprint("den: alias: expansion depth limit exceeded\n", .{});
-                    return;
-                }
-
-                // Get the first word of the alias value as the new command name
-                const trimmed = std.mem.trim(u8, alias_value, &std.ascii.whitespace);
-                const first_space = std.mem.indexOfScalar(u8, trimmed, ' ');
-                const first_word = if (first_space) |pos| trimmed[0..pos] else trimmed;
-
-                // Replace command name with expanded alias
-                if (!expanded) {
-                    const new_name = try self.allocator.dupe(u8, alias_value);
-                    self.allocator.free(cmd.name);
-                    cmd.name = new_name;
-                    expanded = true;
-                }
-
-                // Check if first word is also an alias
-                current_name = first_word;
-            }
-        }
+        try shell_mod.expandAliases(self, chain);
     }
 
     /// Builtin: alias - define or list aliases
@@ -1965,141 +1550,23 @@ pub const Shell = struct {
     /// Returns the final variable name after following any nameref references
     /// Max depth of 10 to prevent infinite loops
     pub fn resolveNameref(self: *Shell, name: []const u8) []const u8 {
-        var current_name = name;
-        var depth: u32 = 0;
-        const max_depth = 10;
-
-        while (depth < max_depth) : (depth += 1) {
-            if (self.var_attributes.get(current_name)) |attrs| {
-                if (attrs.nameref) {
-                    // This is a nameref, its value is the name of the referenced variable
-                    if (self.environment.get(current_name)) |ref_name| {
-                        current_name = ref_name;
-                        continue;
-                    }
-                }
-            }
-            // Not a nameref or no more references to follow
-            break;
-        }
-        return current_name;
+        return shell_mod.resolveNameref(self, name);
     }
 
-    /// Get variable value following namerefs
     pub fn getVariableValue(self: *Shell, name: []const u8) ?[]const u8 {
-        const resolved_name = self.resolveNameref(name);
-        return self.environment.get(resolved_name);
+        return shell_mod.getVariableValue(self, name);
     }
 
-    /// Set variable value following namerefs
     pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void {
-        const resolved_name = self.resolveNameref(name);
-
-        // Check if readonly
-        if (self.var_attributes.get(resolved_name)) |attrs| {
-            if (attrs.readonly) {
-                try IO.eprint("den: {s}: readonly variable\n", .{resolved_name});
-                return error.ReadonlyVariable;
-            }
-        }
-
-        // Set the value
-        const gop = try self.environment.getOrPut(resolved_name);
-        if (gop.found_existing) {
-            self.allocator.free(gop.value_ptr.*);
-        } else {
-            gop.key_ptr.* = try self.allocator.dupe(u8, resolved_name);
-        }
-        gop.value_ptr.* = try self.allocator.dupe(u8, value);
+        try shell_mod.setVariableValue(self, name, value);
     }
 
-    /// Check if input is an array assignment: name=(value1 value2 ...)
     fn isArrayAssignment(input: []const u8) bool {
-        // Look for pattern: name=(...)
-        const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return false;
-        if (eq_pos >= input.len - 1) return false;
-        if (input[eq_pos + 1] != '(') return false;
-
-        // Check for closing paren
-        return std.mem.indexOfScalar(u8, input[eq_pos + 2 ..], ')') != null;
+        return shell_mod.isArrayAssignment(input);
     }
 
-    /// Parse and execute array assignment
     fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
-        const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return error.InvalidSyntax;
-        const name = std.mem.trim(u8, input[0..eq_pos], &std.ascii.whitespace);
-
-        // Validate variable name
-        if (name.len == 0) return error.InvalidVariableName;
-        for (name) |c| {
-            if (!std.ascii.isAlphanumeric(c) and c != '_') {
-                return error.InvalidVariableName;
-            }
-        }
-
-        // Find array content between ( and )
-        const start_paren = eq_pos + 1;
-        if (input[start_paren] != '(') return error.InvalidSyntax;
-
-        const end_paren = std.mem.lastIndexOfScalar(u8, input, ')') orelse return error.InvalidSyntax;
-        if (end_paren <= start_paren + 1) {
-            // Empty array: name=()
-            const key = try self.allocator.dupe(u8, name);
-            const empty_array = try self.allocator.alloc([]const u8, 0);
-
-            // Free old array if exists
-            if (self.arrays.get(name)) |old_array| {
-                for (old_array) |item| {
-                    self.allocator.free(item);
-                }
-                self.allocator.free(old_array);
-                const old_key = self.arrays.getKey(name).?;
-                self.allocator.free(old_key);
-                _ = self.arrays.remove(name);
-            }
-
-            try self.arrays.put(key, empty_array);
-            self.last_exit_code = 0;
-            return;
-        }
-
-        // Parse array elements
-        const content = std.mem.trim(u8, input[start_paren + 1 .. end_paren], &std.ascii.whitespace);
-
-        // Count elements first
-        var count: usize = 0;
-        var count_iter = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
-        while (count_iter.next()) |_| {
-            count += 1;
-        }
-
-        // Allocate array
-        const array = try self.allocator.alloc([]const u8, count);
-        errdefer self.allocator.free(array);
-
-        // Fill array
-        var i: usize = 0;
-        var iter = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
-        while (iter.next()) |token| : (i += 1) {
-            array[i] = try self.allocator.dupe(u8, token);
-        }
-
-        // Store array
-        const key = try self.allocator.dupe(u8, name);
-
-        // Free old array if exists
-        if (self.arrays.get(name)) |old_array| {
-            for (old_array) |item| {
-                self.allocator.free(item);
-            }
-            self.allocator.free(old_array);
-            const old_key = self.arrays.getKey(name).?;
-            self.allocator.free(old_key);
-            _ = self.arrays.remove(name);
-        }
-
-        try self.arrays.put(key, array);
-        self.last_exit_code = 0;
+        try shell_mod.executeArrayAssignment(self, input);
     }
 
     /// Builtin: exec - replace shell with command
@@ -2155,55 +1622,6 @@ pub const Shell = struct {
         try shell_mod.builtinBuiltin(self, cmd);
     }
 
-    fn hasBunLock(self: *Shell, cwd: []const u8) bool {
-        _ = self;
-        const lock_files = [_][]const u8{ "bun.lockb", "bun.lock" };
-
-        for (lock_files) |filename| {
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
-
-            // Just check if file exists
-            const file = std.fs.cwd().openFile(path, .{}) catch continue;
-            file.close();
-            return true;
-        }
-
-        return false;
-    }
-
-    // Version detection methods - delegate to shell/version.zig module
-    fn detectPackageVersion(self: *Shell, cwd: []const u8) ![]const u8 {
-        return shell_mod.detectPackageVersion(self.allocator, cwd);
-    }
-
-    fn detectBunVersion(self: *Shell) ![]const u8 {
-        return shell_mod.detectBunVersion(self.allocator);
-    }
-
-    fn detectNodeVersion(self: *Shell) ![]const u8 {
-        return shell_mod.detectNodeVersion(self.allocator);
-    }
-
-    fn detectPythonVersion(self: *Shell) ![]const u8 {
-        return shell_mod.detectPythonVersion(self.allocator);
-    }
-
-    fn detectRubyVersion(self: *Shell) ![]const u8 {
-        return shell_mod.detectRubyVersion(self.allocator);
-    }
-
-    fn detectGoVersion(self: *Shell) ![]const u8 {
-        return shell_mod.detectGoVersion(self.allocator);
-    }
-
-    fn detectRustVersion(self: *Shell) ![]const u8 {
-        return shell_mod.detectRustVersion(self.allocator);
-    }
-
-    fn detectZigVersion(self: *Shell) ![]const u8 {
-        return shell_mod.detectZigVersion(self.allocator);
-    }
 };
 
 /// Tab completion function for line editor

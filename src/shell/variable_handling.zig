@@ -1,0 +1,145 @@
+//! Variable Handling Module
+//! Handles variable resolution, namerefs, and array assignments
+
+const std = @import("std");
+const IO = @import("../utils/io.zig").IO;
+const Shell = @import("../shell.zig").Shell;
+
+/// Resolve nameref chain to get the actual variable name
+pub fn resolveNameref(self: *Shell, name: []const u8) []const u8 {
+    var current_name = name;
+    var depth: u32 = 0;
+    const max_depth = 10;
+
+    while (depth < max_depth) : (depth += 1) {
+        if (self.var_attributes.get(current_name)) |attrs| {
+            if (attrs.nameref) {
+                // This is a nameref, its value is the name of the referenced variable
+                if (self.environment.get(current_name)) |ref_name| {
+                    current_name = ref_name;
+                    continue;
+                }
+            }
+        }
+        // Not a nameref or no more references to follow
+        break;
+    }
+    return current_name;
+}
+
+/// Get variable value following namerefs
+pub fn getVariableValue(self: *Shell, name: []const u8) ?[]const u8 {
+    const resolved_name = resolveNameref(self, name);
+    return self.environment.get(resolved_name);
+}
+
+/// Set variable value following namerefs
+pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void {
+    const resolved_name = resolveNameref(self, name);
+
+    // Check if readonly
+    if (self.var_attributes.get(resolved_name)) |attrs| {
+        if (attrs.readonly) {
+            try IO.eprint("den: {s}: readonly variable\n", .{resolved_name});
+            return error.ReadonlyVariable;
+        }
+    }
+
+    // Set the value
+    const gop = try self.environment.getOrPut(resolved_name);
+    if (gop.found_existing) {
+        self.allocator.free(gop.value_ptr.*);
+    } else {
+        gop.key_ptr.* = try self.allocator.dupe(u8, resolved_name);
+    }
+    gop.value_ptr.* = try self.allocator.dupe(u8, value);
+}
+
+/// Check if input is an array assignment: name=(value1 value2 ...)
+pub fn isArrayAssignment(input: []const u8) bool {
+    // Look for pattern: name=(...)
+    const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return false;
+    if (eq_pos >= input.len - 1) return false;
+    if (input[eq_pos + 1] != '(') return false;
+
+    // Check for closing paren
+    return std.mem.indexOfScalar(u8, input[eq_pos + 2 ..], ')') != null;
+}
+
+/// Parse and execute array assignment
+pub fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
+    const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return error.InvalidSyntax;
+    const name = std.mem.trim(u8, input[0..eq_pos], &std.ascii.whitespace);
+
+    // Validate variable name
+    if (name.len == 0) return error.InvalidVariableName;
+    for (name) |c| {
+        if (!std.ascii.isAlphanumeric(c) and c != '_') {
+            return error.InvalidVariableName;
+        }
+    }
+
+    // Find array content between ( and )
+    const start_paren = eq_pos + 1;
+    if (input[start_paren] != '(') return error.InvalidSyntax;
+
+    const end_paren = std.mem.lastIndexOfScalar(u8, input, ')') orelse return error.InvalidSyntax;
+    if (end_paren <= start_paren + 1) {
+        // Empty array: name=()
+        const key = try self.allocator.dupe(u8, name);
+        const empty_array = try self.allocator.alloc([]const u8, 0);
+
+        // Free old array if exists
+        if (self.arrays.get(name)) |old_array| {
+            for (old_array) |item| {
+                self.allocator.free(item);
+            }
+            self.allocator.free(old_array);
+            const old_key = self.arrays.getKey(name).?;
+            self.allocator.free(old_key);
+            _ = self.arrays.remove(name);
+        }
+
+        try self.arrays.put(key, empty_array);
+        self.last_exit_code = 0;
+        return;
+    }
+
+    // Parse array elements
+    const content = std.mem.trim(u8, input[start_paren + 1 .. end_paren], &std.ascii.whitespace);
+
+    // Count elements first
+    var count: usize = 0;
+    var count_iter = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
+    while (count_iter.next()) |_| {
+        count += 1;
+    }
+
+    // Allocate array
+    const array = try self.allocator.alloc([]const u8, count);
+    errdefer self.allocator.free(array);
+
+    // Fill array
+    var i: usize = 0;
+    var iter = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
+    while (iter.next()) |token| : (i += 1) {
+        array[i] = try self.allocator.dupe(u8, token);
+    }
+
+    // Store array
+    const key = try self.allocator.dupe(u8, name);
+
+    // Free old array if exists
+    if (self.arrays.get(name)) |old_array| {
+        for (old_array) |item| {
+            self.allocator.free(item);
+        }
+        self.allocator.free(old_array);
+        const old_key = self.arrays.getKey(name).?;
+        self.allocator.free(old_key);
+        _ = self.arrays.remove(name);
+    }
+
+    try self.arrays.put(key, array);
+    self.last_exit_code = 0;
+}
