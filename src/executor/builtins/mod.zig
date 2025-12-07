@@ -27,6 +27,10 @@ pub const process_builtins = @import("process_builtins.zig");
 pub const macos_builtins = @import("macos_builtins.zig");
 pub const signal_builtins = @import("signal_builtins.zig");
 pub const dev_builtins = @import("dev_builtins.zig");
+pub const interactive_builtins = @import("interactive_builtins.zig");
+pub const job_builtins = @import("job_builtins.zig");
+pub const command_builtins = @import("command_builtins.zig");
+pub const state_builtins = @import("state_builtins.zig");
 pub const context = @import("context.zig");
 
 pub const BuiltinContext = context.BuiltinContext;

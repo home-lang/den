@@ -505,6 +505,66 @@ pub fn uname(command: *types.ParsedCommand) !i32 {
     return 0;
 }
 
+/// help - Display built-in commands help
+pub fn help(command: *types.ParsedCommand) !i32 {
+    _ = command;
+
+    try IO.print("Den Shell - Built-in Commands:\n\n", .{});
+    try IO.print("Core:\n", .{});
+    try IO.print("  cd [dir]          Change directory\n", .{});
+    try IO.print("  pwd               Print working directory\n", .{});
+    try IO.print("  echo [args...]    Print arguments\n", .{});
+    try IO.print("  exit [n]          Exit shell with status n\n", .{});
+    try IO.print("  env               Print environment variables\n", .{});
+    try IO.print("  export VAR=val    Export environment variable\n", .{});
+    try IO.print("  set [opts]        Set shell options or variables\n", .{});
+    try IO.print("  unset VAR         Unset environment variable\n", .{});
+    try IO.print("\nControl:\n", .{});
+    try IO.print("  true              Return success (0)\n", .{});
+    try IO.print("  false             Return failure (1)\n", .{});
+    try IO.print("  test / [          Evaluate conditional expression\n", .{});
+    try IO.print("  eval CMD          Evaluate and execute command string\n", .{});
+    try IO.print("  exec CMD          Replace shell with command\n", .{});
+    try IO.print("\nInformation:\n", .{});
+    try IO.print("  which CMD         Locate a command\n", .{});
+    try IO.print("  type CMD          Display command type\n", .{});
+    try IO.print("  command [-pVv]    Run command with options\n", .{});
+    try IO.print("  builtin CMD       Run builtin command\n", .{});
+    try IO.print("  help              Display this help message\n", .{});
+    try IO.print("  hash              Command hash table\n", .{});
+    try IO.print("\nI/O:\n", .{});
+    try IO.print("  read VAR          Read line into variable\n", .{});
+    try IO.print("  printf fmt [args] Formatted print\n", .{});
+    try IO.print("  clear             Clear the screen\n", .{});
+    try IO.print("\nJob Control:\n", .{});
+    try IO.print("  jobs              List active jobs\n", .{});
+    try IO.print("  fg [job]          Foreground a job\n", .{});
+    try IO.print("  bg [job]          Background a job\n", .{});
+    try IO.print("  wait [pid]        Wait for process completion\n", .{});
+    try IO.print("  disown [job]      Remove job from table\n", .{});
+    try IO.print("  kill [-sig] pid   Send signal to process\n", .{});
+    try IO.print("\nDirectory Stack:\n", .{});
+    try IO.print("  pushd [dir]       Push directory onto stack\n", .{});
+    try IO.print("  popd              Pop directory from stack\n", .{});
+    try IO.print("  dirs              Display directory stack\n", .{});
+    try IO.print("\nAdvanced:\n", .{});
+    try IO.print("  alias [name=val]  Create or display aliases\n", .{});
+    try IO.print("  unalias name      Remove alias\n", .{});
+    try IO.print("  source / . file   Execute commands from file\n", .{});
+    try IO.print("  history           Display command history\n", .{});
+    try IO.print("  time CMD          Time command execution\n", .{});
+    try IO.print("  times             Print process times\n", .{});
+    try IO.print("  trap              Set signal handlers\n", .{});
+    try IO.print("  umask [mask]      Set file creation mask\n", .{});
+    try IO.print("  getopts           Parse command options\n", .{});
+    try IO.print("\nUtility:\n", .{});
+    try IO.print("  yes [str]         Repeatedly output string\n", .{});
+    try IO.print("  reload            Reload shell configuration\n", .{});
+    try IO.print("  copyssh           Copy SSH public key to clipboard\n", .{});
+
+    return 0;
+}
+
 // Tests
 test "seq generates sequence" {
     // Basic compilation test

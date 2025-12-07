@@ -53,9 +53,6 @@ fn getCEnviron() [*:null]const ?[*:0]const u8 {
 // Windows process access rights (for job control)
 const PROCESS_TERMINATE: u32 = 0x0001;
 
-// File type filter for ifind
-const FileTypeFilter = enum { all, files, dirs };
-
 // Networking code moved to networking.zig
 
 pub const Executor = struct {
@@ -691,7 +688,48 @@ pub const Executor = struct {
 
     /// Get a BuiltinContext for calling extracted builtins
     fn getBuiltinContext(self: *Executor) BuiltinContext {
-        return BuiltinContext.init(self.allocator, self.environment, self.shell);
+        return BuiltinContext.initWithExecutor(
+            self.allocator,
+            self.environment,
+            self.shell,
+            isBuiltinStatic,
+            executeCommandCallback,
+            @ptrCast(self),
+        );
+    }
+
+    /// Static wrapper for isBuiltin callback
+    fn isBuiltinStatic(name: []const u8) bool {
+        // Check against all known builtin names
+        const builtin_names = [_][]const u8{
+            "echo", "pwd", "cd", "env", "export", "set", "unset", "true", "false",
+            "test", "[", "[[", "which", "type", "help", "alias", "unalias", "read",
+            "printf", "source", ".", "history", "pushd", "popd", "dirs", "eval",
+            "exec", "command", "builtin", "jobs", "fg", "bg", "wait", "disown",
+            "kill", "trap", "times", "umask", "getopts", "clear", "time", "timeout",
+            "hash", "yes", "reload", "watch", "tree", "grep", "find", "ft", "calc",
+            "json", "ls", "seq", "date", "parallel", "http", "base64", "uuid",
+            "localip", "ip", "shrug", "web", "return", "local", "copyssh", "reloaddns",
+            "emptytrash", "wip", "bookmark", "code", "pstorm", "show", "hide",
+            "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor",
+            "log-parse", "dotfiles", "library", "hook", "ifind", "coproc", "exit",
+            ":", "declare", "typeset", "let", "shift", "break", "continue",
+        };
+        for (builtin_names) |b| {
+            if (std.mem.eql(u8, name, b)) return true;
+        }
+        return false;
+    }
+
+    /// Callback wrapper for command execution
+    fn executeCommandCallback(ctx_ptr: *anyopaque, name: []const u8, args: [][]const u8) anyerror!i32 {
+        const self: *Executor = @ptrCast(@alignCast(ctx_ptr));
+        var cmd = types.ParsedCommand{
+            .name = name,
+            .args = args,
+            .redirections = &[_]types.Redirection{},
+        };
+        return self.executeCommand(&cmd);
     }
 
     /// Dispatch and execute a builtin command.
@@ -721,11 +759,11 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "[[")) {
             return try test_builtins.extendedTest(command);
         } else if (std.mem.eql(u8, command.name, "which")) {
-            return try self.builtinWhich(command);
+            return try builtins.command_builtins.which(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "type")) {
-            return try self.builtinType(command);
+            return try builtins.command_builtins.typeBuiltin(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "help")) {
-            return try self.builtinHelp(command);
+            return try utilities.help(command);
         } else if (std.mem.eql(u8, command.name, "alias")) {
             return try alias_builtins.alias(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "unalias")) {
@@ -753,19 +791,19 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "builtin")) {
             return try self.builtinBuiltin(command);
         } else if (std.mem.eql(u8, command.name, "jobs")) {
-            return try self.builtinJobs(command);
+            return try builtins.job_builtins.jobs(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "fg")) {
-            return try self.builtinFg(command);
+            return try builtins.job_builtins.fg(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "bg")) {
-            return try self.builtinBg(command);
+            return try builtins.job_builtins.bg(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "wait")) {
-            return try self.builtinWait(command);
+            return try builtins.job_builtins.wait(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "disown")) {
-            return try self.builtinDisown(command);
+            return try builtins.job_builtins.disown(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "kill")) {
             return try builtins.signal_builtins.kill(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "trap")) {
-            return try self.builtinTrap(command);
+            return try builtins.state_builtins.trap(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "times")) {
             return try builtins.process_builtins.times(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "umask")) {
@@ -779,11 +817,11 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "timeout")) {
             return try builtins.process_builtins.timeout(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "hash")) {
-            return try self.builtinHash(command);
+            return try builtins.command_builtins.hash(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "yes")) {
             return try utilities.yes(command);
         } else if (std.mem.eql(u8, command.name, "reload")) {
-            return try self.builtinReload(command);
+            return try builtins.state_builtins.reload(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "watch")) {
             return try self.builtinWatch(command);
         } else if (std.mem.eql(u8, command.name, "tree")) {
@@ -833,7 +871,7 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "wip")) {
             return try builtins.dev_builtins.wip(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "bookmark")) {
-            return try self.builtinBookmark(command);
+            return try builtins.state_builtins.bookmark(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "code")) {
             return try builtins.dev_builtins.code(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "pstorm")) {
@@ -861,7 +899,7 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "hook")) {
             return try builtinHook(self, command);
         } else if (std.mem.eql(u8, command.name, "ifind")) {
-            return try self.builtinIfind(command);
+            return try builtins.interactive_builtins.ifind(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "coproc")) {
             return try self.builtinCoproc(command);
         }
@@ -1085,258 +1123,6 @@ pub const Executor = struct {
             }
         }
     }
-
-    fn builtinWhich(self: *Executor, command: *types.ParsedCommand) !i32 {
-        if (command.args.len == 0) {
-            try IO.eprint("den: which: missing argument\n", .{});
-            return 1;
-        }
-
-        const utils = @import("../utils.zig");
-        var found_all = true;
-        var show_all = false;
-        var arg_start: usize = 0;
-
-        // Parse flags
-        for (command.args, 0..) |arg, i| {
-            if (arg.len > 0 and arg[0] == '-') {
-                for (arg[1..]) |c| {
-                    switch (c) {
-                        'a' => show_all = true,
-                        else => {},
-                    }
-                }
-                arg_start = i + 1;
-            } else {
-                break;
-            }
-        }
-
-        if (arg_start >= command.args.len) {
-            try IO.eprint("den: which: missing argument\n", .{});
-            return 1;
-        }
-
-        for (command.args[arg_start..]) |cmd_name| {
-            // Check if it's a builtin
-            if (self.isBuiltin(cmd_name)) {
-                try IO.print("{s}: shell builtin command\n", .{cmd_name});
-                if (!show_all) continue;
-            }
-
-            // Parse PATH and find executable
-            var path_list = utils.env.PathList.fromEnv(self.allocator) catch {
-                try IO.eprint("den: which: failed to parse PATH\n", .{});
-                return 1;
-            };
-            defer path_list.deinit();
-
-            if (show_all) {
-                // Find all matches
-                const all_paths = try path_list.findAllExecutables(self.allocator, cmd_name);
-                defer {
-                    for (all_paths) |p| self.allocator.free(p);
-                    self.allocator.free(all_paths);
-                }
-
-                if (all_paths.len == 0 and !self.isBuiltin(cmd_name)) {
-                    found_all = false;
-                } else {
-                    for (all_paths) |exec_path| {
-                        try IO.print("{s}\n", .{exec_path});
-                    }
-                }
-            } else {
-                // Find first match only
-                if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
-                    defer self.allocator.free(exec_path);
-                    try IO.print("{s}\n", .{exec_path});
-                } else {
-                    found_all = false;
-                }
-            }
-        }
-
-        return if (found_all) 0 else 1;
-    }
-
-    fn builtinType(self: *Executor, command: *types.ParsedCommand) !i32 {
-        if (command.args.len == 0) {
-            try IO.eprint("den: type: missing argument\n", .{});
-            return 1;
-        }
-
-        const utils = @import("../utils.zig");
-
-        // Parse flags
-        var show_all = false;      // -a: show all matches
-        var type_only = false;     // -t: show type only (builtin, file, alias, etc.)
-        var path_only = false;     // -p: show path only (for external commands)
-        var arg_start: usize = 0;
-
-        for (command.args, 0..) |arg, i| {
-            if (arg.len > 0 and arg[0] == '-' and arg.len > 1) {
-                for (arg[1..]) |c| {
-                    switch (c) {
-                        'a' => show_all = true,
-                        't' => type_only = true,
-                        'p' => path_only = true,
-                        else => {
-                            try IO.eprint("den: type: -{c}: invalid option\n", .{c});
-                            return 1;
-                        },
-                    }
-                }
-                arg_start = i + 1;
-            } else {
-                break;
-            }
-        }
-
-        if (arg_start >= command.args.len) {
-            try IO.eprint("den: type: missing argument\n", .{});
-            return 1;
-        }
-
-        var found_all = true;
-
-        for (command.args[arg_start..]) |cmd_name| {
-            var found_any = false;
-
-            // Check if it's a builtin
-            if (self.isBuiltin(cmd_name)) {
-                found_any = true;
-                if (type_only) {
-                    try IO.print("builtin\n", .{});
-                } else if (!path_only) {
-                    try IO.print("{s} is a shell builtin\n", .{cmd_name});
-                }
-                if (!show_all) continue;
-            }
-
-            // Check if it's in PATH
-            var path_list = utils.env.PathList.fromEnv(self.allocator) catch {
-                try IO.eprint("den: type: failed to parse PATH\n", .{});
-                return 1;
-            };
-            defer path_list.deinit();
-
-            if (show_all) {
-                // Show all matches in PATH
-                for (path_list.paths.items) |path_dir| {
-                    const full_path = std.fs.path.join(self.allocator, &[_][]const u8{ path_dir, cmd_name }) catch continue;
-                    defer self.allocator.free(full_path);
-
-                    // Check if file exists and is executable
-                    std.fs.accessAbsolute(full_path, .{}) catch continue;
-
-                    if (builtin.os.tag != .windows) {
-                        const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
-                        defer file.close();
-                        const stat = file.stat() catch continue;
-                        if (stat.mode & 0o111 == 0) continue;
-                    }
-
-                    found_any = true;
-                    if (type_only) {
-                        try IO.print("file\n", .{});
-                    } else if (path_only) {
-                        try IO.print("{s}\n", .{full_path});
-                    } else {
-                        try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
-                    }
-                }
-            } else {
-                // Just find first match
-                if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
-                    defer self.allocator.free(exec_path);
-                    found_any = true;
-                    if (type_only) {
-                        try IO.print("file\n", .{});
-                    } else if (path_only) {
-                        try IO.print("{s}\n", .{exec_path});
-                    } else {
-                        try IO.print("{s} is {s}\n", .{ cmd_name, exec_path });
-                    }
-                }
-            }
-
-            if (!found_any) {
-                if (!type_only and !path_only) {
-                    try IO.print("den: type: {s}: not found\n", .{cmd_name});
-                }
-                found_all = false;
-            }
-        }
-
-        return if (found_all) 0 else 1;
-    }
-
-    fn builtinHelp(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        _ = command;
-
-        try IO.print("Den Shell - Built-in Commands:\n\n", .{});
-        try IO.print("Core:\n", .{});
-        try IO.print("  cd [dir]          Change directory\n", .{});
-        try IO.print("  pwd               Print working directory\n", .{});
-        try IO.print("  echo [args...]    Print arguments\n", .{});
-        try IO.print("  exit [n]          Exit shell with status n\n", .{});
-        try IO.print("  env               Print environment variables\n", .{});
-        try IO.print("  export VAR=val    Export environment variable\n", .{});
-        try IO.print("  set [opts]        Set shell options or variables\n", .{});
-        try IO.print("  unset VAR         Unset environment variable\n", .{});
-        try IO.print("\nControl:\n", .{});
-        try IO.print("  true              Return success (0)\n", .{});
-        try IO.print("  false             Return failure (1)\n", .{});
-        try IO.print("  test / [          Evaluate conditional expression\n", .{});
-        try IO.print("  eval CMD          Evaluate and execute command string\n", .{});
-        try IO.print("  exec CMD          Replace shell with command\n", .{});
-        try IO.print("\nInformation:\n", .{});
-        try IO.print("  which CMD         Locate a command\n", .{});
-        try IO.print("  type CMD          Display command type\n", .{});
-        try IO.print("  command [-pVv]    Run command with options\n", .{});
-        try IO.print("  builtin CMD       Run builtin command\n", .{});
-        try IO.print("  help              Display this help message\n", .{});
-        try IO.print("  hash              Command hash table\n", .{});
-        try IO.print("\nI/O:\n", .{});
-        try IO.print("  read VAR          Read line into variable\n", .{});
-        try IO.print("  printf fmt [args] Formatted print\n", .{});
-        try IO.print("  clear             Clear the screen\n", .{});
-        try IO.print("\nJob Control:\n", .{});
-        try IO.print("  jobs              List active jobs\n", .{});
-        try IO.print("  fg [job]          Foreground a job\n", .{});
-        try IO.print("  bg [job]          Background a job\n", .{});
-        try IO.print("  wait [pid]        Wait for process completion\n", .{});
-        try IO.print("  disown [job]      Remove job from table\n", .{});
-        try IO.print("  kill [-sig] pid   Send signal to process\n", .{});
-        try IO.print("\nDirectory Stack:\n", .{});
-        try IO.print("  pushd [dir]       Push directory onto stack\n", .{});
-        try IO.print("  popd              Pop directory from stack\n", .{});
-        try IO.print("  dirs              Display directory stack\n", .{});
-        try IO.print("\nAdvanced:\n", .{});
-        try IO.print("  alias [name=val]  Create or display aliases\n", .{});
-        try IO.print("  unalias name      Remove alias\n", .{});
-        try IO.print("  source / . file   Execute commands from file\n", .{});
-        try IO.print("  history           Display command history\n", .{});
-        try IO.print("  time CMD          Time command execution\n", .{});
-        try IO.print("  times             Print process times\n", .{});
-        try IO.print("  trap              Set signal handlers\n", .{});
-        try IO.print("  umask [mask]      Set file creation mask\n", .{});
-        try IO.print("  getopts           Parse command options\n", .{});
-        try IO.print("\nUtility:\n", .{});
-        try IO.print("  yes [str]         Repeatedly output string\n", .{});
-        try IO.print("  reload            Reload shell configuration\n", .{});
-        try IO.print("  copyssh           Copy SSH public key to clipboard\n", .{});
-
-        return 0;
-    }
-
-    // Builtins moved to separate modules in builtins/:
-    // - alias_builtins.zig: alias, unalias
-    // - shell_builtins.zig: cd, pwd, read, source, history
-    // - env_builtins.zig: env, export, set, unset
-    // - dir_builtins.zig: pushd, popd, dirs
 
     fn builtinEval(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
         const shell_ref = self.shell orelse {
@@ -1576,162 +1362,6 @@ pub const Executor = struct {
         return try self.executeBuiltin(&builtin_cmd);
     }
 
-    fn builtinJobs(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: jobs: shell context not available\n", .{});
-            return 1;
-        };
-        return try shell_ref.job_manager.builtinJobs(command.args);
-    }
-
-    fn builtinFg(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: fg: shell context not available\n", .{});
-            return 1;
-        };
-        return try shell_ref.job_manager.builtinFg(command.args);
-    }
-
-    fn builtinBg(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: bg: shell context not available\n", .{});
-            return 1;
-        };
-        return try shell_ref.job_manager.builtinBg(command.args);
-    }
-
-    fn builtinWait(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: wait: shell context not available\n", .{});
-            return 1;
-        };
-        return try shell_ref.job_manager.builtinWait(command.args);
-    }
-
-    fn builtinDisown(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: disown: shell context not available\n", .{});
-            return 1;
-        };
-        return try shell_ref.job_manager.builtinDisown(command.args);
-    }
-
-    fn builtinTrap(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: trap: shell context not available\n", .{});
-            return 1;
-        };
-
-        // If no arguments, list all traps
-        if (command.args.len == 0) {
-            var iter = shell_ref.signal_handlers.iterator();
-            while (iter.next()) |entry| {
-                const signal = entry.key_ptr.*;
-                const action = entry.value_ptr.*;
-                if (action.len > 0) {
-                    try IO.print("trap -- '{s}' {s}\n", .{ action, signal });
-                } else {
-                    try IO.print("trap -- '' {s}\n", .{signal});
-                }
-            }
-            return 0;
-        }
-
-        var start_idx: usize = 0;
-
-        // Skip '--' if present (POSIX compatibility)
-        if (std.mem.eql(u8, command.args[0], "--")) {
-            start_idx = 1;
-            if (command.args.len == 1) {
-                try IO.eprint("den: trap: usage: trap [-lp] [[arg] signal_spec ...]\n", .{});
-                return 1;
-            }
-        }
-
-        // Handle -l flag (list signal names)
-        if (std.mem.eql(u8, command.args[start_idx], "-l") or std.mem.eql(u8, command.args[start_idx], "--list")) {
-            const signal_names = [_][]const u8{
-                "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE",
-                "KILL", "USR1", "SEGV", "USR2", "PIPE", "ALRM", "TERM",
-                "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG",
-                "XCPU", "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "SYS",
-            };
-            for (signal_names, 0..) |sig, i| {
-                try IO.print("{d}) {s}\n", .{ i + 1, sig });
-            }
-            return 0;
-        }
-
-        // Handle -p flag (print trap commands)
-        if (std.mem.eql(u8, command.args[start_idx], "-p") or std.mem.eql(u8, command.args[start_idx], "--print")) {
-            if (command.args.len <= start_idx + 1) {
-                return 0;
-            }
-            for (command.args[start_idx + 1 ..]) |signal| {
-                if (shell_ref.signal_handlers.get(signal)) |action| {
-                    try IO.print("trap -- '{s}' {s}\n", .{ action, signal });
-                }
-            }
-            return 0;
-        }
-
-        // Need at least 2 args: action and signal
-        if (command.args.len < start_idx + 2) {
-            try IO.eprint("den: trap: usage: trap [-lp] [[arg] signal_spec ...]\n", .{});
-            return 1;
-        }
-
-        const action = command.args[start_idx];
-        const signals = command.args[start_idx + 1 ..];
-
-        // Handle empty string action - remove the trap
-        if (action.len == 0) {
-            for (signals) |signal| {
-                if (shell_ref.signal_handlers.fetchRemove(signal)) |kv| {
-                    self.allocator.free(kv.key);
-                    self.allocator.free(kv.value);
-                }
-            }
-            return 0;
-        }
-
-        // Handle '-' action - reset to default handler
-        if (std.mem.eql(u8, action, "-")) {
-            for (signals) |signal| {
-                const sig_key = try self.allocator.dupe(u8, signal);
-                errdefer self.allocator.free(sig_key);
-                const sig_value = try self.allocator.dupe(u8, "");
-
-                // Remove existing handler if present
-                if (shell_ref.signal_handlers.fetchRemove(signal)) |kv| {
-                    self.allocator.free(kv.key);
-                    self.allocator.free(kv.value);
-                }
-
-                try shell_ref.signal_handlers.put(sig_key, sig_value);
-            }
-            return 0;
-        }
-
-        // Set up the trap
-        for (signals) |signal| {
-            const sig_key = try self.allocator.dupe(u8, signal);
-            errdefer self.allocator.free(sig_key);
-            const sig_value = try self.allocator.dupe(u8, action);
-
-            // Remove existing handler if present
-            if (shell_ref.signal_handlers.fetchRemove(signal)) |kv| {
-                self.allocator.free(kv.key);
-                self.allocator.free(kv.value);
-            }
-
-            try shell_ref.signal_handlers.put(sig_key, sig_value);
-        }
-
-        return 0;
-    }
-
-
     fn builtinGetopts(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
         const shell_ref = self.shell orelse {
             try IO.eprint("den: getopts: shell context not available\n", .{});
@@ -1808,8 +1438,6 @@ pub const Executor = struct {
 
         return 0;
     }
-
-    // builtinClear extracted to executor/builtins/utilities.zig
 
     fn builtinTime(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Parse flags
@@ -1889,242 +1517,6 @@ pub const Executor = struct {
         return exit_code;
     }
 
-
-    fn builtinHash(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: hash: shell context not available\n", .{});
-            return 1;
-        };
-
-        const utils = @import("../utils.zig");
-
-        // hash with no args - list all cached paths
-        if (command.args.len == 0) {
-            var iter = shell_ref.command_cache.iterator();
-            var has_entries = false;
-            while (iter.next()) |entry| {
-                try IO.print("{s}\t{s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-                has_entries = true;
-            }
-            if (!has_entries) {
-                try IO.print("hash: hash table empty\n", .{});
-            }
-            return 0;
-        }
-
-        // Parse flags
-        var arg_idx: usize = 0;
-        while (arg_idx < command.args.len) {
-            const arg = command.args[arg_idx];
-
-            // hash -r - clear hash table
-            if (std.mem.eql(u8, arg, "-r")) {
-                var iter = shell_ref.command_cache.iterator();
-                while (iter.next()) |entry| {
-                    self.allocator.free(entry.key_ptr.*);
-                    self.allocator.free(entry.value_ptr.*);
-                }
-                shell_ref.command_cache.clearRetainingCapacity();
-                arg_idx += 1;
-                continue;
-            }
-
-            // hash -l - list in reusable format
-            if (std.mem.eql(u8, arg, "-l")) {
-                var iter = shell_ref.command_cache.iterator();
-                while (iter.next()) |entry| {
-                    try IO.print("builtin hash -p {s} {s}\n", .{ entry.value_ptr.*, entry.key_ptr.* });
-                }
-                return 0;
-            }
-
-            // hash -d name - delete specific entry
-            if (std.mem.eql(u8, arg, "-d")) {
-                if (arg_idx + 1 >= command.args.len) {
-                    try IO.eprint("den: hash: -d: option requires an argument\n", .{});
-                    return 1;
-                }
-                const name = command.args[arg_idx + 1];
-                if (shell_ref.command_cache.fetchRemove(name)) |kv| {
-                    self.allocator.free(kv.key);
-                    self.allocator.free(kv.value);
-                } else {
-                    try IO.eprint("den: hash: {s}: not found\n", .{name});
-                    return 1;
-                }
-                arg_idx += 2;
-                continue;
-            }
-
-            // hash -p path name - add specific path for name
-            if (std.mem.eql(u8, arg, "-p")) {
-                if (arg_idx + 2 >= command.args.len) {
-                    try IO.eprint("den: hash: -p: option requires path and name arguments\n", .{});
-                    return 1;
-                }
-                const path = command.args[arg_idx + 1];
-                const name = command.args[arg_idx + 2];
-
-                // Remove old entry if exists
-                if (shell_ref.command_cache.fetchRemove(name)) |kv| {
-                    self.allocator.free(kv.key);
-                    self.allocator.free(kv.value);
-                }
-
-                // Add new entry with specified path
-                const key = try self.allocator.dupe(u8, name);
-                errdefer self.allocator.free(key);
-                const value = try self.allocator.dupe(u8, path);
-                errdefer self.allocator.free(value);
-                try shell_ref.command_cache.put(key, value);
-                arg_idx += 3;
-                continue;
-            }
-
-            // hash -t name... - print cached path for name
-            if (std.mem.eql(u8, arg, "-t")) {
-                if (arg_idx + 1 >= command.args.len) {
-                    try IO.eprint("den: hash: -t: option requires an argument\n", .{});
-                    return 1;
-                }
-                var found_all = true;
-                for (command.args[arg_idx + 1 ..]) |name| {
-                    if (shell_ref.command_cache.get(name)) |path| {
-                        try IO.print("{s}\n", .{path});
-                    } else {
-                        try IO.eprint("den: hash: {s}: not found\n", .{name});
-                        found_all = false;
-                    }
-                }
-                return if (found_all) 0 else 1;
-            }
-
-            // Not a flag, must be command name(s) to hash
-            break;
-        }
-
-        // If we only had -r flag with no commands, we're done
-        if (arg_idx >= command.args.len) {
-            return 0;
-        }
-
-        // hash command [command...] - add commands to hash table
-        const path_var = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
-        var path_list = utils.env.PathList.parse(self.allocator, path_var) catch {
-            return 1;
-        };
-        defer path_list.deinit();
-
-        for (command.args[arg_idx..]) |cmd_name| {
-            if (try path_list.findExecutable(self.allocator, cmd_name)) |exec_path| {
-                // Remove old entry if exists
-                if (shell_ref.command_cache.fetchRemove(cmd_name)) |kv| {
-                    self.allocator.free(kv.key);
-                    self.allocator.free(kv.value);
-                }
-
-                // Add new entry
-                const key = try self.allocator.dupe(u8, cmd_name);
-                errdefer self.allocator.free(key);
-                try shell_ref.command_cache.put(key, exec_path);
-            } else {
-                try IO.eprint("den: hash: {s}: not found\n", .{cmd_name});
-                return 1;
-            }
-        }
-
-        return 0;
-    }
-
-    // builtinYes extracted to executor/builtins/utilities.zig
-
-    fn builtinReload(self: *Executor, command: *types.ParsedCommand) !i32 {
-        const shell_ref = self.shell orelse {
-            try IO.eprint("den: reload: shell context not available\n", .{});
-            return 1;
-        };
-
-        // Check for --help
-        for (command.args) |arg| {
-            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-                try IO.print("reload - reload shell configuration\n", .{});
-                try IO.print("Usage: reload [options]\n", .{});
-                try IO.print("Options:\n", .{});
-                try IO.print("  -v, --verbose  Show detailed reload information\n", .{});
-                try IO.print("  --aliases      Reload only aliases\n", .{});
-                try IO.print("  --config       Reload only config (no aliases)\n", .{});
-                try IO.print("\nConfig search order:\n", .{});
-                try IO.print("  1. ./den.jsonc\n", .{});
-                try IO.print("  2. ./package.jsonc (\"den\" key)\n", .{});
-                try IO.print("  3. ./config/den.jsonc\n", .{});
-                try IO.print("  4. ./.config/den.jsonc\n", .{});
-                try IO.print("  5. ~/.config/den.jsonc\n", .{});
-                try IO.print("  6. ~/package.jsonc (\"den\" key)\n", .{});
-                return 0;
-            }
-        }
-
-        var verbose = false;
-        var reload_aliases = true;
-        var reload_config = true;
-
-        for (command.args) |arg| {
-            if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--verbose")) {
-                verbose = true;
-            } else if (std.mem.eql(u8, arg, "--aliases")) {
-                reload_config = false;
-            } else if (std.mem.eql(u8, arg, "--config")) {
-                reload_aliases = false;
-            }
-        }
-
-        const config_loader = @import("../config_loader.zig");
-
-        if (reload_config) {
-            // Load config with source information
-            const result = config_loader.loadConfigWithSource(self.allocator) catch {
-                try IO.eprint("den: reload: failed to load configuration\n", .{});
-                return 1;
-            };
-
-            // Update shell config
-            shell_ref.config = result.config;
-
-            if (verbose) {
-                const source_name = switch (result.source.source_type) {
-                    .default => "defaults",
-                    .den_jsonc => "den.jsonc",
-                    .package_jsonc => "package.jsonc",
-                    .custom_path => "custom path",
-                };
-                if (result.source.path) |path| {
-                    try IO.print("Configuration loaded from: {s} ({s})\n", .{ path, source_name });
-                } else {
-                    try IO.print("Configuration loaded from: {s}\n", .{source_name});
-                }
-            }
-        }
-
-        if (reload_aliases) {
-            // Reload aliases from config
-            shell_ref.loadAliasesFromConfig() catch {
-                try IO.eprint("den: reload: failed to reload aliases\n", .{});
-                return 1;
-            };
-            if (verbose) {
-                try IO.print("Aliases reloaded from configuration\n", .{});
-            }
-        }
-
-        if (!verbose) {
-            try IO.print("Configuration reloaded\n", .{});
-        } else {
-            try IO.print("Reload complete\n", .{});
-        }
-
-        return 0;
-    }
-
     fn builtinWatch(self: *Executor, command: *types.ParsedCommand) !i32 {
         // watch [-n seconds] command [args...]
         // Repeatedly execute a command and display output
@@ -2182,9 +1574,6 @@ pub const Executor = struct {
 
         return 0;
     }
-
-    // File operation builtins (tree, grep, find, ft, calc, json, ls) extracted to
-    // executor/builtins/file_ops.zig
 
     fn executeExternal(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Check if command exists before forking to provide better error messages
@@ -2501,8 +1890,6 @@ pub const Executor = struct {
         // The process will continue running independently
     }
 
-    // builtinSeq and builtinDate extracted to executor/builtins/utilities.zig
-
     /// Builtin: parallel - run commands in parallel (stub)
     fn builtinParallel(self: *Executor, command: *types.ParsedCommand) !i32 {
         _ = self;
@@ -2519,9 +1906,6 @@ pub const Executor = struct {
 
         return 0;
     }
-
-    // builtinHttp, builtinBase64, builtinUuid, builtinLocalip, builtinIp, builtinShrug, builtinWeb
-    // extracted to executor/builtins/utilities.zig
 
     fn builtinReturn(self: *Executor, command: *types.ParsedCommand) !i32 {
         const shell = self.shell orelse {
@@ -2585,122 +1969,6 @@ pub const Executor = struct {
 
         return 0;
     }
-
-
-
-    fn builtinBookmark(self: *Executor, command: *types.ParsedCommand) !i32 {
-        // bookmark         - list all bookmarks
-        // bookmark name    - cd to bookmark
-        // bookmark -a name - add current dir as bookmark
-        // bookmark -d name - delete bookmark
-
-        if (command.args.len == 0) {
-            // List all bookmarks
-            if (self.shell) |shell| {
-                var iter = shell.named_dirs.iterator();
-                var count: usize = 0;
-                while (iter.next()) |entry| {
-                    try IO.print("{s} -> {s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-                    count += 1;
-                }
-                if (count == 0) {
-                    try IO.print("No bookmarks set. Use 'bookmark -a name' to add one.\n", .{});
-                }
-            } else {
-                try IO.eprint("den: bookmark: shell not available\n", .{});
-                return 1;
-            }
-            return 0;
-        }
-
-        const first_arg = command.args[0];
-
-        if (std.mem.eql(u8, first_arg, "-a")) {
-            // Add bookmark
-            if (command.args.len < 2) {
-                try IO.eprint("den: bookmark: -a requires a name\n", .{});
-                return 1;
-            }
-            const name = command.args[1];
-
-            // Get current directory
-            var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const cwd = std.posix.getcwd(&cwd_buf) catch {
-                try IO.eprint("den: bookmark: failed to get current directory\n", .{});
-                return 1;
-            };
-
-            if (self.shell) |shell| {
-                // Add to named directories
-                const key = try self.allocator.dupe(u8, name);
-                const value = try self.allocator.dupe(u8, cwd);
-
-                const result = shell.named_dirs.fetchPut(key, value) catch {
-                    self.allocator.free(key);
-                    self.allocator.free(value);
-                    try IO.eprint("den: bookmark: failed to save bookmark\n", .{});
-                    return 1;
-                };
-
-                if (result) |old| {
-                    self.allocator.free(old.key);
-                    self.allocator.free(old.value);
-                }
-
-                try IO.print("Bookmark '{s}' -> {s}\n", .{ name, cwd });
-            } else {
-                try IO.eprint("den: bookmark: shell not available\n", .{});
-                return 1;
-            }
-            return 0;
-        }
-
-        if (std.mem.eql(u8, first_arg, "-d")) {
-            // Delete bookmark
-            if (command.args.len < 2) {
-                try IO.eprint("den: bookmark: -d requires a name\n", .{});
-                return 1;
-            }
-            const name = command.args[1];
-
-            if (self.shell) |shell| {
-                if (shell.named_dirs.fetchRemove(name)) |old| {
-                    self.allocator.free(old.key);
-                    self.allocator.free(old.value);
-                    try IO.print("Bookmark '{s}' removed\n", .{name});
-                } else {
-                    try IO.eprint("den: bookmark: '{s}' not found\n", .{name});
-                    return 1;
-                }
-            } else {
-                try IO.eprint("den: bookmark: shell not available\n", .{});
-                return 1;
-            }
-            return 0;
-        }
-
-        // No flag - cd to bookmark
-        const name = first_arg;
-
-        if (self.shell) |shell| {
-            if (shell.named_dirs.get(name)) |path| {
-                std.posix.chdir(path) catch |err| {
-                    try IO.eprint("den: bookmark: {s}: {}\n", .{ path, err });
-                    return 1;
-                };
-                try IO.print("{s}\n", .{path});
-            } else {
-                try IO.eprint("den: bookmark: '{s}' not found\n", .{name});
-                return 1;
-            }
-        } else {
-            try IO.eprint("den: bookmark: shell not available\n", .{});
-            return 1;
-        }
-
-        return 0;
-    }
-
 
     /// Coproc: run a command as a coprocess with bidirectional pipes
     /// Usage: coproc [NAME] command [args...]
@@ -2878,261 +2146,8 @@ pub const Executor = struct {
         return 0;
     }
 
-    /// Interactive file finder with fuzzy matching and selection
-    fn builtinIfind(self: *Executor, command: *types.ParsedCommand) !i32 {
-        // Parse arguments
-        var search_pattern: ?[]const u8 = null;
-        var search_dir: []const u8 = ".";
-        var show_hidden = false;
-        var max_depth: u32 = 10;
-        var file_type: FileTypeFilter = .all;
-
-        var i: usize = 0;
-        while (i < command.args.len) : (i += 1) {
-            const arg = command.args[i];
-            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-                try IO.print(
-                    \\Usage: ifind [OPTIONS] [PATTERN] [DIRECTORY]
-                    \\
-                    \\Interactive file finder with fuzzy matching.
-                    \\
-                    \\Options:
-                    \\  -a, --all         Show hidden files
-                    \\  -d, --depth N     Maximum search depth (default: 10)
-                    \\  -f, --files       Only show files
-                    \\  -D, --dirs        Only show directories
-                    \\  -h, --help        Show this help
-                    \\
-                    \\Navigation:
-                    \\  ↑/↓ or j/k       Move selection
-                    \\  Enter            Select current item
-                    \\  q, Esc           Cancel
-                    \\  Type to filter   Refine search with fuzzy matching
-                    \\
-                    \\Examples:
-                    \\  ifind             Search current directory
-                    \\  ifind test        Search for files matching 'test'
-                    \\  ifind -f zig src  Search for files containing 'zig' in src/
-                    \\
-                , .{});
-                return 0;
-            } else if (std.mem.eql(u8, arg, "-a") or std.mem.eql(u8, arg, "--all")) {
-                show_hidden = true;
-            } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--files")) {
-                file_type = .files;
-            } else if (std.mem.eql(u8, arg, "-D") or std.mem.eql(u8, arg, "--dirs")) {
-                file_type = .dirs;
-            } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--depth")) {
-                i += 1;
-                if (i < command.args.len) {
-                    max_depth = std.fmt.parseInt(u32, command.args[i], 10) catch 10;
-                }
-            } else if (arg.len > 0 and arg[0] != '-') {
-                if (search_pattern == null) {
-                    search_pattern = arg;
-                } else {
-                    search_dir = arg;
-                }
-            }
-        }
-
-        // Collect files
-        var files = std.ArrayList([]const u8).empty;
-        defer {
-            for (files.items) |f| {
-                self.allocator.free(f);
-            }
-            files.deinit(self.allocator);
-        }
-
-        // Walk directory
-        try collectFilesRecursive(self.allocator, search_dir, &files, show_hidden, max_depth, file_type, 0);
-
-        if (files.items.len == 0) {
-            try IO.print("No files found.\n", .{});
-            return 0;
-        }
-
-        // If initial pattern, filter
-        var filtered_indices = std.ArrayList(usize).empty;
-        defer filtered_indices.deinit(self.allocator);
-
-        for (0..files.items.len) |idx| {
-            if (search_pattern == null or fuzzyMatchPath(files.items[idx], search_pattern.?)) {
-                try filtered_indices.append(self.allocator, idx);
-            }
-        }
-
-        if (filtered_indices.items.len == 0) {
-            try IO.print("No matching files.\n", .{});
-            return 0;
-        }
-
-        // Print matches with highlighting
-        try IO.print("\x1b[1;36mifind\x1b[0m - Found {d} matching files:\n\n", .{filtered_indices.items.len});
-
-        const max_display: usize = 50;
-        const display_count = @min(filtered_indices.items.len, max_display);
-
-        for (0..display_count) |j| {
-            const file_path = files.items[filtered_indices.items[j]];
-            try IO.print("  {s}\n", .{file_path});
-        }
-
-        if (filtered_indices.items.len > max_display) {
-            try IO.print("\n  \x1b[2m... and {d} more\x1b[0m\n", .{filtered_indices.items.len - max_display});
-        }
-
-        return 0;
-    }
 };
 
-fn collectFilesRecursive(
-    allocator: std.mem.Allocator,
-    dir_path: []const u8,
-    files: *std.ArrayList([]const u8),
-    show_hidden: bool,
-    max_depth: u32,
-    file_type: FileTypeFilter,
-    current_depth: u32,
-) !void {
-    if (current_depth >= max_depth) return;
-
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
-    defer dir.close();
-
-    var iter = dir.iterate();
-    while (iter.next() catch null) |entry| {
-        // Skip hidden files unless requested
-        if (!show_hidden and entry.name.len > 0 and entry.name[0] == '.') continue;
-
-        // Build full path
-        const full_path = if (std.mem.eql(u8, dir_path, "."))
-            try allocator.dupe(u8, entry.name)
-        else
-            try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.name });
-
-        const is_dir = entry.kind == .directory;
-
-        // Apply file type filter
-        switch (file_type) {
-            .all => try files.append(allocator, full_path),
-            .files => {
-                if (!is_dir) {
-                    try files.append(allocator, full_path);
-                } else {
-                    allocator.free(full_path);
-                }
-            },
-            .dirs => {
-                if (is_dir) {
-                    try files.append(allocator, full_path);
-                } else {
-                    allocator.free(full_path);
-                }
-            },
-        }
-
-        // Recurse into directories
-        if (is_dir) {
-            const recurse_path = if (std.mem.eql(u8, dir_path, "."))
-                try allocator.dupe(u8, entry.name)
-            else
-                try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.name });
-            defer allocator.free(recurse_path);
-
-            try collectFilesRecursive(allocator, recurse_path, files, show_hidden, max_depth, file_type, current_depth + 1);
-        }
-    }
-}
-
-fn fuzzyMatchPath(path: []const u8, pattern: []const u8) bool {
-    if (pattern.len == 0) return true;
-
-    // Simple fuzzy matching: all pattern chars must appear in order (case insensitive)
-    var pat_idx: usize = 0;
-    for (path) |c| {
-        const path_lower = if (c >= 'A' and c <= 'Z') c + 32 else c;
-        const pat_lower = if (pattern[pat_idx] >= 'A' and pattern[pat_idx] <= 'Z') pattern[pat_idx] + 32 else pattern[pat_idx];
-
-        if (path_lower == pat_lower) {
-            pat_idx += 1;
-            if (pat_idx >= pattern.len) return true;
-        }
-    }
-    return false;
-}
-
-/// List available libraries
-
-/// Get color code for log level
-fn getLevelColor(level: []const u8) []const u8 {
-    const upper = level;
-    if (std.mem.indexOf(u8, upper, "ERROR") != null or
-        std.mem.indexOf(u8, upper, "FATAL") != null or
-        std.mem.indexOf(u8, upper, "error") != null or
-        std.mem.indexOf(u8, upper, "fatal") != null)
-    {
-        return "\x1b[1;31m"; // Red
-    } else if (std.mem.indexOf(u8, upper, "WARN") != null or
-        std.mem.indexOf(u8, upper, "warn") != null)
-    {
-        return "\x1b[1;33m"; // Yellow
-    } else if (std.mem.indexOf(u8, upper, "INFO") != null or
-        std.mem.indexOf(u8, upper, "info") != null)
-    {
-        return "\x1b[1;32m"; // Green
-    } else if (std.mem.indexOf(u8, upper, "DEBUG") != null or
-        std.mem.indexOf(u8, upper, "debug") != null or
-        std.mem.indexOf(u8, upper, "TRACE") != null or
-        std.mem.indexOf(u8, upper, "trace") != null)
-    {
-        return "\x1b[2m"; // Dim
-    }
-    return "\x1b[0m";
-}
-
-/// Print a line with custom highlight pattern (for log-tail)
-fn logTailHighlightLine(line: []const u8, pattern: []const u8) !void {
-    var remaining = line;
-    while (remaining.len > 0) {
-        if (std.mem.indexOf(u8, remaining, pattern)) |idx| {
-            // Print before match
-            if (idx > 0) {
-                try IO.print("{s}", .{remaining[0..idx]});
-            }
-            // Print match in red bold
-            try IO.print("\x1b[1;31m{s}\x1b[0m", .{pattern});
-            remaining = remaining[idx + pattern.len ..];
-        } else {
-            try IO.print("{s}\n", .{remaining});
-            break;
-        }
-    }
-}
-
-/// Print a line with auto-highlighting for common log levels (for log-tail)
-fn logTailAutoHighlightLine(line: []const u8) !void {
-    // Check for common log levels and colorize
-    if (std.mem.indexOf(u8, line, "ERROR") != null or
-        std.mem.indexOf(u8, line, "FATAL") != null or
-        std.mem.indexOf(u8, line, "CRITICAL") != null)
-    {
-        try IO.print("\x1b[1;31m{s}\x1b[0m\n", .{line}); // Red
-    } else if (std.mem.indexOf(u8, line, "WARN") != null or
-        std.mem.indexOf(u8, line, "WARNING") != null)
-    {
-        try IO.print("\x1b[1;33m{s}\x1b[0m\n", .{line}); // Yellow
-    } else if (std.mem.indexOf(u8, line, "INFO") != null) {
-        try IO.print("\x1b[1;32m{s}\x1b[0m\n", .{line}); // Green
-    } else if (std.mem.indexOf(u8, line, "DEBUG") != null or
-        std.mem.indexOf(u8, line, "TRACE") != null)
-    {
-        try IO.print("\x1b[2m{s}\x1b[0m\n", .{line}); // Dim
-    } else {
-        try IO.print("{s}\n", .{line});
-    }
-}
 
 /// hook builtin - manage custom command hooks
 fn builtinHook(self: *Executor, command: *types.ParsedCommand) !i32 {
