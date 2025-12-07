@@ -1,7 +1,5 @@
 # Den Shell
 
-**A blazing-fast, production-ready POSIX shell written in Zig.**
-
 Den is a modern shell that combines the familiarity of traditional shells with native performance and memory safety. Originally built as "Krusty" with TypeScript and Bun, Den has been completely rewritten in Zig for maximum efficiency.
 
 ## Why Den?
@@ -217,38 +215,6 @@ den/
 
 Contributions are welcome! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for guidelines.
 
-## Roadmap
-
-**✅ Completed** (Production Ready):
-- Core shell functionality (parsing, execution, I/O)
-- 54 essential builtin commands
-- Job control and process management (jobs, fg, bg, kill, wait, disown)
-- History and tab completion
-- Variable expansion ($VAR, ${VAR:-default}, special vars: $?, $$, $!, $_, $0-$9, $@, $*, $#)
-- Command substitution ($(command) and `` `command` ``)
-- Arithmetic expansion ($((expr)) with +, -, *, /, %, ** operators)
-- Brace expansion ({1..10}, {a..z}, {foo,bar,baz})
-- Tilde expansion (~, ~/path)
-- Glob expansion (*.txt, **/*.zig)
-- Pipelines, redirections, and operators
-- Script control builtins (return, break, continue, local, declare, readonly)
-- Advanced execution (exec, builtin, trap, getopts, times)
-- Script execution with positional parameters
-- Error handling (set -e errexit, set -E errtrace, line number reporting)
-- Script management (caching, reloading, validation, enhanced error reporting)
-- Control flow (if/elif/else/fi, while, until, for loops with break/continue support)
-
-**✨ Enhanced Features**:
-- ✅ Configuration file support (JSONC via zig-config)
-- ✅ C-style for loops (`for ((i=0; i<10; i++))`)
-- ✅ Select menus for interactive selection
-- 🔧 Plugin system for extensibility (infrastructure complete)
-- 🔧 Theme and prompt customization (configuration complete)
-- 🔧 Syntax highlighting and auto-suggestions (plugins exist)
-- 📋 Additional productivity builtins (planned)
-
-See [ROADMAP.md](ROADMAP.md) for detailed phase breakdown.
-
 ## Documentation
 
 ### User Guides
@@ -274,7 +240,3 @@ Made with 💙 by the Stacks team.
 
 - [GitHub Discussions](https://github.com/stacksjs/den/discussions)
 - [Discord Server](https://discord.gg/stacksjs)
-
----
-
-**Note**: Den is the Zig rewrite of the original Krusty shell (TypeScript/Bun). The TypeScript version remains available in the repository for reference but is no longer actively developed.
