@@ -26,6 +26,7 @@ pub const prompt_context = @import("prompt_context.zig");
 pub const command_expansion = @import("command_expansion.zig");
 pub const variable_handling = @import("variable_handling.zig");
 pub const command_execution = @import("command_execution.zig");
+pub const builtin_dispatch = @import("builtin_dispatch.zig");
 
 // Re-export version detection functions for convenience
 pub const detectPackageVersion = version.detectPackageVersion;
@@ -147,3 +148,7 @@ pub const executeArrayAssignment = variable_handling.executeArrayAssignment;
 pub const tryFastPath = command_execution.tryFastPath;
 pub const executeErrTrap = command_execution.executeErrTrap;
 pub const executeInBackground = command_execution.executeInBackground;
+
+// Re-export builtin dispatch
+pub const dispatchBuiltin = builtin_dispatch.dispatchBuiltin;
+pub const DispatchResult = builtin_dispatch.DispatchResult;

@@ -779,8 +779,8 @@ pub const Shell = struct {
 
     pub fn executeCommand(self: *Shell, input: []const u8) !void {
         // Check for array assignment first
-        if (isArrayAssignment(input)) {
-            try self.executeArrayAssignment(input);
+        if (shell_mod.isArrayAssignment(input)) {
+            try shell_mod.executeArrayAssignment(self, input);
             return;
         }
 
@@ -824,7 +824,7 @@ pub const Shell = struct {
                     if (!found_space_outside_quotes) {
                         // Simple assignment - use setArithVariable which resolves namerefs
                         const value = trimmed_input[eq_pos + 1 ..];
-                        self.setArithVariable(potential_var, value);
+                        shell_mod.setArithVariable(self, potential_var, value);
                         self.last_exit_code = 0;
                         return;
                     }
@@ -835,20 +835,20 @@ pub const Shell = struct {
         // Check for C-style for loop: for ((init; cond; update)); do ... done
         // Skip this check if we're already inside a C-style for loop body to avoid recursion
         if (!self.in_cstyle_for_body and std.mem.startsWith(u8, trimmed_input, "for ((")) {
-            try self.executeCStyleForLoopOneline(input);
+            try shell_mod.executeCStyleForLoopOneline(self, input);
             return;
         }
 
         // Check for select loop: select VAR in ITEM1 ITEM2; do ... done
         if (std.mem.startsWith(u8, trimmed_input, "select ")) {
-            try self.executeSelectLoop(input);
+            try shell_mod.executeSelectLoop(self, input);
             return;
         }
 
         // Check if input contains a C-style for loop after other commands (e.g., "total=0; for ((...")
         // This handles cases like: total=0; for ((i=1; i<=5; i++)); do total=$((total + i)); done; echo $total
         if (!self.in_cstyle_for_body and std.mem.indexOf(u8, trimmed_input, "for ((") != null) {
-            try self.executeWithCStyleForLoop(input);
+            try shell_mod.executeWithCStyleForLoop(self, input);
             return;
         }
 
@@ -940,178 +940,7 @@ pub const Shell = struct {
         // Check for shell-context builtins (jobs, history, etc.)
         if (chain.commands.len == 1 and chain.operators.len == 0) {
             const cmd = &chain.commands[0];
-            if (std.mem.eql(u8, cmd.name, "jobs")) {
-                self.last_exit_code = try self.job_manager.builtinJobs(cmd.args);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "fg")) {
-                self.last_exit_code = try self.job_manager.builtinFg(cmd.args);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "bg")) {
-                self.last_exit_code = try self.job_manager.builtinBg(cmd.args);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "history")) {
-                try self.builtinHistory(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "complete")) {
-                try self.builtinComplete(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "alias")) {
-                try self.builtinAlias(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "unalias")) {
-                try self.builtinUnalias(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "type")) {
-                try self.builtinType(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "which")) {
-                try self.builtinWhich(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "source") or std.mem.eql(u8, cmd.name, ".")) {
-                try self.builtinSource(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "read")) {
-                try self.builtinRead(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "test") or std.mem.eql(u8, cmd.name, "[") or std.mem.eql(u8, cmd.name, "[[")) {
-                try self.builtinTest(cmd);
-                if (self.last_exit_code != 0) {
-                    self.executeErrTrap();
-                }
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "pushd")) {
-                try self.builtinPushd(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "popd")) {
-                try self.builtinPopd(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "dirs")) {
-                try self.builtinDirs(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "printf")) {
-                try self.builtinPrintf(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "true")) {
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "false")) {
-                self.last_exit_code = 1;
-                self.executeErrTrap();
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "sleep")) {
-                try self.builtinSleep(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "help")) {
-                try self.builtinHelp(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "basename")) {
-                try self.builtinBasename(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "dirname")) {
-                try self.builtinDirname(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "realpath")) {
-                try self.builtinRealpath(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "command")) {
-                try self.builtinCommand(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "eval")) {
-                try self.builtinEval(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "shift")) {
-                try self.builtinShift(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "time")) {
-                try self.builtinTime(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "umask")) {
-                try self.builtinUmask(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "clear")) {
-                try self.builtinClear(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "uname")) {
-                try self.builtinUname(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "whoami")) {
-                try self.builtinWhoami(cmd);
-                self.last_exit_code = 0;
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "hash")) {
-                try self.builtinHash(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "return")) {
-                try self.builtinReturn(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "break")) {
-                try self.builtinBreak(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "continue")) {
-                try self.builtinContinue(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "local")) {
-                try self.builtinLocal(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "declare")) {
-                try self.builtinDeclare(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "readonly")) {
-                try self.builtinReadonly(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "exec")) {
-                try self.builtinExec(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "wait")) {
-                try self.builtinWait(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "kill")) {
-                try self.builtinKill(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "disown")) {
-                try self.builtinDisown(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "getopts")) {
-                try self.builtinGetopts(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "times")) {
-                try self.builtinTimes(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "builtin")) {
-                try self.builtinBuiltin(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "typeset")) {
-                try self.builtinTypeset(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "let")) {
-                try self.builtinLet(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "shopt")) {
-                try self.builtinShopt(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "mapfile") or std.mem.eql(u8, cmd.name, "readarray")) {
-                try self.builtinMapfile(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "caller")) {
-                try self.builtinCaller(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "compgen")) {
-                try self.builtinCompgen(cmd);
-                return;
-            } else if (std.mem.eql(u8, cmd.name, "enable")) {
-                try self.builtinEnable(cmd);
+            if (try shell_mod.dispatchBuiltin(self, cmd) == .handled) {
                 return;
             }
         }
@@ -1122,7 +951,7 @@ pub const Shell = struct {
 
         if (is_background) {
             // Execute in background
-            try self.executeInBackground(&chain, input);
+            try shell_mod.executeInBackground(self, &chain, input);
             self.last_exit_code = 0;
         } else {
             // Execute normally
@@ -1163,10 +992,6 @@ pub const Shell = struct {
 
     pub fn executeErrTrap(self: *Shell) void {
         shell_mod.executeErrTrap(self);
-    }
-
-    fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_input: []const u8) !void {
-        try shell_mod.executeInBackground(self, chain, original_input);
     }
 
     pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
@@ -1260,290 +1085,9 @@ pub const Shell = struct {
         try History.appendToFile(self.history_file_path, command);
     }
 
-    /// Builtin: history - show command history
-    fn builtinHistory(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinHistory(self, cmd);
-    }
-
-    /// Builtin: complete - manage programmable completions
-    fn builtinComplete(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinComplete(self, cmd);
-    }
-
-    /// Show completions in legacy mode (for a prefix)
-    fn showLegacyCompletions(self: *Shell, completion: *Completion, prefix: []const u8) !void {
-        try shell_mod.showLegacyCompletions(self, completion, prefix);
-    }
-
     /// Expand aliases in command chain with circular reference detection
     pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
         try shell_mod.expandAliases(self, chain);
-    }
-
-    /// Builtin: alias - define or list aliases
-    /// Supports -s flag for suffix aliases (zsh-style): alias -s ts='bun'
-    fn builtinAlias(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinAlias(self, cmd);
-    }
-
-    /// Builtin: unalias - remove alias
-    /// Supports -s flag for suffix aliases: unalias -s ts
-    fn builtinUnalias(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinUnalias(self, cmd);
-    }
-
-    /// Builtin: type - identify command type
-    fn builtinType(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinType(self, cmd);
-    }
-
-    /// Builtin: which - locate command in PATH
-    fn builtinWhich(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinWhich(self, cmd);
-    }
-
-    /// Builtin: source - execute commands from file
-    fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinSource(self, cmd);
-    }
-
-    /// Builtin: read - read line from stdin into variable
-    fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinRead(self, cmd);
-    }
-
-    /// Builtin: test/[ - evaluate conditional expressions
-    fn builtinTest(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinTest(self, cmd);
-    }
-
-    /// Builtin: pushd - push directory onto stack and cd
-    fn builtinPushd(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinPushd(self, cmd);
-    }
-
-    /// Helper to rotate directory stack
-    fn rotateDirStack(self: *Shell, index: usize) !void {
-        try shell_mod.rotateDirStack(self, index);
-    }
-
-    /// Helper to print directory stack
-    fn printDirStack(self: *Shell) !void {
-        try shell_mod.printDirStack(self);
-    }
-
-    /// Builtin: popd - pop directory from stack and cd
-    fn builtinPopd(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinPopd(self, cmd);
-    }
-
-    /// Builtin: dirs - show directory stack
-    fn builtinDirs(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinDirs(self, cmd);
-    }
-
-    /// Builtin: printf - formatted output with full format string support
-    fn builtinPrintf(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinPrintf(self, cmd);
-    }
-
-    /// Builtin: sleep - pause for specified seconds
-    fn builtinSleep(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinSleep(self, cmd);
-    }
-
-    /// Builtin: help - show available builtins
-    fn builtinHelp(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinHelp(self, cmd);
-    }
-
-    /// Builtin: basename - extract filename from path
-    fn builtinBasename(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinBasename(self, cmd);
-    }
-
-    /// Builtin: dirname - extract directory from path
-    fn builtinDirname(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinDirname(self, cmd);
-    }
-
-    /// Builtin: realpath - resolve absolute path
-    fn builtinRealpath(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinRealpath(self, cmd);
-    }
-
-    /// Builtin: command - run command bypassing aliases/builtins
-    fn builtinCommand(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinCommand(self, cmd);
-    }
-
-    /// Builtin: eval - execute arguments as shell command
-    fn builtinEval(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinEval(self, cmd);
-    }
-
-    /// Builtin: shift - shift positional parameters
-    fn builtinShift(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinShift(self, cmd);
-    }
-
-    /// Builtin: time - time command execution
-    fn builtinTime(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinTime(self, cmd);
-    }
-
-    /// Builtin: umask - set file creation mask
-    fn builtinUmask(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinUmask(self, cmd);
-    }
-
-    /// Builtin: clear - clear the terminal screen
-    fn builtinClear(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinClear(self, cmd);
-    }
-
-    /// Builtin: uname - print system information
-    fn builtinUname(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinUname(self, cmd);
-    }
-
-    /// Builtin: whoami - print current username
-    fn builtinWhoami(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinWhoami(self, cmd);
-    }
-
-    /// Builtin: hash - remember/display command paths (simplified)
-    fn builtinHash(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinHash(self, cmd);
-    }
-
-    /// Builtin: return - return from function or script
-    fn builtinReturn(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinReturn(self, cmd);
-    }
-
-    /// Builtin: break - exit from loop
-    /// Supports `break N` to break out of N nested loops
-    fn builtinBreak(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinBreak(self, cmd);
-    }
-
-    /// Builtin: continue - skip to next loop iteration
-    /// Supports `continue N` to continue the Nth enclosing loop
-    fn builtinContinue(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinContinue(self, cmd);
-    }
-
-    /// Builtin: local - declare local variables (function scope)
-    fn builtinLocal(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinLocal(self, cmd);
-    }
-
-    /// Builtin: declare/typeset - declare variables with attributes
-    fn builtinDeclare(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinDeclare(self, cmd);
-    }
-
-    /// Helper to set variable attributes
-    fn setVarAttributes(self: *Shell, name: []const u8, attrs: types.VarAttributes, remove: bool) !void {
-        try shell_mod.setVarAttributes(self, name, attrs, remove);
-    }
-
-    /// Builtin: readonly - declare readonly variables
-    fn builtinReadonly(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinReadonly(self, cmd);
-    }
-
-    /// Builtin: typeset - alias for declare (bash compatibility)
-    fn builtinTypeset(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinTypeset(self, cmd);
-    }
-
-    /// Builtin: let - evaluate arithmetic expressions
-    fn builtinLet(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinLet(self, cmd);
-    }
-
-    /// Builtin: shopt - shell options
-    fn builtinShopt(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinShopt(self, cmd);
-    }
-
-    /// Builtin: mapfile/readarray - read lines into array
-    fn builtinMapfile(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinMapfile(self, cmd);
-    }
-
-    /// Builtin: caller - display call stack
-    fn builtinCaller(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinCaller(self, cmd);
-    }
-
-    /// Builtin: compgen - generate completions
-    fn builtinCompgen(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinCompgen(self, cmd);
-    }
-
-    /// enable builtin - load/unload loadable builtins from shared libraries
-    /// Usage:
-    ///   enable              - list all loadable builtins
-    ///   enable -a           - list all builtins (built-in and loadable)
-    ///   enable -f file name - load a builtin from shared library
-    ///   enable -d name      - delete (unload) a loadable builtin
-    ///   enable -n name      - disable a loadable builtin
-    ///   enable name         - enable a loadable builtin
-    fn builtinEnable(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinEnable(self, cmd);
-    }
-
-    /// Execute a one-line C-style for loop: for ((init; cond; update)); do cmd1; cmd2; done
-    fn executeCStyleForLoopOneline(self: *Shell, input: []const u8) !void {
-        try shell_mod.executeCStyleForLoopOneline(self, input);
-    }
-
-    /// Execute a command in the body of a C-style for loop
-    fn executeCStyleLoopBodyCommand(self: *Shell, cmd: []const u8) void {
-        shell_mod.executeCStyleLoopBodyCommand(self, cmd);
-    }
-
-    /// Execute input that contains a C-style for loop with commands before and/or after
-    fn executeWithCStyleForLoop(self: *Shell, input: []const u8) !void {
-        try shell_mod.executeWithCStyleForLoop(self, input);
-    }
-
-    /// Execute a select loop: select VAR in ITEM1 ITEM2 ...; do BODY; done
-    fn executeSelectLoop(self: *Shell, input: []const u8) !void {
-        try shell_mod.executeSelectLoop(self, input);
-    }
-
-    /// Execute select loop body command (non-recursive helper)
-    fn executeSelectBody(self: *Shell, body: []const u8) void {
-        shell_mod.executeSelectBody(self, body);
-    }
-
-    /// Execute arithmetic statement (like i=0 or i++)
-    fn executeArithmeticStatement(self: *Shell, stmt: []const u8) void {
-        shell_mod.executeArithmeticStatement(self, stmt);
-    }
-
-    /// Set a variable for arithmetic operations
-    fn setArithVariable(self: *Shell, name: []const u8, value: []const u8) void {
-        shell_mod.setArithVariable(self, name, value);
-    }
-
-    /// Evaluate arithmetic condition (returns true if non-zero)
-    fn evaluateArithmeticCondition(self: *Shell, cond: []const u8) bool {
-        return shell_mod.evaluateArithmeticCondition(self, cond);
-    }
-
-    /// Evaluate arithmetic expression
-    fn evaluateArithmeticExpr(self: *Shell, expr: []const u8) i64 {
-        return shell_mod.evaluateArithmeticExpr(self, expr);
-    }
-
-    /// Get variable value (helper for arithmetic)
-    fn getVariableValueForArith(self: *Shell, name: []const u8) []const u8 {
-        return shell_mod.getVariableValueForArith(self, name);
     }
 
     /// Resolve nameref: follow nameref chain to get the actual variable name
@@ -1561,34 +1105,6 @@ pub const Shell = struct {
         try shell_mod.setVariableValue(self, name, value);
     }
 
-    fn isArrayAssignment(input: []const u8) bool {
-        return shell_mod.isArrayAssignment(input);
-    }
-
-    fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
-        try shell_mod.executeArrayAssignment(self, input);
-    }
-
-    /// Builtin: exec - replace shell with command
-    fn builtinExec(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinExec(self, cmd);
-    }
-
-    /// Builtin: wait - wait for job completion
-    fn builtinWait(self: *Shell, cmd: *types.ParsedCommand) !void {
-        self.last_exit_code = try self.job_manager.builtinWait(cmd.args);
-    }
-
-    /// Builtin: kill - send signal to job or process
-    fn builtinKill(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinKill(self, cmd);
-    }
-
-    /// Builtin: disown - remove jobs from job table
-    fn builtinDisown(self: *Shell, cmd: *types.ParsedCommand) !void {
-        self.last_exit_code = try self.job_manager.builtinDisown(cmd.args);
-    }
-
     /// Builtin: trap - handle signals and special events
     fn builtinTrap(self: *Shell, cmd: *types.ParsedCommand) !void {
         if (cmd.args.len == 0) {
@@ -1600,26 +1116,6 @@ pub const Shell = struct {
         // Stub - full implementation would register signal handlers
         try IO.print("den: trap: registering handler for signals (stub)\n", .{});
         self.last_exit_code = 0;
-    }
-
-    /// Builtin: getopts - parse command options
-    fn builtinGetopts(self: *Shell, cmd: *types.ParsedCommand) !void {
-        _ = cmd;
-        try IO.print("den: getopts: option parsing not yet implemented\n", .{});
-        self.last_exit_code = 1;
-    }
-
-    /// Builtin: times - display process times
-    fn builtinTimes(self: *Shell, cmd: *types.ParsedCommand) !void {
-        _ = cmd;
-        try IO.print("0m0.000s 0m0.000s\n", .{}); // Shell user/sys time
-        try IO.print("0m0.000s 0m0.000s\n", .{}); // Children user/sys time
-        self.last_exit_code = 0;
-    }
-
-    /// Builtin: builtin - execute builtin command
-    fn builtinBuiltin(self: *Shell, cmd: *types.ParsedCommand) !void {
-        try shell_mod.builtinBuiltin(self, cmd);
     }
 
 };
