@@ -14,6 +14,14 @@ pub const directory_stack = @import("directory_stack.zig");
 pub const printf_builtin = @import("printf_builtin.zig");
 pub const test_builtin = @import("test_builtin.zig");
 pub const variable_builtins = @import("variable_builtins.zig");
+pub const completion_builtins = @import("completion_builtins.zig");
+pub const shopt_builtin = @import("shopt_builtin.zig");
+pub const process_builtins = @import("process_builtins.zig");
+pub const enable_builtin = @import("enable_builtin.zig");
+pub const misc_builtins = @import("misc_builtins.zig");
+pub const eval_builtins = @import("eval_builtins.zig");
+pub const loop_execution = @import("loop_execution.zig");
+pub const function_definition = @import("function_definition.zig");
 
 // Re-export version detection functions for convenience
 pub const detectPackageVersion = version.detectPackageVersion;
@@ -43,13 +51,6 @@ pub const builtinReturn = builtins.builtinReturn;
 pub const builtinBreak = builtins.builtinBreak;
 pub const builtinContinue = builtins.builtinContinue;
 
-// Re-export loop functions for convenience
-pub const executeCStyleForLoopOneline = loops.executeCStyleForLoopOneline;
-pub const executeCStyleLoopBodyCommand = loops.executeCStyleLoopBodyCommand;
-pub const executeArithmeticStatement = loops.executeArithmeticStatement;
-pub const evaluateArithmeticCondition = loops.evaluateArithmeticCondition;
-pub const evaluateArithmeticExpression = loops.evaluateArithmeticExpression;
-
 // Re-export directory stack functions
 pub const builtinPushd = directory_stack.builtinPushd;
 pub const builtinPopd = directory_stack.builtinPopd;
@@ -72,3 +73,52 @@ pub const builtinTypeset = variable_builtins.builtinTypeset;
 pub const builtinLet = variable_builtins.builtinLet;
 pub const printDeclare = variable_builtins.printDeclare;
 pub const setVarAttributes = variable_builtins.setVarAttributes;
+
+// Re-export completion builtin functions
+pub const builtinComplete = completion_builtins.builtinComplete;
+pub const builtinCompgen = completion_builtins.builtinCompgen;
+pub const printCompletionSpec = completion_builtins.printCompletionSpec;
+pub const showLegacyCompletions = completion_builtins.showLegacyCompletions;
+
+// Re-export shopt builtin function
+pub const builtinShopt = shopt_builtin.builtinShopt;
+
+// Re-export process builtin functions
+pub const builtinExec = process_builtins.builtinExec;
+pub const builtinKill = process_builtins.builtinKill;
+
+// Re-export enable builtin function
+pub const builtinEnable = enable_builtin.builtinEnable;
+
+// Re-export misc builtin functions
+pub const builtinSource = misc_builtins.builtinSource;
+pub const builtinMapfile = misc_builtins.builtinMapfile;
+pub const builtinTime = misc_builtins.builtinTime;
+pub const builtinHash = misc_builtins.builtinHash;
+pub const builtinUmask = misc_builtins.builtinUmask;
+pub const builtinCaller = misc_builtins.builtinCaller;
+
+// Re-export eval builtin functions
+pub const builtinRead = eval_builtins.builtinRead;
+pub const builtinCommand = eval_builtins.builtinCommand;
+pub const builtinEval = eval_builtins.builtinEval;
+pub const builtinShift = eval_builtins.builtinShift;
+pub const builtinBuiltin = eval_builtins.builtinBuiltin;
+
+// Re-export loop execution functions
+pub const executeCStyleForLoopOneline = loop_execution.executeCStyleForLoopOneline;
+pub const executeCStyleLoopBodyCommand = loop_execution.executeCStyleLoopBodyCommand;
+pub const executeWithCStyleForLoop = loop_execution.executeWithCStyleForLoop;
+pub const executeSelectLoop = loop_execution.executeSelectLoop;
+pub const executeSelectBody = loop_execution.executeSelectBody;
+pub const executeArithmeticStatement = loop_execution.executeArithmeticStatement;
+pub const setArithVariable = loop_execution.setArithVariable;
+pub const evaluateArithmeticCondition = loop_execution.evaluateArithmeticCondition;
+pub const evaluateArithmeticExpr = loop_execution.evaluateArithmeticExpr;
+pub const getVariableValueForArith = loop_execution.getVariableValueForArith;
+
+// Re-export function definition functions
+pub const checkFunctionDefinitionStart = function_definition.checkFunctionDefinitionStart;
+pub const handleMultilineContinuation = function_definition.handleMultilineContinuation;
+pub const finishFunctionDefinition = function_definition.finishFunctionDefinition;
+pub const resetMultilineState = function_definition.resetMultilineState;

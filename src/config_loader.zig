@@ -148,11 +148,8 @@ fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
     const json = try removeJsoncComments(allocator, content.items);
     defer allocator.free(json);
 
-    // Parse JSON
-    // Note: We don't call parsed.deinit() because even with .alloc_always,
-    // the value struct still contains pointers to arena memory for slices.
-    // The arena will be cleaned up when the allocator is destroyed.
-    const parsed = std.json.parseFromSlice(DenConfig, allocator, json, .{
+    // Parse JSON using page_allocator - this memory lives for program lifetime
+    const parsed = std.json.parseFromSlice(DenConfig, std.heap.page_allocator, json, .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
     }) catch |err| {
@@ -164,6 +161,7 @@ fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
 }
 
 /// Try to load config from a path, return null on failure
+/// Uses page_allocator for JSON parsing since config lives for program lifetime
 fn tryLoadFromPath(comptime T: type, allocator: std.mem.Allocator, path: []const u8) ?T {
     const file = std.fs.cwd().openFile(path, .{}) catch return null;
     defer file.close();
@@ -183,8 +181,9 @@ fn tryLoadFromPath(comptime T: type, allocator: std.mem.Allocator, path: []const
     const json = removeJsoncComments(allocator, content.items) catch return null;
     defer allocator.free(json);
 
-    // Parse JSON
-    const parsed = std.json.parseFromSlice(T, allocator, json, .{
+    // Parse JSON using page_allocator - this memory lives for program lifetime
+    // and won't trigger GPA leak warnings
+    const parsed = std.json.parseFromSlice(T, std.heap.page_allocator, json, .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
     }) catch return null;
@@ -217,8 +216,8 @@ fn tryLoadDenFromPackageJson(allocator: std.mem.Allocator, path: []const u8) ?De
     const json = removeJsoncComments(allocator, content.items) catch return null;
     defer allocator.free(json);
 
-    // Parse JSON looking for "den" key
-    const parsed = std.json.parseFromSlice(PackageJsonWithDen, allocator, json, .{
+    // Parse JSON using page_allocator - this memory lives for program lifetime
+    const parsed = std.json.parseFromSlice(PackageJsonWithDen, std.heap.page_allocator, json, .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
     }) catch return null;

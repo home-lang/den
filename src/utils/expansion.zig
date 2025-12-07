@@ -335,6 +335,7 @@ pub const Expansion = struct {
 
                 // Try to expand variable
                 const expansion_result = try self.expandVariable(input[i..]);
+                defer if (expansion_result.owned) self.allocator.free(@constCast(expansion_result.value));
 
                 // Copy expansion result to buffer
                 if (result_len + expansion_result.value.len > result_buffer.len) {
@@ -359,12 +360,13 @@ pub const Expansion = struct {
     const ExpansionResult = struct {
         value: []const u8,
         consumed: usize, // How many characters were consumed from input
+        owned: bool, // Whether value needs to be freed
     };
 
     /// Expand a single variable starting at $ character
     fn expandVariable(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 2 or input[0] != '$') {
-            return ExpansionResult{ .value = "$", .consumed = 1 };
+            return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
         // Check for special variables
@@ -373,23 +375,23 @@ pub const Expansion = struct {
             '?' => {
                 // $? - last exit code
                 const value = try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_exit_code});
-                return ExpansionResult{ .value = value, .consumed = 2 };
+                return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
             '$' => {
                 // $$ - current process ID
                 const pid = std.c.getpid();
                 const value = try std.fmt.allocPrint(self.allocator, "{d}", .{pid});
-                return ExpansionResult{ .value = value, .consumed = 2 };
+                return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
             '#' => {
                 // $# - number of positional parameters
                 const value = try std.fmt.allocPrint(self.allocator, "{d}", .{self.positional_params.len});
-                return ExpansionResult{ .value = value, .consumed = 2 };
+                return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
             '@' => {
                 // $@ - all positional parameters as separate words
                 if (self.positional_params.len == 0) {
-                    return ExpansionResult{ .value = "", .consumed = 2 };
+                    return ExpansionResult{ .value = "", .consumed = 2, .owned = false };
                 }
                 // Calculate total length needed
                 var total_len: usize = 0;
@@ -411,12 +413,12 @@ pub const Expansion = struct {
                         pos += 1;
                     }
                 }
-                return ExpansionResult{ .value = result, .consumed = 2 };
+                return ExpansionResult{ .value = result, .consumed = 2, .owned = true };
             },
             '*' => {
                 // $* - all positional parameters as single word
                 if (self.positional_params.len == 0) {
-                    return ExpansionResult{ .value = "", .consumed = 2 };
+                    return ExpansionResult{ .value = "", .consumed = 2, .owned = false };
                 }
                 // Calculate total length needed
                 var total_len: usize = 0;
@@ -438,32 +440,32 @@ pub const Expansion = struct {
                         pos += 1;
                     }
                 }
-                return ExpansionResult{ .value = result, .consumed = 2 };
+                return ExpansionResult{ .value = result, .consumed = 2, .owned = true };
             },
             '0' => {
                 // $0 - shell name or script name
                 const value = try self.allocator.dupe(u8, self.shell_name);
-                return ExpansionResult{ .value = value, .consumed = 2 };
+                return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
             '1'...'9' => {
                 // $1, $2, etc. - positional arguments
                 const digit = next_char - '0';
                 if (digit <= self.positional_params.len) {
                     const value = try self.allocator.dupe(u8, self.positional_params[digit - 1]);
-                    return ExpansionResult{ .value = value, .consumed = 2 };
+                    return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
                 }
                 // Parameter not set - return empty string
-                return ExpansionResult{ .value = "", .consumed = 2 };
+                return ExpansionResult{ .value = "", .consumed = 2, .owned = false };
             },
             '!' => {
                 // $! - last background job PID
                 const value = try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_background_pid});
-                return ExpansionResult{ .value = value, .consumed = 2 };
+                return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
             '_' => {
                 // $_ - last argument of previous command
                 const value = try self.allocator.dupe(u8, self.last_arg);
-                return ExpansionResult{ .value = value, .consumed = 2 };
+                return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
             '(' => {
                 // Check if it's $(( for arithmetic or $( for command substitution
@@ -489,7 +491,7 @@ pub const Expansion = struct {
     /// Expand ${VAR} or ${VAR:-default} form
     fn expandBracedVariable(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 3 or input[0] != '$' or input[1] != '{') {
-            return ExpansionResult{ .value = "$", .consumed = 1 };
+            return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
         // Find closing brace
@@ -500,7 +502,7 @@ pub const Expansion = struct {
 
         if (end >= input.len) {
             // No closing brace found - treat as literal
-            return ExpansionResult{ .value = "$", .consumed = 1 };
+            return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
         const content = input[2..end];
@@ -510,7 +512,7 @@ pub const Expansion = struct {
             const var_name = content[0..bracket_pos];
             const close_bracket = std.mem.indexOfScalar(u8, content[bracket_pos..], ']') orelse {
                 // No closing bracket - treat as literal
-                return ExpansionResult{ .value = "$", .consumed = 1 };
+                return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
             };
             const index_part = content[bracket_pos + 1 .. bracket_pos + close_bracket];
 
@@ -520,7 +522,7 @@ pub const Expansion = struct {
                     if (std.mem.eql(u8, index_part, "@") or std.mem.eql(u8, index_part, "*")) {
                         // ${arr[@]} or ${arr[*]} - all elements
                         if (array.len == 0) {
-                            return ExpansionResult{ .value = "", .consumed = end + 1 };
+                            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                         }
                         var total_len: usize = 0;
                         for (array) |item| {
@@ -540,17 +542,17 @@ pub const Expansion = struct {
                                 pos += 1;
                             }
                         }
-                        return ExpansionResult{ .value = result, .consumed = end + 1 };
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     } else {
                         // ${arr[index]} - specific index
                         const index = std.fmt.parseInt(usize, index_part, 10) catch {
-                            return ExpansionResult{ .value = "", .consumed = end + 1 };
+                            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                         };
                         if (index < array.len) {
                             const value = try self.allocator.dupe(u8, array[index]);
-                            return ExpansionResult{ .value = value, .consumed = end + 1 };
+                            return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
                         }
-                        return ExpansionResult{ .value = "", .consumed = end + 1 };
+                        return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                     }
                 }
             }
@@ -561,7 +563,7 @@ pub const Expansion = struct {
                     if (std.mem.eql(u8, index_part, "@") or std.mem.eql(u8, index_part, "*")) {
                         // ${assoc[@]} or ${assoc[*]} - all values
                         if (assoc.count() == 0) {
-                            return ExpansionResult{ .value = "", .consumed = end + 1 };
+                            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                         }
 
                         // Collect all values
@@ -592,14 +594,14 @@ pub const Expansion = struct {
                                 pos += 1;
                             }
                         }
-                        return ExpansionResult{ .value = result, .consumed = end + 1 };
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     } else {
                         // ${assoc[key]} - specific key lookup
                         if (assoc.get(index_part)) |value| {
                             const result = try self.allocator.dupe(u8, value);
-                            return ExpansionResult{ .value = result, .consumed = end + 1 };
+                            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                         }
-                        return ExpansionResult{ .value = "", .consumed = end + 1 };
+                        return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                     }
                 }
             }
@@ -612,24 +614,24 @@ pub const Expansion = struct {
             if (self.arrays) |arrays| {
                 if (arrays.get(var_name)) |array| {
                     const value = try std.fmt.allocPrint(self.allocator, "{d}", .{array.len});
-                    return ExpansionResult{ .value = value, .consumed = end + 1 };
+                    return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
                 }
             }
             // Then check associative arrays
             if (self.assoc_arrays) |assoc_arrays| {
                 if (assoc_arrays.get(var_name)) |assoc| {
                     const value = try std.fmt.allocPrint(self.allocator, "{d}", .{assoc.count()});
-                    return ExpansionResult{ .value = value, .consumed = end + 1 };
+                    return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
                 }
             }
             // Then check scalar variables for string length
             if (self.environment.get(var_name)) |value| {
                 const len_str = try std.fmt.allocPrint(self.allocator, "{d}", .{value.len});
-                return ExpansionResult{ .value = len_str, .consumed = end + 1 };
+                return ExpansionResult{ .value = len_str, .consumed = end + 1, .owned = true };
             }
             // Variable not found - length is 0
             const zero = try self.allocator.dupe(u8, "0");
-            return ExpansionResult{ .value = zero, .consumed = end + 1 };
+            return ExpansionResult{ .value = zero, .consumed = end + 1, .owned = true };
         }
 
         // Check for variable name prefix expansion: ${!prefix@} or ${!prefix*}
@@ -648,7 +650,7 @@ pub const Expansion = struct {
                         if (arrays.get(var_name)) |array| {
                             // Return indices 0, 1, 2, ...
                             if (array.len == 0) {
-                                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                             }
 
                             // Calculate space needed
@@ -672,7 +674,7 @@ pub const Expansion = struct {
                                     pos += 1;
                                 }
                             }
-                            return ExpansionResult{ .value = result, .consumed = end + 1 };
+                            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                         }
                     }
 
@@ -680,7 +682,7 @@ pub const Expansion = struct {
                     if (self.assoc_arrays) |assoc_arrays| {
                         if (assoc_arrays.get(var_name)) |assoc| {
                             if (assoc.count() == 0) {
-                                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                             }
 
                             // Collect all keys
@@ -716,7 +718,7 @@ pub const Expansion = struct {
                                     pos += 1;
                                 }
                             }
-                            return ExpansionResult{ .value = result, .consumed = end + 1 };
+                            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                         }
                     }
                 }
@@ -743,7 +745,7 @@ pub const Expansion = struct {
                 }.lessThan);
 
                 if (names.items.len == 0) {
-                    return ExpansionResult{ .value = "", .consumed = end + 1 };
+                    return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                 }
 
                 // Join with spaces
@@ -763,7 +765,7 @@ pub const Expansion = struct {
                         pos += 1;
                     }
                 }
-                return ExpansionResult{ .value = result, .consumed = end + 1 };
+                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
             }
 
             // Check for indirect expansion: ${!VAR}
@@ -772,10 +774,10 @@ pub const Expansion = struct {
             if (self.environment.get(indirect_name)) |ref_name| {
                 if (self.environment.get(ref_name)) |value| {
                     const result = try self.allocator.dupe(u8, value);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
             }
-            return ExpansionResult{ .value = "", .consumed = end + 1 };
+            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         }
 
         // Check for substring extraction: ${VAR:offset} or ${VAR:offset:length}
@@ -818,11 +820,11 @@ pub const Expansion = struct {
 
                         if (start <= end_pos and start <= value.len) {
                             const result = try self.allocator.dupe(u8, value[start..end_pos]);
-                            return ExpansionResult{ .value = result, .consumed = end + 1 };
+                            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                         }
-                        return ExpansionResult{ .value = "", .consumed = end + 1 };
+                        return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                     }
-                    return ExpansionResult{ .value = "", .consumed = end + 1 };
+                    return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                 }
             }
         }
@@ -844,7 +846,7 @@ pub const Expansion = struct {
 
                     if (self.environment.get(var_name)) |value| {
                         const result = try self.replaceInString(value, pattern, replacement, replace_all);
-                        return ExpansionResult{ .value = result, .consumed = end + 1 };
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     }
                 } else {
                     // No second slash - replacement is empty string (deletion)
@@ -852,10 +854,10 @@ pub const Expansion = struct {
 
                     if (self.environment.get(var_name)) |value| {
                         const result = try self.replaceInString(value, pattern, "", replace_all);
-                        return ExpansionResult{ .value = result, .consumed = end + 1 };
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     }
                 }
-                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
             }
         }
 
@@ -867,13 +869,13 @@ pub const Expansion = struct {
             if (self.environment.get(var_name)) |value| {
                 if (value.len > 0) {
                     const result = try self.allocator.dupe(u8, value);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
             }
 
             // Use default value
             const result = try self.allocator.dupe(u8, default_value);
-            return ExpansionResult{ .value = result, .consumed = end + 1 };
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
 
         // Check for assign default syntax: ${VAR:=default}
@@ -884,7 +886,7 @@ pub const Expansion = struct {
             if (self.environment.get(var_name)) |value| {
                 if (value.len > 0) {
                     const result = try self.allocator.dupe(u8, value);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
             }
 
@@ -893,7 +895,7 @@ pub const Expansion = struct {
             const name_copy = try self.allocator.dupe(u8, var_name);
             self.environment.put(name_copy, value_copy) catch {};
             const result = try self.allocator.dupe(u8, default_value);
-            return ExpansionResult{ .value = result, .consumed = end + 1 };
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
 
         // Check for error if unset syntax: ${VAR:?message}
@@ -904,7 +906,7 @@ pub const Expansion = struct {
             if (self.environment.get(var_name)) |value| {
                 if (value.len > 0) {
                     const result = try self.allocator.dupe(u8, value);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
             }
 
@@ -928,12 +930,12 @@ pub const Expansion = struct {
                 if (value.len > 0) {
                     // Variable is set and non-empty, use alternative value
                     const result = try self.allocator.dupe(u8, alt_value);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
             }
 
             // Variable is unset or empty, return empty string
-            return ExpansionResult{ .value = "", .consumed = end + 1 };
+            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         }
 
         // Check for parameter expansion patterns
@@ -945,9 +947,9 @@ pub const Expansion = struct {
 
                 if (self.environment.get(var_name)) |value| {
                     const result = try self.removePrefix(value, pattern, true);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
-                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
             }
         }
 
@@ -959,9 +961,9 @@ pub const Expansion = struct {
 
                 if (self.environment.get(var_name)) |value| {
                     const result = try self.removePrefix(value, pattern, false);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
-                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
             }
         }
 
@@ -973,9 +975,9 @@ pub const Expansion = struct {
 
                 if (self.environment.get(var_name)) |value| {
                     const result = try self.removeSuffix(value, pattern, true);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
-                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
             }
         }
 
@@ -987,20 +989,20 @@ pub const Expansion = struct {
 
                 if (self.environment.get(var_name)) |value| {
                     const result = try self.removeSuffix(value, pattern, false);
-                    return ExpansionResult{ .value = result, .consumed = end + 1 };
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
-                return ExpansionResult{ .value = "", .consumed = end + 1 };
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
             }
         }
 
         // Simple braced variable - use getVariableValue for nameref resolution
         if (self.getVariableValue(content)) |value| {
             const result = try self.allocator.dupe(u8, value);
-            return ExpansionResult{ .value = result, .consumed = end + 1 };
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
 
         // Variable not found - return empty string
-        return ExpansionResult{ .value = "", .consumed = end + 1 };
+        return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
     }
 
     /// Remove prefix pattern from string
@@ -1201,7 +1203,7 @@ pub const Expansion = struct {
     /// Expand $VAR form (unbraced)
     fn expandSimpleVariable(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 2 or input[0] != '$') {
-            return ExpansionResult{ .value = "$", .consumed = 1 };
+            return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
         // Find end of variable name (alphanumeric and underscore)
@@ -1216,7 +1218,7 @@ pub const Expansion = struct {
 
         if (end == 1) {
             // No valid variable name after $
-            return ExpansionResult{ .value = "$", .consumed = 1 };
+            return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
         const var_name = input[1..end];
@@ -1224,7 +1226,7 @@ pub const Expansion = struct {
         // Use getVariableValue which handles local vars and nameref resolution
         if (self.getVariableValue(var_name)) |value| {
             const result = try self.allocator.dupe(u8, value);
-            return ExpansionResult{ .value = result, .consumed = end };
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
         }
 
         // Variable not found
@@ -1239,13 +1241,13 @@ pub const Expansion = struct {
         }
 
         // Return empty string (default behavior)
-        return ExpansionResult{ .value = "", .consumed = end };
+        return ExpansionResult{ .value = "", .consumed = end, .owned = false };
     }
 
     /// Expand $(command) - command substitution
     fn expandCommandSubstitution(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 3 or input[0] != '$' or input[1] != '(') {
-            return ExpansionResult{ .value = "$", .consumed = 1 };
+            return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
         // Find matching closing parenthesis
@@ -1262,7 +1264,7 @@ pub const Expansion = struct {
 
         if (depth != 0) {
             // Unmatched parenthesis
-            return ExpansionResult{ .value = "$(", .consumed = 2 };
+            return ExpansionResult{ .value = "$(", .consumed = 2, .owned = false };
         }
 
         const command = input[2..end];
@@ -1271,14 +1273,14 @@ pub const Expansion = struct {
         if (self.cmd_cache) |cache| {
             if (cache.get(command)) |cached| {
                 const result = try self.allocator.dupe(u8, cached);
-                return ExpansionResult{ .value = result, .consumed = end + 1 };
+                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
             }
         }
 
         // Execute the command and capture output
         const output = self.executeCommandForSubstitution(command) catch {
             // On error, return empty string
-            return ExpansionResult{ .value = "", .consumed = end + 1 };
+            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         };
 
         // Trim trailing newlines (bash behavior)
@@ -1296,13 +1298,13 @@ pub const Expansion = struct {
             };
         }
 
-        return ExpansionResult{ .value = result, .consumed = end + 1 };
+        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
     }
 
     /// Expand backtick command substitution: `command`
     fn expandBacktick(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 2 or input[0] != '`') {
-            return ExpansionResult{ .value = "`", .consumed = 1 };
+            return ExpansionResult{ .value = "`", .consumed = 1, .owned = false };
         }
 
         // Find matching closing backtick
@@ -1318,7 +1320,7 @@ pub const Expansion = struct {
 
         if (end >= input.len) {
             // Unmatched backtick
-            return ExpansionResult{ .value = "`", .consumed = 1 };
+            return ExpansionResult{ .value = "`", .consumed = 1, .owned = false };
         }
 
         const command = input[1..end];
@@ -1327,14 +1329,14 @@ pub const Expansion = struct {
         if (self.cmd_cache) |cache| {
             if (cache.get(command)) |cached| {
                 const result = try self.allocator.dupe(u8, cached);
-                return ExpansionResult{ .value = result, .consumed = end + 1 };
+                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
             }
         }
 
         // Execute the command and capture output
         const output = self.executeCommandForSubstitution(command) catch {
             // On error, return empty string
-            return ExpansionResult{ .value = "", .consumed = end + 1 };
+            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         };
 
         // Trim trailing newlines (bash behavior)
@@ -1352,7 +1354,7 @@ pub const Expansion = struct {
             };
         }
 
-        return ExpansionResult{ .value = result, .consumed = end + 1 };
+        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
     }
 
     /// Execute a command and return its output
@@ -1389,7 +1391,7 @@ pub const Expansion = struct {
     /// Expand $((expression)) - arithmetic expansion
     fn expandArithmetic(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 4 or input[0] != '$' or input[1] != '(' or input[2] != '(') {
-            return ExpansionResult{ .value = "$", .consumed = 1 };
+            return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
         // Find matching closing parentheses ))
@@ -1406,7 +1408,7 @@ pub const Expansion = struct {
 
         if (depth != 0 or end >= input.len or input[end - 1] != ')') {
             // Unmatched parentheses
-            return ExpansionResult{ .value = "$((", .consumed = 3 };
+            return ExpansionResult{ .value = "$((", .consumed = 3, .owned = false };
         }
 
         // Extract expression (between (( and ))
@@ -1417,19 +1419,19 @@ pub const Expansion = struct {
         const result_value = arith.eval(expr) catch {
             // On error, return 0
             const value = try std.fmt.allocPrint(self.allocator, "0", .{});
-            return ExpansionResult{ .value = value, .consumed = end + 1 };
+            return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
         };
 
         // Format result as string
         const value = try std.fmt.allocPrint(self.allocator, "{d}", .{result_value});
-        return ExpansionResult{ .value = value, .consumed = end + 1 };
+        return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
     }
 
     /// Expand tilde (~) to home directory
     /// Supports: ~, ~user, ~+, ~-, ~+N, ~-N
     fn expandTilde(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 1 or input[0] != '~') {
-            return ExpansionResult{ .value = "~", .consumed = 1 };
+            return ExpansionResult{ .value = "~", .consumed = 1, .owned = false };
         }
 
         // Find end of username (or tilde alone)
@@ -1508,6 +1510,7 @@ pub const Expansion = struct {
         return ExpansionResult{
             .value = expanded_path,
             .consumed = end,
+            .owned = true,
         };
     }
 
@@ -1518,7 +1521,7 @@ pub const Expansion = struct {
         if (builtin.os.tag == .windows) {
             // Return the literal text on Windows
             if (input.len < 2) {
-                return ExpansionResult{ .value = if (is_input) "<" else ">", .consumed = 1 };
+                return ExpansionResult{ .value = if (is_input) "<" else ">", .consumed = 1, .owned = false };
             }
             // Find closing paren and return as literal
             var end: usize = 2;
@@ -1528,12 +1531,12 @@ pub const Expansion = struct {
                 if (depth > 0) end += 1;
             }
             const literal = try self.allocator.dupe(u8, input[0 .. end + 1]);
-            return ExpansionResult{ .value = literal, .consumed = end + 1 };
+            return ExpansionResult{ .value = literal, .consumed = end + 1, .owned = true };
         }
 
         // Parse: <(cmd) or >(cmd)
         if (input.len < 3 or input[1] != '(') {
-            return ExpansionResult{ .value = if (is_input) "<" else ">", .consumed = 1 };
+            return ExpansionResult{ .value = if (is_input) "<" else ">", .consumed = 1, .owned = false };
         }
 
         // Find matching closing parenthesis
@@ -1550,21 +1553,21 @@ pub const Expansion = struct {
 
         if (depth != 0) {
             // Unmatched parenthesis - return literal
-            return ExpansionResult{ .value = if (is_input) "<(" else ">(", .consumed = 2 };
+            return ExpansionResult{ .value = if (is_input) "<(" else ">(", .consumed = 2, .owned = false };
         }
 
         const command = input[2..end];
 
         // Create a pipe
         const pipe_fds = std.posix.pipe() catch {
-            return ExpansionResult{ .value = "", .consumed = end + 1 };
+            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         };
 
         // Fork a child process
         const fork_result = std.posix.fork() catch {
             std.posix.close(pipe_fds[0]);
             std.posix.close(pipe_fds[1]);
-            return ExpansionResult{ .value = "", .consumed = end + 1 };
+            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         };
 
         if (fork_result == 0) {
@@ -1619,10 +1622,10 @@ pub const Expansion = struct {
         // Format the /dev/fd/N path
         const fd_path = std.fmt.allocPrint(self.allocator, "/dev/fd/{d}", .{parent_fd}) catch {
             std.posix.close(parent_fd);
-            return ExpansionResult{ .value = "", .consumed = end + 1 };
+            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         };
 
-        return ExpansionResult{ .value = fd_path, .consumed = end + 1 };
+        return ExpansionResult{ .value = fd_path, .consumed = end + 1, .owned = true };
     }
 };
 
