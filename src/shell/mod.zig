@@ -27,6 +27,7 @@ pub const command_expansion = @import("command_expansion.zig");
 pub const variable_handling = @import("variable_handling.zig");
 pub const command_execution = @import("command_execution.zig");
 pub const builtin_dispatch = @import("builtin_dispatch.zig");
+pub const tab_completion = @import("tab_completion.zig");
 
 // Re-export version detection functions for convenience
 pub const detectPackageVersion = version.detectPackageVersion;
@@ -152,3 +153,8 @@ pub const executeInBackground = command_execution.executeInBackground;
 // Re-export builtin dispatch
 pub const dispatchBuiltin = builtin_dispatch.dispatchBuiltin;
 pub const DispatchResult = builtin_dispatch.DispatchResult;
+
+// Re-export tab completion functions
+pub const tabCompletionFn = tab_completion.tabCompletionFn;
+pub const setCompletionConfig = tab_completion.setCompletionConfig;
+pub const getCompletionConfig = tab_completion.getCompletionConfig;

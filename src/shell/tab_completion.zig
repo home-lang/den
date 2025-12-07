@@ -1,0 +1,718 @@
+//! Tab Completion Module
+//! Handles intelligent tab completion for various commands
+
+const std = @import("std");
+const types = @import("../types/mod.zig");
+const Completion = @import("completion/file_completion.zig").Completion;
+const ContextCompletion = @import("completion/context_completion.zig").ContextCompletion;
+
+/// Global completion configuration (thread-local)
+var g_completion_config: types.CompletionConfig = .{};
+var g_completion_config_initialized: bool = false;
+
+/// Set the global completion configuration
+pub fn setCompletionConfig(config: types.CompletionConfig) void {
+    g_completion_config = config;
+    g_completion_config_initialized = true;
+}
+
+/// Get the global completion configuration
+pub fn getCompletionConfig() types.CompletionConfig {
+    return g_completion_config;
+}
+
+/// Main tab completion function
+pub fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]const u8 {
+    // Check if completion is enabled via config
+    if (g_completion_config_initialized and !g_completion_config.enabled) {
+        return &[_][]const u8{};
+    }
+
+    var completion = Completion.init(allocator);
+    var ctx_completion = ContextCompletion.init(allocator);
+
+    // If input is empty, show nothing
+    if (input.len == 0) {
+        return &[_][]const u8{};
+    }
+
+    // Find the first word (command) and current word being completed
+    var first_word_end: usize = 0;
+    while (first_word_end < input.len) : (first_word_end += 1) {
+        const c = input[first_word_end];
+        if (c == ' ' or c == '\t') break;
+    }
+
+    var word_start: usize = 0;
+    for (input, 0..) |c, i| {
+        if (c == ' ' or c == '\t' or c == '|' or c == '&' or c == ';') {
+            word_start = i + 1;
+        }
+    }
+    const prefix = input[word_start..];
+    const command = input[0..first_word_end];
+
+    // If first word, try command completion
+    if (word_start == 0) {
+        return completion.completeCommand(prefix);
+    }
+
+    // Check for environment variable completion ($...)
+    if (prefix.len > 0 and prefix[0] == '$') {
+        const env_prefix = if (prefix.len > 1) prefix[1..] else "";
+        const items = try ctx_completion.completeEnvVars(env_prefix);
+        if (items.len > 0) {
+            var results = try allocator.alloc([]const u8, items.len);
+            for (items, 0..) |item, i| {
+                results[i] = try std.fmt.allocPrint(allocator, "${s}", .{item.text});
+                allocator.free(item.text);
+            }
+            allocator.free(items);
+            return results;
+        }
+        allocator.free(items);
+    }
+
+    // Check for option/flag completion (-...)
+    if (prefix.len > 0 and prefix[0] == '-') {
+        const items = try ctx_completion.completeOptions(command, prefix);
+        if (items.len > 0) {
+            var results = try allocator.alloc([]const u8, items.len);
+            for (items, 0..) |item, i| {
+                results[i] = try allocator.dupe(u8, item.text);
+                allocator.free(item.text);
+            }
+            allocator.free(items);
+            return results;
+        }
+        allocator.free(items);
+    }
+
+    // For cd command, only complete directories
+    if (std.mem.eql(u8, command, "cd")) {
+        return completion.completeDirectory(prefix);
+    }
+
+    // For git command, show branches, files, subcommands
+    if (std.mem.eql(u8, command, "git")) {
+        return try completeGit(allocator, input, prefix);
+    }
+
+    // For bun command, show scripts, commands, and files
+    if (std.mem.eql(u8, command, "bun")) {
+        return try completeBun(allocator, prefix);
+    }
+
+    // For npm command, show scripts, commands, and files
+    if (std.mem.eql(u8, command, "npm")) {
+        return try completeNpm(allocator, prefix);
+    }
+
+    // For yarn command, show scripts, commands, and files
+    if (std.mem.eql(u8, command, "yarn")) {
+        return try completeYarn(allocator, input, prefix);
+    }
+
+    // For pnpm command, show scripts, commands, and files
+    if (std.mem.eql(u8, command, "pnpm")) {
+        return try completePnpm(allocator, input, prefix);
+    }
+
+    // For docker command, show containers, images, subcommands
+    if (std.mem.eql(u8, command, "docker")) {
+        return try completeDocker(allocator, input, prefix);
+    }
+
+    // Otherwise, try file completion
+    const results = try completion.completeFile(prefix);
+
+    // Apply max_suggestions limit from config
+    if (g_completion_config_initialized and g_completion_config.max_suggestions > 0) {
+        const max = @as(usize, g_completion_config.max_suggestions);
+        if (results.len > max) {
+            // Free excess results
+            for (results[max..]) |r| {
+                allocator.free(r);
+            }
+            // Shrink the slice
+            const limited = allocator.realloc(results, max) catch results[0..max];
+            return limited;
+        }
+    }
+
+    return results;
+}
+
+/// Get completions for git command (branches, files, subcommands)
+pub fn completeGit(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Parse to find the git subcommand
+    var tokens = std.mem.tokenizeScalar(u8, input, ' ');
+    _ = tokens.next(); // Skip "git"
+    const subcommand = tokens.next(); // Get subcommand (if any)
+
+    const git_commands = [_][]const u8{
+        "add",  "bisect", "branch", "checkout", "cherry-pick", "clone",  "commit",
+        "diff", "fetch",  "grep",   "init",     "log",         "merge",  "mv",
+        "pull", "push",   "rebase", "reset",    "restore",     "revert", "rm",
+        "show", "stash",  "status", "switch",   "tag",
+    };
+
+    // If no subcommand yet, or if we're still typing the subcommand (prefix matches subcommand),
+    // show matching git subcommands
+    if (subcommand == null or (subcommand != null and std.mem.eql(u8, subcommand.?, prefix))) {
+        for (git_commands) |cmd| {
+            if (std.mem.startsWith(u8, cmd, prefix)) {
+                const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+                try results.append(allocator, marked_cmd);
+            }
+        }
+
+        const owned = try allocator.alloc([]const u8, results.items.len);
+        @memcpy(owned, results.items);
+        return owned;
+    }
+
+    // At this point, we have a complete subcommand and are completing arguments
+
+    // Branch-related subcommands: checkout, branch, merge, rebase, switch
+    const branch_commands = [_][]const u8{ "checkout", "branch", "merge", "rebase", "switch", "cherry-pick" };
+    for (branch_commands) |branch_cmd| {
+        if (std.mem.eql(u8, subcommand.?, branch_cmd)) {
+            return try getGitBranches(allocator, prefix);
+        }
+    }
+
+    // File-related subcommands: add, diff, restore, reset
+    const file_commands = [_][]const u8{ "add", "diff", "restore", "reset" };
+    for (file_commands) |file_cmd| {
+        if (std.mem.eql(u8, subcommand.?, file_cmd)) {
+            return try getGitModifiedFiles(allocator, prefix);
+        }
+    }
+
+    // For other subcommands, don't provide completions
+    return &[_][]const u8{};
+}
+
+/// Get git branches for completion
+pub fn getGitBranches(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Run: git branch -a --format=%(refname:short)
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "git", "branch", "-a", "--format=%(refname:short)" },
+    }) catch {
+        return &[_][]const u8{};
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    if (result.term.Exited != 0) {
+        return &[_][]const u8{};
+    }
+
+    // Parse output (one branch per line)
+    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+        if (trimmed.len == 0) continue;
+
+        // Skip remotes/origin/ prefix for cleaner display
+        var branch_name = trimmed;
+        if (std.mem.startsWith(u8, branch_name, "remotes/origin/")) {
+            branch_name = branch_name[15..];
+        } else if (std.mem.startsWith(u8, branch_name, "origin/")) {
+            branch_name = branch_name[7..];
+        }
+
+        if (std.mem.startsWith(u8, branch_name, prefix)) {
+            const marked_branch = try std.fmt.allocPrint(allocator, "\x03{s}", .{branch_name});
+            try results.append(allocator, marked_branch);
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
+}
+
+/// Get git modified files for completion
+pub fn getGitModifiedFiles(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Run: git status --porcelain
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "git", "status", "--porcelain" },
+    }) catch {
+        return &[_][]const u8{};
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    if (result.term.Exited != 0) {
+        return &[_][]const u8{};
+    }
+
+    // Parse output (format: XY filename)
+    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    while (lines.next()) |line| {
+        if (line.len < 4) continue; // At least "XY filename"
+        const filename = std.mem.trim(u8, line[3..], &std.ascii.whitespace);
+        if (filename.len == 0) continue;
+
+        if (std.mem.startsWith(u8, filename, prefix)) {
+            try results.append(allocator, try allocator.dupe(u8, filename));
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
+}
+
+/// Get completions for bun command
+pub fn completeBun(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Bun subcommands
+    const bun_commands = [_][]const u8{
+        "run",      "test",      "x",        "repl",
+        "install",  "add",       "remove",   "update",
+        "link",     "unlink",    "pm",       "build",
+        "init",     "create",    "upgrade",  "completions",
+        "discord",  "help",      "outdated",
+    };
+
+    // If prefix is empty or matches a subcommand, show subcommands
+    for (bun_commands) |cmd| {
+        if (std.mem.startsWith(u8, cmd, prefix)) {
+            const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+            try results.append(allocator, marked_cmd);
+        }
+    }
+
+    // Try to read package.json for scripts
+    const pkg_scripts = getPackageJsonScripts(allocator) catch null;
+    if (pkg_scripts) |scripts| {
+        defer {
+            for (scripts) |s| allocator.free(s);
+            allocator.free(scripts);
+        }
+        for (scripts) |script| {
+            if (std.mem.startsWith(u8, script, prefix)) {
+                const marked_script = try std.fmt.allocPrint(allocator, "\x04{s}", .{script});
+                try results.append(allocator, marked_script);
+            }
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
+}
+
+/// Read scripts from package.json
+fn getPackageJsonScripts(allocator: std.mem.Allocator) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    errdefer {
+        for (results.items) |item| allocator.free(item);
+        results.deinit(allocator);
+    }
+
+    const file = std.fs.cwd().openFile("package.json", .{}) catch return error.NotFound;
+    defer file.close();
+
+    // Read file (limit to 64KB for safety)
+    const max_size: usize = 65536;
+    const file_size = try file.getEndPos();
+    const read_size: usize = @min(file_size, max_size);
+    const buffer = try allocator.alloc(u8, read_size);
+    defer allocator.free(buffer);
+
+    var total_read: usize = 0;
+    while (total_read < read_size) {
+        const n = try file.read(buffer[total_read..]);
+        if (n == 0) break;
+        total_read += n;
+    }
+    const content = buffer[0..total_read];
+
+    // Simple JSON parsing to find "scripts": { ... }
+    var i: usize = 0;
+    while (i < content.len) : (i += 1) {
+        if (std.mem.startsWith(u8, content[i..], "\"scripts\"")) {
+            // Find the opening brace
+            var j = i + 9; // Skip "scripts"
+            while (j < content.len and content[j] != '{') : (j += 1) {}
+            if (j >= content.len) break;
+            j += 1; // Skip opening brace
+
+            // Parse script names
+            while (j < content.len and content[j] != '}') : (j += 1) {
+                // Skip whitespace
+                while (j < content.len and (content[j] == ' ' or content[j] == '\t' or content[j] == '\n' or content[j] == '\r' or content[j] == ',')) : (j += 1) {}
+                if (j >= content.len or content[j] == '}') break;
+
+                // Find script name (in quotes)
+                if (content[j] == '"') {
+                    j += 1;
+                    const name_start = j;
+                    while (j < content.len and content[j] != '"') : (j += 1) {}
+                    if (j > name_start) {
+                        try results.append(allocator, try allocator.dupe(u8, content[name_start..j]));
+                    }
+                    j += 1; // Skip closing quote
+
+                    // Skip to value and past it
+                    while (j < content.len and content[j] != ':') : (j += 1) {}
+                    j += 1; // Skip colon
+                    while (j < content.len and content[j] != '"') : (j += 1) {}
+                    j += 1; // Skip opening quote
+                    while (j < content.len and content[j] != '"') : (j += 1) {
+                        if (content[j] == '\\' and j + 1 < content.len) j += 1; // Skip escaped chars
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    return try results.toOwnedSlice(allocator);
+}
+
+/// Get completions for npm command
+pub fn completeNpm(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // npm subcommands
+    const npm_commands = [_][]const u8{
+        "access",      "adduser",     "audit",       "bin",
+        "bugs",        "cache",       "ci",          "completion",
+        "config",      "dedupe",      "deprecate",   "diff",
+        "dist-tag",    "docs",        "doctor",      "edit",
+        "exec",        "explain",     "explore",     "find-dupes",
+        "fund",        "get",         "help",        "help-search",
+        "hook",        "init",        "install",     "install-ci-test",
+        "install-test", "link",       "ll",          "login",
+        "logout",      "ls",          "org",         "outdated",
+        "owner",       "pack",        "ping",        "pkg",
+        "prefix",      "profile",     "prune",       "publish",
+        "query",       "rebuild",     "repo",        "restart",
+        "root",        "run",         "run-script",  "search",
+        "set",         "shrinkwrap",  "star",        "stars",
+        "start",       "stop",        "team",        "test",
+        "token",       "uninstall",   "unpublish",   "unstar",
+        "update",      "version",     "view",        "whoami",
+    };
+
+    // If prefix is empty or matches a subcommand, show subcommands
+    for (npm_commands) |cmd| {
+        if (std.mem.startsWith(u8, cmd, prefix)) {
+            const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+            try results.append(allocator, marked_cmd);
+        }
+    }
+
+    // Try to read package.json for scripts
+    const pkg_scripts = getPackageJsonScripts(allocator) catch null;
+    if (pkg_scripts) |scripts| {
+        defer {
+            for (scripts) |s| allocator.free(s);
+            allocator.free(scripts);
+        }
+        for (scripts) |script| {
+            if (std.mem.startsWith(u8, script, prefix)) {
+                const marked_script = try std.fmt.allocPrint(allocator, "\x04{s}", .{script});
+                try results.append(allocator, marked_script);
+            }
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
+}
+
+/// Get completions for yarn command
+pub fn completeYarn(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Parse to find if we have a subcommand
+    var tokens = std.mem.tokenizeScalar(u8, input, ' ');
+    _ = tokens.next(); // Skip "yarn"
+    const subcommand = tokens.next();
+
+    // yarn subcommands
+    const yarn_commands = [_][]const u8{
+        "add",        "audit",       "autoclean",   "bin",
+        "cache",      "check",       "config",      "create",
+        "dedupe",     "generate-lock-entry",        "global",
+        "help",       "import",      "info",        "init",
+        "install",    "licenses",    "link",        "list",
+        "login",      "logout",      "node",        "outdated",
+        "owner",      "pack",        "policies",    "publish",
+        "remove",     "run",         "set",         "tag",
+        "team",       "test",        "unlink",      "unplug",
+        "upgrade",    "upgrade-interactive",        "version",
+        "versions",   "why",         "workspace",   "workspaces",
+    };
+
+    // If no subcommand yet, show subcommands
+    if (subcommand == null or (subcommand != null and std.mem.eql(u8, subcommand.?, prefix))) {
+        for (yarn_commands) |cmd| {
+            if (std.mem.startsWith(u8, cmd, prefix)) {
+                const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+                try results.append(allocator, marked_cmd);
+            }
+        }
+
+        // Also show scripts from package.json
+        const pkg_scripts = getPackageJsonScripts(allocator) catch null;
+        if (pkg_scripts) |scripts| {
+            defer {
+                for (scripts) |s| allocator.free(s);
+                allocator.free(scripts);
+            }
+            for (scripts) |script| {
+                if (std.mem.startsWith(u8, script, prefix)) {
+                    const marked_script = try std.fmt.allocPrint(allocator, "\x04{s}", .{script});
+                    try results.append(allocator, marked_script);
+                }
+            }
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
+}
+
+/// Get completions for pnpm command
+pub fn completePnpm(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Parse to find if we have a subcommand
+    var tokens = std.mem.tokenizeScalar(u8, input, ' ');
+    _ = tokens.next(); // Skip "pnpm"
+    const subcommand = tokens.next();
+
+    // pnpm subcommands
+    const pnpm_commands = [_][]const u8{
+        "add",        "audit",       "bin",         "config",
+        "dedupe",     "dlx",         "doctor",      "exec",
+        "fetch",      "i",           "import",      "init",
+        "install",    "install-test", "licenses",   "link",
+        "list",       "ln",          "ls",          "outdated",
+        "pack",       "patch",       "patch-commit", "prune",
+        "publish",    "rebuild",     "remove",      "rm",
+        "root",       "run",         "server",      "setup",
+        "store",      "test",        "uninstall",   "unlink",
+        "update",     "upgrade",     "why",
+    };
+
+    // If no subcommand yet, show subcommands
+    if (subcommand == null or (subcommand != null and std.mem.eql(u8, subcommand.?, prefix))) {
+        for (pnpm_commands) |cmd| {
+            if (std.mem.startsWith(u8, cmd, prefix)) {
+                const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+                try results.append(allocator, marked_cmd);
+            }
+        }
+
+        // Also show scripts from package.json
+        const pkg_scripts = getPackageJsonScripts(allocator) catch null;
+        if (pkg_scripts) |scripts| {
+            defer {
+                for (scripts) |s| allocator.free(s);
+                allocator.free(scripts);
+            }
+            for (scripts) |script| {
+                if (std.mem.startsWith(u8, script, prefix)) {
+                    const marked_script = try std.fmt.allocPrint(allocator, "\x04{s}", .{script});
+                    try results.append(allocator, marked_script);
+                }
+            }
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
+}
+
+/// Get completions for docker command
+pub fn completeDocker(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Parse to find the docker subcommand
+    var tokens = std.mem.tokenizeScalar(u8, input, ' ');
+    _ = tokens.next(); // Skip "docker"
+    const subcommand = tokens.next();
+
+    // docker subcommands
+    const docker_commands = [_][]const u8{
+        "attach",     "build",       "commit",      "compose",
+        "config",     "container",   "context",     "cp",
+        "create",     "diff",        "events",      "exec",
+        "export",     "history",     "image",       "images",
+        "import",     "info",        "inspect",     "kill",
+        "load",       "login",       "logout",      "logs",
+        "manifest",   "network",     "node",        "pause",
+        "plugin",     "port",        "ps",          "pull",
+        "push",       "rename",      "restart",     "rm",
+        "rmi",        "run",         "save",        "search",
+        "secret",     "service",     "stack",       "start",
+        "stats",      "stop",        "swarm",       "system",
+        "tag",        "top",         "trust",       "unpause",
+        "update",     "version",     "volume",      "wait",
+    };
+
+    // If no subcommand yet, show subcommands
+    if (subcommand == null or (subcommand != null and std.mem.eql(u8, subcommand.?, prefix))) {
+        for (docker_commands) |cmd| {
+            if (std.mem.startsWith(u8, cmd, prefix)) {
+                const marked_cmd = try std.fmt.allocPrint(allocator, "\x02{s}", .{cmd});
+                try results.append(allocator, marked_cmd);
+            }
+        }
+
+        const owned = try allocator.alloc([]const u8, results.items.len);
+        @memcpy(owned, results.items);
+        return owned;
+    }
+
+    // Container-related subcommands
+    const container_commands = [_][]const u8{
+        "attach", "exec", "inspect", "kill", "logs", "pause",
+        "port", "restart", "rm", "start", "stop", "top", "unpause",
+    };
+    for (container_commands) |container_cmd| {
+        if (std.mem.eql(u8, subcommand.?, container_cmd)) {
+            return try getDockerContainers(allocator, prefix);
+        }
+    }
+
+    // Image-related subcommands
+    const image_commands = [_][]const u8{ "rmi", "tag", "push", "save", "history" };
+    for (image_commands) |image_cmd| {
+        if (std.mem.eql(u8, subcommand.?, image_cmd)) {
+            return try getDockerImages(allocator, prefix);
+        }
+    }
+
+    // For run command, show images
+    if (std.mem.eql(u8, subcommand.?, "run")) {
+        return try getDockerImages(allocator, prefix);
+    }
+
+    return &[_][]const u8{};
+}
+
+/// Get docker containers for completion
+fn getDockerContainers(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Run: docker ps -a --format {{.Names}}
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "docker", "ps", "-a", "--format", "{{.Names}}" },
+    }) catch {
+        return &[_][]const u8{};
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    if (result.term.Exited != 0) {
+        return &[_][]const u8{};
+    }
+
+    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+        if (trimmed.len == 0) continue;
+
+        if (std.mem.startsWith(u8, trimmed, prefix)) {
+            try results.append(allocator, try allocator.dupe(u8, trimmed));
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, results.items.len);
+    @memcpy(owned, results.items);
+    return owned;
+}
+
+/// Get docker images for completion
+fn getDockerImages(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    defer results.deinit(allocator);
+
+    // Run: docker images --format {{.Repository}}:{{.Tag}}
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "docker", "images", "--format", "{{.Repository}}:{{.Tag}}" },
+    }) catch {
+        return &[_][]const u8{};
+    };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    if (result.term.Exited != 0) {
+        return &[_][]const u8{};
+    }
+
+    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+        if (trimmed.len == 0) continue;
+        if (std.mem.eql(u8, trimmed, "<none>:<none>")) continue;
+
+        if (std.mem.startsWith(u8, trimmed, prefix)) {
+            try results.append(allocator, try allocator.dupe(u8, trimmed));
+        }
+    }
+
+    // Also try to complete from common base images if prefix is short
+    if (prefix.len < 3) {
+        const common_images = [_][]const u8{
+            "alpine",      "ubuntu",    "debian",    "centos",
+            "node",        "python",    "golang",    "rust",
+            "nginx",       "redis",     "postgres",  "mysql",
+            "mongo",       "busybox",   "httpd",     "php",
+        };
+        for (common_images) |img| {
+            if (std.mem.startsWith(u8, img, prefix)) {
+                // Check if already in results
+                var found = false;
+                for (results.items) |r| {
+                    if (std.mem.startsWith(u8, r, img)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    const items = try ContextCompletion.init(allocator).completeDockerImages(img);
+                    for (items) |item| {
+                        try results.append(allocator, try allocator.dupe(u8, item.text));
+                        allocator.free(item.text);
+                    }
+                    allocator.free(items);
+                }
+            }
+        }
+    }
+
+    return try results.toOwnedSlice(allocator);
+}
