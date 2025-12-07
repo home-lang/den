@@ -3,8 +3,8 @@
 
 const std = @import("std");
 const types = @import("../types/mod.zig");
-const Completion = @import("completion/file_completion.zig").Completion;
-const ContextCompletion = @import("completion/context_completion.zig").ContextCompletion;
+const Completion = @import("../utils/completion.zig").Completion;
+const ContextCompletion = @import("../utils/context_completion.zig").ContextCompletion;
 
 /// Global completion configuration (thread-local)
 var g_completion_config: types.CompletionConfig = .{};
@@ -703,12 +703,8 @@ fn getDockerImages(allocator: std.mem.Allocator, prefix: []const u8) ![][]const 
                     }
                 }
                 if (!found) {
-                    const items = try ContextCompletion.init(allocator).completeDockerImages(img);
-                    for (items) |item| {
-                        try results.append(allocator, try allocator.dupe(u8, item.text));
-                        allocator.free(item.text);
-                    }
-                    allocator.free(items);
+                    // Just add the common image name as a suggestion
+                    try results.append(allocator, try allocator.dupe(u8, img));
                 }
             }
         }
