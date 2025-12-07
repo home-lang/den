@@ -1,0 +1,380 @@
+const std = @import("std");
+const types = @import("../../types/mod.zig");
+const IO = @import("../../utils/io.zig").IO;
+const builtin = @import("builtin");
+
+/// Test builtins: test, [, [[
+/// Extracted from executor/mod.zig for better modularity
+
+pub fn testBuiltin(command: *types.ParsedCommand) !i32 {
+    // Handle both 'test' and '[' syntax
+    const args = if (std.mem.eql(u8, command.name, "[")) blk: {
+        // For '[', last arg should be ']'
+        if (command.args.len > 0 and std.mem.eql(u8, command.args[command.args.len - 1], "]")) {
+            break :blk command.args[0 .. command.args.len - 1];
+        }
+        try IO.eprint("den: [: missing ']'\n", .{});
+        return 2;
+    } else command.args;
+
+    if (args.len == 0) return 1; // Empty test is false
+
+    // Single argument - test if non-empty string
+    if (args.len == 1) {
+        return if (args[0].len > 0) 0 else 1;
+    }
+
+    // Two arguments - unary operators
+    if (args.len == 2) {
+        const op = args[0];
+        const arg = args[1];
+
+        if (std.mem.eql(u8, op, "-z")) {
+            return if (arg.len == 0) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-n")) {
+            return if (arg.len > 0) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-f")) {
+            const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
+            defer file.close();
+            const stat = file.stat() catch return 1;
+            return if (stat.kind == .file) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-d")) {
+            var dir = std.fs.cwd().openDir(arg, .{}) catch return 1;
+            dir.close();
+            return 0;
+        } else if (std.mem.eql(u8, op, "-e")) {
+            std.fs.cwd().access(arg, .{}) catch return 1;
+            return 0;
+        } else if (std.mem.eql(u8, op, "-r")) {
+            const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
+            file.close();
+            return 0;
+        } else if (std.mem.eql(u8, op, "-w")) {
+            const file = std.fs.cwd().openFile(arg, .{ .mode = .write_only }) catch return 1;
+            file.close();
+            return 0;
+        } else if (std.mem.eql(u8, op, "-x")) {
+            if (builtin.os.tag == .windows) {
+                std.fs.cwd().access(arg, .{}) catch return 1;
+                return 0;
+            }
+            const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
+            defer file.close();
+            const stat = file.stat() catch return 1;
+            return if (stat.mode & 0o111 != 0) 0 else 1;
+        }
+    }
+
+    // Three arguments - binary operators
+    if (args.len == 3) {
+        const left = args[0];
+        const op = args[1];
+        const right = args[2];
+
+        if (std.mem.eql(u8, op, "=") or std.mem.eql(u8, op, "==")) {
+            return if (std.mem.eql(u8, left, right)) 0 else 1;
+        } else if (std.mem.eql(u8, op, "!=")) {
+            return if (!std.mem.eql(u8, left, right)) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-eq")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+            return if (left_num == right_num) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-ne")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+            return if (left_num != right_num) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-lt")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+            return if (left_num < right_num) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-le")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+            return if (left_num <= right_num) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-gt")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+            return if (left_num > right_num) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-ge")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
+            return if (left_num >= right_num) 0 else 1;
+        }
+    }
+
+    try IO.eprint("den: test: unsupported expression\n", .{});
+    return 2;
+}
+
+/// Extended test builtin [[ ]] with pattern matching and regex support
+pub fn extendedTest(command: *types.ParsedCommand) !i32 {
+    // Remove trailing ]] if present
+    var args = command.args;
+    if (args.len > 0 and std.mem.eql(u8, args[args.len - 1], "]]")) {
+        args = args[0 .. args.len - 1];
+    }
+
+    if (args.len == 0) return 1; // Empty test is false
+
+    // Handle compound expressions with && and ||
+    var i: usize = 0;
+    var last_result: bool = true;
+    var pending_op: ?enum { and_op, or_op } = null;
+
+    while (i < args.len) {
+        // Find the next && or || or end of args
+        var expr_end = i;
+        var paren_depth: u32 = 0;
+        while (expr_end < args.len) {
+            const arg = args[expr_end];
+            if (std.mem.eql(u8, arg, "(")) {
+                paren_depth += 1;
+            } else if (std.mem.eql(u8, arg, ")")) {
+                if (paren_depth > 0) paren_depth -= 1;
+            } else if (paren_depth == 0) {
+                if (std.mem.eql(u8, arg, "&&") or std.mem.eql(u8, arg, "||")) {
+                    break;
+                }
+            }
+            expr_end += 1;
+        }
+
+        // Evaluate the sub-expression
+        const sub_result = try evaluateExtendedTestExpr(args[i..expr_end]);
+
+        // Apply pending operator
+        if (pending_op) |op| {
+            switch (op) {
+                .and_op => last_result = last_result and sub_result,
+                .or_op => last_result = last_result or sub_result,
+            }
+        } else {
+            last_result = sub_result;
+        }
+
+        // Short-circuit evaluation
+        if (expr_end < args.len) {
+            const op_str = args[expr_end];
+            if (std.mem.eql(u8, op_str, "&&")) {
+                if (!last_result) return 1;
+                pending_op = .and_op;
+            } else if (std.mem.eql(u8, op_str, "||")) {
+                if (last_result) return 0;
+                pending_op = .or_op;
+            }
+            i = expr_end + 1;
+        } else {
+            break;
+        }
+    }
+
+    return if (last_result) 0 else 1;
+}
+
+/// Evaluate a single extended test expression (without && / ||)
+fn evaluateExtendedTestExpr(args: [][]const u8) !bool {
+    if (args.len == 0) return false;
+
+    // Handle negation
+    if (args.len >= 1 and std.mem.eql(u8, args[0], "!")) {
+        return !(try evaluateExtendedTestExpr(args[1..]));
+    }
+
+    // Handle parentheses
+    if (args.len >= 2 and std.mem.eql(u8, args[0], "(")) {
+        var depth: u32 = 1;
+        var close_idx: usize = 1;
+        while (close_idx < args.len and depth > 0) {
+            if (std.mem.eql(u8, args[close_idx], "(")) depth += 1;
+            if (std.mem.eql(u8, args[close_idx], ")")) depth -= 1;
+            if (depth > 0) close_idx += 1;
+        }
+        if (close_idx < args.len) {
+            return try evaluateExtendedTestExpr(args[1..close_idx]);
+        }
+    }
+
+    // Single argument - test if non-empty string
+    if (args.len == 1) {
+        return args[0].len > 0;
+    }
+
+    // Two arguments - unary operators
+    if (args.len == 2) {
+        const op = args[0];
+        const arg = args[1];
+
+        if (std.mem.eql(u8, op, "-z")) {
+            return arg.len == 0;
+        } else if (std.mem.eql(u8, op, "-n")) {
+            return arg.len > 0;
+        } else if (std.mem.eql(u8, op, "-f")) {
+            const file = std.fs.cwd().openFile(arg, .{}) catch return false;
+            defer file.close();
+            const stat = file.stat() catch return false;
+            return stat.kind == .file;
+        } else if (std.mem.eql(u8, op, "-d")) {
+            var dir = std.fs.cwd().openDir(arg, .{}) catch return false;
+            dir.close();
+            return true;
+        } else if (std.mem.eql(u8, op, "-e")) {
+            std.fs.cwd().access(arg, .{}) catch return false;
+            return true;
+        } else if (std.mem.eql(u8, op, "-r")) {
+            const file = std.fs.cwd().openFile(arg, .{}) catch return false;
+            file.close();
+            return true;
+        } else if (std.mem.eql(u8, op, "-w")) {
+            const file = std.fs.cwd().openFile(arg, .{ .mode = .write_only }) catch return false;
+            file.close();
+            return true;
+        } else if (std.mem.eql(u8, op, "-x")) {
+            if (builtin.os.tag == .windows) {
+                std.fs.cwd().access(arg, .{}) catch return false;
+                return true;
+            }
+            const file = std.fs.cwd().openFile(arg, .{}) catch return false;
+            defer file.close();
+            const stat = file.stat() catch return false;
+            return stat.mode & 0o111 != 0;
+        } else if (std.mem.eql(u8, op, "-s")) {
+            const file = std.fs.cwd().openFile(arg, .{}) catch return false;
+            defer file.close();
+            const stat = file.stat() catch return false;
+            return stat.size > 0;
+        } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
+            const stat = std.fs.cwd().statFile(arg) catch return false;
+            return stat.kind == .sym_link;
+        }
+    }
+
+    // Three arguments - binary operators
+    if (args.len == 3) {
+        const left = args[0];
+        const op = args[1];
+        const right = args[2];
+
+        if (std.mem.eql(u8, op, "==") or std.mem.eql(u8, op, "=")) {
+            return globMatch(left, right);
+        } else if (std.mem.eql(u8, op, "!=")) {
+            return !globMatch(left, right);
+        } else if (std.mem.eql(u8, op, "=~")) {
+            return matchRegex(left, right);
+        } else if (std.mem.eql(u8, op, "<")) {
+            return std.mem.lessThan(u8, left, right);
+        } else if (std.mem.eql(u8, op, ">")) {
+            return std.mem.lessThan(u8, right, left);
+        } else if (std.mem.eql(u8, op, "-eq")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+            return left_num == right_num;
+        } else if (std.mem.eql(u8, op, "-ne")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+            return left_num != right_num;
+        } else if (std.mem.eql(u8, op, "-lt")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+            return left_num < right_num;
+        } else if (std.mem.eql(u8, op, "-le")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+            return left_num <= right_num;
+        } else if (std.mem.eql(u8, op, "-gt")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+            return left_num > right_num;
+        } else if (std.mem.eql(u8, op, "-ge")) {
+            const left_num = std.fmt.parseInt(i64, left, 10) catch return false;
+            const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
+            return left_num >= right_num;
+        } else if (std.mem.eql(u8, op, "-nt")) {
+            const left_stat = std.fs.cwd().statFile(left) catch return false;
+            const right_stat = std.fs.cwd().statFile(right) catch return false;
+            return left_stat.mtime.nanoseconds > right_stat.mtime.nanoseconds;
+        } else if (std.mem.eql(u8, op, "-ot")) {
+            const left_stat = std.fs.cwd().statFile(left) catch return false;
+            const right_stat = std.fs.cwd().statFile(right) catch return false;
+            return left_stat.mtime.nanoseconds < right_stat.mtime.nanoseconds;
+        } else if (std.mem.eql(u8, op, "-ef")) {
+            const left_stat = std.fs.cwd().statFile(left) catch return false;
+            const right_stat = std.fs.cwd().statFile(right) catch return false;
+            return left_stat.inode == right_stat.inode;
+        }
+    }
+
+    return false;
+}
+
+/// Simple glob pattern matching for [[ == ]]
+pub fn globMatch(str: []const u8, pattern: []const u8) bool {
+    var s_idx: usize = 0;
+    var p_idx: usize = 0;
+    var star_idx: ?usize = null;
+    var match_idx: usize = 0;
+
+    while (s_idx < str.len) {
+        if (p_idx < pattern.len and (pattern[p_idx] == '?' or pattern[p_idx] == str[s_idx])) {
+            s_idx += 1;
+            p_idx += 1;
+        } else if (p_idx < pattern.len and pattern[p_idx] == '*') {
+            star_idx = p_idx;
+            match_idx = s_idx;
+            p_idx += 1;
+        } else if (star_idx) |si| {
+            p_idx = si + 1;
+            match_idx += 1;
+            s_idx = match_idx;
+        } else {
+            return false;
+        }
+    }
+
+    while (p_idx < pattern.len and pattern[p_idx] == '*') {
+        p_idx += 1;
+    }
+
+    return p_idx == pattern.len;
+}
+
+/// Simple regex matching for [[ =~ ]]
+fn matchRegex(str: []const u8, pattern: []const u8) bool {
+    if (pattern.len == 0) return true;
+
+    const anchored_start = pattern[0] == '^';
+    const anchored_end = pattern.len > 0 and pattern[pattern.len - 1] == '$';
+
+    var actual_pattern = pattern;
+    if (anchored_start) actual_pattern = actual_pattern[1..];
+    if (anchored_end and actual_pattern.len > 0) actual_pattern = actual_pattern[0 .. actual_pattern.len - 1];
+
+    if (actual_pattern.len == 0) {
+        return str.len == 0;
+    }
+
+    if (anchored_start and anchored_end) {
+        return simplePatternMatch(str, actual_pattern);
+    } else if (anchored_start) {
+        return str.len >= actual_pattern.len and simplePatternMatch(str[0..actual_pattern.len], actual_pattern);
+    } else if (anchored_end) {
+        if (str.len < actual_pattern.len) return false;
+        return simplePatternMatch(str[str.len - actual_pattern.len ..], actual_pattern);
+    } else {
+        if (str.len < actual_pattern.len) return false;
+        var i: usize = 0;
+        while (i <= str.len - actual_pattern.len) : (i += 1) {
+            if (simplePatternMatch(str[i .. i + actual_pattern.len], actual_pattern)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+fn simplePatternMatch(str: []const u8, pattern: []const u8) bool {
+    if (str.len != pattern.len) return false;
+    for (str, pattern) |s, p| {
+        if (p != '.' and s != p) return false;
+    }
+    return true;
+}
