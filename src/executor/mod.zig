@@ -763,7 +763,7 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "disown")) {
             return try self.builtinDisown(command);
         } else if (std.mem.eql(u8, command.name, "kill")) {
-            return try self.builtinKill(command);
+            return try builtins.signal_builtins.kill(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "trap")) {
             return try self.builtinTrap(command);
         } else if (std.mem.eql(u8, command.name, "times")) {
@@ -831,13 +831,13 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "emptytrash")) {
             return try builtins.macos_builtins.emptytrash(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "wip")) {
-            return try self.builtinWip(command);
+            return try builtins.dev_builtins.wip(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "bookmark")) {
             return try self.builtinBookmark(command);
         } else if (std.mem.eql(u8, command.name, "code")) {
-            return try self.builtinCode(command);
+            return try builtins.dev_builtins.code(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "pstorm")) {
-            return try self.builtinPstorm(command);
+            return try builtins.dev_builtins.pstorm(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "show")) {
             return try builtins.macos_builtins.show(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "hide")) {
@@ -1614,247 +1614,6 @@ pub const Executor = struct {
             return 1;
         };
         return try shell_ref.job_manager.builtinDisown(command.args);
-    }
-
-    fn builtinKill(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-        if (command.args.len == 0) {
-            try IO.eprint("den: kill: missing argument\n", .{});
-            return 1;
-        }
-
-        // Check for -l flag (list signals)
-        if (std.mem.eql(u8, command.args[0], "-l") or std.mem.eql(u8, command.args[0], "-L") or std.mem.eql(u8, command.args[0], "--list")) {
-            const signal_table = [_]struct { num: u6, name: []const u8 }{
-                .{ .num = 1, .name = "HUP" },
-                .{ .num = 2, .name = "INT" },
-                .{ .num = 3, .name = "QUIT" },
-                .{ .num = 4, .name = "ILL" },
-                .{ .num = 5, .name = "TRAP" },
-                .{ .num = 6, .name = "ABRT" },
-                .{ .num = 7, .name = "BUS" },
-                .{ .num = 8, .name = "FPE" },
-                .{ .num = 9, .name = "KILL" },
-                .{ .num = 10, .name = "USR1" },
-                .{ .num = 11, .name = "SEGV" },
-                .{ .num = 12, .name = "USR2" },
-                .{ .num = 13, .name = "PIPE" },
-                .{ .num = 14, .name = "ALRM" },
-                .{ .num = 15, .name = "TERM" },
-                .{ .num = 17, .name = "CHLD" },
-                .{ .num = 18, .name = "CONT" },
-                .{ .num = 19, .name = "STOP" },
-                .{ .num = 20, .name = "TSTP" },
-                .{ .num = 21, .name = "TTIN" },
-                .{ .num = 22, .name = "TTOU" },
-                .{ .num = 23, .name = "URG" },
-                .{ .num = 24, .name = "XCPU" },
-                .{ .num = 25, .name = "XFSZ" },
-                .{ .num = 26, .name = "VTALRM" },
-                .{ .num = 27, .name = "PROF" },
-                .{ .num = 28, .name = "WINCH" },
-                .{ .num = 29, .name = "IO" },
-                .{ .num = 30, .name = "PWR" },
-                .{ .num = 31, .name = "SYS" },
-            };
-
-            // If a signal number is given after -l, print just that signal name
-            if (command.args.len >= 2) {
-                const sig_num = std.fmt.parseInt(u6, command.args[1], 10) catch {
-                    try IO.eprint("den: kill: {s}: invalid signal specification\n", .{command.args[1]});
-                    return 1;
-                };
-                for (signal_table) |sig| {
-                    if (sig.num == sig_num) {
-                        try IO.print("{s}\n", .{sig.name});
-                        return 0;
-                    }
-                }
-                try IO.eprint("den: kill: {d}: invalid signal specification\n", .{sig_num});
-                return 1;
-            }
-
-            // Print all signals
-            if (builtin.os.tag == .windows) {
-                try IO.print("Signals on Windows (only TERM/KILL are supported):\n", .{});
-                try IO.print(" 9) SIGKILL    15) SIGTERM\n", .{});
-            } else {
-                var col: usize = 0;
-                for (signal_table) |sig| {
-                    try IO.print("{d:>2}) SIG{s: <8}", .{ sig.num, sig.name });
-                    col += 1;
-                    if (col >= 4) {
-                        try IO.print("\n", .{});
-                        col = 0;
-                    }
-                }
-                if (col > 0) {
-                    try IO.print("\n", .{});
-                }
-            }
-            return 0;
-        }
-
-        // Check for -s flag (specify signal by name)
-        var start_idx: usize = 0;
-        var explicit_signal: ?u8 = null;
-        if (std.mem.eql(u8, command.args[0], "-s")) {
-            if (command.args.len < 2) {
-                try IO.eprint("den: kill: -s requires a signal name\n", .{});
-                return 1;
-            }
-            const sig_name = command.args[1];
-            explicit_signal = signalFromName(sig_name);
-            if (explicit_signal == null) {
-                try IO.eprint("den: kill: invalid signal: {s}\n", .{sig_name});
-                return 1;
-            }
-            start_idx = 2;
-        }
-
-        if (builtin.os.tag == .windows) {
-            // Windows: parse optional signal flag but only support TERM/KILL (both terminate)
-            if (command.args[0].len > 0 and command.args[0][0] == '-') {
-                const sig_str = command.args[0][1..];
-                // Only accept TERM, KILL, or their numeric equivalents (9, 15)
-                if (sig_str.len > 0) {
-                    const valid = std.mem.eql(u8, sig_str, "TERM") or
-                        std.mem.eql(u8, sig_str, "KILL") or
-                        std.mem.eql(u8, sig_str, "9") or
-                        std.mem.eql(u8, sig_str, "15");
-                    if (!valid) {
-                        // Check for other signals and warn
-                        if (std.mem.eql(u8, sig_str, "HUP") or
-                            std.mem.eql(u8, sig_str, "INT") or
-                            std.mem.eql(u8, sig_str, "QUIT") or
-                            std.mem.eql(u8, sig_str, "STOP") or
-                            std.mem.eql(u8, sig_str, "CONT"))
-                        {
-                            try IO.eprint("den: kill: signal {s} not supported on Windows, using TERM\n", .{sig_str});
-                        } else {
-                            try IO.eprint("den: kill: invalid signal: {s}\n", .{sig_str});
-                            return 1;
-                        }
-                    }
-                }
-                start_idx = 1;
-            }
-
-            if (start_idx >= command.args.len) {
-                try IO.eprint("den: kill: missing process ID\n", .{});
-                return 1;
-            }
-
-            // Terminate each process on Windows
-            for (command.args[start_idx..]) |pid_str| {
-                const pid = std.fmt.parseInt(u32, pid_str, 10) catch {
-                    try IO.eprint("den: kill: invalid process ID: {s}\n", .{pid_str});
-                    continue;
-                };
-
-                // Open process with TERMINATE permission
-                const handle = std.os.windows.kernel32.OpenProcess(
-                    PROCESS_TERMINATE,
-                    std.os.windows.FALSE,
-                    pid,
-                );
-                if (handle == null) {
-                    try IO.eprint("den: kill: ({d}): cannot open process\n", .{pid});
-                    return 1;
-                }
-                defer std.os.windows.CloseHandle(handle.?);
-
-                // Terminate the process
-                if (std.os.windows.kernel32.TerminateProcess(handle.?, 1) == 0) {
-                    try IO.eprint("den: kill: ({d}): cannot terminate process\n", .{pid});
-                    return 1;
-                }
-            }
-
-            return 0;
-        }
-
-        // POSIX implementation
-        var signal: u8 = explicit_signal orelse @intFromEnum(std.posix.SIG.TERM);
-
-        // Parse signal if provided (and not already set via -s)
-        if (explicit_signal == null and start_idx < command.args.len and
-            command.args[start_idx].len > 0 and command.args[start_idx][0] == '-')
-        {
-            const sig_str = command.args[start_idx][1..];
-            if (sig_str.len > 0) {
-                // Try to parse as number
-                signal = std.fmt.parseInt(u8, sig_str, 10) catch blk: {
-                    // Try to parse as signal name
-                    break :blk signalFromName(sig_str) orelse {
-                        try IO.eprint("den: kill: invalid signal: {s}\n", .{sig_str});
-                        return 1;
-                    };
-                };
-            }
-            start_idx += 1;
-        }
-
-        if (start_idx >= command.args.len) {
-            try IO.eprint("den: kill: missing process ID\n", .{});
-            return 1;
-        }
-
-        // Send signal to each PID
-        for (command.args[start_idx..]) |pid_str| {
-            const pid = std.fmt.parseInt(process.ProcessId, pid_str, 10) catch {
-                try IO.eprint("den: kill: invalid process ID: {s}\n", .{pid_str});
-                continue;
-            };
-
-            process.killProcess(pid, signal) catch |err| {
-                try IO.eprint("den: kill: ({d}): {}\n", .{ pid, err });
-                return 1;
-            };
-        }
-
-        return 0;
-    }
-
-    /// Helper to convert signal name to signal number
-    fn signalFromName(name: []const u8) ?u8 {
-        if (builtin.os.tag == .windows) {
-            if (std.mem.eql(u8, name, "TERM") or std.mem.eql(u8, name, "KILL")) {
-                return 15; // Just return TERM, as Windows only supports terminate
-            }
-            return null;
-        }
-
-        if (std.mem.eql(u8, name, "HUP")) return @intFromEnum(std.posix.SIG.HUP)
-        else if (std.mem.eql(u8, name, "INT")) return @intFromEnum(std.posix.SIG.INT)
-        else if (std.mem.eql(u8, name, "QUIT")) return @intFromEnum(std.posix.SIG.QUIT)
-        else if (std.mem.eql(u8, name, "ILL")) return @intFromEnum(std.posix.SIG.ILL)
-        else if (std.mem.eql(u8, name, "TRAP")) return @intFromEnum(std.posix.SIG.TRAP)
-        else if (std.mem.eql(u8, name, "ABRT")) return @intFromEnum(std.posix.SIG.ABRT)
-        else if (std.mem.eql(u8, name, "BUS")) return @intFromEnum(std.posix.SIG.BUS)
-        else if (std.mem.eql(u8, name, "FPE")) return @intFromEnum(std.posix.SIG.FPE)
-        else if (std.mem.eql(u8, name, "KILL")) return @intFromEnum(std.posix.SIG.KILL)
-        else if (std.mem.eql(u8, name, "USR1")) return @intFromEnum(std.posix.SIG.USR1)
-        else if (std.mem.eql(u8, name, "SEGV")) return @intFromEnum(std.posix.SIG.SEGV)
-        else if (std.mem.eql(u8, name, "USR2")) return @intFromEnum(std.posix.SIG.USR2)
-        else if (std.mem.eql(u8, name, "PIPE")) return @intFromEnum(std.posix.SIG.PIPE)
-        else if (std.mem.eql(u8, name, "ALRM")) return @intFromEnum(std.posix.SIG.ALRM)
-        else if (std.mem.eql(u8, name, "TERM")) return @intFromEnum(std.posix.SIG.TERM)
-        else if (std.mem.eql(u8, name, "CHLD")) return @intFromEnum(std.posix.SIG.CHLD)
-        else if (std.mem.eql(u8, name, "CONT")) return @intFromEnum(std.posix.SIG.CONT)
-        else if (std.mem.eql(u8, name, "STOP")) return @intFromEnum(std.posix.SIG.STOP)
-        else if (std.mem.eql(u8, name, "TSTP")) return @intFromEnum(std.posix.SIG.TSTP)
-        else if (std.mem.eql(u8, name, "TTIN")) return @intFromEnum(std.posix.SIG.TTIN)
-        else if (std.mem.eql(u8, name, "TTOU")) return @intFromEnum(std.posix.SIG.TTOU)
-        else if (std.mem.eql(u8, name, "URG")) return @intFromEnum(std.posix.SIG.URG)
-        else if (std.mem.eql(u8, name, "XCPU")) return @intFromEnum(std.posix.SIG.XCPU)
-        else if (std.mem.eql(u8, name, "XFSZ")) return @intFromEnum(std.posix.SIG.XFSZ)
-        else if (std.mem.eql(u8, name, "VTALRM")) return @intFromEnum(std.posix.SIG.VTALRM)
-        else if (std.mem.eql(u8, name, "PROF")) return @intFromEnum(std.posix.SIG.PROF)
-        else if (std.mem.eql(u8, name, "WINCH")) return @intFromEnum(std.posix.SIG.WINCH)
-        else if (std.mem.eql(u8, name, "IO")) return @intFromEnum(std.posix.SIG.IO)
-        else if (std.mem.eql(u8, name, "SYS")) return @intFromEnum(std.posix.SIG.SYS)
-        else return null;
     }
 
     fn builtinTrap(self: *Executor, command: *types.ParsedCommand) anyerror!i32 {
@@ -2828,54 +2587,6 @@ pub const Executor = struct {
     }
 
 
-    fn builtinWip(self: *Executor, command: *types.ParsedCommand) !i32 {
-        _ = self;
-
-        // Get custom message if provided
-        var message: []const u8 = "WIP";
-        if (command.args.len > 0) {
-            message = command.args[0];
-        }
-
-        // Run git add .
-        var add_child = std.process.Child.init(&[_][]const u8{ "git", "add", "." }, std.heap.page_allocator);
-        add_child.stdin_behavior = .Ignore;
-        add_child.stdout_behavior = .Inherit;
-        add_child.stderr_behavior = .Inherit;
-
-        add_child.spawn() catch {
-            try IO.eprint("den: wip: failed to run git add\n", .{});
-            return 1;
-        };
-
-        const add_result = add_child.wait() catch {
-            try IO.eprint("den: wip: git add failed\n", .{});
-            return 1;
-        };
-
-        if (add_result.Exited != 0) {
-            try IO.eprint("den: wip: git add returned error\n", .{});
-            return 1;
-        }
-
-        // Run git commit -m "message"
-        var commit_child = std.process.Child.init(&[_][]const u8{ "git", "commit", "-m", message }, std.heap.page_allocator);
-        commit_child.stdin_behavior = .Ignore;
-        commit_child.stdout_behavior = .Inherit;
-        commit_child.stderr_behavior = .Inherit;
-
-        commit_child.spawn() catch {
-            try IO.eprint("den: wip: failed to run git commit\n", .{});
-            return 1;
-        };
-
-        const commit_result = commit_child.wait() catch {
-            try IO.eprint("den: wip: git commit failed\n", .{});
-            return 1;
-        };
-
-        return @intCast(commit_result.Exited);
-    }
 
     fn builtinBookmark(self: *Executor, command: *types.ParsedCommand) !i32 {
         // bookmark         - list all bookmarks
@@ -2988,70 +2699,6 @@ pub const Executor = struct {
         }
 
         return 0;
-    }
-
-    /// Open file or directory in VS Code
-    fn builtinCode(self: *Executor, command: *types.ParsedCommand) !i32 {
-        if (builtin.os.tag != .macos) {
-            try IO.eprint("den: code: only supported on macOS\n", .{});
-            return 1;
-        }
-
-        // Get path - use current directory if not specified
-        const path = if (command.args.len > 0) command.args[0] else ".";
-
-        // Execute: open -a "Visual Studio Code" <path>
-        const argv = [_]?[*:0]const u8{
-            "open",
-            "-a",
-            "Visual Studio Code",
-            try self.allocator.dupeZ(u8, path),
-            null,
-        };
-        defer self.allocator.free(std.mem.span(argv[3].?));
-
-        const pid = try std.posix.fork();
-        if (pid == 0) {
-            _ = std.posix.execvpeZ("open", @ptrCast(&argv), getCEnviron()) catch {
-                std.posix.exit(127);
-            };
-            unreachable;
-        } else {
-            const result = std.posix.waitpid(pid, 0);
-            return @intCast(std.posix.W.EXITSTATUS(result.status));
-        }
-    }
-
-    /// Open file or directory in PhpStorm
-    fn builtinPstorm(self: *Executor, command: *types.ParsedCommand) !i32 {
-        if (builtin.os.tag != .macos) {
-            try IO.eprint("den: pstorm: only supported on macOS\n", .{});
-            return 1;
-        }
-
-        // Get path - use current directory if not specified
-        const path = if (command.args.len > 0) command.args[0] else ".";
-
-        // Execute: open -a "PhpStorm" <path>
-        const argv = [_]?[*:0]const u8{
-            "open",
-            "-a",
-            "PhpStorm",
-            try self.allocator.dupeZ(u8, path),
-            null,
-        };
-        defer self.allocator.free(std.mem.span(argv[3].?));
-
-        const pid = try std.posix.fork();
-        if (pid == 0) {
-            _ = std.posix.execvpeZ("open", @ptrCast(&argv), getCEnviron()) catch {
-                std.posix.exit(127);
-            };
-            unreachable;
-        } else {
-            const result = std.posix.waitpid(pid, 0);
-            return @intCast(std.posix.W.EXITSTATUS(result.status));
-        }
     }
 
 

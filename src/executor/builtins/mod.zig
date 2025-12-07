@@ -25,6 +25,8 @@ pub const alias_builtins = @import("alias_builtins.zig");
 pub const monitoring_builtins = @import("monitoring_builtins.zig");
 pub const process_builtins = @import("process_builtins.zig");
 pub const macos_builtins = @import("macos_builtins.zig");
+pub const signal_builtins = @import("signal_builtins.zig");
+pub const dev_builtins = @import("dev_builtins.zig");
 pub const context = @import("context.zig");
 
 pub const BuiltinContext = context.BuiltinContext;
