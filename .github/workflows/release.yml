@@ -92,7 +92,7 @@ jobs:
           cat *.sha256 > checksums-${{ steps.version.outputs.VERSION }}.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Den Shell v${{ steps.version.outputs.VERSION }}
