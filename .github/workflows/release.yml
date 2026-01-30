@@ -1,4 +1,4 @@
-name: Release
+name: Releaser
 
 on:
   push:
@@ -12,7 +12,7 @@ env:
   ZIG_VERSION: '0.16-dev'
 
 jobs:
-  build:
+  npm:
     name: Build Release Binaries
     runs-on: ${{ matrix.os }}
     strategy:
@@ -69,7 +69,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: npm
     runs-on: ubuntu-latest
 
     steps:
