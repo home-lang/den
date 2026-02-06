@@ -192,16 +192,24 @@ pub fn command(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
             return 0;
         }
 
-        // Check PATH (or default PATH if -p)
-        var path_list = utils.env.PathList.parse(ctx.allocator, path_to_use) catch {
-            return 1;
-        };
-        defer path_list.deinit();
-
-        if (try path_list.findExecutable(ctx.allocator, cmd_name)) |exec_path| {
-            defer ctx.allocator.free(exec_path);
-            try IO.print("{s}\n", .{exec_path});
-            return 0;
+        // Search PATH manually
+        var iter = std.mem.splitScalar(u8, path_to_use, ':');
+        while (iter.next()) |dir| {
+            if (dir.len == 0) continue;
+            const full_path = try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ dir, cmd_name });
+            defer ctx.allocator.free(full_path);
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            @memcpy(path_buf[0..full_path.len], full_path);
+            path_buf[full_path.len] = 0;
+            const c_path: [*:0]const u8 = path_buf[0..full_path.len :0];
+            if (std.c.access(c_path, std.posix.X_OK) == 0) {
+                if (verbose) {
+                    try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
+                } else {
+                    try IO.print("{s}\n", .{full_path});
+                }
+                return 0;
+            }
         }
 
         return 1;

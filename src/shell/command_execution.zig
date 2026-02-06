@@ -120,6 +120,17 @@ pub fn executeErrTrap(self: *Shell) void {
     }
 }
 
+/// Execute EXIT trap if one is set (called when shell is about to exit)
+pub fn executeExitTrap(self: *Shell) void {
+    // Check if EXIT trap is set
+    if (self.signal_handlers.get("EXIT")) |handler| {
+        if (handler.len > 0) {
+            // Execute the trap handler
+            self.executeCommand(handler) catch {};
+        }
+    }
+}
+
 /// Execute a command chain in the background
 pub fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_input: []const u8) !void {
     if (builtin.os.tag == .windows) {

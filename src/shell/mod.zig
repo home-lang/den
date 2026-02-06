@@ -148,6 +148,7 @@ pub const executeArrayAssignment = variable_handling.executeArrayAssignment;
 // Re-export command execution functions
 pub const tryFastPath = command_execution.tryFastPath;
 pub const executeErrTrap = command_execution.executeErrTrap;
+pub const executeExitTrap = command_execution.executeExitTrap;
 pub const executeInBackground = command_execution.executeInBackground;
 
 // Re-export builtin dispatch

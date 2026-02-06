@@ -71,10 +71,129 @@ pub fn builtinCommand(self: *Shell, cmd: *types.ParsedCommand) !void {
         return;
     }
 
-    // Simplified: execute as a single-command chain
+    // Handle -v, -V, -p flags
+    var verbose = false;
+    var short_output = false;
+    var start_idx: usize = 0;
+
+    for (cmd.args, 0..) |arg, i| {
+        if (arg.len > 0 and arg[0] == '-') {
+            for (arg[1..]) |c| {
+                if (c == 'V') {
+                    verbose = true;
+                } else if (c == 'v') {
+                    short_output = true;
+                } else if (c == 'p') {
+                    // use default PATH - ignored for -v/-V
+                } else {
+                    try IO.eprint("den: command: invalid option: -{c}\n", .{c});
+                    self.last_exit_code = 1;
+                    return;
+                }
+            }
+            start_idx = i + 1;
+        } else {
+            break;
+        }
+    }
+
+    if (start_idx >= cmd.args.len) {
+        if (verbose or short_output) {
+            // No command name after flags
+            self.last_exit_code = 1;
+            return;
+        }
+        try IO.eprint("den: command: missing command argument\n", .{});
+        self.last_exit_code = 1;
+        return;
+    }
+
+    const cmd_name = cmd.args[start_idx];
+
+    if (verbose or short_output) {
+        // command -v / command -V: locate command
+        const builtins = [_][]const u8{
+            "cd",      "echo",    "exit",    "export",  "set",     "unset",
+            "alias",   "unalias", "source",  ".",       "eval",    "exec",
+            "command", "builtin", "type",    "which",   "test",    "[",
+            "[[",      "true",    "false",   "read",    "printf",  "pwd",
+            "pushd",   "popd",    "dirs",    "history", "jobs",    "fg",
+            "bg",      "kill",    "wait",    "trap",    "shift",   "return",
+            "break",   "continue","local",   "declare", "typeset", "readonly",
+            "let",     "hash",    "umask",   "ulimit",  "getopts", ":",
+        };
+        for (builtins) |b| {
+            if (std.mem.eql(u8, cmd_name, b)) {
+                if (verbose) {
+                    try IO.print("{s} is a shell builtin\n", .{cmd_name});
+                } else {
+                    try IO.print("{s}\n", .{cmd_name});
+                }
+                self.last_exit_code = 0;
+                return;
+            }
+        }
+
+        // Check functions
+        if (self.function_manager.hasFunction(cmd_name)) {
+            if (verbose) {
+                try IO.print("{s} is a function\n", .{cmd_name});
+            } else {
+                try IO.print("{s}\n", .{cmd_name});
+            }
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Check aliases
+        if (self.aliases.contains(cmd_name)) {
+            if (verbose) {
+                if (self.aliases.get(cmd_name)) |val| {
+                    try IO.print("{s} is aliased to `{s}'\n", .{ cmd_name, val });
+                }
+            } else {
+                try IO.print("{s}\n", .{cmd_name});
+            }
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Search PATH
+        if (self.environment.get("PATH")) |path_val| {
+            var iter = std.mem.splitScalar(u8, path_val, ':');
+            while (iter.next()) |dir| {
+                if (dir.len == 0) continue;
+                const full_path = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ dir, cmd_name }) catch continue;
+                defer self.allocator.free(full_path);
+                // Check if file exists and is executable
+                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                @memcpy(path_buf[0..full_path.len], full_path);
+                path_buf[full_path.len] = 0;
+                const c_path: [*:0]const u8 = path_buf[0..full_path.len :0];
+                if (std.c.access(c_path, std.posix.X_OK) == 0) {
+                    if (verbose) {
+                        try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
+                    } else {
+                        try IO.print("{s}\n", .{full_path});
+                    }
+                    self.last_exit_code = 0;
+                    return;
+                }
+            }
+        }
+
+        // Not found
+        if (verbose) {
+            try IO.eprint("den: command not found: {s}\n", .{cmd_name});
+        }
+        self.last_exit_code = 1;
+        return;
+    }
+
+    // No flags: execute as a single-command chain (bypass functions/aliases)
     const single_cmd = types.ParsedCommand{
-        .name = cmd.args[0],
-        .args = if (cmd.args.len > 1) cmd.args[1..] else &[_][]const u8{},
+        .name = cmd_name,
+        .args = if (start_idx + 1 < cmd.args.len) cmd.args[start_idx + 1 ..] else &[_][]const u8{},
         .redirections = &[_]types.Redirection{},
         .type = .external,
     };

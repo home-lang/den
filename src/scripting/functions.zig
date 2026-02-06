@@ -4,6 +4,20 @@ const control_flow = @import("control_flow.zig");
 const ControlFlowParser = control_flow.ControlFlowParser;
 const ControlFlowExecutor = control_flow.ControlFlowExecutor;
 
+/// Check if input contains a word (surrounded by word boundaries: start/end/space/semicolon)
+fn containsWord(input: []const u8, word: []const u8) bool {
+    var pos: usize = 0;
+    while (pos + word.len <= input.len) {
+        if (std.mem.eql(u8, input[pos..][0..word.len], word)) {
+            const at_start = pos == 0 or input[pos - 1] == ' ' or input[pos - 1] == ';' or input[pos - 1] == '\t';
+            const at_end = pos + word.len == input.len or input[pos + word.len] == ' ' or input[pos + word.len] == ';' or input[pos + word.len] == '\t' or input[pos + word.len] == '\n';
+            if (at_start and at_end) return true;
+        }
+        pos += 1;
+    }
+    return false;
+}
+
 /// Function definition
 pub const Function = struct {
     name: []const u8,
@@ -192,79 +206,82 @@ pub const FunctionManager = struct {
             }
 
             // Check for control flow constructs
-            if (std.mem.startsWith(u8, trimmed, "if ") or std.mem.eql(u8, trimmed, "if")) {
-                // Parse if statement
-                if (cf_parser.parseIf(func.body, line_num)) |result| {
-                    var stmt = result.stmt;
-                    exit_code = cf_executor.executeIf(&stmt) catch 1;
-                    line_num = result.end + 1;
+            // One-liner detection: if the line contains both opener and closer
+            // (e.g., "for...done" or "if...fi"), treat as one-liner via executeCommand
+            const is_oneliner = (std.mem.startsWith(u8, trimmed, "for ") and
+                (containsWord(trimmed, "done") or containsWord(trimmed, "fi"))) or
+                (std.mem.startsWith(u8, trimmed, "while ") and containsWord(trimmed, "done")) or
+                (std.mem.startsWith(u8, trimmed, "until ") and containsWord(trimmed, "done")) or
+                (std.mem.startsWith(u8, trimmed, "if ") and containsWord(trimmed, "fi")) or
+                (std.mem.startsWith(u8, trimmed, "case ") and containsWord(trimmed, "esac"));
 
-                    // Check for return
-                    if (self.currentFrame()) |frame| {
-                        if (frame.return_requested) {
-                            return frame.return_code;
+            if (!is_oneliner) {
+                if (std.mem.startsWith(u8, trimmed, "if ") or std.mem.eql(u8, trimmed, "if")) {
+                    if (cf_parser.parseIf(func.body, line_num)) |result| {
+                        var stmt = result.stmt;
+                        exit_code = cf_executor.executeIf(&stmt) catch 1;
+                        line_num = result.end + 1;
+
+                        if (self.currentFrame()) |frame| {
+                            if (frame.return_requested) {
+                                return frame.return_code;
+                            }
                         }
-                    }
-                    continue;
-                } else |_| {
-                    // Parse failed, execute as regular command
+                        continue;
+                    } else |_| {}
+                } else if (std.mem.startsWith(u8, trimmed, "while ") or std.mem.eql(u8, trimmed, "while")) {
+                    if (cf_parser.parseWhile(func.body, line_num, false)) |result| {
+                        var loop = result.loop;
+                        exit_code = cf_executor.executeWhile(&loop) catch 1;
+                        line_num = result.end + 1;
+
+                        if (self.currentFrame()) |frame| {
+                            if (frame.return_requested) {
+                                return frame.return_code;
+                            }
+                        }
+                        continue;
+                    } else |_| {}
+                } else if (std.mem.startsWith(u8, trimmed, "until ") or std.mem.eql(u8, trimmed, "until")) {
+                    if (cf_parser.parseWhile(func.body, line_num, true)) |result| {
+                        var loop = result.loop;
+                        exit_code = cf_executor.executeWhile(&loop) catch 1;
+                        line_num = result.end + 1;
+
+                        if (self.currentFrame()) |frame| {
+                            if (frame.return_requested) {
+                                return frame.return_code;
+                            }
+                        }
+                        continue;
+                    } else |_| {}
+                } else if (std.mem.startsWith(u8, trimmed, "for ") or std.mem.eql(u8, trimmed, "for")) {
+                    if (cf_parser.parseFor(func.body, line_num)) |result| {
+                        var loop = result.loop;
+                        exit_code = cf_executor.executeFor(&loop) catch 1;
+                        line_num = result.end + 1;
+
+                        if (self.currentFrame()) |frame| {
+                            if (frame.return_requested) {
+                                return frame.return_code;
+                            }
+                        }
+                        continue;
+                    } else |_| {}
+                } else if (std.mem.startsWith(u8, trimmed, "case ")) {
+                    if (cf_parser.parseCase(func.body, line_num)) |result| {
+                        var stmt = result.stmt;
+                        exit_code = cf_executor.executeCase(&stmt) catch 1;
+                        line_num = result.end + 1;
+
+                        if (self.currentFrame()) |frame| {
+                            if (frame.return_requested) {
+                                return frame.return_code;
+                            }
+                        }
+                        continue;
+                    } else |_| {}
                 }
-            } else if (std.mem.startsWith(u8, trimmed, "while ") or std.mem.eql(u8, trimmed, "while")) {
-                // Parse while loop
-                if (cf_parser.parseWhile(func.body, line_num, false)) |result| {
-                    var loop = result.loop;
-                    exit_code = cf_executor.executeWhile(&loop) catch 1;
-                    line_num = result.end + 1;
-
-                    if (self.currentFrame()) |frame| {
-                        if (frame.return_requested) {
-                            return frame.return_code;
-                        }
-                    }
-                    continue;
-                } else |_| {}
-            } else if (std.mem.startsWith(u8, trimmed, "until ") or std.mem.eql(u8, trimmed, "until")) {
-                // Parse until loop
-                if (cf_parser.parseWhile(func.body, line_num, true)) |result| {
-                    var loop = result.loop;
-                    exit_code = cf_executor.executeWhile(&loop) catch 1;
-                    line_num = result.end + 1;
-
-                    if (self.currentFrame()) |frame| {
-                        if (frame.return_requested) {
-                            return frame.return_code;
-                        }
-                    }
-                    continue;
-                } else |_| {}
-            } else if (std.mem.startsWith(u8, trimmed, "for ") or std.mem.eql(u8, trimmed, "for")) {
-                // Parse for loop
-                if (cf_parser.parseFor(func.body, line_num)) |result| {
-                    var loop = result.loop;
-                    exit_code = cf_executor.executeFor(&loop) catch 1;
-                    line_num = result.end + 1;
-
-                    if (self.currentFrame()) |frame| {
-                        if (frame.return_requested) {
-                            return frame.return_code;
-                        }
-                    }
-                    continue;
-                } else |_| {}
-            } else if (std.mem.startsWith(u8, trimmed, "case ")) {
-                // Parse case statement
-                if (cf_parser.parseCase(func.body, line_num)) |result| {
-                    var stmt = result.stmt;
-                    exit_code = cf_executor.executeCase(&stmt) catch 1;
-                    line_num = result.end + 1;
-
-                    if (self.currentFrame()) |frame| {
-                        if (frame.return_requested) {
-                            return frame.return_code;
-                        }
-                    }
-                    continue;
-                } else |_| {}
             }
 
             // Execute as regular command

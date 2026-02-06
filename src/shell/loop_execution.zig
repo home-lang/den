@@ -512,6 +512,22 @@ pub fn executeArithmeticStatement(self: *Shell, stmt: []const u8) void {
 pub fn setArithVariable(self: *Shell, name: []const u8, value: []const u8) void {
     const resolved_name = self.resolveNameref(name);
 
+    // If inside a function and the variable exists as a local, update local instead
+    if (self.function_manager.currentFrame()) |frame| {
+        if (frame.local_vars.getKey(resolved_name)) |_| {
+            const val = self.allocator.dupe(u8, value) catch return;
+            const gop = frame.local_vars.getOrPut(resolved_name) catch {
+                self.allocator.free(val);
+                return;
+            };
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+            }
+            gop.value_ptr.* = val;
+            return;
+        }
+    }
+
     const val = self.allocator.dupe(u8, value) catch return;
 
     const gop = self.environment.getOrPut(resolved_name) catch {

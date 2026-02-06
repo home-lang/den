@@ -754,6 +754,9 @@ pub const Shell = struct {
             // Execute command
             try self.executeCommand(command);
         }
+
+        // Fire EXIT trap before leaving
+        self.executeExitTrap();
     }
 
     /// Run a script file with positional parameters (using ScriptManager)
@@ -801,9 +804,55 @@ pub const Shell = struct {
     }
 
     pub fn executeCommand(self: *Shell, input: []const u8) !void {
+        // Preprocess heredocs: convert <<DELIM\ncontent\nDELIM to herestring
+        if (std.mem.indexOf(u8, input, "<<") != null and std.mem.indexOfScalar(u8, input, '\n') != null) {
+            if (self.preprocessHeredoc(input)) |rewritten| {
+                defer self.allocator.free(rewritten);
+                return self.executeCommand(rewritten);
+            }
+        }
+
         // Split on unquoted semicolons and execute each part separately.
         // This ensures variables set by earlier parts are visible to later parts.
         if (self.splitAndExecuteSemicolons(input)) return;
+
+        // Check for function definition (name() { ... } or function name { ... })
+        const fn_trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+        if (try self.checkFunctionDefinitionStart(fn_trimmed)) {
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Check for subshell: (command)
+        if (fn_trimmed.len > 2 and fn_trimmed[0] == '(' and fn_trimmed[fn_trimmed.len - 1] == ')') {
+            // Execute the inner command in a subshell (fork to isolate env changes)
+            const inner = std.mem.trim(u8, fn_trimmed[1 .. fn_trimmed.len - 1], &std.ascii.whitespace);
+            if (inner.len > 0) {
+                const fork_ret = std.c.fork();
+                if (fork_ret < 0) {
+                    try IO.eprint("den: fork failed\n", .{});
+                    self.last_exit_code = 1;
+                    return;
+                }
+                if (fork_ret == 0) {
+                    // Child: execute command and exit
+                    self.executeCommand(inner) catch {
+                        std.c._exit(1);
+                    };
+                    std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
+                }
+                // Parent: wait for child
+                var wait_status: c_int = 0;
+                _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
+                if (wait_status & 0x7f == 0) {
+                    // Exited normally
+                    self.last_exit_code = @as(i32, @intCast((wait_status >> 8) & 0xff));
+                } else {
+                    self.last_exit_code = 128 + @as(i32, @intCast(wait_status & 0x7f));
+                }
+                return;
+            }
+        }
 
         // Check for array assignment first
         if (shell_mod.isArrayAssignment(input)) {
@@ -860,8 +909,14 @@ pub const Shell = struct {
                             }
                         }
                         if (!needs_full_pipeline) {
-                            // Simple literal assignment
-                            shell_mod.setArithVariable(self, potential_var, raw_value);
+                            // Simple literal assignment - strip surrounding quotes
+                            const stripped = if (raw_value.len >= 2 and
+                                ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
+                                (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
+                                raw_value[1 .. raw_value.len - 1]
+                            else
+                                raw_value;
+                            shell_mod.setArithVariable(self, potential_var, stripped);
                             self.last_exit_code = 0;
                             return;
                         }
@@ -1045,6 +1100,171 @@ pub const Shell = struct {
 
     pub fn executeErrTrap(self: *Shell) void {
         shell_mod.executeErrTrap(self);
+    }
+
+    pub fn executeExitTrap(self: *Shell) void {
+        shell_mod.executeExitTrap(self);
+    }
+
+    /// Preprocess heredoc: convert multi-line heredoc to herestring.
+    /// Input like "cat <<EOF\nhello\nworld\nEOF" becomes "cat <<< 'hello\nworld'"
+    /// Returns null if no heredoc found or processing fails.
+    fn preprocessHeredoc(self: *Shell, input: []const u8) ?[]const u8 {
+        // Find << that's not <<< (herestring)
+        var search_pos: usize = 0;
+        const heredoc_pos = while (search_pos < input.len) {
+            const pos = std.mem.indexOf(u8, input[search_pos..], "<<") orelse break null;
+            const abs_pos = search_pos + pos;
+            // Skip <<< (herestring)
+            if (abs_pos + 2 < input.len and input[abs_pos + 2] == '<') {
+                search_pos = abs_pos + 3;
+                continue;
+            }
+            break abs_pos;
+        } else null;
+
+        const hd_pos = heredoc_pos orelse return null;
+
+        // Check for <<- (strip tabs variant)
+        var after_op = hd_pos + 2;
+        var strip_tabs = false;
+        if (after_op < input.len and input[after_op] == '-') {
+            strip_tabs = true;
+            after_op += 1;
+        }
+
+        // Skip whitespace after <<
+        while (after_op < input.len and (input[after_op] == ' ' or input[after_op] == '\t')) {
+            after_op += 1;
+        }
+
+        if (after_op >= input.len) return null;
+
+        // Extract delimiter (handle quoted: 'EOF', "EOF", \EOF, or plain EOF)
+        var delim_start = after_op;
+        var delim_end = after_op;
+        var quoted = false;
+
+        if (input[delim_start] == '\'' or input[delim_start] == '"') {
+            const quote_char = input[delim_start];
+            delim_start += 1;
+            delim_end = delim_start;
+            while (delim_end < input.len and input[delim_end] != quote_char) {
+                delim_end += 1;
+            }
+            quoted = true;
+            after_op = if (delim_end < input.len) delim_end + 1 else delim_end;
+        } else {
+            while (delim_end < input.len and input[delim_end] != '\n' and
+                input[delim_end] != ' ' and input[delim_end] != '\t')
+            {
+                delim_end += 1;
+            }
+            after_op = delim_end;
+        }
+
+        const delimiter = input[delim_start..delim_end];
+        if (delimiter.len == 0) return null;
+
+        // Find the first newline after the heredoc operator (start of content)
+        const first_nl = std.mem.indexOfScalarPos(u8, input, after_op, '\n') orelse return null;
+        const content_start = first_nl + 1;
+
+        // Find the delimiter line in the remaining content
+        var line_start = content_start;
+        var content_end = content_start;
+        var found_delim = false;
+
+        while (line_start < input.len) {
+            const line_end = std.mem.indexOfScalarPos(u8, input, line_start, '\n') orelse input.len;
+            var line = input[line_start..line_end];
+
+            // Strip leading tabs if <<-
+            if (strip_tabs) {
+                while (line.len > 0 and line[0] == '\t') {
+                    line = line[1..];
+                }
+            }
+
+            if (std.mem.eql(u8, std.mem.trim(u8, line, &std.ascii.whitespace), delimiter)) {
+                content_end = line_start;
+                found_delim = true;
+                break;
+            }
+            line_start = if (line_end < input.len) line_end + 1 else input.len;
+        }
+
+        if (!found_delim) return null;
+
+        // Build the heredoc content (everything between command and delimiter)
+        var heredoc_content = input[content_start..content_end];
+        // Remove trailing newline if present
+        if (heredoc_content.len > 0 and heredoc_content[heredoc_content.len - 1] == '\n') {
+            heredoc_content = heredoc_content[0 .. heredoc_content.len - 1];
+        }
+
+        // Build the command part (everything before <<)
+        const cmd_part = std.mem.trim(u8, input[0..hd_pos], &std.ascii.whitespace);
+
+        if (quoted) {
+            // Quoted heredoc: no expansion. Directly pipe the content.
+            // Create pipe, fork writer, redirect stdin, then execute command.
+            var pipe_fds: [2]std.posix.fd_t = undefined;
+            if (std.c.pipe(&pipe_fds) != 0) return null;
+            const read_fd = pipe_fds[0];
+            const write_fd = pipe_fds[1];
+
+            const fork_ret = std.c.fork();
+            if (fork_ret < 0) {
+                std.posix.close(read_fd);
+                std.posix.close(write_fd);
+                return null;
+            }
+            if (fork_ret == 0) {
+                // Child: write content and exit
+                std.posix.close(read_fd);
+                const content_with_nl = std.fmt.allocPrint(self.allocator, "{s}\n", .{heredoc_content}) catch {
+                    std.c._exit(1);
+                    unreachable;
+                };
+                (std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } }).writeStreamingAll(std.Options.debug_io, content_with_nl) catch {};
+                std.posix.close(write_fd);
+                std.c._exit(0);
+                unreachable;
+            }
+
+            // Parent: redirect stdin to read end of pipe
+            std.posix.close(write_fd);
+            const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
+            if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) {
+                std.posix.close(read_fd);
+                if (saved_stdin >= 0) std.posix.close(@intCast(saved_stdin));
+                return null;
+            }
+            std.posix.close(read_fd);
+
+            // Wait for writer to finish
+            var wait_status: c_int = 0;
+            _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
+
+            // Execute the command with stdin redirected
+            self.executeCommand(cmd_part) catch {};
+
+            // Restore stdin
+            if (saved_stdin >= 0) {
+                _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
+                std.posix.close(@intCast(saved_stdin));
+            }
+
+            // Return empty string to signal we handled it (caller will free and return)
+            return self.allocator.dupe(u8, "") catch null;
+        } else {
+            // Unquoted heredoc: allow expansion via herestring with double quotes
+            const result = std.fmt.allocPrint(self.allocator, "{s} <<< \"{s}\"", .{
+                cmd_part, heredoc_content,
+            }) catch return null;
+            return result;
+        }
     }
 
     /// Execute a one-liner control flow statement (for/while/until/if/case).
@@ -1235,6 +1455,7 @@ pub const Shell = struct {
         var in_single_quote = false;
         var in_double_quote = false;
         var paren_depth: u32 = 0;
+        var brace_depth: u32 = 0; // { } nesting depth (function bodies)
         var cf_depth: u32 = 0; // control flow nesting depth
         var i: usize = 0;
         var at_word_start = true; // track word boundaries for keyword detection
@@ -1253,11 +1474,17 @@ pub const Shell = struct {
                 in_double_quote = !in_double_quote;
                 at_word_start = false;
             } else if (!in_single_quote and !in_double_quote) {
-                if (c == '(' and (paren_depth > 0 or (i > 0 and input[i - 1] == '$'))) {
+                if (c == '(') {
                     paren_depth += 1;
                     at_word_start = false;
                 } else if (c == ')' and paren_depth > 0) {
                     paren_depth -= 1;
+                    at_word_start = false;
+                } else if (c == '{' and at_word_start) {
+                    brace_depth += 1;
+                    at_word_start = false;
+                } else if (c == '}' and brace_depth > 0) {
+                    brace_depth -= 1;
                     at_word_start = false;
                 } else if (paren_depth == 0) {
                     // Track control flow nesting at word boundaries
@@ -1274,7 +1501,7 @@ pub const Shell = struct {
                             at_word_start = true;
                             continue;
                         }
-                        if (cf_depth == 0) {
+                        if (cf_depth == 0 and brace_depth == 0) {
                             const part = std.mem.trim(u8, input[start..i], &std.ascii.whitespace);
                             if (part.len > 0 and part_count < parts_buf.len) {
                                 parts_buf[part_count] = part;
@@ -1310,6 +1537,8 @@ pub const Shell = struct {
         // Execute each part separately
         for (parts_buf[0..part_count]) |part| {
             self.executeCommand(part) catch {};
+            // Honor set -e (errexit): stop if a command fails
+            if (self.option_errexit and self.last_exit_code != 0) break;
         }
         return true;
     }

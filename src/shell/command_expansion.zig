@@ -73,6 +73,10 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
         self.allocator.free(cmd.name);
         cmd.name = expanded_name;
 
+        // [[ ]] is a shell keyword - skip glob expansion on its arguments
+        // to preserve patterns like a* for pattern matching
+        const skip_globs = std.mem.eql(u8, cmd.name, "[[");
+
         // Expand arguments (variables + braces + globs)
         var expanded_args_buffer: [128][]const u8 = undefined;
         var expanded_args_count: usize = 0;
@@ -80,6 +84,20 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
         for (cmd.args) |arg| {
             // First expand variables
             const var_expanded = try expander.expand(arg);
+
+            if (skip_globs) {
+                // For [[ ]], only do variable expansion, no brace/glob expansion
+                if (expanded_args_count >= expanded_args_buffer.len) {
+                    self.allocator.free(var_expanded);
+                    self.allocator.free(arg);
+                    return error.TooManyArguments;
+                }
+                expanded_args_buffer[expanded_args_count] = var_expanded;
+                expanded_args_count += 1;
+                self.allocator.free(arg);
+                continue;
+            }
+
             defer self.allocator.free(var_expanded);
 
             // Then expand braces

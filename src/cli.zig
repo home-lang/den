@@ -256,9 +256,11 @@ fn execCommand(allocator: std.mem.Allocator, args: []const []const u8, config_pa
 
     // Execute the command
     den_shell.executeCommand(command) catch |err| {
+        den_shell.executeExitTrap();
         std.debug.print("Error executing command: {}\n", .{err});
         return err;
     };
+    den_shell.executeExitTrap();
 }
 
 /// Get completions for input (JSON output)
@@ -541,6 +543,7 @@ fn runScript(allocator: std.mem.Allocator, args: []const []const u8, config_path
     defer den_shell.deinit();
 
     try den_shell.runScript(script_path, "den", script_args);
+    den_shell.executeExitTrap();
 }
 
 /// Run command string (-c "command")
@@ -561,11 +564,15 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
 
     // Execute the command
     den_shell.executeCommand(command) catch |err| {
+        den_shell.executeExitTrap();
         if (json_output) {
             try IO.print("{{\"error\":\"{s}\",\"exit_code\":{d}}}\n", .{ @errorName(err), den_shell.last_exit_code });
         }
         return err;
     };
+
+    // Fire EXIT trap before leaving
+    den_shell.executeExitTrap();
 
     // Output JSON result if requested
     if (json_output) {

@@ -557,6 +557,22 @@ pub const Executor = struct {
                 if (is_valid) {
                     const value = command.name[eq_pos + 1 ..];
                     if (self.shell) |shell| {
+                        // If inside a function and variable exists as local, update local
+                        if (shell.function_manager.currentFrame()) |frame| {
+                            if (frame.local_vars.getKey(var_name)) |_| {
+                                const val_copy = self.allocator.dupe(u8, value) catch return 1;
+                                const gop = frame.local_vars.getOrPut(var_name) catch {
+                                    self.allocator.free(val_copy);
+                                    return 1;
+                                };
+                                if (gop.found_existing) {
+                                    self.allocator.free(gop.value_ptr.*);
+                                }
+                                gop.value_ptr.* = val_copy;
+                                return 0;
+                            }
+                        }
+
                         // Set the variable in the shell environment
                         const key_copy = self.allocator.dupe(u8, var_name) catch return 1;
                         const val_copy = self.allocator.dupe(u8, value) catch {

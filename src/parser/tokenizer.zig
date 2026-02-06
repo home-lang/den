@@ -343,6 +343,7 @@ pub const Tokenizer = struct {
         var in_double_quote = false;
         var in_ansi_quote = false; // $'...' ANSI-C quoting
         var subst_depth: u32 = 0; // Track $(...) / $((...)) nesting depth
+        var in_backtick = false; // Track `...` command substitution
 
         // Build the word with escape processing
         var word_buffer: [4096]u8 = undefined;
@@ -353,26 +354,51 @@ pub const Tokenizer = struct {
 
             // Handle backslash escapes (not in regular single quotes, but yes in ANSI quotes)
             if (char == '\\' and (!in_single_quote or in_ansi_quote)) {
-                self.pos += 1;
-                self.column += 1;
-
-                // If there's a next character, process it
-                if (self.pos < self.input.len) {
-                    const escaped_char = self.input[self.pos];
+                if (self.pos + 1 < self.input.len) {
+                    const next_char = self.input[self.pos + 1];
                     if (in_ansi_quote) {
-                        // Process ANSI-C escape sequences
-                        const result = self.processAnsiEscape(escaped_char);
+                        // ANSI-C escape: always interpret
+                        self.pos += 2;
+                        self.column += 2;
+                        const result = self.processAnsiEscape(next_char);
                         if (word_len < word_buffer.len) {
                             word_buffer[word_len] = result;
                             word_len += 1;
                         }
+                    } else if (in_double_quote) {
+                        // In double quotes: backslash is only special before $ ` " \ newline
+                        if (next_char == '$' or next_char == '`' or next_char == '"' or
+                            next_char == '\\' or next_char == '\n')
+                        {
+                            // Consume backslash, use next char literally
+                            self.pos += 2;
+                            self.column += 2;
+                            if (next_char != '\n') {
+                                if (word_len < word_buffer.len) {
+                                    word_buffer[word_len] = next_char;
+                                    word_len += 1;
+                                }
+                            }
+                        } else {
+                            // Preserve the backslash
+                            if (word_len < word_buffer.len) {
+                                word_buffer[word_len] = '\\';
+                                word_len += 1;
+                            }
+                            self.pos += 1;
+                            self.column += 1;
+                        }
                     } else {
-                        // Regular escape - use literally
+                        // Outside quotes: backslash escapes next char
+                        self.pos += 2;
+                        self.column += 2;
                         if (word_len < word_buffer.len) {
-                            word_buffer[word_len] = escaped_char;
+                            word_buffer[word_len] = next_char;
                             word_len += 1;
                         }
                     }
+                } else {
+                    // Trailing backslash
                     self.pos += 1;
                     self.column += 1;
                 }
@@ -410,6 +436,18 @@ pub const Tokenizer = struct {
 
             // If not in quotes, handle special characters
             if (!in_single_quote and !in_double_quote and !in_ansi_quote) {
+                // Toggle backtick command substitution tracking
+                if (char == '`') {
+                    in_backtick = !in_backtick;
+                    // Add backtick to word buffer and continue (don't break)
+                    if (word_len < word_buffer.len) {
+                        word_buffer[word_len] = char;
+                        word_len += 1;
+                    }
+                    self.pos += 1;
+                    self.column += 1;
+                    continue;
+                }
                 if (char == '(') {
                     // Check if this is $( or $(( - command/arithmetic substitution
                     if (word_len > 0 and word_buffer[word_len - 1] == '$') {
@@ -418,18 +456,18 @@ pub const Tokenizer = struct {
                     } else if (subst_depth > 0) {
                         // Nested parenthesis inside substitution
                         subst_depth += 1;
-                    } else {
-                        break; // Standalone ( - break
+                    } else if (!in_backtick) {
+                        break; // Standalone ( - break (but not inside backticks)
                     }
                 } else if (char == ')') {
                     if (subst_depth > 0) {
                         subst_depth -= 1;
                         // Don't break - consume as part of word
-                    } else {
-                        break; // Standalone ) - break
+                    } else if (!in_backtick) {
+                        break; // Standalone ) - break (but not inside backticks)
                     }
-                } else if (subst_depth == 0) {
-                    // Only break on special chars when not inside a substitution
+                } else if (subst_depth == 0 and !in_backtick) {
+                    // Only break on special chars when not inside a substitution or backtick
                     if (std.ascii.isWhitespace(char) or
                         char == '|' or char == ';' or char == '&' or
                         char == '>' or char == '<')
@@ -437,7 +475,7 @@ pub const Tokenizer = struct {
                         break;
                     }
                 }
-                // When subst_depth > 0, all chars (spaces, pipes, etc.) are part of the command
+                // When subst_depth > 0 or in_backtick, all chars are part of the command
             }
 
             // Add character to word

@@ -265,12 +265,60 @@ pub const ControlFlowExecutor = struct {
             expanded_items.deinit(self.allocator);
         }
 
-        // Create expansion context
+        // Build positional params from function call frame or shell
+        var pp_slice: [64][]const u8 = undefined;
+        var pp_count: usize = 0;
+        if (self.shell.function_manager.currentFrame()) |frame| {
+            var pi: usize = 0;
+            while (pi < frame.positional_params_count) : (pi += 1) {
+                if (frame.positional_params[pi]) |param| {
+                    pp_slice[pp_count] = param;
+                    pp_count += 1;
+                }
+            }
+        } else {
+            for (self.shell.positional_params) |maybe_param| {
+                if (maybe_param) |param| {
+                    pp_slice[pp_count] = param;
+                    pp_count += 1;
+                }
+            }
+        }
+
+        // Create expansion context with positional params
         var expander = Expansion.init(self.allocator, &self.shell.environment, self.shell.last_exit_code);
+        expander.positional_params = pp_slice[0..pp_count];
         expander.arrays = &self.shell.arrays;
         expander.assoc_arrays = &self.shell.assoc_arrays;
 
         for (loop.items) |item| {
+            // Special case: "$@" in for loops - each positional param becomes a separate item
+            if (std.mem.eql(u8, item, "\"$@\"") or std.mem.eql(u8, item, "$@")) {
+                for (pp_slice[0..pp_count]) |param| {
+                    try expanded_items.append(self.allocator, try self.allocator.dupe(u8, param));
+                }
+                continue;
+            }
+            // Special case: "$*" or $* - all params as one string
+            if (std.mem.eql(u8, item, "\"$*\"") or std.mem.eql(u8, item, "$*")) {
+                if (pp_count > 0) {
+                    var total: usize = 0;
+                    for (pp_slice[0..pp_count]) |p| total += p.len;
+                    total += if (pp_count > 1) pp_count - 1 else 0;
+                    const joined = try self.allocator.alloc(u8, total);
+                    var off: usize = 0;
+                    for (pp_slice[0..pp_count], 0..) |p, pi| {
+                        @memcpy(joined[off .. off + p.len], p);
+                        off += p.len;
+                        if (pi < pp_count - 1) {
+                            joined[off] = ' ';
+                            off += 1;
+                        }
+                    }
+                    try expanded_items.append(self.allocator, joined);
+                }
+                continue;
+            }
             // Check if item is an array expansion
             if (std.mem.indexOf(u8, item, "${") != null and
                 (std.mem.indexOf(u8, item, "[@]") != null or std.mem.indexOf(u8, item, "[*]") != null))
@@ -700,16 +748,83 @@ pub const ControlFlowParser = struct {
 
         var i = start + 1;
         var current_section: enum { then, elif, @"else" } = .then;
+        var if_depth: u32 = 0; // Track nested if/fi depth
+        var elif_body_buffer: [1000][]const u8 = undefined;
+        var elif_body_count: usize = 0;
+        // Buffer for accumulating nested construct lines to reconstruct as single body entry
+        var nested_buf: [4096]u8 = undefined;
+        var nested_len: usize = 0;
 
         while (i < lines.len) : (i += 1) {
             const line = std.mem.trim(u8, lines[i], &std.ascii.whitespace);
 
+            // Track nested if/for/while/case/fi/done/esac depth
+            if (if_depth > 0) {
+                // Check for deeper nesting
+                if (std.mem.startsWith(u8, line, "if ") or
+                    std.mem.startsWith(u8, line, "for ") or
+                    std.mem.startsWith(u8, line, "while ") or
+                    std.mem.startsWith(u8, line, "until ") or
+                    std.mem.startsWith(u8, line, "case "))
+                {
+                    if_depth += 1;
+                } else if (std.mem.eql(u8, line, "fi") or
+                    std.mem.eql(u8, line, "done") or
+                    std.mem.eql(u8, line, "esac"))
+                {
+                    if_depth -= 1;
+                }
+                // Append to nested buffer with "; " separator
+                if (nested_len > 0 and nested_len + 2 < nested_buf.len) {
+                    nested_buf[nested_len] = ';';
+                    nested_buf[nested_len + 1] = ' ';
+                    nested_len += 2;
+                }
+                const copy_len = @min(line.len, nested_buf.len - nested_len);
+                @memcpy(nested_buf[nested_len .. nested_len + copy_len], line[0..copy_len]);
+                nested_len += copy_len;
+
+                // When depth returns to 0, flush accumulated nested construct as single body entry
+                if (if_depth == 0) {
+                    const nested_line = try self.allocator.dupe(u8, nested_buf[0..nested_len]);
+                    nested_len = 0;
+                    switch (current_section) {
+                        .then => {
+                            if (then_body_count >= then_body_buffer.len) return error.TooManyLines;
+                            then_body_buffer[then_body_count] = nested_line;
+                            then_body_count += 1;
+                        },
+                        .elif => {
+                            if (elif_body_count >= elif_body_buffer.len) return error.TooManyLines;
+                            elif_body_buffer[elif_body_count] = nested_line;
+                            elif_body_count += 1;
+                        },
+                        .@"else" => {
+                            if (else_body_count >= else_body_buffer.len) return error.TooManyLines;
+                            else_body_buffer[else_body_count] = nested_line;
+                            else_body_count += 1;
+                        },
+                    }
+                }
+                continue;
+            }
+
             if (std.mem.eql(u8, line, "then")) {
-                current_section = .then;
+                // "then" after "elif" stays in elif section (it's the elif body start)
+                if (current_section != .elif) {
+                    current_section = .then;
+                }
                 continue;
             }
 
             if (std.mem.startsWith(u8, line, "elif ")) {
+                // Save current elif body if we had one
+                if (current_section == .elif and elif_count > 0 and elif_body_count > 0) {
+                    const body = try self.allocator.alloc([]const u8, elif_body_count);
+                    @memcpy(body, elif_body_buffer[0..elif_body_count]);
+                    elif_buffer[elif_count - 1].body = body;
+                    elif_body_count = 0;
+                }
                 current_section = .elif;
                 // Parse elif condition
                 const elif_cond_start = 5;
@@ -719,21 +834,48 @@ pub const ControlFlowParser = struct {
                 if (elif_count >= elif_buffer.len) return error.TooManyElifClauses;
                 elif_buffer[elif_count] = ElifClause{
                     .condition = elif_condition,
-                    .body = &[_][]const u8{}, // Empty placeholder, will be filled later
+                    .body = &[_][]const u8{},
                 };
                 elif_count += 1;
                 continue;
             }
 
             if (std.mem.eql(u8, line, "else")) {
+                // Save current elif body if we had one
+                if (current_section == .elif and elif_count > 0 and elif_body_count > 0) {
+                    const body = try self.allocator.alloc([]const u8, elif_body_count);
+                    @memcpy(body, elif_body_buffer[0..elif_body_count]);
+                    elif_buffer[elif_count - 1].body = body;
+                    elif_body_count = 0;
+                }
                 current_section = .@"else";
                 has_else = true;
                 continue;
             }
 
             if (std.mem.eql(u8, line, "fi")) {
-                // End of if statement
+                // Save current elif body if we had one
+                if (current_section == .elif and elif_count > 0 and elif_body_count > 0) {
+                    const body = try self.allocator.alloc([]const u8, elif_body_count);
+                    @memcpy(body, elif_body_buffer[0..elif_body_count]);
+                    elif_buffer[elif_count - 1].body = body;
+                }
                 break;
+            }
+
+            // Check if this line starts a nested construct - accumulate until matching closer
+            if (std.mem.startsWith(u8, line, "if ") or
+                std.mem.startsWith(u8, line, "for ") or
+                std.mem.startsWith(u8, line, "while ") or
+                std.mem.startsWith(u8, line, "until ") or
+                std.mem.startsWith(u8, line, "case "))
+            {
+                if_depth = 1;
+                nested_len = 0;
+                const copy_len = @min(line.len, nested_buf.len);
+                @memcpy(nested_buf[0..copy_len], line[0..copy_len]);
+                nested_len = copy_len;
+                continue;
             }
 
             // Add line to appropriate body
@@ -746,8 +888,9 @@ pub const ControlFlowParser = struct {
                         then_body_count += 1;
                     },
                     .elif => {
-                        // We'll need to track elif bodies separately - for now, skip
-                        // This is a simplified implementation
+                        if (elif_body_count >= elif_body_buffer.len) return error.TooManyLines;
+                        elif_body_buffer[elif_body_count] = line_copy;
+                        elif_body_count += 1;
                     },
                     .@"else" => {
                         if (else_body_count >= else_body_buffer.len) return error.TooManyLines;
@@ -799,12 +942,51 @@ pub const ControlFlowParser = struct {
         var body_buffer: [1000][]const u8 = undefined;
         var body_count: usize = 0;
         var i = start + 1;
+        var nest_depth: u32 = 0;
+        var nest_buf: [4096]u8 = undefined;
+        var nest_len: usize = 0;
 
         while (i < lines.len) : (i += 1) {
             const line = std.mem.trim(u8, lines[i], &std.ascii.whitespace);
 
-            if (std.mem.eql(u8, line, "do")) continue;
+            if (std.mem.eql(u8, line, "do") and nest_depth == 0) continue;
+
+            if (nest_depth > 0) {
+                if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
+                    std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
+                    std.mem.startsWith(u8, line, "case ")) nest_depth += 1
+                else if (std.mem.eql(u8, line, "fi") or std.mem.eql(u8, line, "done") or
+                    std.mem.eql(u8, line, "esac")) nest_depth -= 1;
+                if (nest_len > 0 and nest_len + 2 < nest_buf.len) {
+                    nest_buf[nest_len] = ';';
+                    nest_buf[nest_len + 1] = ' ';
+                    nest_len += 2;
+                }
+                const cl = @min(line.len, nest_buf.len - nest_len);
+                @memcpy(nest_buf[nest_len .. nest_len + cl], line[0..cl]);
+                nest_len += cl;
+                if (nest_depth == 0) {
+                    if (body_count >= body_buffer.len) return error.TooManyLines;
+                    body_buffer[body_count] = try self.allocator.dupe(u8, nest_buf[0..nest_len]);
+                    body_count += 1;
+                    nest_len = 0;
+                }
+                continue;
+            }
+
             if (std.mem.eql(u8, line, "done")) break;
+
+            if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
+                std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
+                std.mem.startsWith(u8, line, "case "))
+            {
+                nest_depth = 1;
+                nest_len = 0;
+                const cl = @min(line.len, nest_buf.len);
+                @memcpy(nest_buf[0..cl], line[0..cl]);
+                nest_len = cl;
+                continue;
+            }
 
             if (line.len > 0 and line[0] != '#') {
                 if (body_count >= body_buffer.len) return error.TooManyLines;
@@ -855,12 +1037,51 @@ pub const ControlFlowParser = struct {
         var body_buffer: [1000][]const u8 = undefined;
         var body_count: usize = 0;
         var i = start + 1;
+        var nest_depth: u32 = 0;
+        var nest_buf: [4096]u8 = undefined;
+        var nest_len: usize = 0;
 
         while (i < lines.len) : (i += 1) {
             const line = std.mem.trim(u8, lines[i], &std.ascii.whitespace);
 
-            if (std.mem.eql(u8, line, "do")) continue;
+            if (std.mem.eql(u8, line, "do") and nest_depth == 0) continue;
+
+            if (nest_depth > 0) {
+                if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
+                    std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
+                    std.mem.startsWith(u8, line, "case ")) nest_depth += 1
+                else if (std.mem.eql(u8, line, "fi") or std.mem.eql(u8, line, "done") or
+                    std.mem.eql(u8, line, "esac")) nest_depth -= 1;
+                if (nest_len > 0 and nest_len + 2 < nest_buf.len) {
+                    nest_buf[nest_len] = ';';
+                    nest_buf[nest_len + 1] = ' ';
+                    nest_len += 2;
+                }
+                const cl = @min(line.len, nest_buf.len - nest_len);
+                @memcpy(nest_buf[nest_len .. nest_len + cl], line[0..cl]);
+                nest_len += cl;
+                if (nest_depth == 0) {
+                    if (body_count >= body_buffer.len) return error.TooManyLines;
+                    body_buffer[body_count] = try self.allocator.dupe(u8, nest_buf[0..nest_len]);
+                    body_count += 1;
+                    nest_len = 0;
+                }
+                continue;
+            }
+
             if (std.mem.eql(u8, line, "done")) break;
+
+            if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
+                std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
+                std.mem.startsWith(u8, line, "case "))
+            {
+                nest_depth = 1;
+                nest_len = 0;
+                const cl = @min(line.len, nest_buf.len);
+                @memcpy(nest_buf[0..cl], line[0..cl]);
+                nest_len = cl;
+                continue;
+            }
 
             if (line.len > 0 and line[0] != '#') {
                 if (body_count >= body_buffer.len) return error.TooManyLines;

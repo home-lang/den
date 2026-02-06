@@ -829,6 +829,63 @@ pub const Expansion = struct {
             }
         }
 
+        // Check for parameter expansion patterns BEFORE replacement (which also uses /)
+        // ${VAR##pattern} - remove longest prefix match (greedy)
+        if (std.mem.indexOf(u8, content, "##")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 2) {
+                const var_name_pp = content[0..sep_pos];
+                const pp_pattern = content[sep_pos + 2 ..];
+
+                if (self.environment.get(var_name_pp)) |value| {
+                    const result = try self.removePrefix(value, pp_pattern, true);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
+        // ${VAR#pattern} - remove shortest prefix match
+        if (std.mem.indexOf(u8, content, "#")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 1) {
+                const var_name_pp = content[0..sep_pos];
+                const pp_pattern = content[sep_pos + 1 ..];
+
+                if (self.environment.get(var_name_pp)) |value| {
+                    const result = try self.removePrefix(value, pp_pattern, false);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
+        // ${VAR%%pattern} - remove longest suffix match (greedy)
+        if (std.mem.indexOf(u8, content, "%%")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 2) {
+                const var_name_pp = content[0..sep_pos];
+                const pp_pattern = content[sep_pos + 2 ..];
+
+                if (self.environment.get(var_name_pp)) |value| {
+                    const result = try self.removeSuffix(value, pp_pattern, true);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
+        // ${VAR%pattern} - remove shortest suffix match
+        if (std.mem.indexOf(u8, content, "%")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 1) {
+                const var_name_pp = content[0..sep_pos];
+                const pp_pattern = content[sep_pos + 1 ..];
+
+                if (self.environment.get(var_name_pp)) |value| {
+                    const result = try self.removeSuffix(value, pp_pattern, false);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
         // Check for replacement: ${VAR/pattern/replacement} or ${VAR//pattern/replacement}
         if (std.mem.indexOf(u8, content, "/")) |slash_pos| {
             if (slash_pos > 0) {
@@ -936,63 +993,6 @@ pub const Expansion = struct {
 
             // Variable is unset or empty, return empty string
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-        }
-
-        // Check for parameter expansion patterns
-        // ${VAR##pattern} - remove longest prefix match (greedy)
-        if (std.mem.indexOf(u8, content, "##")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 2) {
-                const var_name = content[0..sep_pos];
-                const pattern = content[sep_pos + 2 ..];
-
-                if (self.environment.get(var_name)) |value| {
-                    const result = try self.removePrefix(value, pattern, true);
-                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-                }
-                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-            }
-        }
-
-        // ${VAR#pattern} - remove shortest prefix match
-        if (std.mem.indexOf(u8, content, "#")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 1) {
-                const var_name = content[0..sep_pos];
-                const pattern = content[sep_pos + 1 ..];
-
-                if (self.environment.get(var_name)) |value| {
-                    const result = try self.removePrefix(value, pattern, false);
-                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-                }
-                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-            }
-        }
-
-        // ${VAR%%pattern} - remove longest suffix match (greedy)
-        if (std.mem.indexOf(u8, content, "%%")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 2) {
-                const var_name = content[0..sep_pos];
-                const pattern = content[sep_pos + 2 ..];
-
-                if (self.environment.get(var_name)) |value| {
-                    const result = try self.removeSuffix(value, pattern, true);
-                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-                }
-                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-            }
-        }
-
-        // ${VAR%pattern} - remove shortest suffix match
-        if (std.mem.indexOf(u8, content, "%")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 1) {
-                const var_name = content[0..sep_pos];
-                const pattern = content[sep_pos + 1 ..];
-
-                if (self.environment.get(var_name)) |value| {
-                    const result = try self.removeSuffix(value, pattern, false);
-                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-                }
-                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-            }
         }
 
         // Simple braced variable - use getVariableValue for nameref resolution

@@ -45,7 +45,20 @@ pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void
         }
     }
 
-    // Set the value
+    // If inside a function and the variable exists as a local, update local instead
+    if (self.function_manager.currentFrame()) |frame| {
+        if (frame.local_vars.getKey(resolved_name)) |_| {
+            const val = try self.allocator.dupe(u8, value);
+            const gop = try frame.local_vars.getOrPut(resolved_name);
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+            }
+            gop.value_ptr.* = val;
+            return;
+        }
+    }
+
+    // Set the value in global environment
     const gop = try self.environment.getOrPut(resolved_name);
     if (gop.found_existing) {
         self.allocator.free(gop.value_ptr.*);

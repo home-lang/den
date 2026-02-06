@@ -72,15 +72,59 @@ pub fn checkFunctionDefinitionStart(self: *Shell, trimmed: []const u8) !bool {
             // Extract body (content between { and })
             const body_content = std.mem.trim(u8, trimmed[open_brace + 1 .. close_brace], &std.ascii.whitespace);
 
-            // Create body as array of lines (split by semicolons for single-line)
+            // Create body as array of lines (split by semicolons, respecting control flow nesting)
             var body_lines: [32][]const u8 = undefined;
             var body_count: usize = 0;
-            var line_iter = std.mem.splitScalar(u8, body_content, ';');
-            while (line_iter.next()) |part| {
-                const part_trimmed = std.mem.trim(u8, part, &std.ascii.whitespace);
-                if (part_trimmed.len > 0) {
-                    if (body_count >= body_lines.len) break;
-                    body_lines[body_count] = try self.allocator.dupe(u8, part_trimmed);
+            {
+                var cf_depth: u32 = 0;
+                var seg_start: usize = 0;
+                var si: usize = 0;
+                var in_sq = false;
+                var in_dq = false;
+                while (si < body_content.len) : (si += 1) {
+                    const bc = body_content[si];
+                    if (bc == '\\' and !in_sq and si + 1 < body_content.len) {
+                        si += 1;
+                        continue;
+                    }
+                    if (bc == '\'' and !in_dq) {
+                        in_sq = !in_sq;
+                    } else if (bc == '"' and !in_sq) {
+                        in_dq = !in_dq;
+                    } else if (!in_sq and !in_dq) {
+                        // Track control flow nesting
+                        if (isControlFlowWord(body_content, si, "for ") or
+                            isControlFlowWord(body_content, si, "while ") or
+                            isControlFlowWord(body_content, si, "until ") or
+                            isControlFlowWord(body_content, si, "if ") or
+                            isControlFlowWord(body_content, si, "case "))
+                        {
+                            cf_depth += 1;
+                        } else if (isControlFlowEnd(body_content, si, "done") or
+                            isControlFlowEnd(body_content, si, "fi") or
+                            isControlFlowEnd(body_content, si, "esac"))
+                        {
+                            if (cf_depth > 0) cf_depth -= 1;
+                        }
+                        if (bc == ';' and cf_depth == 0) {
+                            // Skip ;; in case statements
+                            if (si + 1 < body_content.len and body_content[si + 1] == ';') {
+                                si += 1;
+                                continue;
+                            }
+                            const part_trimmed = std.mem.trim(u8, body_content[seg_start..si], &std.ascii.whitespace);
+                            if (part_trimmed.len > 0 and body_count < body_lines.len) {
+                                body_lines[body_count] = try self.allocator.dupe(u8, part_trimmed);
+                                body_count += 1;
+                            }
+                            seg_start = si + 1;
+                        }
+                    }
+                }
+                // Last segment
+                const last_seg = std.mem.trim(u8, body_content[seg_start..], &std.ascii.whitespace);
+                if (last_seg.len > 0 and body_count < body_lines.len) {
+                    body_lines[body_count] = try self.allocator.dupe(u8, last_seg);
                     body_count += 1;
                 }
             }
@@ -147,6 +191,26 @@ pub fn handleMultilineContinuation(self: *Shell, trimmed: []const u8) !void {
             try finishFunctionDefinition(self);
         }
     }
+}
+
+/// Check if a control flow keyword starts at position (preceded by start-of-string or whitespace/semicolon)
+fn isControlFlowWord(input: []const u8, pos: usize, keyword: []const u8) bool {
+    if (pos > 0 and input[pos - 1] != ' ' and input[pos - 1] != '\t' and input[pos - 1] != ';') return false;
+    if (pos + keyword.len > input.len) return false;
+    return std.mem.eql(u8, input[pos..][0..keyword.len], keyword);
+}
+
+/// Check if a control flow closer word is at position
+fn isControlFlowEnd(input: []const u8, pos: usize, word: []const u8) bool {
+    if (pos > 0 and input[pos - 1] != ' ' and input[pos - 1] != '\t' and input[pos - 1] != ';') return false;
+    if (pos + word.len > input.len) return false;
+    if (!std.mem.eql(u8, input[pos..][0..word.len], word)) return false;
+    // Must be followed by end, space, semicolon, or tab
+    if (pos + word.len < input.len) {
+        const next = input[pos + word.len];
+        return next == ' ' or next == '\t' or next == ';' or next == '\n';
+    }
+    return true;
 }
 
 /// Complete function definition parsing and register the function

@@ -107,6 +107,7 @@ pub const ExpressionCache = struct {
 pub const Arithmetic = struct {
     allocator: std.mem.Allocator,
     variables: ?*std.StringHashMap([]const u8) = null,
+    local_vars: ?*std.StringHashMap([]const u8) = null,
     cache: ?*ExpressionCache = null,
 
     pub fn init(allocator: std.mem.Allocator) Arithmetic {
@@ -148,6 +149,7 @@ pub const Arithmetic = struct {
             .pos = 0,
             .allocator = self.allocator,
             .variables = self.variables,
+            .local_vars = self.local_vars,
         };
 
         const result = try parser.parseExpression();
@@ -202,6 +204,7 @@ const Parser = struct {
     pos: usize,
     allocator: std.mem.Allocator,
     variables: ?*std.StringHashMap([]const u8),
+    local_vars: ?*std.StringHashMap([]const u8) = null,
 
     // Entry point - lowest precedence
     fn parseExpression(self: *Parser) ArithmeticError!i64 {
@@ -604,7 +607,14 @@ const Parser = struct {
 
         const var_name = self.input[start..self.pos];
 
-        // Look up variable value
+        // Look up variable value - check local vars first, then global
+        if (self.local_vars) |locals| {
+            if (locals.get(var_name)) |value| {
+                const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+                if (trimmed.len == 0) return 0;
+                return std.fmt.parseInt(i64, trimmed, 10) catch 0;
+            }
+        }
         if (self.variables) |vars| {
             if (vars.get(var_name)) |value| {
                 // Parse the variable value as a number
