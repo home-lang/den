@@ -212,7 +212,7 @@ pub fn getGitBranches(allocator: std.mem.Allocator, prefix: []const u8) ![][]con
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    if (result.term.Exited != 0) {
+    if (result.term.exited != 0) {
         return &[_][]const u8{};
     }
 
@@ -256,7 +256,7 @@ pub fn getGitModifiedFiles(allocator: std.mem.Allocator, prefix: []const u8) ![]
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    if (result.term.Exited != 0) {
+    if (result.term.exited != 0) {
         return &[_][]const u8{};
     }
 
@@ -327,19 +327,19 @@ fn getPackageJsonScripts(allocator: std.mem.Allocator) ![][]const u8 {
         results.deinit(allocator);
     }
 
-    const file = std.fs.cwd().openFile("package.json", .{}) catch return error.NotFound;
-    defer file.close();
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, "package.json", .{}) catch return error.NotFound;
+    defer file.close(std.Options.debug_io);
 
     // Read file (limit to 64KB for safety)
     const max_size: usize = 65536;
-    const file_size = try file.getEndPos();
+    const file_size = (try file.stat(std.Options.debug_io)).size;
     const read_size: usize = @min(file_size, max_size);
     const buffer = try allocator.alloc(u8, read_size);
     defer allocator.free(buffer);
 
     var total_read: usize = 0;
     while (total_read < read_size) {
-        const n = try file.read(buffer[total_read..]);
+        const n = try file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]});
         if (n == 0) break;
         total_read += n;
     }
@@ -635,7 +635,7 @@ fn getDockerContainers(allocator: std.mem.Allocator, prefix: []const u8) ![][]co
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    if (result.term.Exited != 0) {
+    if (result.term.exited != 0) {
         return &[_][]const u8{};
     }
 
@@ -669,7 +669,7 @@ fn getDockerImages(allocator: std.mem.Allocator, prefix: []const u8) ![][]const 
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    if (result.term.Exited != 0) {
+    if (result.term.exited != 0) {
         return &[_][]const u8{};
     }
 

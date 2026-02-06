@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "packages": {
+    "bun-plugin-dtsx@0.9.5": {
+      "name": "bun-plugin-dtsx",
+      "version": "0.9.5",
+      "resolved": "registry:bun-plugin-dtsx@0.9.5"
+    }
+  }
+}

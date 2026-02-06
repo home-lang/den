@@ -15,20 +15,20 @@ pub fn detectPackageVersion(allocator: std.mem.Allocator, cwd: []const u8) ![]co
     const filenames = [_][]const u8{ "package.json", "package.jsonc", "pantry.json", "pantry.jsonc" };
 
     for (filenames) |filename| {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
 
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,path, .{}) catch continue;
+        defer file.close(std.Options.debug_io);
 
         const max_size: usize = 8192;
-        const file_size = file.getEndPos() catch continue;
+        const file_size = (file.stat(std.Options.debug_io) catch continue).size;
         const read_size: usize = @min(file_size, max_size);
         const buffer = allocator.alloc(u8, read_size) catch continue;
         defer allocator.free(buffer);
         var total_read: usize = 0;
         while (total_read < read_size) {
-            const n = file.read(buffer[total_read..]) catch break;
+            const n = file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]}) catch break;
             if (n == 0) break;
             total_read += n;
         }
@@ -65,7 +65,7 @@ pub fn detectBunVersion(allocator: std.mem.Allocator) ![]const u8 {
     defer allocator.free(result.stderr);
 
     switch (result.term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code == 0) {
                 const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
                 if (trimmed.len > 0) {
@@ -90,7 +90,7 @@ pub fn detectNodeVersion(allocator: std.mem.Allocator) ![]const u8 {
     defer allocator.free(result.stderr);
 
     switch (result.term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code == 0) {
                 var trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
                 // Remove leading 'v' if present
@@ -126,7 +126,7 @@ pub fn detectPythonVersion(allocator: std.mem.Allocator) ![]const u8 {
         defer allocator.free(result.stderr);
 
         switch (result.term) {
-            .Exited => |code| {
+            .exited => |code| {
                 if (code == 0) {
                     // Python --version outputs to stdout: "Python 3.12.0"
                     const output = if (result.stdout.len > 0) result.stdout else result.stderr;
@@ -159,7 +159,7 @@ pub fn detectRubyVersion(allocator: std.mem.Allocator) ![]const u8 {
     defer allocator.free(result.stderr);
 
     switch (result.term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code == 0) {
                 const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
 
@@ -193,7 +193,7 @@ pub fn detectGoVersion(allocator: std.mem.Allocator) ![]const u8 {
     defer allocator.free(result.stderr);
 
     switch (result.term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code == 0) {
                 const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
 
@@ -230,7 +230,7 @@ pub fn detectRustVersion(allocator: std.mem.Allocator) ![]const u8 {
     defer allocator.free(result.stderr);
 
     switch (result.term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code == 0) {
                 const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
 
@@ -264,7 +264,7 @@ pub fn detectZigVersion(allocator: std.mem.Allocator) ![]const u8 {
     defer allocator.free(result.stderr);
 
     switch (result.term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code == 0) {
                 const trimmed = std.mem.trim(u8, result.stdout, &std.ascii.whitespace);
                 if (trimmed.len > 0) {

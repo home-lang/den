@@ -26,43 +26,43 @@ pub fn wip(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     }
 
     // Run git add .
-    var add_child = std.process.Child.init(&[_][]const u8{ "git", "add", "." }, std.heap.page_allocator);
-    add_child.stdin_behavior = .Ignore;
-    add_child.stdout_behavior = .Inherit;
-    add_child.stderr_behavior = .Inherit;
-
-    add_child.spawn() catch {
+    var add_child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{ "git", "add", "." },
+        .stdin = .ignore,
+        .stdout = .inherit,
+        .stderr = .inherit,
+    }) catch {
         try IO.eprint("den: wip: failed to run git add\n", .{});
         return 1;
     };
 
-    const add_result = add_child.wait() catch {
+    const add_result = add_child.wait(std.Options.debug_io) catch {
         try IO.eprint("den: wip: git add failed\n", .{});
         return 1;
     };
 
-    if (add_result.Exited != 0) {
+    if (add_result.exited != 0) {
         try IO.eprint("den: wip: git add returned error\n", .{});
         return 1;
     }
 
     // Run git commit -m "message"
-    var commit_child = std.process.Child.init(&[_][]const u8{ "git", "commit", "-m", message }, std.heap.page_allocator);
-    commit_child.stdin_behavior = .Ignore;
-    commit_child.stdout_behavior = .Inherit;
-    commit_child.stderr_behavior = .Inherit;
-
-    commit_child.spawn() catch {
+    var commit_child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{ "git", "commit", "-m", message },
+        .stdin = .ignore,
+        .stdout = .inherit,
+        .stderr = .inherit,
+    }) catch {
         try IO.eprint("den: wip: failed to run git commit\n", .{});
         return 1;
     };
 
-    const commit_result = commit_child.wait() catch {
+    const commit_result = commit_child.wait(std.Options.debug_io) catch {
         try IO.eprint("den: wip: git commit failed\n", .{});
         return 1;
     };
 
-    return @intCast(commit_result.Exited);
+    return @intCast(commit_result.exited);
 }
 
 /// code - Open file or directory in VS Code (macOS)

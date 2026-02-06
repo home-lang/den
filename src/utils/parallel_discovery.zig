@@ -63,7 +63,7 @@ pub const ParallelScanner = struct {
     }
 
     fn scanDirectory(self: *ParallelScanner, dir_path: []const u8, extension: []const u8) !void {
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+        var dir = std.Io.Dir.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
             // Directory doesn't exist or can't be opened, skip it
             if (err == error.FileNotFound or err == error.NotDir) {
                 return;

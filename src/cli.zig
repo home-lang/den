@@ -39,8 +39,8 @@ pub const CliArgs = struct {
 };
 
 /// Parse command line arguments
-pub fn parseArgs(allocator: std.mem.Allocator) !CliArgs {
-    var args = try std.process.argsWithAllocator(allocator);
+pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !CliArgs {
+    var args = try process_args.iterateAllocator(allocator);
     defer args.deinit();
 
     // Skip program name
@@ -337,8 +337,9 @@ fn devSetup(_: std.mem.Allocator) !void {
     std.debug.print("Creating development shim...\n", .{});
 
     // Get current executable path
-    var exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_path = try std.fs.selfExePath(&exe_path_buf);
+    var exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const exe_path_len = try std.process.executablePath(std.Options.debug_io, &exe_path_buf);
+    const exe_path = exe_path_buf[0..exe_path_len];
 
     // Create shim in ~/.local/bin/den
     const home = env_utils.getEnv("HOME") orelse {
@@ -346,19 +347,19 @@ fn devSetup(_: std.mem.Allocator) !void {
         return error.NoHomeDir;
     };
 
-    var home_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var home_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const shim_path = try std.fmt.bufPrint(&home_buf, "{s}/.local/bin/den", .{home});
 
     // Ensure ~/.local/bin exists
-    var local_bin_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var local_bin_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const local_bin_dir = try std.fmt.bufPrint(&local_bin_dir_buf, "{s}/.local/bin", .{home});
-    std.fs.cwd().makePath(local_bin_dir) catch |err| {
+    std.Io.Dir.cwd().makePath(local_bin_dir) catch |err| {
         if (err != error.PathAlreadyExists) return err;
     };
 
     // Create shim file
-    const shim_file = try std.fs.cwd().createFile(shim_path, .{ .truncate = true });
-    defer shim_file.close();
+    const shim_file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, shim_path, .{ .truncate = true });
+    defer shim_file.close(std.Options.debug_io);
 
     const shim_content = try std.fmt.allocPrint(
         std.heap.page_allocator,
@@ -367,10 +368,10 @@ fn devSetup(_: std.mem.Allocator) !void {
     );
     defer std.heap.page_allocator.free(shim_content);
 
-    try shim_file.writeAll(shim_content);
+    try shim_file.writeStreamingAll(std.Options.debug_io, shim_content);
 
     // Make executable
-    try shim_file.chmod(0o755);
+    try shim_file.setPermissions(std.Options.debug_io, 0o755);
 
     std.debug.print("Development shim created at: {s}\n", .{shim_path});
     std.debug.print("Make sure ~/.local/bin is in your PATH\n", .{});
@@ -383,27 +384,28 @@ fn setup(_: std.mem.Allocator) !void {
     std.debug.print("Installing Den shell wrapper...\n", .{});
 
     // Get current executable path
-    var exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_path = try std.fs.selfExePath(&exe_path_buf);
+    var exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const exe_path_len = try std.process.executablePath(std.Options.debug_io, &exe_path_buf);
+    const exe_path = exe_path_buf[0..exe_path_len];
 
     const home = env_utils.getEnv("HOME") orelse {
         std.debug.print("Error: HOME environment variable not set\n", .{});
         return error.NoHomeDir;
     };
 
-    var wrapper_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var wrapper_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const wrapper_path = try std.fmt.bufPrint(&wrapper_path_buf, "{s}/.local/bin/den", .{home});
 
     // Ensure ~/.local/bin exists
-    var local_bin_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var local_bin_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const local_bin_dir = try std.fmt.bufPrint(&local_bin_dir_buf, "{s}/.local/bin", .{home});
-    std.fs.cwd().makePath(local_bin_dir) catch |err| {
+    std.Io.Dir.cwd().makePath(local_bin_dir) catch |err| {
         if (err != error.PathAlreadyExists) return err;
     };
 
     // Create wrapper script
-    const wrapper_file = try std.fs.cwd().createFile(wrapper_path, .{ .truncate = true });
-    defer wrapper_file.close();
+    const wrapper_file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, wrapper_path, .{ .truncate = true });
+    defer wrapper_file.close(std.Options.debug_io);
 
     const wrapper_content = try std.fmt.allocPrint(
         std.heap.page_allocator,
@@ -412,8 +414,8 @@ fn setup(_: std.mem.Allocator) !void {
     );
     defer std.heap.page_allocator.free(wrapper_content);
 
-    try wrapper_file.writeAll(wrapper_content);
-    try wrapper_file.chmod(0o755);
+    try wrapper_file.writeStreamingAll(std.Options.debug_io, wrapper_content);
+    try wrapper_file.setPermissions(std.Options.debug_io, 0o755);
 
     std.debug.print("Wrapper installed at: {s}\n", .{wrapper_path});
     std.debug.print("\nTo use Den shell:\n", .{});
@@ -432,11 +434,11 @@ fn setShell(_: std.mem.Allocator) !void {
         return error.NoHomeDir;
     };
 
-    var den_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var den_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const den_path = try std.fmt.bufPrint(&den_path_buf, "{s}/.local/bin/den", .{home});
 
     // Check if den wrapper exists
-    std.fs.cwd().access(den_path, .{}) catch {
+    std.Io.Dir.cwd().access(std.Options.debug_io, den_path, .{}) catch {
         std.debug.print("Error: Den wrapper not found. Run 'den setup' first.\n", .{});
         return error.WrapperNotFound;
     };
@@ -458,11 +460,11 @@ fn uninstall(_: std.mem.Allocator) !void {
         return error.NoHomeDir;
     };
 
-    var wrapper_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var wrapper_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const wrapper_path = try std.fmt.bufPrint(&wrapper_path_buf, "{s}/.local/bin/den", .{home});
 
     // Remove wrapper
-    std.fs.cwd().deleteFile(wrapper_path) catch |err| {
+    std.Io.Dir.cwd().deleteFile(wrapper_path) catch |err| {
         if (err == error.FileNotFound) {
             std.debug.print("Wrapper not found (already uninstalled?)\n", .{});
             return;

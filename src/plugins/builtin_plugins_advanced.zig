@@ -395,8 +395,8 @@ pub const ScriptSuggesterPlugin = struct {
             if (dir_path.len == 0) continue;
 
             // Try to open directory
-            var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch continue;
-            defer dir.close();
+            var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, dir_path, .{ .iterate = true }) catch continue;
+            defer dir.close(std.Options.debug_io);
 
             // Iterate files
             var iter = dir.iterate();

@@ -30,6 +30,11 @@ const CompletionSpec = @import("../utils/completion_registry.zig").CompletionSpe
 // Forward declaration for Shell type - we import it at comptime
 const Shell = @import("../shell.zig").Shell;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 // ============================================
 // History Builtins
 // ============================================
@@ -222,7 +227,7 @@ pub fn builtinType(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 const extension = name[dot_pos + 1 ..];
                 if (shell.suffix_aliases.get(extension)) |suffix_cmd| {
                     // Check if file exists
-                    std.fs.cwd().access(name, .{}) catch {
+                    std.Io.Dir.cwd().access(std.Options.debug_io,name, .{}) catch {
                         // File doesn't exist, continue to other checks
                         try IO.print("{s} would use suffix alias (if file existed): {s} {s}\n", .{ name, suffix_cmd, name });
                         continue;
@@ -257,15 +262,15 @@ pub fn builtinType(shell: *Shell, cmd: *types.ParsedCommand) !void {
         }
 
         // Search PATH
-        const path_str = shell.environment.get("PATH") orelse std.posix.getenv("PATH") orelse "";
+        const path_str = shell.environment.get("PATH") orelse getenv("PATH") orelse "";
         var path_iter = std.mem.tokenizeScalar(u8, path_str, ':');
         var found = false;
 
         while (path_iter.next()) |dir| {
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch continue;
 
-            std.fs.cwd().access(full_path, .{}) catch continue;
+            std.Io.Dir.cwd().access(std.Options.debug_io,full_path, .{}) catch continue;
 
             try IO.print("{s} is {s}\n", .{ name, full_path });
             found = true;
@@ -285,17 +290,17 @@ pub fn builtinWhich(shell: *Shell, cmd: *types.ParsedCommand) !void {
         return;
     }
 
-    const path_str = shell.environment.get("PATH") orelse std.posix.getenv("PATH") orelse "";
+    const path_str = shell.environment.get("PATH") orelse getenv("PATH") orelse "";
 
     for (cmd.args) |name| {
         var found = false;
         var path_iter = std.mem.tokenizeScalar(u8, path_str, ':');
 
         while (path_iter.next()) |dir| {
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch continue;
 
-            std.fs.cwd().access(full_path, .{}) catch continue;
+            std.Io.Dir.cwd().access(std.Options.debug_io,full_path, .{}) catch continue;
 
             try IO.print("{s}\n", .{full_path});
             found = true;
@@ -449,8 +454,8 @@ pub fn builtinRealpath(shell: *Shell, cmd: *types.ParsedCommand) !void {
     const path = cmd.args[0];
 
     // Use realpath to resolve
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const resolved = std.fs.cwd().realpath(path, &buf) catch |err| {
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const resolved = std.Io.Dir.cwd().realpath(std.Options.debug_io,path, &buf) catch |err| {
         try IO.eprint("den: realpath: {s}: {}\n", .{ path, err });
         shell.last_exit_code = 1;
         return;
@@ -497,7 +502,7 @@ pub fn builtinUname(shell: *Shell, cmd: *types.ParsedCommand) !void {
 /// Builtin: whoami - print current username
 pub fn builtinWhoami(shell: *Shell, cmd: *types.ParsedCommand) !void {
     _ = cmd;
-    const username = std.posix.getenv("USER") orelse std.posix.getenv("LOGNAME") orelse "unknown";
+    const username = getenv("USER") orelse getenv("LOGNAME") orelse "unknown";
     try IO.print("{s}\n", .{username});
     shell.last_exit_code = 0;
 }
@@ -527,7 +532,7 @@ pub fn builtinSleep(shell: *Shell, cmd: *types.ParsedCommand) !void {
         return;
     };
 
-    std.posix.nanosleep(seconds, 0);
+    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(u64, seconds) * 1_000_000_000), .awake) catch {};
     shell.last_exit_code = 0;
 }
 

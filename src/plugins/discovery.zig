@@ -268,8 +268,8 @@ pub const PluginDiscovery = struct {
         for (self.search_paths[0..self.search_paths_count]) |maybe_path| {
             if (maybe_path) |path| {
                 // Try to open directory
-                var dir = std.fs.openDirAbsolute(path, .{ .iterate = true }) catch continue;
-                defer dir.close();
+                var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, path, .{ .iterate = true }) catch continue;
+                defer dir.close(std.Options.debug_io);
 
                 // Look for plugin manifests
                 var iter = dir.iterate();
@@ -304,10 +304,12 @@ pub const PluginDiscovery = struct {
 
     /// Load manifest from file
     fn loadManifest(self: *PluginDiscovery, path: []const u8) !PluginManifest {
-        const file = try std.fs.openFileAbsolute(path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.openFileAbsolute(std.Options.debug_io, path, .{});
+        defer file.close(std.Options.debug_io);
 
-        const content = try file.readToEndAlloc(self.allocator, 1024 * 1024);
+        var read_file_buf: [4096]u8 = undefined;
+        var file_reader = file.readerStreaming(std.Options.debug_io, &read_file_buf);
+        const content = try file_reader.interface.allocRemaining(self.allocator, .limited(1024 * 1024));
         defer self.allocator.free(content);
 
         return try PluginManifest.parse(self.allocator, content);

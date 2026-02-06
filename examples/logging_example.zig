@@ -9,10 +9,8 @@ const stack_trace = utils.stack_trace;
 const assert = utils.assert;
 const timer = utils.timer;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
     // Initialize the logger
     try log.init(allocator, .{
@@ -82,14 +80,14 @@ pub fn main() !void {
 
     // Basic timer
     var t = timer.Timer.start("operation");
-    std.posix.nanosleep(0, 10_000_000); // Sleep for 10ms
+    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 0) * 1_000_000_000 + @as(i96, 10_000_000)), .awake) catch {}; // Sleep for 10ms
     t.print();
 
     // Scoped timer
     {
         var scoped = timer.ScopedTimer.init("scoped_operation");
         defer scoped.deinit();
-        std.posix.nanosleep(0, 5_000_000); // Sleep for 5ms
+        std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 0) * 1_000_000_000 + @as(i96, 5_000_000)), .awake) catch {}; // Sleep for 5ms
     }
 
     // Timing statistics
@@ -100,7 +98,7 @@ pub fn main() !void {
     while (i < 10) : (i += 1) {
         var operation_timer = timer.Timer.start("iteration");
         // Simulate work
-        std.posix.nanosleep(0, @as(u32, @intCast(1_000_000 * (1 + i % 3))));
+        std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 0) * 1_000_000_000 + @as(i96, @intCast(1_000_000 * (1 + i % 3)))), .awake) catch {};
         try stats.addSample(operation_timer.elapsed());
     }
     stats.print();
@@ -112,11 +110,11 @@ pub fn main() !void {
     i = 0;
     while (i < 5) : (i += 1) {
         var prof_timer = profiler.startTimer("task_a");
-        std.posix.nanosleep(0, 2_000_000);
+        std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 0) * 1_000_000_000 + @as(i96, 2_000_000)), .awake) catch {};
         try profiler.recordTiming("task_a", prof_timer.elapsed());
 
         prof_timer = profiler.startTimer("task_b");
-        std.posix.nanosleep(0, 3_000_000);
+        std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 0) * 1_000_000_000 + @as(i96, 3_000_000)), .awake) catch {};
         try profiler.recordTiming("task_b", prof_timer.elapsed());
     }
 

@@ -4,6 +4,16 @@ const types = @import("types.zig");
 const CloudContext = types.CloudContext;
 const CloudProvider = types.CloudProvider;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
+fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
+    const value = getenv(key) orelse return null;
+    return allocator.dupe(u8, value) catch null;
+}
+
 /// Parse INI-style config file
 fn parseIniConfig(allocator: std.mem.Allocator, content: []const u8, key: []const u8) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, content, '\n');
@@ -28,16 +38,20 @@ fn parseIniConfig(allocator: std.mem.Allocator, content: []const u8, key: []cons
 
 /// Read config file from home directory
 fn readHomeConfig(allocator: std.mem.Allocator, path: []const u8) ?[]const u8 {
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch return null;
+    const home = getEnvOwned(allocator, "HOME") orelse return null;
     defer allocator.free(home);
 
     const full_path = std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, path }) catch return null;
     defer allocator.free(full_path);
 
-    const file = std.fs.openFileAbsolute(full_path, .{}) catch return null;
-    defer file.close();
+    const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, full_path, .{}) catch return null;
+    defer file.close(std.Options.debug_io);
 
-    const content = file.readToEndAlloc(allocator, 1024 * 1024) catch return null;
+    const content = blk: {
+        var read_buf: [4096]u8 = undefined;
+        var reader = file.readerStreaming(std.Options.debug_io, &read_buf);
+        break :blk reader.interface.allocRemaining(allocator, .limited(1024 * 1024)) catch break :blk null;
+    };
     return content;
 }
 
@@ -46,9 +60,9 @@ pub fn detectAWS(allocator: std.mem.Allocator, _: []const u8) !?CloudContext {
     var ctx = CloudContext.init(allocator, CloudProvider.AWS.name, CloudProvider.AWS.icon);
 
     // Check environment variables
-    if (std.process.getEnvVarOwned(allocator, "AWS_PROFILE")) |profile| {
+    if (getEnvOwned(allocator, "AWS_PROFILE")) |profile| {
         ctx.profile = profile;
-    } else |_| {
+    } else {
         // Try to read from config
         if (readHomeConfig(allocator, ".aws/config")) |content| {
             defer allocator.free(content);
@@ -76,12 +90,12 @@ pub fn detectAWS(allocator: std.mem.Allocator, _: []const u8) !?CloudContext {
         }
     }
 
-    if (std.process.getEnvVarOwned(allocator, "AWS_REGION")) |region| {
+    if (getEnvOwned(allocator, "AWS_REGION")) |region| {
         ctx.region = region;
-    } else |_| {
-        if (std.process.getEnvVarOwned(allocator, "AWS_DEFAULT_REGION")) |region| {
+    } else {
+        if (getEnvOwned(allocator, "AWS_DEFAULT_REGION")) |region| {
             ctx.region = region;
-        } else |_| {
+        } else {
             // Try to read from config
             if (readHomeConfig(allocator, ".aws/config")) |content| {
                 defer allocator.free(content);
@@ -106,9 +120,9 @@ pub fn detectAzure(allocator: std.mem.Allocator, _: []const u8) !?CloudContext {
     var ctx = CloudContext.init(allocator, CloudProvider.Azure.name, CloudProvider.Azure.icon);
 
     // Check environment variables
-    if (std.process.getEnvVarOwned(allocator, "AZURE_SUBSCRIPTION_ID")) |sub_id| {
+    if (getEnvOwned(allocator, "AZURE_SUBSCRIPTION_ID")) |sub_id| {
         ctx.profile = sub_id;
-    } else |_| {
+    } else {
         // Try to read from Azure config
         if (readHomeConfig(allocator, ".azure/azureProfile.json")) |content| {
             defer allocator.free(content);
@@ -129,9 +143,9 @@ pub fn detectAzure(allocator: std.mem.Allocator, _: []const u8) !?CloudContext {
         }
     }
 
-    if (std.process.getEnvVarOwned(allocator, "AZURE_TENANT_ID")) |tenant| {
+    if (getEnvOwned(allocator, "AZURE_TENANT_ID")) |tenant| {
         ctx.project = tenant;
-    } else |_| {}
+    }
 
     // Only return if we found something
     if (ctx.profile == null and ctx.project == null) {
@@ -147,15 +161,15 @@ pub fn detectGCP(allocator: std.mem.Allocator, _: []const u8) !?CloudContext {
     var ctx = CloudContext.init(allocator, CloudProvider.GCP.name, CloudProvider.GCP.icon);
 
     // Check environment variables
-    if (std.process.getEnvVarOwned(allocator, "GOOGLE_CLOUD_PROJECT")) |project| {
+    if (getEnvOwned(allocator, "GOOGLE_CLOUD_PROJECT")) |project| {
         ctx.project = project;
-    } else |_| {
-        if (std.process.getEnvVarOwned(allocator, "GCP_PROJECT")) |project| {
+    } else {
+        if (getEnvOwned(allocator, "GCP_PROJECT")) |project| {
             ctx.project = project;
-        } else |_| {
-            if (std.process.getEnvVarOwned(allocator, "GCLOUD_PROJECT")) |project| {
+        } else {
+            if (getEnvOwned(allocator, "GCLOUD_PROJECT")) |project| {
                 ctx.project = project;
-            } else |_| {
+            } else {
                 // Try to read from gcloud config
                 if (readHomeConfig(allocator, ".config/gcloud/configurations/config_default")) |content| {
                     defer allocator.free(content);

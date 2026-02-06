@@ -5,6 +5,11 @@ const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const utils = @import("../../utils.zig");
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 /// Command lookup and hash builtins: which, type, hash
 
 /// which - locate a command
@@ -148,12 +153,12 @@ pub fn typeBuiltin(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                 defer ctx.allocator.free(full_path);
 
                 // Check if file exists and is executable
-                std.fs.accessAbsolute(full_path, .{}) catch continue;
+                std.Io.Dir.accessAbsolute(std.Options.debug_io,full_path, .{}) catch continue;
 
                 if (builtin.os.tag != .windows) {
-                    const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
-                    defer file.close();
-                    const stat = file.stat() catch continue;
+                    const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io,full_path, .{}) catch continue;
+                    defer file.close(std.Options.debug_io);
+                    const stat = file.stat(std.Options.debug_io) catch continue;
                     if (stat.mode & 0o111 == 0) continue;
                 }
 
@@ -295,7 +300,7 @@ pub fn hash(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     // hash command [command...] - add commands to hash table
-    const path_var = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
+    const path_var = getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
     var path_list = utils.env.PathList.parse(ctx.allocator, path_var) catch {
         return 1;
     };

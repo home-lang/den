@@ -60,7 +60,7 @@ fn benchmarkGlobExpansion(allocator: std.mem.Allocator) !void {
 
 fn benchmarkProcessSpawn(_: std.mem.Allocator) !void {
     // Simulate process spawn overhead
-    std.posix.nanosleep(0, 50_000); // 0.05ms
+    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 50_000)), .awake) catch {}; // 0.05ms
 }
 
 fn benchmarkPipeSetup(allocator: std.mem.Allocator) !void {
@@ -93,20 +93,18 @@ fn benchmarkRedirection(allocator: std.mem.Allocator) !void {
     redirects[1] = "output.txt";
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
     var suite = BenchmarkSuite.init(allocator, "Command Execution");
     defer suite.deinit();
 
     const stdout_file = if (builtin.os.tag == .windows) blk: {
         const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
-        break :blk std.fs.File{ .handle = handle };
-    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+        break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
+    } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = stdout_file.writer(&stdout_buffer);
+    var stdout_writer = stdout_file.writer(std.Options.debug_io, &stdout_buffer);
 
     try stdout_writer.interface.writeAll("Running command execution benchmarks...\n\n");
 

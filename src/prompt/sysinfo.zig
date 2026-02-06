@@ -10,9 +10,9 @@ pub const SystemInfo = struct {
 
     /// Get current working directory
     pub fn getCurrentDir(self: *SystemInfo) ![]const u8 {
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
-        const cwd = try std.process.getCwd(&buf);
-        return try self.allocator.dupe(u8, cwd);
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const cwd_len = try std.process.currentPath(std.Options.debug_io, &buf);
+        return try self.allocator.dupe(u8, buf[0..cwd_len]);
     }
 
     /// Get home directory
@@ -45,10 +45,10 @@ pub const SystemInfo = struct {
 
         // Try to read from /etc/hostname on Unix systems
         if (@import("builtin").os.tag != .windows) {
-            var file = std.fs.openFileAbsolute("/etc/hostname", .{}) catch {
+            var file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, "/etc/hostname", .{}) catch {
                 return try self.allocator.dupe(u8, "localhost");
             };
-            defer file.close();
+            defer file.close(std.Options.debug_io);
 
             var buf: [256]u8 = undefined;
             var size: usize = 0;
@@ -177,16 +177,18 @@ pub const SystemInfo = struct {
 
     /// Get version from a command
     fn getCommandVersion(self: *SystemInfo, _: []const u8, argv: []const []const u8) ![]const u8 {
-        var child = std.process.Child.init(argv, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = argv,
+            .stdout = .pipe,
+            .stderr = .ignore,
+        }) catch return error.CommandNotFound;
 
-        child.spawn() catch return error.CommandNotFound;
-
-        const stdout = try child.stdout.?.readToEndAlloc(self.allocator, 1024);
+        var stdout_read_buf: [1024]u8 = undefined;
+        var stdout_reader = child.stdout.?.readerStreaming(std.Options.debug_io, &stdout_read_buf);
+        const stdout = stdout_reader.interface.allocRemaining(self.allocator, .limited(1024)) catch return error.CommandNotFound;
         defer self.allocator.free(stdout);
 
-        _ = try child.wait();
+        _ = try child.wait(std.Options.debug_io);
 
         // Extract version number from output
         const trimmed = std.mem.trim(u8, stdout, &std.ascii.whitespace);

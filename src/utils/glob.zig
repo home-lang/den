@@ -172,7 +172,7 @@ pub const Glob = struct {
         // Parse extended glob features
         const parsed = self.parseExtendedGlob(base_pattern);
 
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+        var dir = std.Io.Dir.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
             // Can't open directory - return pattern as-is
             if (err == error.FileNotFound or err == error.AccessDenied) {
                 const result = try self.allocator.alloc([]const u8, 1);
@@ -211,7 +211,7 @@ pub const Glob = struct {
             }
 
             // Build full path using platform-specific separator
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const full_path = if (std.mem.eql(u8, dir_path, ".")) blk: {
                 break :blk try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
             } else blk: {
@@ -316,10 +316,10 @@ pub const Glob = struct {
 
     /// Check if file matches the qualifier
     /// . = regular file, @ = symlink, / = directory, * = executable
-    fn matchesQualifier(self: *Glob, dir: std.fs.Dir, name: []const u8, qualifier: u8) bool {
+    fn matchesQualifier(self: *Glob, dir: std.Io.Dir, name: []const u8, qualifier: u8) bool {
         _ = self;
 
-        const stat = dir.statFile(name) catch return false;
+        const stat = dir.statFile(std.Options.debug_io, name, .{}) catch return false;
 
         return switch (qualifier) {
             '.' => stat.kind == .file,
@@ -389,7 +389,7 @@ pub const Glob = struct {
                 var iter = std.mem.splitScalar(u8, alternatives, '|');
                 while (iter.next()) |alt| {
                     // Try matching alt + suffix
-                    var buf: [std.fs.max_path_bytes]u8 = undefined;
+                    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                     const combined = std.fmt.bufPrint(&buf, "{s}{s}", .{ alt, suffix }) catch continue;
                     if (matchPatternExtended(combined, name, 0, n_idx)) {
                         return true;
@@ -523,7 +523,7 @@ pub const Glob = struct {
                 if (n_idx < name.len) {
                     // Try matching more characters with !(pattern) or just the suffix
                     // Rebuild the extglob pattern for continued matching
-                    var buf: [std.fs.max_path_bytes]u8 = undefined;
+                    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                     const extglob_pattern = std.fmt.bufPrint(&buf, "{s}{s}", .{ pattern[p_idx .. close_pos + 1], suffix }) catch return false;
 
                     // Try: skip one char and continue with !(pattern)

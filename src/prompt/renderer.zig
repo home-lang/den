@@ -69,7 +69,7 @@ pub const PromptRenderer = struct {
 
     /// Expand template string with placeholders
     fn expandTemplate(self: *PromptRenderer, template_str: []const u8, ctx: *const PromptContext) ![]const u8 {
-        var result: std.ArrayList(u8) = .{
+        var result: std.array_list.Managed(u8) = .{
             .items = &[_]u8{},
             .capacity = 0,
         };
@@ -126,7 +126,7 @@ pub const PromptRenderer = struct {
         const spaces_needed = terminal_width - total_width;
 
         // Build result with spacing
-        var result: std.ArrayList(u8) = .{
+        var result: std.array_list.Managed(u8) = .{
             .items = &[_]u8{},
             .capacity = 0,
         };
@@ -174,7 +174,7 @@ pub fn visibleWidth(text: []const u8) usize {
 
 /// Parse prompt segments from rendered text
 pub fn parseSegments(allocator: std.mem.Allocator, text: []const u8) ![]Segment {
-    var segments = std.ArrayList(Segment).init(allocator);
+    var segments = std.array_list.Managed(Segment).init(allocator);
     defer segments.deinit();
 
     // For now, treat the entire text as a single left-aligned segment

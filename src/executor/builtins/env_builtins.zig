@@ -3,6 +3,20 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
+fn getenvFromSlice(key: []const u8) ?[]const u8 {
+    var env_buf: [512]u8 = undefined;
+    if (key.len >= env_buf.len) return null;
+    @memcpy(env_buf[0..key.len], key);
+    env_buf[key.len] = 0;
+    const value = std.c.getenv(env_buf[0..key.len :0]) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 // C library extern declarations for environment manipulation
 const libc_env = struct {
     extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
@@ -433,7 +447,7 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     // Apply unsets to OS environment
     for (unset_vars.items) |unset_var| {
         // Save original OS env value
-        const original = std.posix.getenv(unset_var);
+        const original = getenvFromSlice(unset_var);
         if (original) |orig| {
             try saved_os_env.put(unset_var, try ctx.allocator.dupe(u8, orig));
         } else {
@@ -449,7 +463,7 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     for (env_overrides.items) |override| {
         // Save original OS env value
         if (!saved_os_env.contains(override.key)) {
-            const original = std.posix.getenv(override.key);
+            const original = getenvFromSlice(override.key);
             if (original) |orig| {
                 try saved_os_env.put(override.key, try ctx.allocator.dupe(u8, orig));
             } else {

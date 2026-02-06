@@ -85,11 +85,11 @@
       { "name": "....", "command": "cd ../../.." },
       { "name": "-", "command": "cd -" },
 
-      // List files
-      { "name": "l", "command": "ls -lah" },
-      { "name": "la", "command": "ls -lAh" },
-      { "name": "ll", "command": "ls -lh" },
-      { "name": "ls", "command": "ls --color=auto" },
+      // List files (use absolute paths to avoid circular alias)
+      { "name": "l", "command": "/bin/ls -lah" },
+      { "name": "la", "command": "/bin/ls -lAh" },
+      { "name": "ll", "command": "/bin/ls -lh" },
+      { "name": "ls", "command": "/bin/ls --color=auto" },
 
       // Git shortcuts
       { "name": "g", "command": "git" },
@@ -106,18 +106,18 @@
       { "name": "gst", "command": "git status" },
       { "name": "glog", "command": "git log --oneline --graph" },
 
-      // Safety
-      { "name": "rm", "command": "rm -i" },
-      { "name": "cp", "command": "cp -i" },
-      { "name": "mv", "command": "mv -i" },
+      // Safety (use absolute paths to avoid circular alias)
+      { "name": "rm", "command": "/bin/rm -i" },
+      { "name": "cp", "command": "/bin/cp -i" },
+      { "name": "mv", "command": "/bin/mv -i" },
 
       // Misc
       { "name": "c", "command": "clear" },
       { "name": "h", "command": "history" },
       { "name": "j", "command": "jobs -l" },
-      { "name": "grep", "command": "grep --color=auto" },
-      { "name": "df", "command": "df -h" },
-      { "name": "du", "command": "du -h" },
+      { "name": "grep", "command": "/usr/bin/grep --color=auto" },
+      { "name": "df", "command": "/bin/df -h" },
+      { "name": "du", "command": "/usr/bin/du -h" },
       { "name": "free", "command": "free -h" },
       { "name": "ports", "command": "netstat -tulanp" },
       { "name": "path", "command": "echo $PATH | tr ':' '\\n'" }

@@ -318,7 +318,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             if (kill_after) |ka| {
                 const ka_secs: u64 = @intFromFloat(ka);
                 const ka_nanos: u64 = @intFromFloat((ka - @as(f64, @floatFromInt(ka_secs))) * 1_000_000_000);
-                std.posix.nanosleep(ka_secs, ka_nanos);
+                std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(ka_secs * 1_000_000_000 + ka_nanos), .awake) catch {};
                 // Check if still running
                 const check = std.posix.waitpid(child_pid, std.posix.W.NOHANG);
                 if (check.pid == 0) {
@@ -340,7 +340,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         }
 
         // Sleep briefly before checking again
-        std.posix.nanosleep(0, 10_000_000); // 10ms
+        std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(10_000_000), .awake) catch {}; // 10ms
     }
 
     return 1;
@@ -562,7 +562,7 @@ pub fn watch(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         };
 
         // Sleep for the interval
-        std.posix.nanosleep(interval_seconds, 0);
+        std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(interval_seconds * 1_000_000_000), .awake) catch {};
     }
 
     return 0;

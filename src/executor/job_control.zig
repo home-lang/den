@@ -134,13 +134,13 @@ pub fn backgroundJob(job: *Job) !void {
 
 /// Job list for managing multiple background jobs
 pub const JobList = struct {
-    jobs: std.ArrayList(?Job),
+    jobs: std.array_list.Managed(?Job),
     allocator: std.mem.Allocator,
     next_id: usize = 1,
 
     pub fn init(allocator: std.mem.Allocator) JobList {
         return .{
-            .jobs = std.ArrayList(?Job).init(allocator),
+            .jobs = std.array_list.Managed(?Job).init(allocator),
             .allocator = allocator,
         };
     }

@@ -5,6 +5,11 @@ const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const utils = @import("../../utils.zig");
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 /// Execution builtins: eval, exec, command, builtin, coproc
 
 /// eval - evaluate string as shell command
@@ -40,10 +45,10 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     const cmd_name = cmd.args[0];
 
     // Find the executable in PATH
-    const path_var = std.posix.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
+    const path_var = getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
     var path_iter = std.mem.splitScalar(u8, path_var, ':');
 
-    var exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     var exe_path: ?[]const u8 = null;
 
     // Check if cmd contains a slash (is a path)
@@ -53,7 +58,7 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         // Search in PATH
         while (path_iter.next()) |dir| {
             const full_path = std.fmt.bufPrint(&exe_path_buf, "{s}/{s}", .{ dir, cmd_name }) catch continue;
-            std.fs.accessAbsolute(full_path, .{}) catch continue;
+            std.Io.Dir.accessAbsolute(std.Options.debug_io,full_path, .{}) catch continue;
             exe_path = full_path;
             break;
         }
@@ -170,7 +175,7 @@ pub fn command(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     if (use_default_path) {
         path_to_use = default_path;
     } else {
-        path_to_use = std.posix.getenv("PATH") orelse default_path;
+        path_to_use = getenv("PATH") orelse default_path;
     }
 
     if (verbose or short_output) {
@@ -316,7 +321,7 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         };
 
         // Build argv - allocate on stack
-        var argv_storage: [64][std.fs.max_path_bytes:0]u8 = undefined;
+        var argv_storage: [64][std.Io.Dir.max_path_bytes:0]u8 = undefined;
         var argv: [64:null]?[*:0]const u8 = undefined;
         var argv_idx: usize = 0;
 

@@ -34,33 +34,33 @@ pub fn testBuiltin(command: *types.ParsedCommand) !i32 {
         } else if (std.mem.eql(u8, op, "-n")) {
             return if (arg.len > 0) 0 else 1;
         } else if (std.mem.eql(u8, op, "-f")) {
-            const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
-            defer file.close();
-            const stat = file.stat() catch return 1;
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
+            defer file.close(std.Options.debug_io);
+            const stat = file.stat(std.Options.debug_io) catch return 1;
             return if (stat.kind == .file) 0 else 1;
         } else if (std.mem.eql(u8, op, "-d")) {
-            var dir = std.fs.cwd().openDir(arg, .{}) catch return 1;
-            dir.close();
+            var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, arg, .{}) catch return 1;
+            dir.close(std.Options.debug_io);
             return 0;
         } else if (std.mem.eql(u8, op, "-e")) {
-            std.fs.cwd().access(arg, .{}) catch return 1;
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return 1;
             return 0;
         } else if (std.mem.eql(u8, op, "-r")) {
-            const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
-            file.close();
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
+            file.close(std.Options.debug_io);
             return 0;
         } else if (std.mem.eql(u8, op, "-w")) {
-            const file = std.fs.cwd().openFile(arg, .{ .mode = .write_only }) catch return 1;
-            file.close();
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{ .mode = .write_only }) catch return 1;
+            file.close(std.Options.debug_io);
             return 0;
         } else if (std.mem.eql(u8, op, "-x")) {
             if (builtin.os.tag == .windows) {
-                std.fs.cwd().access(arg, .{}) catch return 1;
+                std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return 1;
                 return 0;
             }
-            const file = std.fs.cwd().openFile(arg, .{}) catch return 1;
-            defer file.close();
-            const stat = file.stat() catch return 1;
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
+            defer file.close(std.Options.debug_io);
+            const stat = file.stat(std.Options.debug_io) catch return 1;
             return if (stat.mode & 0o111 != 0) 0 else 1;
         }
     }
@@ -209,41 +209,41 @@ fn evaluateExtendedTestExpr(args: [][]const u8) !bool {
         } else if (std.mem.eql(u8, op, "-n")) {
             return arg.len > 0;
         } else if (std.mem.eql(u8, op, "-f")) {
-            const file = std.fs.cwd().openFile(arg, .{}) catch return false;
-            defer file.close();
-            const stat = file.stat() catch return false;
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
+            defer file.close(std.Options.debug_io);
+            const stat = file.stat(std.Options.debug_io) catch return false;
             return stat.kind == .file;
         } else if (std.mem.eql(u8, op, "-d")) {
-            var dir = std.fs.cwd().openDir(arg, .{}) catch return false;
-            dir.close();
+            var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, arg, .{}) catch return false;
+            dir.close(std.Options.debug_io);
             return true;
         } else if (std.mem.eql(u8, op, "-e")) {
-            std.fs.cwd().access(arg, .{}) catch return false;
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return false;
             return true;
         } else if (std.mem.eql(u8, op, "-r")) {
-            const file = std.fs.cwd().openFile(arg, .{}) catch return false;
-            file.close();
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
+            file.close(std.Options.debug_io);
             return true;
         } else if (std.mem.eql(u8, op, "-w")) {
-            const file = std.fs.cwd().openFile(arg, .{ .mode = .write_only }) catch return false;
-            file.close();
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{ .mode = .write_only }) catch return false;
+            file.close(std.Options.debug_io);
             return true;
         } else if (std.mem.eql(u8, op, "-x")) {
             if (builtin.os.tag == .windows) {
-                std.fs.cwd().access(arg, .{}) catch return false;
+                std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return false;
                 return true;
             }
-            const file = std.fs.cwd().openFile(arg, .{}) catch return false;
-            defer file.close();
-            const stat = file.stat() catch return false;
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
+            defer file.close(std.Options.debug_io);
+            const stat = file.stat(std.Options.debug_io) catch return false;
             return stat.mode & 0o111 != 0;
         } else if (std.mem.eql(u8, op, "-s")) {
-            const file = std.fs.cwd().openFile(arg, .{}) catch return false;
-            defer file.close();
-            const stat = file.stat() catch return false;
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
+            defer file.close(std.Options.debug_io);
+            const stat = file.stat(std.Options.debug_io) catch return false;
             return stat.size > 0;
         } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
-            const stat = std.fs.cwd().statFile(arg) catch return false;
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,arg) catch return false;
             return stat.kind == .sym_link;
         }
     }
@@ -289,16 +289,16 @@ fn evaluateExtendedTestExpr(args: [][]const u8) !bool {
             const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
             return left_num >= right_num;
         } else if (std.mem.eql(u8, op, "-nt")) {
-            const left_stat = std.fs.cwd().statFile(left) catch return false;
-            const right_stat = std.fs.cwd().statFile(right) catch return false;
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,left) catch return false;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,right) catch return false;
             return left_stat.mtime.nanoseconds > right_stat.mtime.nanoseconds;
         } else if (std.mem.eql(u8, op, "-ot")) {
-            const left_stat = std.fs.cwd().statFile(left) catch return false;
-            const right_stat = std.fs.cwd().statFile(right) catch return false;
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,left) catch return false;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,right) catch return false;
             return left_stat.mtime.nanoseconds < right_stat.mtime.nanoseconds;
         } else if (std.mem.eql(u8, op, "-ef")) {
-            const left_stat = std.fs.cwd().statFile(left) catch return false;
-            const right_stat = std.fs.cwd().statFile(right) catch return false;
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,left) catch return false;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,right) catch return false;
             return left_stat.inode == right_stat.inode;
         }
     }

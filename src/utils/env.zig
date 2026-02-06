@@ -63,19 +63,20 @@ pub fn getEnv(key: []const u8) ?[]const u8 {
         // The cache manages its own memory and reuses slots
         return windows_env_cache.get(key);
     }
-    // On POSIX systems
-    return std.posix.getenv(key);
+    // POSIX: use libc getenv (posix.getenv removed in Zig 0.16)
+    var buf: [512]u8 = undefined;
+    if (key.len >= buf.len) return null;
+    @memcpy(buf[0..key.len], key);
+    buf[key.len] = 0;
+    const result = std.c.getenv(buf[0..key.len :0]) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(result)));
 }
 
-/// Get environment variable with fallback to std.process (cross-platform, allocates)
+/// Get environment variable and allocate a copy (cross-platform)
 /// Caller owns returned memory
 pub fn getEnvAlloc(allocator: std.mem.Allocator, key: []const u8) !?[]const u8 {
-    return std.process.getEnvVarOwned(allocator, key) catch |err| {
-        if (err == error.EnvironmentVariableNotFound) {
-            return null;
-        }
-        return err;
-    };
+    const value = getEnv(key) orelse return null;
+    return try allocator.dupe(u8, value);
 }
 
 /// Platform information
@@ -233,7 +234,7 @@ pub const PathList = struct {
 
     /// Parse PATH environment variable
     pub fn fromEnv(allocator: std.mem.Allocator) !PathList {
-        const path_str = std.posix.getenv("PATH") orelse return PathList{
+        const path_str = getEnv("PATH") orelse return PathList{
             .allocator = allocator,
             .paths = std.ArrayList([]const u8){},
         };
@@ -304,7 +305,7 @@ pub const PathList = struct {
                 // If no extension, try common executable extensions
                 if (std.mem.indexOfScalar(u8, name, '.') == null) {
                     for (windows_exe_extensions) |ext| {
-                        var name_with_ext_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        var name_with_ext_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                         const name_with_ext = std.fmt.bufPrint(&name_with_ext_buf, "{s}{s}", .{ name, ext }) catch continue;
                         if (try self.checkWindowsExecutable(allocator, path_dir, name_with_ext)) |result| {
                             return result;
@@ -317,12 +318,12 @@ pub const PathList = struct {
                 defer allocator.free(full_path);
 
                 // Check if file exists and is accessible
-                std.fs.accessAbsolute(full_path, .{}) catch continue;
+                std.Io.Dir.accessAbsolute(std.Options.debug_io, full_path, .{}) catch continue;
 
-                const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
-                defer file.close();
+                const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, full_path, .{}) catch continue;
+                defer file.close(std.Options.debug_io);
 
-                const stat = file.stat() catch continue;
+                const stat = file.stat(std.Options.debug_io) catch continue;
                 if (stat.mode & 0o111 == 0) continue; // Not executable
 
                 return try allocator.dupe(u8, full_path);
@@ -349,7 +350,7 @@ pub const PathList = struct {
                 // If no extension, try common executable extensions
                 if (std.mem.indexOfScalar(u8, name, '.') == null) {
                     for (windows_exe_extensions) |ext| {
-                        var name_with_ext_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        var name_with_ext_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                         const name_with_ext = std.fmt.bufPrint(&name_with_ext_buf, "{s}{s}", .{ name, ext }) catch continue;
                         if (try self.checkWindowsExecutable(allocator, path_dir, name_with_ext)) |result| {
                             try results.append(allocator, result);
@@ -361,18 +362,18 @@ pub const PathList = struct {
                 const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path_dir, name });
 
                 // Check if file exists and is accessible
-                std.fs.accessAbsolute(full_path, .{}) catch {
+                std.Io.Dir.accessAbsolute(std.Options.debug_io, full_path, .{}) catch {
                     allocator.free(full_path);
                     continue;
                 };
 
-                const file = std.fs.openFileAbsolute(full_path, .{}) catch {
+                const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, full_path, .{}) catch {
                     allocator.free(full_path);
                     continue;
                 };
-                defer file.close();
+                defer file.close(std.Options.debug_io);
 
-                const stat = file.stat() catch {
+                const stat = file.stat(std.Options.debug_io) catch {
                     allocator.free(full_path);
                     continue;
                 };
@@ -396,7 +397,7 @@ pub const PathList = struct {
         errdefer allocator.free(full_path);
 
         // Check if file exists
-        std.fs.accessAbsolute(full_path, .{}) catch {
+        std.Io.Dir.accessAbsolute(std.Options.debug_io, full_path, .{}) catch {
             allocator.free(full_path);
             return null;
         };
@@ -621,7 +622,7 @@ pub fn findExecutableCached(path_list: *const PathList, allocator: std.mem.Alloc
     if (global_exec_cache) |*cache| {
         if (cache.get(name)) |cached_path| {
             // Verify the cached path still exists
-            std.fs.accessAbsolute(cached_path, .{}) catch {
+            std.Io.Dir.accessAbsolute(std.Options.debug_io, cached_path, .{}) catch {
                 // Path no longer valid, invalidate and fall through
                 cache.invalidate(name);
                 return try findAndCacheExecutable(path_list, allocator, name);

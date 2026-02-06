@@ -509,7 +509,7 @@ pub const LineEditor = struct {
 
             const byte = (try self.terminal.readByte()) orelse {
                 // No data, sleep briefly (10ms)
-                std.posix.nanosleep(0, 10_000_000);
+                std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 10_000_000)), .awake) catch {};
                 continue;
             };
 
@@ -535,7 +535,7 @@ pub const LineEditor = struct {
                 // In Vi insert mode, ESC switches to normal mode
                 if (self.editing_mode == .vi and (self.vi_mode == .insert or self.vi_mode == .replace)) {
                     // Wait briefly to see if this is an escape sequence
-                    std.posix.nanosleep(0, 50_000_000); // 50ms
+                    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 50_000_000)), .awake) catch {}; // 50ms
                     if (try self.terminal.readByte()) |next_byte| {
                         // There's a follow-up - it's an escape sequence, handle normally
                         escape_buffer[0] = byte;
@@ -552,7 +552,7 @@ pub const LineEditor = struct {
                 }
                 // Cancel visual mode on ESC (if standalone)
                 if (self.visual_mode) {
-                    std.posix.nanosleep(0, 50_000_000); // 50ms
+                    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 50_000_000)), .awake) catch {}; // 50ms
                     if (try self.terminal.readByte()) |next_byte| {
                         // There's a follow-up - it's an escape sequence, handle normally
                         escape_buffer[0] = byte;
@@ -1786,7 +1786,7 @@ pub const LineEditor = struct {
 
         if (builtin.os.tag == .windows) {
             const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.NoStdOut;
-            const stdout = std.fs.File{ .handle = handle };
+            const stdout = std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
             _ = try stdout.write(bytes);
         } else {
             _ = try posix.write(posix.STDERR_FILENO, bytes);

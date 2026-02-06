@@ -120,14 +120,14 @@ pub fn SlabAllocator(comptime T: type, comptime slab_size: usize) type {
         };
 
         allocator: std.mem.Allocator,
-        slabs: std.ArrayList(*Slab),
+        slabs: std.array_list.Managed(*Slab),
         total_allocated: usize,
         total_freed: usize,
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
-                .slabs = std.ArrayList(*Slab).init(allocator),
+                .slabs = std.array_list.Managed(*Slab).init(allocator),
                 .total_allocated = 0,
                 .total_freed = 0,
             };

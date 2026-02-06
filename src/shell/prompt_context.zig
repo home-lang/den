@@ -167,12 +167,12 @@ fn hasBunLock(self: *Shell, cwd: []const u8) bool {
     const lock_files = [_][]const u8{ "bun.lockb", "bun.lock" };
 
     for (lock_files) |filename| {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
 
         // Just check if file exists
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        file.close();
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,path, .{}) catch continue;
+        file.close(std.Options.debug_io);
         return true;
     }
 

@@ -1,5 +1,10 @@
 const std = @import("std");
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 /// Context-Aware Completion
 /// Provides intelligent completions based on the command being typed
 pub const ContextCompletion = struct {
@@ -514,13 +519,13 @@ pub const ContextCompletion = struct {
         var count: usize = 0;
 
         // Try to read package.json
-        const file = std.fs.cwd().openFile("package.json", .{}) catch return &[_]CompletionItem{};
-        defer file.close();
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, "package.json", .{}) catch return &[_]CompletionItem{};
+        defer file.close(std.Options.debug_io);
 
         var buf: [16384]u8 = undefined;
         var total_read: usize = 0;
         while (total_read < buf.len) {
-            const bytes_read = file.read(buf[total_read..]) catch break;
+            const bytes_read = file.readStreaming(std.Options.debug_io, &.{buf[total_read..]}) catch break;
             if (bytes_read == 0) break;
             total_read += bytes_read;
         }
@@ -1069,20 +1074,20 @@ pub const ContextCompletion = struct {
         var count: usize = 0;
 
         // Try to read known hosts from ~/.ssh/known_hosts
-        const home = std.posix.getenv("HOME") orelse "";
+        const home = getenv("HOME") orelse "";
         if (home.len > 0) {
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const known_hosts_path = std.fmt.bufPrint(&path_buf, "{s}/.ssh/known_hosts", .{home}) catch "";
 
             if (known_hosts_path.len > 0) {
-                const file = std.fs.cwd().openFile(known_hosts_path, .{}) catch null;
+                const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, known_hosts_path, .{}) catch null;
                 if (file) |f| {
-                    defer f.close();
+                    defer f.close(std.Options.debug_io);
 
                     var buf: [8192]u8 = undefined;
                     var total_read: usize = 0;
                     while (total_read < buf.len) {
-                        const n = f.read(buf[total_read..]) catch break;
+                        const n = f.readStreaming(std.Options.debug_io, &.{buf[total_read..]}) catch break;
                         if (n == 0) break;
                         total_read += n;
                     }
@@ -1134,14 +1139,14 @@ pub const ContextCompletion = struct {
             // Also try ~/.ssh/config for Host entries
             const config_path = std.fmt.bufPrint(&path_buf, "{s}/.ssh/config", .{home}) catch "";
             if (config_path.len > 0) {
-                const file = std.fs.cwd().openFile(config_path, .{}) catch null;
+                const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, config_path, .{}) catch null;
                 if (file) |f| {
-                    defer f.close();
+                    defer f.close(std.Options.debug_io);
 
                     var buf: [8192]u8 = undefined;
                     var total_read: usize = 0;
                     while (total_read < buf.len) {
-                        const n = f.read(buf[total_read..]) catch break;
+                        const n = f.readStreaming(std.Options.debug_io, &.{buf[total_read..]}) catch break;
                         if (n == 0) break;
                         total_read += n;
                     }
@@ -1190,11 +1195,11 @@ pub const ContextCompletion = struct {
     // ========================================================================
 
     fn runCommand(self: *ContextCompletion, args: []const []const u8) ![]const u8 {
-        var child = std.process.Child.init(args, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
-
-        try child.spawn();
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = args,
+            .stdout = .pipe,
+            .stderr = .ignore,
+        }) catch |err| return err;
 
         const stdout = child.stdout orelse return error.NoStdout;
 
@@ -1204,12 +1209,12 @@ pub const ContextCompletion = struct {
 
         var read_buf: [4096]u8 = undefined;
         while (true) {
-            const bytes_read = stdout.read(&read_buf) catch break;
+            const bytes_read = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
             if (bytes_read == 0) break;
             try output_buf.appendSlice(self.allocator, read_buf[0..bytes_read]);
         }
 
-        _ = child.wait() catch {};
+        _ = child.wait(std.Options.debug_io) catch {};
 
         return try output_buf.toOwnedSlice(self.allocator);
     }

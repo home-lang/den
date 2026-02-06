@@ -75,7 +75,7 @@ pub fn executeCStyleForLoopOneline(shell: *Shell, input: []const u8) !void {
     const remaining_commands = std.mem.trim(u8, after_done, &std.ascii.whitespace);
 
     // Split body by semicolons (respecting quotes)
-    var body_cmds = std.ArrayList([]const u8).init(shell.allocator);
+    var body_cmds = std.array_list.Managed([]const u8).init(shell.allocator);
     defer body_cmds.deinit();
 
     var cmd_start: usize = 0;

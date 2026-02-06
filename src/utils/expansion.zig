@@ -1362,11 +1362,11 @@ pub const Expansion = struct {
         // Create a child process to execute the command
         const argv = [_][]const u8{ "sh", "-c", command };
 
-        var child = std.process.Child.init(&argv, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
-
-        try child.spawn();
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = &argv,
+            .stdout = .pipe,
+            .stderr = .ignore,
+        }) catch |err| return err;
 
         // Read stdout
         const stdout = child.stdout.?;
@@ -1382,7 +1382,7 @@ pub const Expansion = struct {
         }
         const output = try output_buffer.toOwnedSlice(self.allocator);
 
-        const term = try child.wait();
+        const term = try child.wait(std.Options.debug_io);
         _ = term;
 
         return output;
@@ -1465,8 +1465,8 @@ pub const Expansion = struct {
                     break :blk try self.allocator.dupe(u8, pwd);
                 } else {
                     // Try to get cwd as fallback
-                    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-                    if (std.fs.cwd().realpath(".", &cwd_buf)) |path| {
+                    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+                    if (std.Io.Dir.cwd().realpath(".", &cwd_buf)) |path| {
                         break :blk try self.allocator.dupe(u8, path);
                     } else |_| {
                         break :blk try self.allocator.dupe(u8, "~+");

@@ -3,6 +3,11 @@ const types = @import("types/mod.zig");
 const parser_mod = @import("parser/mod.zig");
 const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
+
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
 const Terminal = @import("utils/terminal.zig");
 const LineEditor = Terminal.LineEditor;
 const Completion = @import("utils/completion.zig").Completion;
@@ -269,7 +274,7 @@ pub const Shell = struct {
         }
 
         // Build history file path from config (expand ~ to home directory)
-        var history_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var history_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const config_history_file = config.history.file;
         const history_path = if (std.mem.startsWith(u8, config_history_file, "~/"))
             try std.fmt.bufPrint(&history_path_buf, "{s}/{s}", .{ home, config_history_file[2..] })
@@ -369,7 +374,7 @@ pub const Shell = struct {
 
         // Detect if stdin is a TTY
         if (@import("builtin").os.tag != .windows) {
-            shell.is_interactive = std.posix.isatty(std.posix.STDIN_FILENO);
+            shell.is_interactive = (std.Io.File{ .handle = std.posix.STDIN_FILENO, .flags = .{ .nonblocking = false } }).isTty(std.Options.debug_io) catch false;
         }
 
         // Load history from file
@@ -1125,11 +1130,12 @@ pub const Shell = struct {
 /// This updates the prompt to reflect current directory changes
 fn refreshPromptCallback(editor: *LineEditor) !void {
     // Get current directory
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd = std.posix.getcwd(&cwd_buf) catch "/";
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const cwd_len = std.process.currentPath(std.Options.debug_io, &cwd_buf) catch 0;
+    const cwd = if (cwd_len > 0) cwd_buf[0..cwd_len] else "/";
 
     // Get home directory to abbreviate with ~
-    const home = std.posix.getenv("HOME");
+    const home = getenv("HOME");
 
     // Build a simple prompt with current directory
     var prompt_buf: [4096]u8 = undefined;

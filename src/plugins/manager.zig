@@ -37,7 +37,8 @@ pub const PluginManager = struct {
                     err,
                 }) catch "[Plugin Manager] Warning: Shutdown failed\n";
 
-                _ = std.posix.write(std.posix.STDERR_FILENO, msg) catch {};
+                const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+                stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
             };
             plugin.deinit();
             // Free the key

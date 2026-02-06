@@ -8,7 +8,7 @@ const BenchmarkSuite = profiling.BenchmarkSuite;
 // Mock shell startup components for benchmarking
 fn benchmarkMinimalStartup(_: std.mem.Allocator) !void {
     // Simulate minimal startup (no config, no plugins)
-    std.posix.nanosleep(0, 100_000); // 0.1ms
+    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 100_000)), .awake) catch {}; // 0.1ms
 }
 
 fn benchmarkConfigLoad(allocator: std.mem.Allocator) !void {
@@ -36,7 +36,7 @@ fn benchmarkHistoryLoad(allocator: std.mem.Allocator) !void {
 
 fn benchmarkPluginDiscovery(_: std.mem.Allocator) !void {
     // Simulate plugin discovery
-    std.posix.nanosleep(0, 500_000); // 0.5ms
+    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 500_000)), .awake) catch {}; // 0.5ms
 }
 
 fn benchmarkPromptInit(allocator: std.mem.Allocator) !void {
@@ -46,20 +46,18 @@ fn benchmarkPromptInit(allocator: std.mem.Allocator) !void {
     @memset(prompt, 0);
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
     var suite = BenchmarkSuite.init(allocator, "Startup Time");
     defer suite.deinit();
 
     const stdout_file = if (builtin.os.tag == .windows) blk: {
         const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
-        break :blk std.fs.File{ .handle = handle };
-    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+        break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
+    } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = stdout_file.writer(&stdout_buffer);
+    var stdout_writer = stdout_file.writer(std.Options.debug_io, &stdout_buffer);
 
     try stdout_writer.interface.writeAll("Running startup benchmarks...\n\n");
     try stdout_writer.interface.flush();

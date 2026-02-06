@@ -1,7 +1,12 @@
 const std = @import("std");
-const zig_config = @import("zig-config");
+const posix = std.posix;
 const types = @import("types/mod.zig");
 const DenConfig = types.DenConfig;
+
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
 
 /// Configuration source information
 pub const ConfigSource = struct {
@@ -92,7 +97,7 @@ pub fn loadConfigWithPathAndSource(allocator: std.mem.Allocator, custom_path: ?[
     }
 
     // Try home directory
-    if (std.posix.getenv("HOME")) |home| {
+    if (getenv("HOME")) |home| {
         // Try ~/.config/den.jsonc
         const home_config_path = std.fmt.allocPrint(allocator, "{s}/.config/den.jsonc", .{home}) catch null;
         if (home_config_path) |path| {
@@ -127,11 +132,11 @@ pub fn loadConfigWithPathAndSource(allocator: std.mem.Allocator, custom_path: ?[
 
 /// Load config from a specific file path
 fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch |err| {
         std.debug.print("Error: Failed to open config file '{s}': {any}\n", .{ path, err });
         return error.ConfigFileNotFound;
     };
-    defer file.close();
+    defer file.close(std.Options.debug_io);
 
     // Read file content
     var content = std.ArrayList(u8).empty;
@@ -139,7 +144,7 @@ fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
 
     var buf: [4096]u8 = undefined;
     while (true) {
-        const n = file.read(&buf) catch break;
+        const n = posix.read(file.handle, &buf) catch break;
         if (n == 0) break;
         try content.appendSlice(allocator, buf[0..n]);
     }
@@ -163,8 +168,8 @@ fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
 /// Try to load config from a path, return null on failure
 /// Uses page_allocator for JSON parsing since config lives for program lifetime
 fn tryLoadFromPath(comptime T: type, allocator: std.mem.Allocator, path: []const u8) ?T {
-    const file = std.fs.cwd().openFile(path, .{}) catch return null;
-    defer file.close();
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch return null;
+    defer file.close(std.Options.debug_io);
 
     // Read file content
     var content = std.ArrayList(u8).empty;
@@ -172,7 +177,7 @@ fn tryLoadFromPath(comptime T: type, allocator: std.mem.Allocator, path: []const
 
     var buf: [4096]u8 = undefined;
     while (true) {
-        const n = file.read(&buf) catch break;
+        const n = posix.read(file.handle, &buf) catch break;
         if (n == 0) break;
         content.appendSlice(allocator, buf[0..n]) catch return null;
     }
@@ -198,8 +203,8 @@ const PackageJsonWithDen = struct {
 
 /// Try to load Den config from package.jsonc "den" key
 fn tryLoadDenFromPackageJson(allocator: std.mem.Allocator, path: []const u8) ?DenConfig {
-    const file = std.fs.cwd().openFile(path, .{}) catch return null;
-    defer file.close();
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch return null;
+    defer file.close(std.Options.debug_io);
 
     // Read file content
     var content = std.ArrayList(u8).empty;
@@ -207,7 +212,7 @@ fn tryLoadDenFromPackageJson(allocator: std.mem.Allocator, path: []const u8) ?De
 
     var buf: [4096]u8 = undefined;
     while (true) {
-        const n = file.read(&buf) catch break;
+        const n = posix.read(file.handle, &buf) catch break;
         if (n == 0) break;
         content.appendSlice(allocator, buf[0..n]) catch return null;
     }
@@ -395,7 +400,7 @@ pub const ValidationResult = struct {
     pub fn printToStderr(self: *const ValidationResult) void {
         const stderr = std.io.getStdErr().writer();
         // Check if stderr is a TTY for color support
-        const use_color = std.posix.isatty(std.posix.STDERR_FILENO);
+        const use_color = (std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } }).isTty(std.Options.debug_io) catch false;
         if (use_color) {
             self.formatColored(stderr) catch {};
         } else {

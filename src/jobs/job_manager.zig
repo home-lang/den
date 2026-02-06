@@ -166,7 +166,7 @@ pub const JobManager = struct {
                     _ = std.posix.kill(job.pid, std.posix.SIG.TERM) catch {};
 
                     // Give process a short time to exit gracefully
-                    std.posix.nanosleep(0, 100_000_000); // 100ms
+                    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 100_000_000)), .awake) catch {}; // 100ms
 
                     // Check if still running
                     const result = std.posix.waitpid(job.pid, std.posix.W.NOHANG);

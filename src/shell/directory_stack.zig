@@ -24,7 +24,7 @@ pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
         }
 
         // Get current directory
-        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const cwd = try std.posix.getcwd(&cwd_buf);
         const cwd_copy = try shell.allocator.dupe(u8, cwd);
 
@@ -77,7 +77,7 @@ pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
             const target_dir = arg;
 
             // Get current directory before changing
-            var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const cwd = try std.posix.getcwd(&cwd_buf);
 
             // Try to change to target directory
@@ -107,7 +107,7 @@ pub fn rotateDirStack(shell: *Shell, index: usize) !void {
     if (index == 0 or index > shell.dir_stack_count) return;
 
     // Get current directory
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cwd = try std.posix.getcwd(&cwd_buf);
     const cwd_copy = try shell.allocator.dupe(u8, cwd);
 
@@ -143,7 +143,7 @@ pub fn rotateDirStack(shell: *Shell, index: usize) !void {
 
 /// Helper to print directory stack
 pub fn printDirStack(shell: *Shell) !void {
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cwd = try std.posix.getcwd(&cwd_buf);
     try IO.print("{s}", .{cwd});
 
@@ -276,7 +276,7 @@ pub fn builtinDirs(shell: *Shell, cmd: *types.ParsedCommand) !void {
     }
 
     // Get current directory
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cwd = try std.posix.getcwd(&cwd_buf);
 
     // Get home directory for tilde substitution

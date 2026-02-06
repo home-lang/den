@@ -127,8 +127,8 @@ pub fn collectFilesRecursive(
 ) !void {
     if (current_depth >= max_depth) return;
 
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
-    defer dir.close();
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(std.Options.debug_io);
 
     var iter = dir.iterate();
     while (iter.next() catch null) |entry| {

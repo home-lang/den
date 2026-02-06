@@ -113,7 +113,7 @@ pub const AsyncGitFetcher = struct {
                 }
                 break;
             }
-            std.posix.nanosleep(0, 10_000_000); // Sleep 10ms
+            std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 10_000_000)), .awake) catch {}; // Sleep 10ms
         }
 
         // Timeout or no cache available - return empty info

@@ -78,17 +78,17 @@ pub const ScriptManager = struct {
 
     /// Load script directly from file (bypassing cache)
     pub fn loadScriptFromFile(self: *ScriptManager, path: []const u8) ![]const u8 {
-        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch |err| {
             std.debug.print("Error loading script '{s}': {}\n", .{ path, err });
             return error.ScriptLoadFailed;
         };
-        defer file.close();
+        defer file.close(std.Options.debug_io);
 
         const max_size: usize = 10 * 1024 * 1024;
-        const file_size = file.getEndPos() catch |err| {
+        const file_size = (file.stat(std.Options.debug_io) catch |err| {
             std.debug.print("Error reading script '{s}': {}\n", .{ path, err });
             return error.ScriptReadFailed;
-        };
+        }).size;
         const read_size: usize = @min(file_size, max_size);
         const buffer = self.allocator.alloc(u8, read_size) catch |err| {
             std.debug.print("Error allocating for script '{s}': {}\n", .{ path, err });
@@ -126,10 +126,10 @@ pub const ScriptManager = struct {
         const cached = self.cache.get(path) orelse return null;
 
         // Check if cache entry is still valid
-        const file = std.fs.cwd().openFile(path, .{}) catch return null;
-        defer file.close();
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch return null;
+        defer file.close(std.Options.debug_io);
 
-        const stat = file.stat() catch return null;
+        const stat = file.stat(std.Options.debug_io) catch return null;
         const mtime = stat.mtime;
 
         // Check if file has been modified
@@ -152,9 +152,9 @@ pub const ScriptManager = struct {
         }
 
         // Get file modification time
-        const file = std.fs.cwd().openFile(path, .{}) catch return;
-        defer file.close();
-        const stat = file.stat() catch return;
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch return;
+        defer file.close(std.Options.debug_io);
+        const stat = file.stat(std.Options.debug_io) catch return;
         const mtime = stat.mtime;
 
         // Count lines

@@ -244,8 +244,8 @@ pub const Completion = struct {
             if (dir_path.len == 0) continue;
 
             // Open directory
-            var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch continue;
-            defer dir.close();
+            var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch continue;
+            defer dir.close(std.Options.debug_io);
 
             // Iterate files in directory
             var iter = dir.iterate();
@@ -253,7 +253,7 @@ pub const Completion = struct {
                 // Check if file starts with prefix
                 if (entry.kind == .file and std.mem.startsWith(u8, entry.name, prefix)) {
                     // Check if executable
-                    const stat = dir.statFile(entry.name) catch continue;
+                    const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch continue;
                     const is_executable = (stat.mode & 0o111) != 0;
                     
                     if (is_executable) {
@@ -333,10 +333,10 @@ pub const Completion = struct {
         const show_hidden = file_prefix.len > 0 and file_prefix[0] == '.';
 
         // Open directory
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch {
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch {
             return &[_][]const u8{};
         };
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
 
         // Iterate directory
         var iter = dir.iterate();
@@ -353,7 +353,7 @@ pub const Completion = struct {
                 // If the original prefix ended with '/', return just the basename
                 // Otherwise, return the full path
                 const completion_text = blk: {
-                    var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+                    var slash_buf: [std.Io.Dir.max_path_bytes + 1]u8 = undefined;
 
                     if (use_prefix.len > 0 and use_prefix[use_prefix.len - 1] == '/') {
                         // Prefix ended with slash: return just basename with trailing slash
@@ -361,7 +361,7 @@ pub const Completion = struct {
                         break :blk with_slash;
                     } else {
                         // Prefix didn't end with slash: return full path with trailing slash
-                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                         const full_path = if (std.mem.eql(u8, dir_path, ".")) blk2: {
                             break :blk2 try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
                         } else blk2: {
@@ -433,10 +433,10 @@ pub const Completion = struct {
         const show_hidden = file_prefix.len > 0 and file_prefix[0] == '.';
 
         // Open directory
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch {
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch {
             return &[_][]const u8{};
         };
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
 
         // Iterate directory
         var iter = dir.iterate();
@@ -453,7 +453,7 @@ pub const Completion = struct {
                     if (use_prefix.len > 0 and use_prefix[use_prefix.len - 1] == '/') {
                         // Prefix ended with slash: return just basename (with slash if directory)
                         if (entry.kind == .directory) {
-                            var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+                            var slash_buf: [std.Io.Dir.max_path_bytes + 1]u8 = undefined;
                             const with_slash = try std.fmt.bufPrint(&slash_buf, "{s}/", .{entry.name});
                             break :blk with_slash;
                         } else {
@@ -461,7 +461,7 @@ pub const Completion = struct {
                         }
                     } else {
                         // Prefix didn't end with slash: return full path
-                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                         const full_path = if (std.mem.eql(u8, dir_path, ".")) blk2: {
                             break :blk2 try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
                         } else blk2: {
@@ -470,7 +470,7 @@ pub const Completion = struct {
 
                         // Add trailing slash for directories
                         if (entry.kind == .directory) {
-                            var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+                            var slash_buf: [std.Io.Dir.max_path_bytes + 1]u8 = undefined;
                             const with_slash = try std.fmt.bufPrint(&slash_buf, "{s}/", .{full_path});
                             break :blk with_slash;
                         } else {
@@ -508,10 +508,10 @@ pub const Completion = struct {
         const show_hidden = file_prefix.len > 0 and file_prefix[0] == '.';
 
         // Open directory
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch {
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch {
             return &[_][]const u8{};
         };
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
 
         // Iterate directory
         var iter = dir.iterate();
@@ -523,7 +523,7 @@ pub const Completion = struct {
                 if (match_count >= matches_buffer.len) break;
 
                 // Build full path
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                 const full_path = if (std.mem.eql(u8, dir_path, ".")) blk: {
                     break :blk try std.fmt.bufPrint(&path_buf, "{s}", .{entry.name});
                 } else blk: {
@@ -532,7 +532,7 @@ pub const Completion = struct {
 
                 // Add trailing slash for directories
                 const with_slash = if (entry.kind == .directory) blk: {
-                    var slash_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+                    var slash_buf: [std.Io.Dir.max_path_bytes + 1]u8 = undefined;
                     break :blk try std.fmt.bufPrint(&slash_buf, "{s}/", .{full_path});
                 } else full_path;
 
@@ -605,7 +605,7 @@ pub const Completion = struct {
         const start_dir = if (is_absolute) "/" else ".";
         if (try self.expandPathWithLookahead(start_dir, segments, 0)) |expanded| {
             // Check if we actually changed anything
-            var test_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var test_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const reconstructed = if (is_absolute) blk: {
                 var pos: usize = 0;
                 test_buf[pos] = '/';
@@ -657,7 +657,7 @@ pub const Completion = struct {
 
         // Skip special directories
         if (std.mem.eql(u8, segment, ".") or std.mem.eql(u8, segment, "..")) {
-            var new_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var new_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const new_dir = if (std.mem.eql(u8, current_dir, "/"))
                 try std.fmt.bufPrint(&new_dir_buf, "/{s}", .{segment})
             else if (std.mem.eql(u8, current_dir, "."))
@@ -672,8 +672,8 @@ pub const Completion = struct {
         var matches: [64][]const u8 = undefined;
         var match_count: usize = 0;
 
-        var dir = std.fs.cwd().openDir(current_dir, .{ .iterate = true }) catch return null;
-        defer dir.close();
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, current_dir, .{ .iterate = true }) catch return null;
+        defer dir.close(std.Options.debug_io);
 
         var dir_iter = dir.iterate();
         while (dir_iter.next() catch null) |entry| {
@@ -691,7 +691,7 @@ pub const Completion = struct {
 
         // If only one match, expand and continue
         if (match_count == 1) {
-            var new_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var new_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const new_dir = if (std.mem.eql(u8, current_dir, "/"))
                 try std.fmt.bufPrint(&new_dir_buf, "/{s}", .{matches[0]})
             else if (std.mem.eql(u8, current_dir, "."))
@@ -708,7 +708,7 @@ pub const Completion = struct {
             var success_count: usize = 0;
 
             for (matches[0..match_count]) |match| {
-                var test_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+                var test_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                 const test_dir = if (std.mem.eql(u8, current_dir, "/"))
                     try std.fmt.bufPrint(&test_dir_buf, "/{s}", .{match})
                 else if (std.mem.eql(u8, current_dir, "."))
@@ -754,11 +754,11 @@ pub const Completion = struct {
 
         // Read /etc/passwd on Unix-like systems
         if (@import("builtin").os.tag != .windows) {
-            const passwd_file = std.fs.openFileAbsolute("/etc/passwd", .{}) catch {
+            const passwd_file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, "/etc/passwd", .{}) catch {
                 // Fall back to just current user
                 return try self.completeCurrentUserOnly(username_prefix);
             };
-            defer passwd_file.close();
+            defer passwd_file.close(std.Options.debug_io);
 
             // Read passwd file content
             var content = std.ArrayList(u8).empty;
@@ -766,7 +766,7 @@ pub const Completion = struct {
 
             var buf: [4096]u8 = undefined;
             while (true) {
-                const n = passwd_file.read(&buf) catch break;
+                const n = passwd_file.readStreaming(std.Options.debug_io, &.{&buf}) catch break;
                 if (n == 0) break;
                 content.appendSlice(self.allocator, buf[0..n]) catch break;
             }
@@ -868,8 +868,8 @@ pub const Completion = struct {
 
         // Look up in /etc/passwd
         if (@import("builtin").os.tag != .windows) {
-            const passwd_file = std.fs.openFileAbsolute("/etc/passwd", .{}) catch return null;
-            defer passwd_file.close();
+            const passwd_file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, "/etc/passwd", .{}) catch return null;
+            defer passwd_file.close(std.Options.debug_io);
 
             // Read passwd file content
             var content = std.ArrayList(u8).empty;
@@ -877,7 +877,7 @@ pub const Completion = struct {
 
             var buf: [4096]u8 = undefined;
             while (true) {
-                const n = passwd_file.read(&buf) catch break;
+                const n = passwd_file.readStreaming(std.Options.debug_io, &.{&buf}) catch break;
                 if (n == 0) break;
                 content.appendSlice(self.allocator, buf[0..n]) catch break;
             }
@@ -916,10 +916,10 @@ pub const Completion = struct {
         }
 
         // Open directory
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch {
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch {
             return null;
         };
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
 
         // Find entries that start with this segment
         var matches_buffer: [16][]const u8 = undefined;
@@ -984,14 +984,14 @@ test "mid-word path expansion - relative path" {
     try tmp.dir.makeDir("testdir/subdir");
 
     // Change to temp directory for testing
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const original_cwd = try std.fs.cwd().realpath(".", &cwd_buf);
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const original_cwd = try std.Io.Dir.cwd().realpath(std.Options.debug_io, ".", &cwd_buf);
     const original_cwd_owned = try allocator.dupe(u8, original_cwd);
     defer allocator.free(original_cwd_owned);
 
-    var tmp_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp_path = try tmp.dir.realpath(".", &tmp_path_buf);
-    try std.fs.cwd().setAsCwd();
+    var tmp_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const tmp_path = try tmp.dir.realpath(std.Options.debug_io, ".", &tmp_path_buf);
+    try std.Io.Dir.cwd().setAsCwd(std.Options.debug_io);
     try std.posix.chdir(tmp_path);
     defer std.posix.chdir(original_cwd_owned) catch {};
 

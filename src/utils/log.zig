@@ -37,7 +37,7 @@ pub const Config = struct {
     show_timestamp: bool = true,
     show_file: bool = true,
     show_line: bool = true,
-    output_file: ?std.fs.File = null,
+    output_file: ?std.Io.File = null,
 };
 
 /// Global logger instance
@@ -176,15 +176,13 @@ pub const Logger = struct {
         // Write to stderr by default
         const output = buf[0..pos];
         if (self.config.output_file) |file| {
-            _ = file.write(output) catch {};
+            file.writeStreamingAll(std.Options.debug_io, output) catch {};
         } else {
-            if (builtin.os.tag == .windows) {
-                const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return;
-                const stderr = std.fs.File{ .handle = handle };
-                _ = stderr.write(output) catch {};
-            } else {
-                _ = std.posix.write(std.posix.STDERR_FILENO, output) catch {};
-            }
+            const stderr = std.Io.File{ .handle = if (builtin.os.tag == .windows)
+                (std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return)
+            else
+                std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+            stderr.writeStreamingAll(std.Options.debug_io, output) catch {};
         }
     }
 

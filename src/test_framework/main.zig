@@ -9,7 +9,7 @@ const OutputFormat = types.OutputFormat;
 const TestRunner = runner_mod.TestRunner;
 
 /// Parse command line arguments
-fn parseArgs(allocator: std.mem.Allocator) !struct {
+fn parseArgs(allocator: std.mem.Allocator, init_args: std.process.Args) !struct {
     filter: TestFilter,
     config: ReporterConfig,
     parallel: usize,
@@ -18,7 +18,7 @@ fn parseArgs(allocator: std.mem.Allocator) !struct {
     var config = ReporterConfig.initDefault();
     var parallel: usize = 1;
 
-    var args = try std.process.argsWithAllocator(allocator);
+    var args = try init_args.iterateAllocator(allocator);
     defer args.deinit();
 
     // Skip program name
@@ -74,10 +74,10 @@ fn parseArgs(allocator: std.mem.Allocator) !struct {
 fn printHelp() !void {
     const stdout_file = if (builtin.os.tag == .windows) blk: {
         const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
-        break :blk std.fs.File{ .handle = handle };
-    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+        break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
+    } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var buffer: [4096]u8 = undefined;
-    var writer = stdout_file.writer(&buffer);
+    var writer = stdout_file.writer(std.Options.debug_io, &buffer);
     defer writer.interface.flush() catch {};
 
     try writer.interface.writeAll(
@@ -105,16 +105,15 @@ fn printHelp() !void {
     );
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    const parsed = try parseArgs(allocator);
+    const parsed = try parseArgs(allocator, init.minimal.args);
 
     // Get current working directory as root
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd = try std.process.getCwd(&cwd_buf);
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const cwd_len = try std.process.currentPath(std.Options.debug_io, &cwd_buf);
+    const cwd = cwd_buf[0..cwd_len];
 
     var test_runner = TestRunner.init(allocator, cwd, parsed.filter, parsed.config);
 

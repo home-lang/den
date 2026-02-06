@@ -53,11 +53,11 @@ pub const GitModule = struct {
         _ = self;
 
         // Try to open .git directory
-        var dir = std.fs.openDirAbsolute(cwd, .{}) catch return false;
-        defer dir.close();
+        var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, cwd, .{}) catch return false;
+        defer dir.close(std.Options.debug_io);
 
         // Check for .git directory or file (for submodules/worktrees)
-        dir.access(".git", .{}) catch return false;
+        dir.access(std.Options.debug_io, ".git", .{}) catch return false;
 
         return true;
     }
@@ -191,12 +191,12 @@ pub const GitModule = struct {
 
     /// Run a git command and return output
     fn runGitCommand(self: *GitModule, cwd: []const u8, argv: []const []const u8) ![]const u8 {
-        var child = std.process.Child.init(argv, self.allocator);
-        child.cwd = cwd;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
-
-        try child.spawn();
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = argv,
+            .cwd = .{ .path = cwd },
+            .stdout = .pipe,
+            .stderr = .ignore,
+        }) catch |err| return err;
 
         // Read stdout manually (readToEndAlloc not available in Zig 0.16)
         var output_buf = std.ArrayList(u8).empty;
@@ -211,25 +211,33 @@ pub const GitModule = struct {
             }
         }
 
-        _ = try child.wait();
+        _ = try child.wait(std.Options.debug_io);
 
         return try output_buf.toOwnedSlice(self.allocator);
     }
 
     /// Find git repository root from a given path
     pub fn findRepositoryRoot(self: *GitModule, start_path: []const u8) !?[]const u8 {
-        var current_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const current_path = try std.fs.realpath(start_path, &current_path_buf);
+        var current_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const current_path = blk: {
+            // Use libc realpath (std.fs.realpath removed in Zig 0.16)
+            var path_z: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            if (start_path.len >= path_z.len) return error.NameTooLong;
+            @memcpy(path_z[0..start_path.len], start_path);
+            path_z[start_path.len] = 0;
+            const result = std.c.realpath(path_z[0..start_path.len :0], &current_path_buf) orelse return error.FileNotFound;
+            break :blk std.mem.span(@as([*:0]const u8, @ptrCast(result)));
+        };
 
         var path = try self.allocator.dupe(u8, current_path);
         defer self.allocator.free(path);
 
         while (true) {
             // Check if .git exists in current directory
-            var dir = std.fs.openDirAbsolute(path, .{}) catch break;
-            defer dir.close();
+            var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, path, .{}) catch break;
+            defer dir.close(std.Options.debug_io);
 
-            dir.access(".git", .{}) catch {
+            dir.access(std.Options.debug_io, ".git", .{}) catch {
                 // No .git here, go up one level
                 const parent = std.fs.path.dirname(path) orelse break;
                 const parent_copy = try self.allocator.dupe(u8, parent);

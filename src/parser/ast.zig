@@ -602,12 +602,12 @@ pub fn deinitWordPart(part: *Word.Part, allocator: std.mem.Allocator) void {
 // ============================================================================
 
 pub const PrettyPrinter = struct {
-    writer: std.ArrayList(u8).Writer,
+    writer: std.array_list.Managed(u8).Writer,
     indent: usize = 0,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) PrettyPrinter {
-        var list = std.ArrayList(u8).init(allocator);
+        var list = std.array_list.Managed(u8).init(allocator);
         return .{
             .writer = list.writer(),
             .allocator = allocator,
@@ -617,7 +617,7 @@ pub const PrettyPrinter = struct {
     pub fn print(self: *PrettyPrinter, node: *const Node) ![]const u8 {
         try self.printNode(node);
         // Get the underlying ArrayList and return owned slice
-        const list_ptr: *std.ArrayList(u8) = @fieldParentPtr("writer", &self.writer);
+        const list_ptr: *std.array_list.Managed(u8) = @fieldParentPtr("writer", &self.writer);
         return list_ptr.toOwnedSlice();
     }
 

@@ -71,7 +71,7 @@ pub const TempDir = struct {
 
         var read_buf: [4096]u8 = undefined;
         while (true) {
-            const n = file.read(&read_buf) catch break;
+            const n = file.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
             if (n == 0) break;
             try result.appendSlice(self.allocator, read_buf[0..n]);
         }
@@ -271,7 +271,7 @@ pub const ShellFixture = struct {
 
         if (child.stdout) |stdout| {
             while (true) {
-                const n = stdout.read(&read_buf) catch break;
+                const n = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -279,7 +279,7 @@ pub const ShellFixture = struct {
 
         if (child.stderr) |stderr| {
             while (true) {
-                const n = stderr.read(&read_buf) catch break;
+                const n = stderr.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -287,7 +287,7 @@ pub const ShellFixture = struct {
 
         const term = try child.wait();
         const exit_code: u8 = switch (term) {
-            .Exited => |code| @intCast(code),
+            .exited => |code| @intCast(code),
             else => 1,
         };
 
@@ -326,7 +326,7 @@ pub fn runCommand(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
     var read_buf: [4096]u8 = undefined;
     if (child.stdout) |stdout| {
         while (true) {
-            const n = stdout.read(&read_buf) catch break;
+            const n = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
             if (n == 0) break;
             try stdout_list.appendSlice(allocator, read_buf[0..n]);
         }
@@ -456,7 +456,7 @@ pub const DenShellFixture = struct {
 
         if (child.stdout) |stdout| {
             while (true) {
-                const n = stdout.read(&read_buf) catch break;
+                const n = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -464,7 +464,7 @@ pub const DenShellFixture = struct {
 
         if (child.stderr) |stderr| {
             while (true) {
-                const n = stderr.read(&read_buf) catch break;
+                const n = stderr.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -472,7 +472,7 @@ pub const DenShellFixture = struct {
 
         const term = try child.wait();
         const exit_code: u8 = switch (term) {
-            .Exited => |code| @intCast(code),
+            .exited => |code| @intCast(code),
             else => 1,
         };
 
@@ -506,7 +506,7 @@ pub const DenShellFixture = struct {
 
         if (child.stdout) |stdout| {
             while (true) {
-                const n = stdout.read(&read_buf) catch break;
+                const n = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -514,7 +514,7 @@ pub const DenShellFixture = struct {
 
         if (child.stderr) |stderr| {
             while (true) {
-                const n = stderr.read(&read_buf) catch break;
+                const n = stderr.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -522,7 +522,7 @@ pub const DenShellFixture = struct {
 
         const term = try child.wait();
         const exit_code: u8 = switch (term) {
-            .Exited => |code| @intCast(code),
+            .exited => |code| @intCast(code),
             else => 1,
         };
 

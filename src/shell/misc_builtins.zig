@@ -15,6 +15,11 @@ const executor_mod = @import("../executor/mod.zig");
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 // Format parse error for display
 fn formatParseError(err: anyerror) []const u8 {
     return switch (err) {
@@ -41,19 +46,19 @@ pub fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
     const filename = cmd.args[0];
 
     // Read file contents
-    const file = std.fs.cwd().openFile(filename, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, filename, .{}) catch |err| {
         try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
         self.last_exit_code = 1;
         return;
     };
-    defer file.close();
+    defer file.close(std.Options.debug_io);
 
     const max_size = 1024 * 1024; // 1MB max
-    const file_size = file.getEndPos() catch |err| {
+    const file_size = (file.stat(std.Options.debug_io) catch |err| {
         try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
         self.last_exit_code = 1;
         return;
-    };
+    }).size;
     const read_size: usize = @min(file_size, max_size);
     const buffer = self.allocator.alloc(u8, read_size) catch |err| {
         try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
@@ -63,7 +68,7 @@ pub fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
     defer self.allocator.free(buffer);
     var total_read: usize = 0;
     while (total_read < read_size) {
-        const bytes_read = file.read(buffer[total_read..]) catch |err| {
+        const bytes_read = file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]}) catch |err| {
             try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
             self.last_exit_code = 1;
             return;
@@ -427,7 +432,7 @@ pub fn builtinHash(self: *Shell, cmd: *types.ParsedCommand) !void {
 
                 // Expand ~ in path
                 if (path.len > 0 and path[0] == '~') {
-                    if (std.posix.getenv("HOME")) |home| {
+                    if (getenv("HOME")) |home| {
                         if (path.len == 1) {
                             path = home;
                         } else if (path[1] == '/') {

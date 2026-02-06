@@ -70,11 +70,11 @@ pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         if (builtin.os.tag == .macos) {
             try IO.print("  Cores: {d}\n", .{try std.Thread.getCpuCount()});
         } else if (builtin.os.tag == .linux) {
-            if (std.fs.cwd().openFile("/proc/cpuinfo", .{})) |file| {
-                defer file.close();
+            if (std.Io.Dir.cwd().openFile(std.Options.debug_io,"/proc/cpuinfo", .{})) |file| {
+                defer file.close(std.Options.debug_io);
                 var cores: u32 = 0;
                 var buf: [4096]u8 = undefined;
-                const n = file.read(&buf) catch 0;
+                const n = file.readStreaming(std.Options.debug_io, &.{&buf}) catch 0;
                 var iter = std.mem.splitScalar(u8, buf[0..n], '\n');
                 while (iter.next()) |line| {
                     if (std.mem.startsWith(u8, line, "processor")) {
@@ -95,10 +95,10 @@ pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     if (show_memory) {
         try IO.print("\x1b[1;33mMemory:\x1b[0m\n", .{});
         if (builtin.os.tag == .linux) {
-            if (std.fs.cwd().openFile("/proc/meminfo", .{})) |file| {
-                defer file.close();
+            if (std.Io.Dir.cwd().openFile(std.Options.debug_io,"/proc/meminfo", .{})) |file| {
+                defer file.close(std.Options.debug_io);
                 var buf: [4096]u8 = undefined;
-                const n = file.read(&buf) catch 0;
+                const n = file.readStreaming(std.Options.debug_io, &.{&buf}) catch 0;
                 var iter = std.mem.splitScalar(u8, buf[0..n], '\n');
                 while (iter.next()) |line| {
                     if (std.mem.startsWith(u8, line, "MemTotal:")) {
@@ -124,8 +124,8 @@ pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     // Disk Info
     if (show_disk) {
         try IO.print("\x1b[1;33mDisk:\x1b[0m\n", .{});
-        const cwd = std.fs.cwd();
-        const stat = cwd.statFile(".") catch null;
+        const cwd = std.Io.Dir.cwd();
+        const stat = cwd.statFile(std.Options.debug_io, ".") catch null;
         if (stat) |_| {
             try IO.print("  (use 'df -h' for detailed disk info)\n", .{});
         } else {
@@ -138,10 +138,10 @@ pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     if (show_uptime) {
         try IO.print("\x1b[1;33mUptime:\x1b[0m\n", .{});
         if (builtin.os.tag == .linux) {
-            if (std.fs.cwd().openFile("/proc/uptime", .{})) |file| {
-                defer file.close();
+            if (std.Io.Dir.cwd().openFile(std.Options.debug_io,"/proc/uptime", .{})) |file| {
+                defer file.close(std.Options.debug_io);
                 var buf: [128]u8 = undefined;
-                const n = file.read(&buf) catch 0;
+                const n = file.readStreaming(std.Options.debug_io, &.{&buf}) catch 0;
                 if (n > 0) {
                     var iter = std.mem.splitScalar(u8, buf[0..n], ' ');
                     if (iter.next()) |uptime_str| {
@@ -211,11 +211,11 @@ pub fn netstats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     if (show_interfaces) {
         try IO.print("\x1b[1;33mNetwork Interfaces:\x1b[0m\n", .{});
         if (builtin.os.tag == .linux) {
-            var dir = std.fs.openDirAbsolute("/sys/class/net", .{ .iterate = true }) catch {
+            var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io,"/sys/class/net", .{ .iterate = true }) catch {
                 try IO.print("  (unable to list interfaces)\n", .{});
                 return 0;
             };
-            defer dir.close();
+            defer dir.close(std.Options.debug_io);
 
             var iter = dir.iterate();
             while (iter.next() catch null) |entry| {
@@ -313,7 +313,7 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         };
 
         if (pid == 0) {
-            const dev_null = std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
             std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
             std.posix.dup2(dev_null.handle, std.posix.STDOUT_FILENO) catch {};
             _ = std.posix.execvpeZ("nc", @ptrCast(&argv), getCEnviron()) catch {};
@@ -354,7 +354,7 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         };
 
         if (pid == 0) {
-            const dev_null = std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
             std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
             std.posix.dup2(dev_null.handle, std.posix.STDOUT_FILENO) catch {};
             _ = std.posix.execvpeZ("ping", @ptrCast(&argv), getCEnviron()) catch {};
@@ -478,13 +478,13 @@ pub fn logTail(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
 
     const path = file_path.?;
 
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,path, .{}) catch |err| {
         try IO.eprint("den: log-tail: cannot open '{s}': {}\n", .{ path, err });
         return 1;
     };
-    defer file.close();
+    defer file.close(std.Options.debug_io);
 
-    const stat = file.stat() catch |err| {
+    const stat = file.stat(std.Options.debug_io) catch |err| {
         try IO.eprint("den: log-tail: cannot stat '{s}': {}\n", .{ path, err });
         return 1;
     };
@@ -500,7 +500,7 @@ pub fn logTail(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
 
     var total_read: usize = 0;
     while (total_read < read_size) {
-        const n = file.read(content[total_read..]) catch |err| {
+        const n = file.readStreaming(std.Options.debug_io, &.{content[total_read..]}) catch |err| {
             try IO.eprint("den: log-tail: read error: {}\n", .{err});
             return 1;
         };
@@ -538,15 +538,15 @@ pub fn logTail(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
         var last_pos = stat.size;
 
         while (true) {
-            std.posix.nanosleep(0, 500_000_000);
+            std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(500_000_000), .awake) catch {};
 
-            const new_stat = file.stat() catch continue;
+            const new_stat = file.stat(std.Options.debug_io) catch continue;
             if (new_stat.size > last_pos) {
                 file.seekTo(last_pos) catch continue;
 
                 var buf: [4096]u8 = undefined;
                 while (true) {
-                    const n = file.read(&buf) catch break;
+                    const n = file.readStreaming(std.Options.debug_io, &.{&buf}) catch break;
                     if (n == 0) break;
 
                     var new_lines = std.mem.splitScalar(u8, buf[0..n], '\n');
@@ -660,7 +660,7 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
             std.posix.close(pipe_fds[0]);
             std.posix.dup2(pipe_fds[1], std.posix.STDOUT_FILENO) catch {};
             std.posix.close(pipe_fds[1]);
-            const dev_null = std.fs.openFileAbsolute("/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
             std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
             _ = std.posix.execvpeZ("ps", @ptrCast(&ps_args), getCEnviron()) catch {};
             std.posix.exit(127);
@@ -671,7 +671,7 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
             var total_read: usize = 0;
 
             while (total_read < buf.len) {
-                const n = std.posix.read(pipe_fds[0], buf[total_read..]) catch break;
+                const n = (std.Io.File{ .handle = pipe_fds[0], .flags = .{ .nonblocking = false } }).readStreaming(std.Options.debug_io, &.{buf[total_read..]}) catch break;
                 if (n == 0) break;
                 total_read += n;
             }
@@ -750,7 +750,7 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
         }
 
         if (iterations + 1 < max_iterations) {
-            std.posix.nanosleep(interval, 0);
+            std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(u64, interval) * 1_000_000_000), .awake) catch {};
         }
     }
 
@@ -821,14 +821,14 @@ pub fn logParse(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     var content_len: usize = 0;
 
     if (file_path) |path| {
-        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,path, .{}) catch |err| {
             try IO.eprint("den: log-parse: cannot open '{s}': {}\n", .{ path, err });
             return 1;
         };
-        defer file.close();
+        defer file.close(std.Options.debug_io);
 
         while (content_len < content_buf.len) {
-            const n = file.read(content_buf[content_len..]) catch break;
+            const n = file.readStreaming(std.Options.debug_io, &.{content_buf[content_len..]}) catch break;
             if (n == 0) break;
             content_len += n;
         }

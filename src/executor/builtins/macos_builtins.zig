@@ -3,6 +3,11 @@ const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 /// macOS-specific and system utility builtins
 /// Includes: copyssh, reloaddns, emptytrash, show, hide, dotfiles, library
 
@@ -22,7 +27,7 @@ pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
 
     // Get home directory
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: copyssh: HOME environment variable not set\n", .{});
         return 1;
     };
@@ -41,14 +46,14 @@ pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
     for (key_files) |key_suffix| {
         // Build full path
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const full_path = std.fmt.bufPrint(&path_buf, "{s}{s}", .{ home, key_suffix }) catch continue;
 
         // Try to open and read the key file
-        const file = std.fs.cwd().openFile(full_path, .{}) catch continue;
-        defer file.close();
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,full_path, .{}) catch continue;
+        defer file.close(std.Options.debug_io);
 
-        const bytes_read = file.read(&key_buffer) catch continue;
+        const bytes_read = file.readStreaming(std.Options.debug_io, &.{&key_buffer}) catch continue;
         if (bytes_read > 0) {
             found_key = key_buffer[0..bytes_read];
             found_path = key_suffix;
@@ -71,26 +76,26 @@ pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     // Copy to clipboard using platform-specific command
     if (builtin.os.tag == .macos) {
         // Use pbcopy on macOS
-        var child = std.process.Child.init(&[_][]const u8{"pbcopy"}, std.heap.page_allocator);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Ignore;
-        child.stderr_behavior = .Ignore;
-
-        child.spawn() catch {
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = &[_][]const u8{"pbcopy"},
+            .stdin = .pipe,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        }) catch {
             try IO.eprint("den: copyssh: failed to run pbcopy\n", .{});
             return 1;
         };
 
         if (child.stdin) |stdin| {
-            stdin.writeAll(trimmed_key) catch {
+            stdin.writeStreamingAll(std.Options.debug_io, trimmed_key) catch {
                 try IO.eprint("den: copyssh: failed to write to pbcopy\n", .{});
                 return 1;
             };
-            stdin.close();
+            stdin.close(std.Options.debug_io);
             child.stdin = null;
         }
 
-        _ = child.wait() catch {
+        _ = child.wait(std.Options.debug_io) catch {
             try IO.eprint("den: copyssh: pbcopy failed\n", .{});
             return 1;
         };
@@ -98,18 +103,18 @@ pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         try IO.print("SSH public key (~{s}) copied to clipboard\n", .{found_path.?});
     } else if (builtin.os.tag == .linux) {
         // Try xclip or xsel on Linux
-        var child = std.process.Child.init(&[_][]const u8{ "xclip", "-selection", "clipboard" }, std.heap.page_allocator);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Ignore;
-        child.stderr_behavior = .Ignore;
-
-        if (child.spawn()) |_| {
+        if (std.process.spawn(std.Options.debug_io, .{
+            .argv = &[_][]const u8{ "xclip", "-selection", "clipboard" },
+            .stdin = .pipe,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        })) |*child| {
             if (child.stdin) |stdin| {
-                stdin.writeAll(trimmed_key) catch {};
-                stdin.close();
+                stdin.writeStreamingAll(std.Options.debug_io, trimmed_key) catch {};
+                stdin.close(std.Options.debug_io);
                 child.stdin = null;
             }
-            _ = child.wait() catch {};
+            _ = child.wait(std.Options.debug_io) catch {};
             try IO.print("SSH public key (~{s}) copied to clipboard\n", .{found_path.?});
         } else |_| {
             // Fallback: just print the key
@@ -134,43 +139,43 @@ pub fn reloaddns(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     }
 
     // Run dscacheutil -flushcache
-    var flush_child = std.process.Child.init(&[_][]const u8{ "dscacheutil", "-flushcache" }, std.heap.page_allocator);
-    flush_child.stdin_behavior = .Ignore;
-    flush_child.stdout_behavior = .Ignore;
-    flush_child.stderr_behavior = .Pipe;
-
-    flush_child.spawn() catch {
+    var flush_child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{ "dscacheutil", "-flushcache" },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .pipe,
+    }) catch {
         try IO.eprint("den: reloaddns: failed to run dscacheutil\n", .{});
         return 1;
     };
 
-    const flush_result = flush_child.wait() catch {
+    const flush_result = flush_child.wait(std.Options.debug_io) catch {
         try IO.eprint("den: reloaddns: dscacheutil failed\n", .{});
         return 1;
     };
 
-    if (flush_result.Exited != 0) {
+    if (flush_result.exited != 0) {
         try IO.eprint("den: reloaddns: dscacheutil returned error\n", .{});
         return 1;
     }
 
     // Run killall -HUP mDNSResponder
-    var kill_child = std.process.Child.init(&[_][]const u8{ "killall", "-HUP", "mDNSResponder" }, std.heap.page_allocator);
-    kill_child.stdin_behavior = .Ignore;
-    kill_child.stdout_behavior = .Ignore;
-    kill_child.stderr_behavior = .Pipe;
-
-    kill_child.spawn() catch {
+    var kill_child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{ "killall", "-HUP", "mDNSResponder" },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .pipe,
+    }) catch {
         try IO.eprint("den: reloaddns: failed to run killall\n", .{});
         return 1;
     };
 
-    const kill_result = kill_child.wait() catch {
+    const kill_result = kill_child.wait(std.Options.debug_io) catch {
         try IO.eprint("den: reloaddns: killall failed\n", .{});
         return 1;
     };
 
-    if (kill_result.Exited != 0) {
+    if (kill_result.exited != 0) {
         try IO.eprint("den: reloaddns: killall mDNSResponder returned error (may need sudo)\n", .{});
         return 1;
     }
@@ -189,24 +194,24 @@ pub fn emptytrash(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     }
 
     // Use osascript to empty trash
-    var child = std.process.Child.init(&[_][]const u8{
-        "osascript", "-e", "tell application \"Finder\" to empty trash",
-    }, std.heap.page_allocator);
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Pipe;
-
-    child.spawn() catch {
+    var child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{
+            "osascript", "-e", "tell application \"Finder\" to empty trash",
+        },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .pipe,
+    }) catch {
         try IO.eprint("den: emptytrash: failed to run osascript\n", .{});
         return 1;
     };
 
-    const result = child.wait() catch {
+    const result = child.wait(std.Options.debug_io) catch {
         try IO.eprint("den: emptytrash: osascript failed\n", .{});
         return 1;
     };
 
-    if (result.Exited != 0) {
+    if (result.exited != 0) {
         try IO.eprint("den: emptytrash: failed to empty trash\n", .{});
         return 1;
     }
@@ -431,7 +436,7 @@ pub fn library(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 // ============ Library Helper Functions ============
 
 fn libraryList() !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
@@ -439,14 +444,14 @@ fn libraryList() !i32 {
     try IO.print("\x1b[1;36m=== Shell Libraries ===\x1b[0m\n\n", .{});
 
     // Check user library directory
-    var user_lib_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var user_lib_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const user_lib_path = std.fmt.bufPrint(&user_lib_buf, "{s}/.config/den/lib", .{home}) catch return 1;
 
     try IO.print("\x1b[1;33mUser libraries:\x1b[0m {s}\n", .{user_lib_path});
 
-    if (std.fs.cwd().openDir(user_lib_path, .{ .iterate = true })) |dir_val| {
+    if (std.Io.Dir.cwd().openDir(std.Options.debug_io,user_lib_path, .{ .iterate = true })) |dir_val| {
         var dir = dir_val;
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
         var iter = dir.iterate();
         var count: usize = 0;
         while (iter.next() catch null) |entry| {
@@ -467,9 +472,9 @@ fn libraryList() !i32 {
     // Check system library directory
     try IO.print("\n\x1b[1;33mSystem libraries:\x1b[0m /usr/local/share/den/lib\n", .{});
 
-    if (std.fs.cwd().openDir("/usr/local/share/den/lib", .{ .iterate = true })) |dir_val| {
+    if (std.Io.Dir.cwd().openDir(std.Options.debug_io,"/usr/local/share/den/lib", .{ .iterate = true })) |dir_val| {
         var dir = dir_val;
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
         var iter = dir.iterate();
         var count: usize = 0;
         while (iter.next() catch null) |entry| {
@@ -491,11 +496,11 @@ fn libraryList() !i32 {
 }
 
 fn libraryPath() !i32 {
-    const home = std.posix.getenv("HOME") orelse "";
+    const home = getenv("HOME") orelse "";
 
     try IO.print("\x1b[1;36m=== Library Search Paths ===\x1b[0m\n\n", .{});
 
-    var user_lib_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var user_lib_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const user_lib_path = std.fmt.bufPrint(&user_lib_buf, "{s}/.config/den/lib", .{home}) catch "(error)";
 
     const paths = [_][]const u8{
@@ -505,7 +510,7 @@ fn libraryPath() !i32 {
     };
 
     for (paths, 1..) |path, i| {
-        const exists = std.fs.cwd().statFile(path) catch null;
+        const exists = std.Io.Dir.cwd().statFile(std.Options.debug_io,path) catch null;
         const status = if (exists != null) "\x1b[1;32m+\x1b[0m" else "\x1b[2m-\x1b[0m";
         try IO.print("{s} {}. {s}\n", .{ status, i, path });
     }
@@ -514,38 +519,38 @@ fn libraryPath() !i32 {
 }
 
 fn libraryInfo(name: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
 
     // Try to find the library
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     // Try user lib directory
     const user_path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}.den", .{ home, name }) catch return 1;
 
     var lib_path: []const u8 = user_path;
-    var file = std.fs.cwd().openFile(user_path, .{}) catch blk: {
+    var file = std.Io.Dir.cwd().openFile(std.Options.debug_io,user_path, .{}) catch blk: {
         // Try with .sh extension
         const user_sh_path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}.sh", .{ home, name }) catch return 1;
         lib_path = user_sh_path;
-        break :blk std.fs.cwd().openFile(user_sh_path, .{}) catch {
+        break :blk std.Io.Dir.cwd().openFile(std.Options.debug_io,user_sh_path, .{}) catch {
             try IO.eprint("den: library: '{s}' not found\n", .{name});
             return 1;
         };
     };
-    defer file.close();
+    defer file.close(std.Options.debug_io);
 
     try IO.print("\x1b[1;36m=== Library: {s} ===\x1b[0m\n\n", .{name});
     try IO.print("\x1b[1;33mPath:\x1b[0m {s}\n", .{lib_path});
 
-    const stat = file.stat() catch return 1;
+    const stat = file.stat(std.Options.debug_io) catch return 1;
     try IO.print("\x1b[1;33mSize:\x1b[0m {} bytes\n", .{stat.size});
 
     // Read and show header comments
     var buf: [4096]u8 = undefined;
-    const n = file.read(&buf) catch 0;
+    const n = file.readStreaming(std.Options.debug_io, &.{&buf}) catch 0;
 
     if (n > 0) {
         try IO.print("\n\x1b[1;33mDescription:\x1b[0m\n", .{});
@@ -604,17 +609,17 @@ fn libraryInfo(name: []const u8) !i32 {
 }
 
 fn libraryLoad(name: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
 
     // Try to find the library
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     // If it's an absolute path, use directly
     if (name[0] == '/') {
-        _ = std.fs.cwd().statFile(name) catch {
+        _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,name) catch {
             try IO.eprint("den: library: '{s}' not found\n", .{name});
             return 1;
         };
@@ -628,7 +633,7 @@ fn libraryLoad(name: []const u8) !i32 {
     for (extensions) |ext| {
         const path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}{s}", .{ home, name, ext }) catch continue;
 
-        if (std.fs.cwd().statFile(path)) |_| {
+        if (std.Io.Dir.cwd().statFile(std.Options.debug_io,path)) |_| {
             try IO.print("\x1b[1;32m+\x1b[0m Found library: {s}\n", .{path});
             try IO.print("  \x1b[2mRun: source {s}\x1b[0m\n", .{path});
             return 0;
@@ -639,7 +644,7 @@ fn libraryLoad(name: []const u8) !i32 {
     for (extensions) |ext| {
         const path = std.fmt.bufPrint(&path_buf, "/usr/local/share/den/lib/{s}{s}", .{ name, ext }) catch continue;
 
-        if (std.fs.cwd().statFile(path)) |_| {
+        if (std.Io.Dir.cwd().statFile(std.Options.debug_io,path)) |_| {
             try IO.print("\x1b[1;32m+\x1b[0m Found library: {s}\n", .{path});
             try IO.print("  \x1b[2mRun: source {s}\x1b[0m\n", .{path});
             return 0;
@@ -652,26 +657,26 @@ fn libraryLoad(name: []const u8) !i32 {
 }
 
 fn libraryCreate(name: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
 
     // Create lib directory if needed
-    var lib_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var lib_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const lib_dir = std.fmt.bufPrint(&lib_dir_buf, "{s}/.config/den/lib", .{home}) catch return 1;
 
-    std.fs.cwd().makePath(lib_dir) catch |err| {
+    std.Io.Dir.cwd().makePath(std.Options.debug_io,lib_dir) catch |err| {
         try IO.eprint("den: library: cannot create directory: {}\n", .{err});
         return 1;
     };
 
     // Create library file
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}.den", .{ lib_dir, name }) catch return 1;
 
     // Check if file exists
-    if (std.fs.cwd().statFile(path)) |_| {
+    if (std.Io.Dir.cwd().statFile(std.Options.debug_io,path)) |_| {
         try IO.eprint("den: library: '{s}' already exists\n", .{path});
         return 1;
     } else |_| {}
@@ -695,13 +700,13 @@ fn libraryCreate(name: []const u8) !i32 {
     var content_buf: [2048]u8 = undefined;
     const content = std.fmt.bufPrint(&content_buf, template, .{ name, name, name }) catch return 1;
 
-    const file = std.fs.cwd().createFile(path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().createFile(std.Options.debug_io,path, .{}) catch |err| {
         try IO.eprint("den: library: cannot create file: {}\n", .{err});
         return 1;
     };
-    defer file.close();
+    defer file.close(std.Options.debug_io);
 
-    _ = file.write(content) catch |err| {
+    _ = file.writeStreamingAll(std.Options.debug_io, content) catch |err| {
         try IO.eprint("den: library: cannot write file: {}\n", .{err});
         return 1;
     };
@@ -718,7 +723,7 @@ fn libraryCreate(name: []const u8) !i32 {
 // ============ Dotfiles Helper Functions ============
 
 fn dotfilesList() !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -740,10 +745,10 @@ fn dotfilesList() !i32 {
     };
 
     for (dotfiles_list) |dotfile| {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ home, dotfile }) catch continue;
 
-        const stat = std.fs.cwd().statFile(path) catch {
+        const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,path) catch {
             continue;
         };
 
@@ -762,11 +767,11 @@ fn dotfilesList() !i32 {
     }
 
     // Check .config directory
-    var config_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var config_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const config_path = std.fmt.bufPrint(&config_path_buf, "{s}/.config", .{home}) catch return 0;
 
-    var dir = std.fs.cwd().openDir(config_path, .{ .iterate = true }) catch return 0;
-    defer dir.close();
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,config_path, .{ .iterate = true }) catch return 0;
+    defer dir.close(std.Options.debug_io);
 
     try IO.print("\n\x1b[1;33m.config/\x1b[0m\n", .{});
 
@@ -791,7 +796,7 @@ fn dotfilesList() !i32 {
 }
 
 fn dotfilesStatus() !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -808,14 +813,14 @@ fn dotfilesStatus() !i32 {
     };
 
     for (dotfiles_list) |dotfile| {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ home, dotfile }) catch continue;
 
-        var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var backup_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const backup_path = std.fmt.bufPrint(&backup_buf, "{s}/{s}.bak", .{ home, dotfile }) catch continue;
 
-        const exists = std.fs.cwd().statFile(path) catch null;
-        const backup_exists = std.fs.cwd().statFile(backup_path) catch null;
+        const exists = std.Io.Dir.cwd().statFile(std.Options.debug_io,path) catch null;
+        const backup_exists = std.Io.Dir.cwd().statFile(std.Options.debug_io,backup_path) catch null;
 
         if (exists != null) {
             const stat = exists.?;
@@ -837,38 +842,38 @@ fn dotfilesStatus() !i32 {
 }
 
 fn dotfilesLink(file: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
-    var target_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var target_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const target = std.fmt.bufPrint(&target_buf, "{s}/{s}", .{ home, file }) catch {
         try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
     };
 
     // Check if source file exists
-    _ = std.fs.cwd().statFile(file) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,file) catch {
         try IO.eprint("dotfiles link: source file '{s}' not found\n", .{file});
         return 1;
     };
 
     // Check if target already exists
-    if (std.fs.cwd().statFile(target)) |_| {
+    if (std.Io.Dir.cwd().statFile(std.Options.debug_io,target)) |_| {
         try IO.eprint("den: dotfiles: link: '{s}' already exists\n", .{target});
         try IO.eprint("den: dotfiles: use 'dotfiles backup {s}' first, then try again\n", .{file});
         return 1;
     } else |_| {}
 
     // Get absolute path to source
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cwd = std.posix.getcwd(&cwd_buf) catch {
         try IO.eprint("den: dotfiles: cannot get current directory\n", .{});
         return 1;
     };
 
-    var abs_source_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var abs_source_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const abs_source = std.fmt.bufPrint(&abs_source_buf, "{s}/{s}", .{ cwd, file }) catch {
         try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
@@ -885,18 +890,18 @@ fn dotfilesLink(file: []const u8) !i32 {
 }
 
 fn dotfilesUnlink(file: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
-    var target_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var target_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const target = std.fmt.bufPrint(&target_buf, "{s}/{s}", .{ home, file }) catch {
         try IO.eprint("den: dotfiles: path too long\n", .{});
         return 1;
     };
 
-    const stat = std.fs.cwd().statFile(target) catch {
+    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,target) catch {
         try IO.eprint("dotfiles unlink: '{s}' not found\n", .{target});
         return 1;
     };
@@ -906,7 +911,7 @@ fn dotfilesUnlink(file: []const u8) !i32 {
         return 1;
     }
 
-    std.fs.cwd().deleteFile(target) catch |err| {
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io,target) catch |err| {
         try IO.eprint("dotfiles unlink: failed to remove: {}\n", .{err});
         return 1;
     };
@@ -916,13 +921,13 @@ fn dotfilesUnlink(file: []const u8) !i32 {
 }
 
 fn dotfilesBackup(file: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
-    var source_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var source_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var backup_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     const source = if (file[0] == '/')
         file
@@ -940,13 +945,13 @@ fn dotfilesBackup(file: []const u8) !i32 {
     };
 
     // Check if source exists
-    _ = std.fs.cwd().statFile(source) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,source) catch {
         try IO.eprint("dotfiles backup: '{s}' not found\n", .{source});
         return 1;
     };
 
     // Copy file
-    std.fs.cwd().copyFile(source, std.fs.cwd(), backup, .{}) catch |err| {
+    std.Io.Dir.cwd().copyFile(std.Options.debug_io,source, std.Io.Dir.cwd(), backup, .{}) catch |err| {
         try IO.eprint("dotfiles backup: failed to copy: {}\n", .{err});
         return 1;
     };
@@ -956,13 +961,13 @@ fn dotfilesBackup(file: []const u8) !i32 {
 }
 
 fn dotfilesRestore(file: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
-    var target_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var target_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var backup_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     const target = if (file[0] == '/')
         file
@@ -980,13 +985,13 @@ fn dotfilesRestore(file: []const u8) !i32 {
     };
 
     // Check if backup exists
-    _ = std.fs.cwd().statFile(backup) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,backup) catch {
         try IO.eprint("dotfiles restore: backup '{s}' not found\n", .{backup});
         return 1;
     };
 
     // Copy backup to original
-    std.fs.cwd().copyFile(backup, std.fs.cwd(), target, .{}) catch |err| {
+    std.Io.Dir.cwd().copyFile(std.Options.debug_io,backup, std.Io.Dir.cwd(), target, .{}) catch |err| {
         try IO.eprint("dotfiles restore: failed to copy: {}\n", .{err});
         return 1;
     };
@@ -996,12 +1001,12 @@ fn dotfilesRestore(file: []const u8) !i32 {
 }
 
 fn dotfilesEdit(file: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = if (file[0] == '/' or file[0] == '.')
         file
     else blk: {
@@ -1013,7 +1018,7 @@ fn dotfilesEdit(file: []const u8) !i32 {
     };
 
     // Get editor
-    const editor = std.posix.getenv("EDITOR") orelse std.posix.getenv("VISUAL") orelse "vim";
+    const editor = getenv("EDITOR") orelse getenv("VISUAL") orelse "vim";
 
     try IO.print("Opening {s} with {s}...\n", .{ path, editor });
 
@@ -1028,7 +1033,7 @@ fn dotfilesEdit(file: []const u8) !i32 {
         var editor_buf: [256]u8 = undefined;
         const editor_z = std.fmt.bufPrintZ(&editor_buf, "{s}", .{editor}) catch std.posix.exit(127);
 
-        var path_z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path_z = std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path}) catch std.posix.exit(127);
 
         const argv = [_]?[*:0]const u8{ editor_z, path_z, null };
@@ -1042,13 +1047,13 @@ fn dotfilesEdit(file: []const u8) !i32 {
 }
 
 fn dotfilesDiff(file: []const u8) !i32 {
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
 
-    var current_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var backup_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var current_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var backup_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     const current = if (file[0] == '/')
         file
@@ -1066,12 +1071,12 @@ fn dotfilesDiff(file: []const u8) !i32 {
     };
 
     // Check both files exist
-    _ = std.fs.cwd().statFile(current) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,current) catch {
         try IO.eprint("dotfiles diff: '{s}' not found\n", .{current});
         return 1;
     };
 
-    _ = std.fs.cwd().statFile(backup) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,backup) catch {
         try IO.eprint("dotfiles diff: backup '{s}' not found\n", .{backup});
         return 1;
     };
@@ -1084,10 +1089,10 @@ fn dotfilesDiff(file: []const u8) !i32 {
 
     if (pid == 0) {
         // Child process
-        var backup_z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var backup_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const backup_z = std.fmt.bufPrintZ(&backup_z_buf, "{s}", .{backup}) catch std.posix.exit(127);
 
-        var current_z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var current_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const current_z = std.fmt.bufPrintZ(&current_z_buf, "{s}", .{current}) catch std.posix.exit(127);
 
         const argv = [_]?[*:0]const u8{ "diff", "-u", "--color=auto", backup_z, current_z, null };

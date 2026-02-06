@@ -104,7 +104,7 @@ pub fn isTty(fd: std.posix.fd_t) bool {
     if (builtin.os.tag == .windows) {
         return isTtyWindows(fd);
     } else {
-        return std.posix.isatty(fd);
+        return (std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } }).isTty(std.Options.debug_io) catch false;
     }
 }
 
@@ -154,7 +154,13 @@ fn getTerminalSizeWindows() ?TerminalSize {
 
 /// Get an environment variable.
 pub fn getEnv(key: []const u8) ?[]const u8 {
-    return std.posix.getenv(key);
+    // posix.getenv removed in Zig 0.16; use libc getenv
+    var buf: [512]u8 = undefined;
+    if (key.len >= buf.len) return null;
+    @memcpy(buf[0..key.len], key);
+    buf[key.len] = 0;
+    const result = std.c.getenv(buf[0..key.len :0]) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(result)));
 }
 
 /// Get the home directory.
@@ -327,13 +333,13 @@ pub fn closeFd(fd: std.posix.fd_t) void {
 
 /// Check if a file exists.
 pub fn fileExists(path: []const u8) bool {
-    std.fs.cwd().access(path, .{}) catch return false;
+    std.Io.Dir.cwd().access(std.Options.debug_io, path, .{}) catch return false;
     return true;
 }
 
 /// Check if a path is a directory.
 pub fn isDirectory(path: []const u8) bool {
-    const stat = std.fs.cwd().statFile(path) catch return false;
+    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, path) catch return false;
     return stat.kind == .directory;
 }
 
@@ -348,7 +354,7 @@ pub fn isExecutable(path: []const u8) bool {
             std.mem.endsWith(u8, path, ".bat") or
             std.mem.endsWith(u8, path, ".com");
     } else {
-        std.fs.cwd().access(path, .{ .mode = .execute }) catch return false;
+        std.Io.Dir.cwd().access(std.Options.debug_io, path, .{ .mode = .execute }) catch return false;
         return true;
     }
 }

@@ -219,7 +219,7 @@ pub const LoadableBuiltins = struct {
             @compileError("Loadable builtins not yet supported on Windows");
         } else {
             // POSIX: dlopen
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             if (path.len >= path_buf.len) return null;
             @memcpy(path_buf[0..path.len], path);
             path_buf[path.len] = 0;

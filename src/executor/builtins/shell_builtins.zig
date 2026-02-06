@@ -50,7 +50,7 @@ pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     // Save current directory as OLDPWD before changing
-    var old_cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var old_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const old_cwd = std.posix.getcwd(&old_cwd_buf) catch null;
 
     // Check if path is relative (doesn't start with / or ~ or .)
@@ -98,7 +98,7 @@ pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 }
 
 pub fn pwd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     // Parse flags
     var use_physical = false;
@@ -119,7 +119,7 @@ pub fn pwd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     } else {
         // -L: Logical path (default) - use PWD env var if set and valid
         if (ctx.getEnv("PWD")) |pwd_val| {
-            var real_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var real_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const real_cwd = std.posix.getcwd(&real_buf) catch null;
 
             if (real_cwd) |_| {

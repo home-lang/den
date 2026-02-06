@@ -20,7 +20,7 @@ fn testHook(ctx: *HookContext) !void {
 
 fn slowHook(ctx: *HookContext) !void {
     _ = ctx;
-    std.posix.nanosleep(0, 100_000_000); // Sleep for 100ms
+    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 100_000_000)), .awake) catch {}; // Sleep for 100ms
     test_hook_called = true;
 }
 

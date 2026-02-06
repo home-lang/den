@@ -50,8 +50,8 @@ pub const TestDiscovery = struct {
 
     /// Scan a directory recursively for test files
     fn scanDirectory(self: *TestDiscovery, dir_path: []const u8, modules: *std.ArrayList(TestModule)) !void {
-        var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return;
-        defer dir.close();
+        var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, dir_path, .{ .iterate = true }) catch return;
+        defer dir.close(std.Options.debug_io);
 
         var iter = dir.iterate();
         while (try iter.next()) |entry| {

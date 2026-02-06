@@ -174,7 +174,7 @@ fn applyHeredocOrHerestring(
     if (writer_pid == 0) {
         // Child: write content and exit
         std.posix.close(read_fd);
-        _ = std.posix.write(write_fd, content) catch {};
+        (std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } }).writeStreamingAll(std.Options.debug_io, content) catch {};
         std.posix.close(write_fd);
         std.posix.exit(0);
     }

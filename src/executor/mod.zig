@@ -268,67 +268,77 @@ pub const Executor = struct {
                 try argv_lists[i].append(self.allocator, arg);
             }
 
-            children_buffer[i] = std.process.Child.init(argv_lists[i].items, self.allocator);
+            // Determine behaviors
+            var stdin_behavior: std.process.SpawnOptions.StdIo = if (i > 0) .pipe else .inherit;
+            var stdout_behavior: std.process.SpawnOptions.StdIo = if (i < num_pipes) .pipe else .inherit;
+            var stderr_behavior: std.process.SpawnOptions.StdIo = .inherit;
 
-            // Set up stdin from previous command's stdout pipe
-            if (i > 0) {
-                children_buffer[i].stdin_behavior = .Pipe;
-                // After spawning previous child, we'll connect the pipes
-            } else {
-                children_buffer[i].stdin_behavior = .Inherit;
-            }
-
-            // Set up stdout to pipe to next command
-            if (i < num_pipes) {
-                children_buffer[i].stdout_behavior = .Pipe;
-            } else {
-                children_buffer[i].stdout_behavior = .Inherit;
-            }
-
-            children_buffer[i].stderr_behavior = .Inherit;
-
-            // Handle explicit redirections
+            // Handle explicit redirections to determine behaviors
             for (cmd.redirections) |redir| {
                 switch (redir.kind) {
                     .output_truncate, .output_append => {
-                        const file = try std.fs.cwd().createFile(redir.target, .{
-                            .truncate = (redir.kind == .output_truncate),
-                        });
                         if (redir.fd == 1) {
-                            children_buffer[i].stdout_behavior = .Ignore;
-                            children_buffer[i].stdout = file;
+                            stdout_behavior = .ignore;
                         } else if (redir.fd == 2) {
-                            children_buffer[i].stderr_behavior = .Ignore;
-                            children_buffer[i].stderr = file;
+                            stderr_behavior = .ignore;
                         }
                     },
                     .input => {
-                        const file = try std.fs.cwd().openFile(redir.target, .{});
-                        children_buffer[i].stdin_behavior = .Ignore;
-                        children_buffer[i].stdin = file;
+                        stdin_behavior = .ignore;
                     },
                     .input_output => {
-                        const file = try std.fs.cwd().openFile(redir.target, .{ .mode = .read_write });
-                        // For <> the fd defaults to 0 (stdin) but can be specified
                         if (redir.fd == 0) {
-                            children_buffer[i].stdin_behavior = .Ignore;
-                            children_buffer[i].stdin = file;
+                            stdin_behavior = .ignore;
                         } else if (redir.fd == 1) {
-                            children_buffer[i].stdout_behavior = .Ignore;
-                            children_buffer[i].stdout = file;
+                            stdout_behavior = .ignore;
                         }
                     },
                     .fd_duplicate => {
                         // Handle 2>&1 (stderr to stdout)
                         if (redir.fd == 2 and std.mem.eql(u8, redir.target, "1")) {
-                            children_buffer[i].stderr_behavior = .Inherit; // Will inherit stdout's destination
+                            stderr_behavior = .inherit; // Will inherit stdout's destination
                         }
                     },
                     else => {},
                 }
             }
 
-            try children_buffer[i].spawn();
+            children_buffer[i] = std.process.spawn(std.Options.debug_io, .{
+                .argv = argv_lists[i].items,
+                .stdin = stdin_behavior,
+                .stdout = stdout_behavior,
+                .stderr = stderr_behavior,
+            }) catch |err| return err;
+
+            // Handle explicit file redirections after spawn
+            for (cmd.redirections) |redir| {
+                switch (redir.kind) {
+                    .output_truncate, .output_append => {
+                        const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
+                            .truncate = (redir.kind == .output_truncate),
+                        });
+                        if (redir.fd == 1) {
+                            children_buffer[i].stdout = file;
+                        } else if (redir.fd == 2) {
+                            children_buffer[i].stderr = file;
+                        }
+                    },
+                    .input => {
+                        const file = try std.Io.Dir.cwd().openFile(std.Options.debug_io, redir.target, .{});
+                        children_buffer[i].stdin = file;
+                    },
+                    .input_output => {
+                        const file = try std.Io.Dir.cwd().openFile(std.Options.debug_io, redir.target, .{ .mode = .read_write });
+                        // For <> the fd defaults to 0 (stdin) but can be specified
+                        if (redir.fd == 0) {
+                            children_buffer[i].stdin = file;
+                        } else if (redir.fd == 1) {
+                            children_buffer[i].stdout = file;
+                        }
+                    },
+                    else => {},
+                }
+            }
 
             // Connect pipes between processes
             if (i > 0 and children_buffer[i - 1].stdout != null) {
@@ -340,9 +350,9 @@ pub const Executor = struct {
         var last_status: i32 = 0;
         var pipefail_status: i32 = 0;
         for (0..commands.len) |i| {
-            const term = try children_buffer[i].wait();
+            const term = try children_buffer[i].wait(std.Options.debug_io);
             const status: i32 = switch (term) {
-                .Exited => |code| code,
+                .exited => |code| code,
                 else => 1,
             };
             last_status = status;
@@ -591,11 +601,11 @@ pub const Executor = struct {
 
         // Check if it's a valid directory path
         // Try to open as directory
-        var dir = std.fs.cwd().openDir(path, .{}) catch {
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, path, .{}) catch {
             // Not a directory or doesn't exist
             return false;
         };
-        dir.close();
+        dir.close(std.Options.debug_io);
         return true;
     }
 
@@ -616,7 +626,7 @@ pub const Executor = struct {
         // Check if the file exists (either as absolute path, relative path, or in current directory)
         const file_exists = blk: {
             // Check if it's an absolute path or relative path that exists
-            std.fs.cwd().access(cmd_name, .{}) catch {
+            std.Io.Dir.cwd().access(std.Options.debug_io, cmd_name, .{}) catch {
                 break :blk false;
             };
             break :blk true;
@@ -967,7 +977,7 @@ pub const Executor = struct {
         if (std.mem.indexOf(u8, cmd, "/") != null or
             (builtin.os.tag == .windows and std.mem.indexOf(u8, cmd, "\\") != null))
         {
-            const stat = std.fs.cwd().statFile(cmd) catch return false;
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, cmd, .{}) catch return false;
             // Check if it's executable (Unix) or just exists (Windows)
             if (builtin.os.tag == .windows) {
                 return stat.kind == .file;
@@ -983,10 +993,10 @@ pub const Executor = struct {
             if (dir_path.len == 0) continue;
 
             // Try to open the directory and check for the file
-            var dir = std.fs.cwd().openDir(dir_path, .{}) catch continue;
-            defer dir.close();
+            var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{}) catch continue;
+            defer dir.close(std.Options.debug_io);
 
-            const stat = dir.statFile(cmd) catch continue;
+            const stat = dir.statFile(std.Options.debug_io, cmd, .{}) catch continue;
 
             // Check if it's executable
             if (builtin.os.tag == .windows) {
@@ -1008,10 +1018,10 @@ pub const Executor = struct {
                 while (path_iter.next()) |dir_path| {
                     if (dir_path.len == 0) continue;
 
-                    var dir = std.fs.cwd().openDir(dir_path, .{}) catch continue;
-                    defer dir.close();
+                    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{}) catch continue;
+                    defer dir.close(std.Options.debug_io);
 
-                    _ = dir.statFile(cmd_with_ext) catch continue;
+                    _ = dir.statFile(std.Options.debug_io, cmd_with_ext, .{}) catch continue;
                     return true;
                 }
             }
@@ -1030,15 +1040,51 @@ pub const Executor = struct {
             try argv_list.append(self.allocator, arg);
         }
 
-        // Create child process
-        var child = std.process.Child.init(argv_list.items, self.allocator);
+        // Determine behaviors from redirections
+        var stdin_behavior: std.process.SpawnOptions.StdIo = .inherit;
+        var stdout_behavior: std.process.SpawnOptions.StdIo = .inherit;
+        var stderr_behavior: std.process.SpawnOptions.StdIo = .inherit;
+        var has_stdout_file = false;
 
-        // Handle redirections (full support including FD duplication)
-        var stdout_file: ?std.fs.File = null;
+        // First pass: determine behaviors
         for (command.redirections) |redir| {
             switch (redir.kind) {
                 .output_truncate, .output_append => {
-                    const file = try std.fs.cwd().createFile(redir.target, .{
+                    if (redir.fd == 1) {
+                        stdout_behavior = .ignore;
+                        has_stdout_file = true;
+                    } else if (redir.fd == 2) {
+                        stderr_behavior = .ignore;
+                    }
+                },
+                .input => {
+                    stdin_behavior = .ignore;
+                },
+                .fd_duplicate => {
+                    if (redir.fd == 2 and std.mem.eql(u8, redir.target, "1")) {
+                        if (!has_stdout_file) {
+                            stderr_behavior = stdout_behavior;
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
+
+        // Create child process
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = argv_list.items,
+            .stdin = stdin_behavior,
+            .stdout = stdout_behavior,
+            .stderr = stderr_behavior,
+        }) catch |err| return err;
+
+        // Second pass: set file handles after spawn
+        var stdout_file: ?std.Io.File = null;
+        for (command.redirections) |redir| {
+            switch (redir.kind) {
+                .output_truncate, .output_append => {
+                    const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
                         .truncate = (redir.kind == .output_truncate),
                     });
                     if (redir.fd == 1) {
@@ -1049,7 +1095,7 @@ pub const Executor = struct {
                     }
                 },
                 .input => {
-                    const file = try std.fs.cwd().openFile(redir.target, .{});
+                    const file = try std.Io.Dir.cwd().openFile(std.Options.debug_io, redir.target, .{});
                     child.stdin = file;
                 },
                 .fd_duplicate => {
@@ -1057,9 +1103,6 @@ pub const Executor = struct {
                     if (redir.fd == 2 and std.mem.eql(u8, redir.target, "1")) {
                         if (stdout_file) |f| {
                             child.stderr = f;
-                        } else {
-                            // stderr follows stdout (both inherit or both go to same pipe)
-                            child.stderr_behavior = child.stdout_behavior;
                         }
                     }
                 },
@@ -1067,11 +1110,10 @@ pub const Executor = struct {
             }
         }
 
-        try child.spawn();
-        const term = try child.wait();
+        const term = try child.wait(std.Options.debug_io);
 
         return switch (term) {
-            .Exited => |code| code,
+            .exited => |code| code,
             else => 1,
         };
     }
@@ -1210,38 +1252,33 @@ pub const Executor = struct {
         }
 
         // Create detached child process
-        var child = std.process.Child.init(argv_list.items, self.allocator);
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = argv_list.items,
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        }) catch |err| return err;
 
-        // Detach from parent - don't wait for it
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Ignore;
-        child.stderr_behavior = .Ignore;
-
-        // Handle redirections
+        // Handle redirections after spawn
         for (command.redirections) |redir| {
             switch (redir.kind) {
                 .output_truncate, .output_append => {
-                    const file = try std.fs.cwd().createFile(redir.target, .{
+                    const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
                         .truncate = (redir.kind == .output_truncate),
                     });
                     if (redir.fd == 1) {
-                        child.stdout_behavior = .Ignore;
                         child.stdout = file;
                     } else if (redir.fd == 2) {
-                        child.stderr_behavior = .Ignore;
                         child.stderr = file;
                     }
                 },
                 .input => {
-                    const file = try std.fs.cwd().openFile(redir.target, .{});
-                    child.stdin_behavior = .Ignore;
+                    const file = try std.Io.Dir.cwd().openFile(std.Options.debug_io, redir.target, .{});
                     child.stdin = file;
                 },
                 else => {},
             }
         }
-
-        try child.spawn();
 
         // On Windows, process handle serves as the ID
         const handle = child.id;

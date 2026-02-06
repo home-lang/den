@@ -13,7 +13,7 @@ pub fn normalize(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
         return try allocator.dupe(u8, ".");
     }
 
-    var components = std.ArrayList([]const u8).init(allocator);
+    var components = std.array_list.Managed([]const u8).init(allocator);
     defer components.deinit();
 
     const is_absolute = isAbsolute(path);
@@ -44,7 +44,7 @@ pub fn normalize(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     }
 
     // Build result
-    var result = std.ArrayList(u8).init(allocator);
+    var result = std.array_list.Managed(u8).init(allocator);
     errdefer result.deinit();
 
     if (is_absolute) {
@@ -108,7 +108,7 @@ pub fn join(allocator: std.mem.Allocator, components: []const []const u8) ![]con
         return try allocator.dupe(u8, ".");
     }
 
-    var result = std.ArrayList(u8).init(allocator);
+    var result = std.array_list.Managed(u8).init(allocator);
     errdefer result.deinit();
 
     for (components, 0..) |component, i| {
@@ -217,7 +217,7 @@ pub const DirWalker = struct {
 
     pub const Entry = struct {
         path: []const u8,
-        kind: std.fs.Dir.Entry.Kind,
+        kind: std.Io.Dir.Entry.Kind,
         depth: u32,
     };
 
@@ -242,7 +242,7 @@ pub const DirWalker = struct {
     /// Walk directory tree and collect all entries
     /// Returns owned slice of Entry structs; caller must free both entries and their paths
     pub fn walk(self: *DirWalker) ![]Entry {
-        var results = std.ArrayList(Entry).init(self.allocator);
+        var results = std.array_list.Managed(Entry).init(self.allocator);
         errdefer {
             for (results.items) |entry| {
                 self.allocator.free(entry.path);
@@ -255,19 +255,19 @@ pub const DirWalker = struct {
         return results.toOwnedSlice();
     }
 
-    fn walkRecursive(self: *DirWalker, dir_path: []const u8, depth: u32, results: *std.ArrayList(Entry)) !void {
+    fn walkRecursive(self: *DirWalker, dir_path: []const u8, depth: u32, results: *std.array_list.Managed(Entry)) !void {
         // Check max depth
         if (self.max_depth) |max| {
             if (depth >= max) return;
         }
 
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch |err| {
             switch (err) {
                 error.AccessDenied, error.FileNotFound => return,
                 else => return err,
             }
         };
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
 
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
@@ -300,7 +300,7 @@ pub const DirWalker = struct {
                 try self.walkRecursive(full_path, depth + 1, results);
             } else if (entry.kind == .sym_link and self.follow_symlinks) {
                 // Check if symlink points to a directory
-                const stat = dir.statFile(entry.name) catch continue;
+                const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch continue;
                 if (stat.kind == .directory) {
                     try self.walkRecursive(full_path, depth + 1, results);
                 }
@@ -326,13 +326,13 @@ pub fn walkDir(allocator: std.mem.Allocator, root: []const u8, config: DirWalker
 /// Iterate over directory entries (non-recursive, lazy)
 pub const DirIterator = struct {
     allocator: std.mem.Allocator,
-    dir: std.fs.Dir,
-    iter: std.fs.Dir.Iterator,
+    dir: std.Io.Dir,
+    iter: std.Io.Dir.Iterator,
     base_path: []const u8,
     include_hidden: bool,
 
     pub fn init(allocator: std.mem.Allocator, path: []const u8, include_hidden: bool) !DirIterator {
-        const dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
+        const dir = try std.Io.Dir.cwd().openDir(std.Options.debug_io, path, .{ .iterate = true });
         return .{
             .allocator = allocator,
             .dir = dir,
@@ -343,10 +343,10 @@ pub const DirIterator = struct {
     }
 
     pub fn deinit(self: *DirIterator) void {
-        self.dir.close();
+        self.dir.close(std.Options.debug_io);
     }
 
-    pub fn next(self: *DirIterator) !?struct { name: []const u8, kind: std.fs.Dir.Entry.Kind } {
+    pub fn next(self: *DirIterator) !?struct { name: []const u8, kind: std.Io.Dir.Entry.Kind } {
         while (try self.iter.next()) |entry| {
             // Skip hidden files unless configured to include them
             if (!self.include_hidden and entry.name.len > 0 and entry.name[0] == '.') {

@@ -275,7 +275,7 @@ pub const PluginAPI = struct {
     pub fn getCurrentDirectory(self: *PluginAPI) ?[]const u8 {
         _ = self.shell orelse return null;
 
-        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const cwd = std.posix.getcwd(&cwd_buf) catch return null;
         return self.allocator.dupe(u8, cwd) catch null;
     }

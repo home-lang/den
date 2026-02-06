@@ -1,5 +1,14 @@
 const std = @import("std");
 
+fn getenvFromSlice(key: []const u8) ?[]const u8 {
+    var env_buf: [512]u8 = undefined;
+    if (key.len >= env_buf.len) return null;
+    @memcpy(env_buf[0..key.len], key);
+    env_buf[key.len] = 0;
+    const value = std.c.getenv(env_buf[0..key.len :0]) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 /// Hook types that plugins can register
 pub const HookType = enum {
     pre_command,   // Before command execution
@@ -129,14 +138,14 @@ pub const CustomHookRegistry = struct {
 
         switch (condition) {
             .file_exists => |path| {
-                _ = std.fs.cwd().statFile(path) catch return false;
+                _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{}) catch return false;
                 return true;
             },
             .env_set => |name| {
-                return std.posix.getenv(name) != null;
+                return getenvFromSlice(name) != null;
             },
             .env_equals => |eq| {
-                const value = std.posix.getenv(eq.name) orelse return false;
+                const value = getenvFromSlice(eq.name) orelse return false;
                 return std.mem.eql(u8, value, eq.value);
             },
             .always => return true,
@@ -424,7 +433,8 @@ pub const PluginRegistry = struct {
                             err,
                         }) catch "[Plugin Error] Failed to format error message\n";
 
-                        _ = std.posix.write(std.posix.STDERR_FILENO, msg) catch {};
+                        const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+                        stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
                     }
                 };
             }

@@ -3,13 +3,19 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Profiler = @import("profiler.zig").Profiler;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    var args_iter = try init.minimal.args.iterateAllocator(allocator);
+    defer args_iter.deinit();
+
+    // Collect args into a slice
+    var args_list = std.array_list.Managed([]const u8).init(allocator);
+    defer args_list.deinit();
+    while (args_iter.next()) |arg| {
+        try args_list.append(arg);
+    }
+    const args = args_list.items;
 
     if (args.len < 2) {
         try printHelp();
@@ -41,10 +47,10 @@ pub fn main() !void {
 fn printHelp() !void {
     const stdout_file = if (builtin.os.tag == .windows) blk: {
         const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
-        break :blk std.fs.File{ .handle = handle };
-    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+        break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
+    } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var buffer: [4096]u8 = undefined;
-    var writer = stdout_file.writer(&buffer);
+    var writer = stdout_file.writer(std.Options.debug_io, &buffer);
     defer writer.interface.flush() catch {};
 
     try writer.interface.writeAll(
@@ -83,10 +89,10 @@ fn printHelp() !void {
 fn listBenchmarks() !void {
     const stdout_file = if (builtin.os.tag == .windows) blk: {
         const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
-        break :blk std.fs.File{ .handle = handle };
-    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+        break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
+    } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var buffer: [4096]u8 = undefined;
-    var writer = stdout_file.writer(&buffer);
+    var writer = stdout_file.writer(std.Options.debug_io, &buffer);
     defer writer.interface.flush() catch {};
 
     try writer.interface.writeAll(
@@ -120,10 +126,10 @@ fn listBenchmarks() !void {
 fn runBenchmark(allocator: std.mem.Allocator, name: []const u8) !void {
     const stdout_file = if (builtin.os.tag == .windows) blk: {
         const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
-        break :blk std.fs.File{ .handle = handle };
-    } else std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+        break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
+    } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var buffer: [4096]u8 = undefined;
-    var writer = stdout_file.writer(&buffer);
+    var writer = stdout_file.writer(std.Options.debug_io, &buffer);
     defer writer.interface.flush() catch {};
 
     try writer.interface.print("Running {s} benchmark...\n\n", .{name});
@@ -149,11 +155,13 @@ fn runExternalBenchmark(allocator: std.mem.Allocator, bench_name: []const u8) !v
     const exe_path = try std.fmt.allocPrint(allocator, "./zig-out/bin/{s}", .{bench_name});
     defer allocator.free(exe_path);
 
-    var child = std.process.Child.init(&[_][]const u8{exe_path}, allocator);
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
+    var child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{exe_path},
+        .stdout = .inherit,
+        .stderr = .inherit,
+    }) catch |err| return err;
 
-    _ = try child.spawnAndWait();
+    _ = try child.wait(std.Options.debug_io);
 }
 
 fn runAllBenchmarks(allocator: std.mem.Allocator) !void {

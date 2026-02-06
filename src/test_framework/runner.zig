@@ -80,11 +80,11 @@ pub const TestRunner = struct {
         try cmd_args.append(self.allocator, test_step);
 
         // Execute test
-        var child = std.process.Child.init(cmd_args.items, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-
-        child.spawn() catch |err| {
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = cmd_args.items,
+            .stdout = .pipe,
+            .stderr = .pipe,
+        }) catch |err| {
             const end_time = std.time.Instant.now() catch start_time;
             const duration = end_time.since(start_time);
             const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to spawn test: {any}", .{err});
@@ -121,7 +121,7 @@ pub const TestRunner = struct {
         }
         const stderr = stderr_buf.items;
 
-        const term = child.wait() catch |err| {
+        const term = child.wait(std.Options.debug_io) catch |err| {
             const end_time = std.time.Instant.now() catch start_time;
             const duration = end_time.since(start_time);
             const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to wait for test: {any}", .{err});
@@ -134,7 +134,7 @@ pub const TestRunner = struct {
         const duration = end_time.since(start_time);
 
         switch (term) {
-            .Exited => |code| {
+            .exited => |code| {
                 if (code == 0) {
                     result.setPassed(duration);
                 } else {

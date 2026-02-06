@@ -138,7 +138,7 @@ pub fn bookmark(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         const name = command.args[1];
 
         // Get current directory
-        var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const cwd = std.posix.getcwd(&cwd_buf) catch {
             try IO.eprint("den: bookmark: failed to get current directory\n", .{});
             return 1;

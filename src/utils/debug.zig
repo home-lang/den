@@ -11,13 +11,11 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
     const output = std.fmt.bufPrint(&buf, "[DEBUG] " ++ fmt ++ "\n", args) catch return;
 
-    if (builtin.os.tag == .windows) {
-        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return;
-        const stderr = std.fs.File{ .handle = handle };
-        _ = stderr.write(output) catch {};
-    } else {
-        _ = std.posix.write(std.posix.STDERR_FILENO, output) catch {};
-    }
+    const stderr = std.Io.File{ .handle = if (builtin.os.tag == .windows)
+        (std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return)
+    else
+        std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+    stderr.writeStreamingAll(std.Options.debug_io, output) catch {};
 }
 
 /// Dump memory contents in hex format
@@ -69,15 +67,12 @@ pub fn hexDump(label: []const u8, data: []const u8) void {
         }
 
         const output = buf[0..pos];
-        if (builtin.os.tag == .windows) {
-            const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse continue;
-            const stderr = std.fs.File{ .handle = handle };
-            _ = stderr.write(output) catch {};
-            _ = stderr.write("\n") catch {};
-        } else {
-            _ = std.posix.write(std.posix.STDERR_FILENO, output) catch {};
-            _ = std.posix.write(std.posix.STDERR_FILENO, "\n") catch {};
-        }
+        const stderr = std.Io.File{ .handle = if (builtin.os.tag == .windows)
+            (std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse continue)
+        else
+            std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+        stderr.writeStreamingAll(std.Options.debug_io, output) catch {};
+        stderr.writeStreamingAll(std.Options.debug_io, "\n") catch {};
     }
 }
 

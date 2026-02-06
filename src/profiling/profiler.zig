@@ -69,7 +69,7 @@ pub const ProfileEvent = struct {
 /// Main profiler for collecting and analyzing performance data
 pub const Profiler = struct {
     allocator: std.mem.Allocator,
-    events: std.ArrayList(ProfileEvent),
+    events: std.array_list.Managed(ProfileEvent),
     enabled: bool,
     output_file: ?[]const u8,
     start_time: std.time.Instant,
@@ -79,7 +79,7 @@ pub const Profiler = struct {
         const profiler = try allocator.create(Profiler);
         profiler.* = .{
             .allocator = allocator,
-            .events = std.ArrayList(ProfileEvent).init(allocator),
+            .events = std.array_list.Managed(ProfileEvent).init(allocator),
             .enabled = false,
             .output_file = null,
             .start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant),
@@ -133,7 +133,7 @@ pub const Profiler = struct {
             .thread_id = std.Thread.getCurrentId(),
         };
 
-        try self.events.append(self.allocator, event);
+        try self.events.append(event);
     }
 
     pub fn beginZone(self: *Profiler, name: []const u8) ProfileZone {
@@ -232,18 +232,20 @@ pub const Profiler = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const file = try std.fs.cwd().createFile(file_path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, file_path, .{});
+        defer file.close(std.Options.debug_io);
 
-        var writer = file.writer();
+        var buffer: [4096]u8 = undefined;
+        var writer = file.writer(std.Options.debug_io, &buffer);
+        defer writer.interface.flush() catch {};
 
-        try writer.writeAll("[\n");
+        try writer.interface.writeAll("[\n");
 
         for (self.events.items, 0..) |event, i| {
             const ts_us = @divFloor(event.timestamp, 1000);
             const dur_us = @divFloor(event.duration_ns, 1000);
 
-            try writer.print(
+            try writer.interface.print(
                 \\  {{"name": "{s}", "cat": "{s}", "ph": "X", "ts": {d}, "dur": {d}, "pid": 1, "tid": {d}}}
             , .{
                 event.name,
@@ -254,13 +256,13 @@ pub const Profiler = struct {
             });
 
             if (i < self.events.items.len - 1) {
-                try writer.writeAll(",\n");
+                try writer.interface.writeAll(",\n");
             } else {
-                try writer.writeAll("\n");
+                try writer.interface.writeAll("\n");
             }
         }
 
-        try writer.writeAll("]\n");
+        try writer.interface.writeAll("]\n");
     }
 
     /// Clear all collected events
@@ -346,7 +348,7 @@ test "Profiler report generation" {
     try profiler.recordEvent("parse", .parsing, 500_000);
     try profiler.recordEvent("execute", .command_execution, 2_000_000);
 
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.array_list.Managed(u8).init(allocator);
     defer buffer.deinit();
 
     try profiler.generateReport(buffer.writer());

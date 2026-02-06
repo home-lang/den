@@ -40,10 +40,11 @@ pub const TestReporter = struct {
         _ = self;
         if (builtin.os.tag == .windows) {
             const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.NoStdOut;
-            const stdout = std.fs.File{ .handle = handle };
+            const stdout = std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
             _ = try stdout.write(bytes);
         } else {
-            _ = try std.posix.write(std.posix.STDOUT_FILENO, bytes);
+            const stdout_posix = std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+            try stdout_posix.writeStreamingAll(std.Options.debug_io, bytes);
         }
     }
 

@@ -82,7 +82,7 @@ pub const BuiltinRegistry = struct {
 
     /// Get list of all builtins
     pub fn getAllBuiltins(self: *const BuiltinRegistry, allocator: std.mem.Allocator) ![][]const u8 {
-        var list = std.ArrayList([]const u8).init(allocator);
+        var list = std.array_list.Managed([]const u8).init(allocator);
         var iter = self.builtins.keyIterator();
         while (iter.next()) |key| {
             try list.append(key.*);
@@ -92,7 +92,7 @@ pub const BuiltinRegistry = struct {
 
     /// Get list of disabled builtins
     pub fn getDisabledBuiltins(self: *const BuiltinRegistry, allocator: std.mem.Allocator) ![][]const u8 {
-        var list = std.ArrayList([]const u8).init(allocator);
+        var list = std.array_list.Managed([]const u8).init(allocator);
         var iter = self.disabled.keyIterator();
         while (iter.next()) |key| {
             try list.append(key.*);

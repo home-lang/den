@@ -3,6 +3,11 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const builtin = @import("builtin");
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 /// Standalone utility builtins that don't require shell state.
 /// These can operate with just an allocator.
 
@@ -381,7 +386,7 @@ pub fn clear(command: *types.ParsedCommand) !i32 {
 pub fn copyssh(command: *types.ParsedCommand) !i32 {
     _ = command;
 
-    const home = std.posix.getenv("HOME") orelse {
+    const home = getenv("HOME") orelse {
         try IO.eprint("den: copyssh: HOME environment variable not set\n", .{});
         return 1;
     };
@@ -396,13 +401,13 @@ pub fn copyssh(command: *types.ParsedCommand) !i32 {
     var key_buffer: [8192]u8 = undefined;
 
     for (key_files) |key_suffix| {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const full_path = std.fmt.bufPrint(&path_buf, "{s}{s}", .{ home, key_suffix }) catch continue;
 
-        const file = std.fs.cwd().openFile(full_path, .{}) catch continue;
-        defer file.close();
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, full_path, .{}) catch continue;
+        defer file.close(std.Options.debug_io);
 
-        const bytes_read = file.read(&key_buffer) catch continue;
+        const bytes_read = file.readStreaming(std.Options.debug_io, &.{&key_buffer}) catch continue;
         if (bytes_read > 0) {
             try IO.print("Found SSH key: {s}\n", .{full_path});
             try IO.print("Key content:\n{s}\n", .{key_buffer[0..bytes_read]});
@@ -424,7 +429,7 @@ pub fn copyssh(command: *types.ParsedCommand) !i32 {
 /// whoami - print current username
 pub fn whoami(command: *types.ParsedCommand) !i32 {
     _ = command;
-    const user = std.posix.getenv("USER") orelse std.posix.getenv("USERNAME") orelse "unknown";
+    const user = getenv("USER") orelse getenv("USERNAME") orelse "unknown";
     try IO.print("{s}\n", .{user});
     return 0;
 }

@@ -3,6 +3,46 @@ const posix = std.posix;
 const builtin = @import("builtin");
 
 // ============================================================================
+// Zig 0.16 IO compatibility
+// ============================================================================
+
+/// Get the runtime's Io instance for file operations.
+/// This uses the debug_io which is initialized by the Zig runtime before main().
+pub fn getIo() std.Io {
+    return std.Options.debug_io;
+}
+
+/// Compatibility wrapper: open a file relative to cwd
+pub fn cwdOpenFile(sub_path: []const u8, flags: std.Io.File.OpenFlags) std.Io.File.OpenError!std.Io.File {
+    return std.Io.Dir.cwd().openFile(getIo(), sub_path, flags);
+}
+
+/// Compatibility wrapper: create a file relative to cwd
+pub fn cwdCreateFile(sub_path: []const u8, flags: std.Io.File.CreateFlags) std.Io.File.OpenError!std.Io.File {
+    return std.Io.Dir.cwd().createFile(getIo(), sub_path, flags);
+}
+
+/// Compatibility wrapper: check access relative to cwd
+pub fn cwdAccess(sub_path: []const u8, flags: std.Io.Dir.AccessOptions) std.Io.Dir.AccessError!void {
+    return std.Io.Dir.cwd().access(getIo(), sub_path, flags);
+}
+
+/// Compatibility wrapper: make directory path relative to cwd
+pub fn cwdMakePath(sub_path: []const u8) std.Io.Dir.CreateDirPathError!void {
+    return std.Io.Dir.cwd().createDirPath(getIo(), sub_path);
+}
+
+/// Write bytes directly to a file descriptor (low-level, no Io needed)
+pub fn rawWrite(fd: posix.fd_t, bytes: []const u8) void {
+    if (builtin.link_libc) {
+        _ = std.c.write(fd, bytes.ptr, bytes.len);
+    } else {
+        // Fallback: use inline assembly or OS-specific syscall
+        _ = std.os.linux.write(fd, bytes.ptr, bytes.len);
+    }
+}
+
+// ============================================================================
 // Buffered I/O for reduced syscall overhead
 // ============================================================================
 
@@ -97,8 +137,8 @@ pub const BufferedStdinReader = struct {
     fn readStdinRaw(buffer: []u8) !usize {
         if (builtin.os.tag == .windows) {
             const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.NoStdIn;
-            const stdin = std.fs.File{ .handle = handle };
-            return stdin.read(buffer) catch |err| {
+            const stdin = std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
+            return stdin.readStreaming(std.Options.debug_io, &.{buffer}) catch |err| {
                 if (err == error.EndOfStream) return 0;
                 return err;
             };
@@ -126,31 +166,29 @@ pub const IO = struct {
     /// Write string to stdout (cross-platform)
     pub fn print(comptime fmt: []const u8, args: anytype) !void {
         // Use File API directly to write to stdout
-        const stdout_file = std.fs.File{ .handle = if (builtin.os.tag == .windows)
+        const stdout_file = std.Io.File{ .handle = if (builtin.os.tag == .windows)
             std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) catch return
         else
-            posix.STDOUT_FILENO
-        };
+            posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
 
         // Format the string
         var buf: [4096]u8 = undefined;
         const formatted = try std.fmt.bufPrint(&buf, fmt, args);
-        try stdout_file.writeAll(formatted);
+        try stdout_file.writeStreamingAll(std.Options.debug_io, formatted);
     }
 
     /// Write string to stderr (cross-platform)
     pub fn eprint(comptime fmt: []const u8, args: anytype) !void {
         // Use File API directly to write to stderr
-        const stderr_file = std.fs.File{ .handle = if (builtin.os.tag == .windows)
+        const stderr_file = std.Io.File{ .handle = if (builtin.os.tag == .windows)
             std.os.windows.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) catch return
         else
-            posix.STDERR_FILENO
-        };
+            posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
 
         // Format the string
         var buf: [4096]u8 = undefined;
         const formatted = try std.fmt.bufPrint(&buf, fmt, args);
-        try stderr_file.writeAll(formatted);
+        try stderr_file.writeStreamingAll(std.Options.debug_io, formatted);
     }
 
     /// Read a line from stdin (blocking)
@@ -163,12 +201,12 @@ pub const IO = struct {
         if (builtin.os.tag == .windows) {
             // Use Windows stdin handle with read loop (similar to POSIX path)
             const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.NoStdIn;
-            const stdin = std.fs.File{ .handle = handle };
+            const stdin = std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
 
             while (pos < buffer.len) {
                 var char_buf: [1]u8 = undefined;
 
-                const bytes_read = stdin.read(&char_buf) catch {
+                const bytes_read = stdin.readStreaming(std.Options.debug_io, &.{&char_buf}) catch {
                     if (pos == 0) return null;
                     return try allocator.dupe(u8, buffer[0..pos]);
                 };
@@ -236,13 +274,11 @@ pub const IO = struct {
 
     /// Write bytes to stdout
     pub fn writeBytes(bytes: []const u8) !void {
-        if (builtin.os.tag == .windows) {
-            var stdout = std.io.getStdOut();
-            const writer = stdout.writer();
-            try writer.writeAll(bytes);
-        } else {
-            _ = try posix.write(posix.STDOUT_FILENO, bytes);
-        }
+        const stdout_file = std.Io.File{ .handle = if (builtin.os.tag == .windows)
+            std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) catch return
+        else
+            posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+        try stdout_file.writeStreamingAll(std.Options.debug_io, bytes);
     }
 
     /// Flush stdout (no-op on Unix, as writes are unbuffered)
@@ -252,8 +288,8 @@ pub const IO = struct {
 
     /// Read entire file contents into allocated buffer (Zig 0.16 compatible)
     /// Replaces deprecated file.readToEndAlloc()
-    pub fn readFileAlloc(allocator: std.mem.Allocator, file: std.fs.File, max_size: usize) ![]u8 {
-        const file_size = try file.getEndPos();
+    pub fn readFileAlloc(allocator: std.mem.Allocator, file: std.Io.File, max_size: usize) ![]u8 {
+        const file_size = (try file.stat(std.Options.debug_io)).size;
         const read_size: usize = @min(file_size, max_size);
         const buffer = try allocator.alloc(u8, read_size);
         errdefer allocator.free(buffer);
@@ -261,7 +297,7 @@ pub const IO = struct {
         // Read in a loop until buffer is full or EOF
         var total_read: usize = 0;
         while (total_read < read_size) {
-            const bytes_read = try file.read(buffer[total_read..]);
+            const bytes_read = try file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]});
             if (bytes_read == 0) break; // EOF
             total_read += bytes_read;
         }
@@ -323,13 +359,11 @@ pub const BufferedStdoutWriter = struct {
     pub fn flush(self: *BufferedStdoutWriter) !void {
         if (self.pos == 0) return;
 
-        if (builtin.os.tag == .windows) {
-            const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return;
-            const stdout = std.fs.File{ .handle = handle };
-            try stdout.writeAll(self.buffer[0..self.pos]);
-        } else {
-            _ = try posix.write(posix.STDOUT_FILENO, self.buffer[0..self.pos]);
-        }
+        const stdout = std.Io.File{ .handle = if (builtin.os.tag == .windows)
+            (std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return)
+        else
+            posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+        try stdout.writeStreamingAll(std.Options.debug_io, self.buffer[0..self.pos]);
         self.pos = 0;
     }
 

@@ -476,7 +476,7 @@ pub fn isTerminal() bool {
         var mode: win.DWORD = 0;
         return win.kernel32.GetConsoleMode(handle, &mode) != 0;
     } else {
-        return std.posix.isatty(std.posix.STDOUT_FILENO);
+        return (std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } }).isTty(std.Options.debug_io) catch false;
     }
 }
 
@@ -484,24 +484,20 @@ pub fn isTerminal() bool {
 pub const Output = struct {
     /// Write to stdout
     pub fn write(bytes: []const u8) !void {
-        if (builtin.os.tag == .windows) {
-            const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.NoStdOut;
-            const stdout = std.fs.File{ .handle = handle };
-            _ = try stdout.write(bytes);
-        } else {
-            _ = try std.posix.write(std.posix.STDOUT_FILENO, bytes);
-        }
+        const stdout = std.Io.File{ .handle = if (builtin.os.tag == .windows)
+            (try std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE))
+        else
+            std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+        try stdout.writeStreamingAll(std.Options.debug_io, bytes);
     }
 
     /// Write to stderr
     pub fn writeErr(bytes: []const u8) !void {
-        if (builtin.os.tag == .windows) {
-            const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return error.NoStdErr;
-            const stderr = std.fs.File{ .handle = handle };
-            _ = try stderr.write(bytes);
-        } else {
-            _ = try std.posix.write(std.posix.STDERR_FILENO, bytes);
-        }
+        const stderr = std.Io.File{ .handle = if (builtin.os.tag == .windows)
+            (try std.os.windows.GetStdHandle(std.os.windows.STD_ERROR_HANDLE))
+        else
+            std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+        try stderr.writeStreamingAll(std.Options.debug_io, bytes);
     }
 
     /// Print with ANSI formatting

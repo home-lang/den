@@ -86,15 +86,15 @@ pub const History = struct {
         history_count: *usize,
         history_file_path: []const u8,
     ) !void {
-        const file = std.fs.cwd().openFile(history_file_path, .{}) catch |err| {
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, history_file_path, .{}) catch |err| {
             if (err == error.FileNotFound) return; // File doesn't exist yet
             return err;
         };
-        defer file.close();
+        defer file.close(std.Options.debug_io);
 
         // Read entire file
         const max_size = 1024 * 1024; // 1MB max
-        const file_size = try file.getEndPos();
+        const file_size = (try file.stat(std.Options.debug_io)).size;
         const read_size: usize = @min(file_size, max_size);
         const buffer = try allocator.alloc(u8, read_size);
         defer allocator.free(buffer);
@@ -134,28 +134,28 @@ pub const History = struct {
 
     /// Save the entire history buffer to the history file.
     pub fn save(history: []?[]const u8, history_file_path: []const u8) !void {
-        const file = try std.fs.cwd().createFile(history_file_path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, history_file_path, .{});
+        defer file.close(std.Options.debug_io);
 
         for (history) |maybe_entry| {
             if (maybe_entry) |entry| {
-                _ = try file.writeAll(entry);
-                _ = try file.write("\n");
+                try file.writeStreamingAll(std.Options.debug_io, entry);
+                try file.writeStreamingAll(std.Options.debug_io, "\n");
             }
         }
     }
 
     /// Append a single command to the history file.
     pub fn appendToFile(history_file_path: []const u8, command: []const u8) !void {
-        const file = try std.fs.cwd().openFile(history_file_path, .{ .mode = .write_only });
-        defer file.close();
+        const file = try std.Io.Dir.cwd().openFile(std.Options.debug_io, history_file_path, .{ .mode = .write_only });
+        defer file.close(std.Options.debug_io);
 
         // Seek to end of file
         try file.seekFromEnd(0);
 
         // Append the command
-        _ = try file.writeAll(command);
-        _ = try file.write("\n");
+        try file.writeStreamingAll(std.Options.debug_io, command);
+        try file.writeStreamingAll(std.Options.debug_io, "\n");
     }
 
     /// Print history in the same format as the builtin `history` command.
@@ -243,7 +243,7 @@ pub const History = struct {
             return &[_]FuzzyMatch{};
         }
 
-        var matches = std.ArrayList(FuzzyMatch).init(allocator);
+        var matches = std.array_list.Managed(FuzzyMatch).init(allocator);
         defer matches.deinit();
 
         // Score all history entries

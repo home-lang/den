@@ -42,7 +42,7 @@ pub const CustomModule = struct {
             const path = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ cwd, condition }) catch return false;
             defer self.allocator.free(path);
 
-            std.fs.accessAbsolute(path, .{}) catch return false;
+            std.Io.Dir.accessAbsolute(std.Options.debug_io, path, .{}) catch return false;
             return true;
         }
         return true;
@@ -51,7 +51,7 @@ pub const CustomModule = struct {
     /// Execute custom module command
     pub fn execute(self: *const CustomModule, _: []const u8) !?ModuleInfo {
         // Parse command into argv
-        var argv = std.ArrayList([]const u8).init(self.allocator);
+        var argv = std.array_list.Managed([]const u8).init(self.allocator);
         defer argv.deinit();
 
         var parts = std.mem.tokenizeAny(u8, self.command, " \t");
@@ -62,17 +62,19 @@ pub const CustomModule = struct {
         if (argv.items.len == 0) return null;
 
         // Execute command
-        var child = std.process.Child.init(argv.items, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = argv.items,
+            .stdout = .pipe,
+            .stderr = .ignore,
+        }) catch return null;
 
-        child.spawn() catch return null;
-
-        const output = child.stdout.?.readToEndAlloc(self.allocator, 4096) catch return null;
+        var stdout_read_buf: [4096]u8 = undefined;
+        var stdout_reader = child.stdout.?.readerStreaming(std.Options.debug_io, &stdout_read_buf);
+        const output = stdout_reader.interface.allocRemaining(self.allocator, .limited(4096)) catch return null;
         defer self.allocator.free(output);
 
-        const status = child.wait() catch return null;
-        if (status != .Exited or status.Exited != 0) return null;
+        const status = child.wait(std.Options.debug_io) catch return null;
+        if (status != .exited or status.exited != 0) return null;
 
         const trimmed = std.mem.trim(u8, output, &std.ascii.whitespace);
         if (trimmed.len == 0) return null;
@@ -105,7 +107,7 @@ pub const FormatString = struct {
     /// Render format string with module info
     /// Supports: {symbol}, {version}, {name}
     pub fn render(self: *const FormatString, info: *const ModuleInfo) ![]const u8 {
-        var result: std.ArrayList(u8) = .{
+        var result: std.array_list.Managed(u8) = .{
             .items = &[_]u8{},
             .capacity = 0,
         };

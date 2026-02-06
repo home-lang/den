@@ -8,10 +8,11 @@ fn writeStdout(data: []const u8) !void {
     if (builtin.os.tag == .windows) {
         const win = std.os.windows;
         const handle = try win.GetStdHandle(win.STD_OUTPUT_HANDLE);
-        const stdout = std.fs.File{ .handle = handle };
-        try stdout.writeAll(data);
+        const stdout = std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
+        try stdout.writeStreamingAll(std.Options.debug_io, data);
     } else {
-        _ = try posix.write(posix.STDOUT_FILENO, data);
+        const stdout = std.Io.File{ .handle = posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+        try stdout.writeStreamingAll(std.Options.debug_io, data);
     }
 }
 
@@ -21,7 +22,8 @@ fn print(comptime fmt: []const u8, args: anytype) !void {
     try writeStdout(result);
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    _ = init;
     try writeStdout("\n=== Den Shell ANSI/Terminal Utilities Demo ===\n\n");
 
     // 1. Basic Colors

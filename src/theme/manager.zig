@@ -165,21 +165,19 @@ fn detectMacOSDarkMode(allocator: std.mem.Allocator) ?bool {
     if (@import("builtin").os.tag != .macos) return null;
 
     // Try to execute: defaults read -g AppleInterfaceStyle
-    var child = std.process.Child.init(
-        &[_][]const u8{ "defaults", "read", "-g", "AppleInterfaceStyle" },
-        allocator,
-    );
-
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-
-    child.spawn() catch return null;
+    var child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{ "defaults", "read", "-g", "AppleInterfaceStyle" },
+        .stdout = .pipe,
+        .stderr = .ignore,
+    }) catch return null;
 
     // Read stdout
-    const stdout_data = child.stdout.?.readToEndAlloc(allocator, 1024) catch return null;
+    var stdout_read_buf: [1024]u8 = undefined;
+    var stdout_reader = child.stdout.?.readerStreaming(std.Options.debug_io, &stdout_read_buf);
+    const stdout_data = stdout_reader.interface.allocRemaining(allocator, .limited(1024)) catch return null;
     defer allocator.free(stdout_data);
 
-    _ = child.wait() catch return null;
+    _ = child.wait(std.Options.debug_io) catch return null;
 
     return std.mem.indexOf(u8, stdout_data, "Dark") != null;
 }

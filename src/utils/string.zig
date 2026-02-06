@@ -22,7 +22,7 @@ pub const String = struct {
 
     /// Split string by delimiter
     pub fn split(allocator: std.mem.Allocator, str: []const u8, delimiter: []const u8) ![][]const u8 {
-        var result = std.ArrayList([]const u8).init(allocator);
+        var result = std.array_list.Managed([]const u8).init(allocator);
         errdefer result.deinit();
 
         var iter = std.mem.splitSequence(u8, str, delimiter);
@@ -84,7 +84,7 @@ pub const String = struct {
 
     /// Replace all occurrences
     pub fn replaceAll(allocator: std.mem.Allocator, str: []const u8, old: []const u8, new: []const u8) ![]u8 {
-        var result = std.ArrayList(u8){};
+        var result = std.array_list.Managed(u8){};
         errdefer result.deinit();
 
         var remaining = str;

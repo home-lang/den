@@ -16,9 +16,9 @@ const std = @import("std");
 /// - stat operation fails
 pub fn getFileMtime(path: ?[]const u8) i128 {
     const config_path = path orelse return 0;
-    const file = std.fs.cwd().openFile(config_path, .{}) catch return 0;
-    defer file.close();
-    const stat = file.stat() catch return 0;
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, config_path, .{}) catch return 0;
+    defer file.close(std.Options.debug_io);
+    const stat = file.stat(std.Options.debug_io) catch return 0;
     return stat.mtime.nanoseconds;
 }
 

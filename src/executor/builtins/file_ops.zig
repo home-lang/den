@@ -2,6 +2,11 @@ const std = @import("std");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
 /// File operations builtins: tree, grep, find, ft, ls, json, calc
 /// Extracted from executor/mod.zig for better modularity
 
@@ -13,14 +18,14 @@ pub fn tree(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 }
 
 fn printTree(allocator: std.mem.Allocator, dir_path: []const u8, prefix: []const u8) !void {
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,dir_path, .{ .iterate = true }) catch |err| {
         try IO.eprint("den: tree: cannot open {s}: {}\n", .{ dir_path, err });
         return;
     };
-    defer dir.close();
+    defer dir.close(std.Options.debug_io);
 
     var iter = dir.iterate();
-    var entries: std.ArrayList(std.fs.Dir.Entry) = .{};
+    var entries: std.ArrayList(std.Io.Dir.Entry) = .{};
     defer entries.deinit(allocator);
 
     while (try iter.next()) |entry| {
@@ -123,17 +128,17 @@ pub fn grep(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     var total_matches: usize = 0;
 
     for (files) |file_path| {
-        const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,file_path, .{}) catch |err| {
             try IO.eprint("den: grep: {s}: {}\n", .{ file_path, err });
             continue;
         };
-        defer file.close();
+        defer file.close(std.Options.debug_io);
 
         const max_size: usize = 10 * 1024 * 1024;
-        const file_size = file.getEndPos() catch {
+        const file_size = (file.stat(std.Options.debug_io) catch {
             try IO.eprint("den: grep: error reading {s}\n", .{file_path});
             continue;
-        };
+        }).size;
         const read_size: usize = @min(file_size, max_size);
         const buffer = allocator.alloc(u8, read_size) catch {
             try IO.eprint("den: grep: out of memory\n", .{});
@@ -142,7 +147,7 @@ pub fn grep(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         defer allocator.free(buffer);
         var total_read: usize = 0;
         while (total_read < read_size) {
-            const n = file.read(buffer[total_read..]) catch break;
+            const n = file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]}) catch break;
             if (n == 0) break;
             total_read += n;
         }
@@ -278,11 +283,11 @@ pub fn find(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 }
 
 fn findRecursive(allocator: std.mem.Allocator, dir_path: []const u8, name_pattern: ?[]const u8, type_filter: ?u8) !void {
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,dir_path, .{ .iterate = true }) catch |err| {
         try IO.eprint("den: find: cannot open {s}: {}\n", .{ dir_path, err });
         return;
     };
-    defer dir.close();
+    defer dir.close(std.Options.debug_io);
 
     var iter = dir.iterate();
 
@@ -431,10 +436,10 @@ fn fuzzyFindRecursive(
     if (current_depth >= max_depth) return;
     if (results.items.len >= max_collect) return;
 
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,dir_path, .{ .iterate = true }) catch {
         return;
     };
-    defer dir.close();
+    defer dir.close(std.Options.debug_io);
 
     var iter = dir.iterate();
 
@@ -623,17 +628,17 @@ pub fn json(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     }
 
     const file_path = command.args[0];
-    const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,file_path, .{}) catch |err| {
         try IO.eprint("den: json: cannot open {s}: {}\n", .{ file_path, err });
         return 1;
     };
-    defer file.close();
+    defer file.close(std.Options.debug_io);
 
     const max_size: usize = 10 * 1024 * 1024;
-    const file_size = file.getEndPos() catch |err| {
+    const file_size = (file.stat(std.Options.debug_io) catch |err| {
         try IO.eprint("den: json: error reading {s}: {}\n", .{ file_path, err });
         return 1;
-    };
+    }).size;
     const read_size: usize = @min(file_size, max_size);
     const buffer = allocator.alloc(u8, read_size) catch |err| {
         try IO.eprint("den: json: out of memory: {}\n", .{err});
@@ -642,7 +647,7 @@ pub fn json(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     defer allocator.free(buffer);
     var total_read: usize = 0;
     while (total_read < read_size) {
-        const n = file.read(buffer[total_read..]) catch |err| {
+        const n = file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]}) catch |err| {
             try IO.eprint("den: json: error reading {s}: {}\n", .{ file_path, err });
             return 1;
         };
@@ -703,15 +708,15 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         return 0;
     }
 
-    var dir = std.fs.cwd().openDir(target_path, .{ .iterate = true }) catch |err| {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,target_path, .{ .iterate = true }) catch |err| {
         try IO.eprint("den: ls: cannot access '{s}': {}\n", .{ target_path, err });
         return 1;
     };
-    defer dir.close();
+    defer dir.close(std.Options.debug_io);
 
     const EntryInfo = struct {
         name: []const u8,
-        kind: std.fs.Dir.Entry.Kind,
+        kind: std.Io.Dir.Entry.Kind,
         size: u64,
         mtime_ns: i96,
     };
@@ -724,9 +729,9 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         if (!show_all and entry.name.len > 0 and entry.name[0] == '.') continue;
         if (count >= 512) break;
 
-        const stat = dir.statFile(entry.name) catch |err| {
+        const stat = dir.statFile(std.Options.debug_io, entry.name) catch |err| {
             if (err == error.IsDir) {
-                const dir_stat = dir.stat() catch {
+                const dir_stat = dir.stat(std.Options.debug_io) catch {
                     entries[count] = .{
                         .name = try allocator.dupe(u8, entry.name),
                         .kind = entry.kind,
@@ -855,7 +860,7 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
             const nlink: u64 = if (stat_result == 0) @intCast(st.nlink) else 1;
 
-            const username = std.posix.getenv("USER") orelse "user";
+            const username = getenv("USER") orelse "user";
             const groupname = "staff";
 
             const size_str = if (human_readable) blk: {

@@ -388,22 +388,26 @@ pub const ControlFlowExecutor = struct {
     /// Execute select menu for interactive selection
     pub fn executeSelect(self: *ControlFlowExecutor, menu: *SelectMenu) !i32 {
         var last_exit: i32 = 0;
-        const stdin = std.io.getStdIn();
-        const stdout = std.io.getStdOut();
-        var buf_reader = std.io.bufferedReader(stdin.reader());
-        var reader = buf_reader.reader();
+        const stdin_file = std.Io.File{ .handle = std.posix.STDIN_FILENO, .flags = .{ .nonblocking = false } };
+        const stdout_file = std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+        var stdin_buf: [4096]u8 = undefined;
+        var stdin_reader = stdin_file.reader(std.Options.debug_io, &stdin_buf);
+        var reader = stdin_reader.interface;
+        var stdout_buf: [4096]u8 = undefined;
+        var stdout_writer = stdout_file.writer(std.Options.debug_io, &stdout_buf);
+        defer stdout_writer.interface.flush() catch {};
 
         // Display menu items once
-        try stdout.writeAll("\n");
+        try stdout_file.writeStreamingAll(std.Options.debug_io, "\n");
         for (menu.items, 1..) |item, idx| {
-            try stdout.writer().print("{d}) {s}\n", .{ idx, item });
+            try stdout_writer.interface.print("{d}) {s}\n", .{ idx, item });
         }
+        try stdout_writer.interface.flush();
 
         // Loop until break
         while (true) {
             // Display prompt
-            try stdout.writeAll(menu.prompt);
-            try stdout.writer().context.sync(); // Flush output
+            try stdout_file.writeStreamingAll(std.Options.debug_io, menu.prompt);
 
             // Read user input
             var input_buf: [1024]u8 = undefined;
@@ -418,12 +422,12 @@ pub const ControlFlowExecutor = struct {
             // Parse selection number
             const selection = std.fmt.parseInt(usize, trimmed, 10) catch {
                 // Invalid number, ask again
-                try stdout.writeAll("Invalid selection\n");
+                try stdout_file.writeStreamingAll(std.Options.debug_io, "Invalid selection\n");
                 continue;
             };
 
             if (selection == 0 or selection > menu.items.len) {
-                try stdout.writeAll("Invalid selection\n");
+                try stdout_file.writeStreamingAll(std.Options.debug_io, "Invalid selection\n");
                 continue;
             }
 

@@ -141,13 +141,11 @@ pub fn panicWithStackTrace(msg: []const u8, error_return_trace: ?*std.builtin.St
 
 /// Helper to write to stderr
 fn writeStderr(msg: []const u8) void {
-    if (builtin.os.tag == .windows) {
-        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return;
-        const stderr = std.fs.File{ .handle = handle };
-        _ = stderr.write(msg) catch {};
-    } else {
-        _ = std.posix.write(std.posix.STDERR_FILENO, msg) catch {};
-    }
+    const stderr = std.Io.File{ .handle = if (builtin.os.tag == .windows)
+        (std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return)
+    else
+        std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+    stderr.writeStreamingAll(std.Options.debug_io, msg) catch {};
 }
 
 /// Helper to get milliseconds since some reference point
@@ -188,13 +186,13 @@ pub const TracePoint = struct {
 /// Execution trace - tracks a series of trace points
 pub const ExecutionTrace = struct {
     allocator: std.mem.Allocator,
-    points: std.ArrayList(TracePoint),
+    points: std.array_list.Managed(TracePoint),
     start_time: i64,
 
     pub fn init(allocator: std.mem.Allocator) ExecutionTrace {
         return .{
             .allocator = allocator,
-            .points = std.ArrayList(TracePoint).init(allocator),
+            .points = std.array_list.Managed(TracePoint).init(allocator),
             .start_time = getMilliTimestamp(),
         };
     }

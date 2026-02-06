@@ -1,4 +1,5 @@
 const std = @import("std");
+const posix = std.posix;
 const types = @import("types.zig");
 const builtin = @import("builtin");
 
@@ -6,11 +7,11 @@ const ModuleInfo = types.ModuleInfo;
 
 /// Get battery status on macOS
 fn getMacOSBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
-    var child = std.process.Child.init(&[_][]const u8{ "pmset", "-g", "batt" }, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-
-    child.spawn() catch return null;
+    var child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{ "pmset", "-g", "batt" },
+        .stdout = .pipe,
+        .stderr = .ignore,
+    }) catch return null;
 
     // Read stdout manually
     var output_buf = std.ArrayList(u8).empty;
@@ -26,8 +27,8 @@ fn getMacOSBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     }
     const output = output_buf.items;
 
-    const status = child.wait() catch return null;
-    if (status != .Exited or status.Exited != 0) return null;
+    const status = child.wait(std.Options.debug_io) catch return null;
+    if (status != .exited or status.exited != 0) return null;
 
     // Parse output like: "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1234567) 95%; discharging; 5:23 remaining present: true"
     var lines = std.mem.splitScalar(u8, output, '\n');
@@ -61,8 +62,8 @@ fn getLinuxBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     const capacity_path = "/sys/class/power_supply/BAT0/capacity";
     const status_path = "/sys/class/power_supply/BAT0/status";
 
-    const capacity_file = std.fs.openFileAbsolute(capacity_path, .{}) catch return null;
-    defer capacity_file.close();
+    const capacity_file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, capacity_path, .{}) catch return null;
+    defer capacity_file.close(std.Options.debug_io);
 
     var buf: [16]u8 = undefined;
     var capacity_size: usize = 0;
@@ -74,8 +75,8 @@ fn getLinuxBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     const capacity_str = std.mem.trim(u8, buf[0..capacity_size], &std.ascii.whitespace);
     const percentage = std.fmt.parseInt(u8, capacity_str, 10) catch return null;
 
-    const status_file = std.fs.openFileAbsolute(status_path, .{}) catch return null;
-    defer status_file.close();
+    const status_file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, status_path, .{}) catch return null;
+    defer status_file.close(std.Options.debug_io);
 
     var status_size: usize = 0;
     while (status_size < buf.len) {
@@ -97,18 +98,18 @@ fn getLinuxBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
 fn getWindowsBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     // Use WMIC to get battery information
     // wmic path Win32_Battery get EstimatedChargeRemaining,BatteryStatus
-    var child = std.process.Child.init(&[_][]const u8{
-        "wmic",
-        "path",
-        "Win32_Battery",
-        "get",
-        "EstimatedChargeRemaining,BatteryStatus",
-        "/format:csv",
-    }, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-
-    child.spawn() catch return null;
+    var child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{
+            "wmic",
+            "path",
+            "Win32_Battery",
+            "get",
+            "EstimatedChargeRemaining,BatteryStatus",
+            "/format:csv",
+        },
+        .stdout = .pipe,
+        .stderr = .ignore,
+    }) catch return null;
 
     // Read stdout manually
     var output_buf2 = std.ArrayList(u8).empty;
@@ -124,8 +125,8 @@ fn getWindowsBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     }
     const output = output_buf2.items;
 
-    const status = child.wait() catch return null;
-    if (status != .Exited or status.Exited != 0) return null;
+    const status = child.wait(std.Options.debug_io) catch return null;
+    if (status != .exited or status.exited != 0) return null;
 
     // Parse CSV output: Node,BatteryStatus,EstimatedChargeRemaining
     // BatteryStatus: 1=Discharging, 2=AC Power, 3-9=Charging variants
@@ -189,17 +190,17 @@ pub fn detectBattery(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
 fn getWindowsMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
     // Use WMIC to get memory information
     // wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /format:csv
-    var child = std.process.Child.init(&[_][]const u8{
-        "wmic",
-        "OS",
-        "get",
-        "FreePhysicalMemory,TotalVisibleMemorySize",
-        "/format:csv",
-    }, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-
-    child.spawn() catch return null;
+    var child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{
+            "wmic",
+            "OS",
+            "get",
+            "FreePhysicalMemory,TotalVisibleMemorySize",
+            "/format:csv",
+        },
+        .stdout = .pipe,
+        .stderr = .ignore,
+    }) catch return null;
 
     // Read stdout manually
     var output_buf3 = std.ArrayList(u8).empty;
@@ -215,8 +216,8 @@ fn getWindowsMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
     }
     const output = output_buf3.items;
 
-    const status = child.wait() catch return null;
-    if (status != .Exited or status.Exited != 0) return null;
+    const status = child.wait(std.Options.debug_io) catch return null;
+    if (status != .exited or status.exited != 0) return null;
 
     // Parse CSV output: Node,FreePhysicalMemory,TotalVisibleMemorySize
     // Values are in KB
@@ -255,11 +256,11 @@ fn getWindowsMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
 fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
     switch (builtin.os.tag) {
         .macos => {
-            var child = std.process.Child.init(&[_][]const u8{"vm_stat"}, allocator);
-            child.stdout_behavior = .Pipe;
-            child.stderr_behavior = .Ignore;
-
-            child.spawn() catch return null;
+            var child = std.process.spawn(std.Options.debug_io, .{
+                .argv = &[_][]const u8{"vm_stat"},
+                .stdout = .pipe,
+                .stderr = .ignore,
+            }) catch return null;
 
             // Read stdout manually
             var vm_output_buf = std.ArrayList(u8).empty;
@@ -275,7 +276,7 @@ fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
             }
             const output = vm_output_buf.items;
 
-            _ = child.wait() catch return null;
+            _ = child.wait(std.Options.debug_io) catch return null;
 
             // Parse vm_stat output to calculate memory usage
             // This is simplified - real implementation would parse pages free, active, inactive, etc.
@@ -318,15 +319,15 @@ fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
             };
         },
         .linux => {
-            const file = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return null;
-            defer file.close();
+            const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, "/proc/meminfo", .{}) catch return null;
+            defer file.close(std.Options.debug_io);
 
             // Read file manually
             var content_buf = std.ArrayList(u8).empty;
             defer content_buf.deinit(allocator);
             var read_buf: [4096]u8 = undefined;
             while (true) {
-                const n = file.read(&read_buf) catch break;
+                const n = posix.read(file.handle, &read_buf) catch break;
                 if (n == 0) break;
                 content_buf.appendSlice(allocator, read_buf[0..n]) catch break;
                 if (content_buf.items.len >= 8192) break;
@@ -471,11 +472,11 @@ pub fn detectDocker(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
         info.color = "#2496ed";
         return info;
     } else |_| {
-        var child = std.process.Child.init(&[_][]const u8{ "docker", "context", "show" }, allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
-
-        child.spawn() catch return null;
+        var child = std.process.spawn(std.Options.debug_io, .{
+            .argv = &[_][]const u8{ "docker", "context", "show" },
+            .stdout = .pipe,
+            .stderr = .ignore,
+        }) catch return null;
 
         // Read stdout manually
         var docker_output_buf = std.ArrayList(u8).empty;
@@ -491,8 +492,8 @@ pub fn detectDocker(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
         }
         const output = docker_output_buf.items;
 
-        const status = child.wait() catch return null;
-        if (status != .Exited or status.Exited != 0) return null;
+        const status = child.wait(std.Options.debug_io) catch return null;
+        if (status != .exited or status.exited != 0) return null;
 
         const context = std.mem.trim(u8, output, &std.ascii.whitespace);
         if (context.len == 0 or std.mem.eql(u8, context, "default")) return null;
@@ -507,11 +508,11 @@ pub fn detectDocker(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
 
 /// Detect Kubernetes context
 pub fn detectKubernetes(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
-    var child = std.process.Child.init(&[_][]const u8{ "kubectl", "config", "current-context" }, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-
-    child.spawn() catch return null;
+    var child = std.process.spawn(std.Options.debug_io, .{
+        .argv = &[_][]const u8{ "kubectl", "config", "current-context" },
+        .stdout = .pipe,
+        .stderr = .ignore,
+    }) catch return null;
 
     // Read stdout manually
     var k8s_output_buf = std.ArrayList(u8).empty;
@@ -527,8 +528,8 @@ pub fn detectKubernetes(allocator: std.mem.Allocator, _: []const u8) !?ModuleInf
     }
     const output = k8s_output_buf.items;
 
-    const status = child.wait() catch return null;
-    if (status != .Exited or status.Exited != 0) return null;
+    const status = child.wait(std.Options.debug_io) catch return null;
+    if (status != .exited or status.exited != 0) return null;
 
     const context = std.mem.trim(u8, output, &std.ascii.whitespace);
     if (context.len == 0) return null;

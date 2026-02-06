@@ -12,8 +12,8 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     };
 
     // Get current directory
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd = std.fs.cwd().realpath(".", &cwd_buf) catch |err| {
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const cwd = std.Io.Dir.cwd().realpath(".", &cwd_buf) catch |err| {
         try IO.eprint("den: pushd: cannot get current directory: {}\n", .{err});
         return 1;
     };
@@ -204,8 +204,8 @@ pub fn dirs(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     // Get current directory
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd = std.fs.cwd().realpath(".", &cwd_buf) catch |err| {
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const cwd = std.Io.Dir.cwd().realpath(".", &cwd_buf) catch |err| {
         try IO.eprint("den: dirs: cannot get current directory: {}\n", .{err});
         return 1;
     };

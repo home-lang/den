@@ -63,7 +63,7 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
     var brace = BraceExpander.init(self.allocator);
 
     // Get current working directory for glob expansion
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cwd = try std.posix.getcwd(&cwd_buf);
 
     for (chain.commands) |*cmd| {
@@ -172,6 +172,11 @@ pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
                 cmd.name = new_name;
                 expanded = true;
             }
+
+            // POSIX behavior: if the first word of the expansion matches the
+            // alias name, stop expanding to allow self-referencing aliases
+            // like "ls" -> "ls --color=auto"
+            if (std.mem.eql(u8, first_word, current_name)) break;
 
             // Check if first word is also an alias
             current_name = first_word;
