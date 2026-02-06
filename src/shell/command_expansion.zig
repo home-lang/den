@@ -168,9 +168,41 @@ pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
 
             // Replace command name with expanded alias
             if (!expanded) {
-                const new_name = try self.allocator.dupe(u8, alias_value);
+                // Split alias value into command name and extra args
+                const new_cmd_name = try self.allocator.dupe(u8, first_word);
                 self.allocator.free(cmd.name);
-                cmd.name = new_name;
+                cmd.name = new_cmd_name;
+
+                // If alias has extra arguments, prepend them before existing args
+                if (first_space) |pos| {
+                    const extra_args_str = std.mem.trim(u8, trimmed[pos + 1 ..], &std.ascii.whitespace);
+                    if (extra_args_str.len > 0) {
+                        // Split extra args by spaces (simple split for now)
+                        var extra_count: usize = 0;
+                        var count_iter = std.mem.splitScalar(u8, extra_args_str, ' ');
+                        while (count_iter.next()) |part| {
+                            if (part.len > 0) extra_count += 1;
+                        }
+
+                        if (extra_count > 0) {
+                            const new_args = try self.allocator.alloc([]const u8, extra_count + cmd.args.len);
+                            var idx: usize = 0;
+                            var split_iter = std.mem.splitScalar(u8, extra_args_str, ' ');
+                            while (split_iter.next()) |part| {
+                                if (part.len > 0) {
+                                    new_args[idx] = try self.allocator.dupe(u8, part);
+                                    idx += 1;
+                                }
+                            }
+                            // Copy existing args after the alias args
+                            @memcpy(new_args[idx..], cmd.args);
+                            // Free old args array (but not individual strings - they're moved)
+                            self.allocator.free(cmd.args);
+                            cmd.args = new_args;
+                        }
+                    }
+                }
+
                 expanded = true;
             }
 
