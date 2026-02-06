@@ -328,7 +328,7 @@ pub const PathList = struct {
                 defer file.close(std.Options.debug_io);
 
                 const stat = file.stat(std.Options.debug_io) catch continue;
-                if (stat.mode & 0o111 == 0) continue; // Not executable
+                if (stat.permissions.toMode() & 0o111 == 0) continue; // Not executable
 
                 return try allocator.dupe(u8, full_path);
             }
@@ -382,7 +382,7 @@ pub const PathList = struct {
                     continue;
                 };
 
-                if (stat.mode & 0o111 == 0) {
+                if (stat.permissions.toMode() & 0o111 == 0) {
                     allocator.free(full_path);
                     continue;
                 }

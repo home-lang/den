@@ -4,6 +4,9 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const utils = @import("../../utils.zig");
+const c_exec = struct {
+    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+};
 
 fn getenv(key: [*:0]const u8) ?[]const u8 {
     const value = std.c.getenv(key) orelse return null;
@@ -342,9 +345,7 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         argv[argv_idx] = null;
 
         // Execute
-        _ = std.posix.execvpeZ(&cmd_z, @ptrCast(argv[0..argv_idx :null]), getCEnviron()) catch {
-            std.process.exit(127);
-        };
+        _ = c_exec.execvp(&cmd_z, @ptrCast(argv[0..argv_idx :null]));
 
         // If exec failed
         std.process.exit(127);

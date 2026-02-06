@@ -159,7 +159,7 @@ pub fn typeBuiltin(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                     const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io,full_path, .{}) catch continue;
                     defer file.close(std.Options.debug_io);
                     const stat = file.stat(std.Options.debug_io) catch continue;
-                    if (stat.mode & 0o111 == 0) continue;
+                    if (stat.permissions.toMode() & 0o111 == 0) continue;
                 }
 
                 found_any = true;

@@ -151,7 +151,7 @@ pub const History = struct {
         defer file.close(std.Options.debug_io);
 
         // Seek to end of file
-        try file.seekFromEnd(0);
+        _ = std.c.lseek(file.handle, 0, std.c.SEEK.END);
 
         // Append the command
         try file.writeStreamingAll(std.Options.debug_io, command);

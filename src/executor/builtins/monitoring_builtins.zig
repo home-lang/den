@@ -2,6 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
+const c_exec = struct {
+    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+};
 
 /// Monitoring builtins: sys-stats, netstats, net-check, log-tail, proc-monitor, log-parse
 
@@ -125,7 +128,7 @@ pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     if (show_disk) {
         try IO.print("\x1b[1;33mDisk:\x1b[0m\n", .{});
         const cwd = std.Io.Dir.cwd();
-        const stat = cwd.statFile(std.Options.debug_io, ".") catch null;
+        const stat = cwd.statFile(std.Options.debug_io, ".", .{}) catch null;
         if (stat) |_| {
             try IO.print("  (use 'df -h' for detailed disk info)\n", .{});
         } else {
@@ -218,7 +221,7 @@ pub fn netstats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
             defer dir.close(std.Options.debug_io);
 
             var iter = dir.iterate();
-            while (iter.next() catch null) |entry| {
+            while (iter.next(std.Options.debug_io) catch null) |entry| {
                 if (entry.kind == .sym_link or entry.kind == .directory) {
                     try IO.print("  - {s}\n", .{entry.name});
                 }
@@ -315,11 +318,11 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         const pid: std.posix.pid_t = @intCast(fork_ret);
 
         if (pid == 0) {
-            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
             _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
             _ = std.c.dup2(dev_null.handle, std.posix.STDOUT_FILENO);
-            _ = std.posix.execvpeZ("nc", @ptrCast(&argv), getCEnviron()) catch {};
-            std.posix.exit(127);
+            _ = c_exec.execvp("nc", @ptrCast(&argv));
+            std.c._exit(127);
         } else {
             var wait_status: c_int = 0;
             _ = std.c.waitpid(pid, &wait_status, 0);
@@ -359,11 +362,11 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         const pid: std.posix.pid_t = @intCast(fork_ret2);
 
         if (pid == 0) {
-            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
             _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
             _ = std.c.dup2(dev_null.handle, std.posix.STDOUT_FILENO);
-            _ = std.posix.execvpeZ("ping", @ptrCast(&argv), getCEnviron()) catch {};
-            std.posix.exit(127);
+            _ = c_exec.execvp("ping", @ptrCast(&argv));
+            std.c._exit(127);
         } else {
             var wait_status2: c_int = 0;
             _ = std.c.waitpid(pid, &wait_status2, 0);
@@ -548,12 +551,13 @@ pub fn logTail(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
 
             const new_stat = file.stat(std.Options.debug_io) catch continue;
             if (new_stat.size > last_pos) {
-                file.seekTo(last_pos) catch continue;
+                var read_pos = last_pos;
 
                 var buf: [4096]u8 = undefined;
                 while (true) {
-                    const n = file.readStreaming(std.Options.debug_io, &.{&buf}) catch break;
+                    const n = file.readPositional(std.Options.debug_io, &.{&buf}, read_pos) catch break;
                     if (n == 0) break;
+                    read_pos += n;
 
                     var new_lines = std.mem.splitScalar(u8, buf[0..n], '\n');
                     while (new_lines.next()) |new_line| {
@@ -669,10 +673,10 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
             std.posix.close(pipe_fds[0]);
             _ = std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO);
             std.posix.close(pipe_fds[1]);
-            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
+            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
             _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
-            _ = std.posix.execvpeZ("ps", @ptrCast(&ps_args), getCEnviron()) catch {};
-            std.posix.exit(127);
+            _ = c_exec.execvp("ps", @ptrCast(&ps_args));
+            std.c._exit(127);
         } else {
             std.posix.close(pipe_fds[1]);
 

@@ -58,7 +58,7 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
             return;
         } else if (std.mem.eql(u8, op, "-f")) {
             // File exists and is regular file
-            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg) catch {
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
                 shell.last_exit_code = 1;
                 return;
             };
@@ -66,7 +66,7 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
             return;
         } else if (std.mem.eql(u8, op, "-d")) {
             // Directory exists
-            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg) catch {
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
                 shell.last_exit_code = 1;
                 return;
             };

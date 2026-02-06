@@ -270,7 +270,7 @@ pub const DirWalker = struct {
         defer dir.close(std.Options.debug_io);
 
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(std.Options.debug_io)) |entry| {
             // Skip hidden files unless configured to include them
             if (!self.include_hidden and entry.name.len > 0 and entry.name[0] == '.') {
                 continue;
@@ -347,7 +347,7 @@ pub const DirIterator = struct {
     }
 
     pub fn next(self: *DirIterator) !?struct { name: []const u8, kind: std.Io.Dir.Entry.Kind } {
-        while (try self.iter.next()) |entry| {
+        while (try self.iter.next(std.Options.debug_io)) |entry| {
             // Skip hidden files unless configured to include them
             if (!self.include_hidden and entry.name.len > 0 and entry.name[0] == '.') {
                 continue;

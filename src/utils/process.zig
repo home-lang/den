@@ -256,7 +256,7 @@ pub fn waitProcess(pid: ProcessId, options: WaitOptions) !WaitResult {
 }
 
 fn waitProcessPosix(pid: std.posix.pid_t, options: WaitOptions) !WaitResult {
-    const flags: c_int = if (options.no_hang) @bitCast(std.posix.W.NOHANG) else 0;
+    const flags: c_int = if (options.no_hang) std.posix.W.NOHANG else 0;
 
     var wait_status: c_int = 0;
     const wait_pid = std.c.waitpid(pid, &wait_status, flags);
@@ -277,7 +277,7 @@ fn waitProcessPosix(pid: std.posix.pid_t, options: WaitOptions) !WaitResult {
         exit_status.code = @intCast(std.posix.W.EXITSTATUS(status_u32));
     } else if (std.posix.W.IFSIGNALED(status_u32)) {
         exit_status.signaled = true;
-        exit_status.signal = @intCast(std.posix.W.TERMSIG(status_u32));
+        exit_status.signal = @intCast(@intFromEnum(std.posix.W.TERMSIG(status_u32)));
         exit_status.code = 128 + @as(i32, @intCast(exit_status.signal.?));
     }
 

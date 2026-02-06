@@ -2,6 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
+const c_exec = struct {
+    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+};
 
 /// Developer helper builtins: wip, code, pstorm
 /// Note: bookmark remains in executor/mod.zig as it requires shell named_dirs state
@@ -91,10 +94,8 @@ pub fn code(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     if (fork_ret < 0) return error.Unexpected;
     const pid: std.posix.pid_t = @intCast(fork_ret);
     if (pid == 0) {
-        _ = std.posix.execvpeZ("open", @ptrCast(&argv), getCEnviron()) catch {
-            std.posix.exit(127);
-        };
-        unreachable;
+        _ = c_exec.execvp("open", @ptrCast(&argv));
+        std.c._exit(127);
     } else {
         var wait_status: c_int = 0;
         _ = std.c.waitpid(pid, &wait_status, 0);
@@ -128,10 +129,8 @@ pub fn pstorm(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
     if (fork_ret2 < 0) return error.Unexpected;
     const pid2: std.posix.pid_t = @intCast(fork_ret2);
     if (pid2 == 0) {
-        _ = std.posix.execvpeZ("open", @ptrCast(&argv), getCEnviron()) catch {
-            std.posix.exit(127);
-        };
-        unreachable;
+        _ = c_exec.execvp("open", @ptrCast(&argv));
+        std.c._exit(127);
     } else {
         var wait_status2: c_int = 0;
         _ = std.c.waitpid(pid2, &wait_status2, 0);

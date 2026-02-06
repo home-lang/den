@@ -74,7 +74,7 @@ pub fn executePosix(
             // Execute the command
             if (isBuiltinFn(cmd.name)) {
                 const exit_code = executeBuiltinFn(cmd) catch 1;
-                std.posix.exit(@intCast(exit_code));
+                std.c._exit(@intCast(exit_code));
             } else {
                 executeExternalFn(cmd) catch {};
             }

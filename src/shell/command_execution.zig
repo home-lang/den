@@ -138,7 +138,7 @@ pub fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_in
         // Child process - execute the chain
         var executor = executor_mod.Executor.init(self.allocator, &self.environment);
         const exit_code = executor.executeChain(chain) catch 1;
-        std.posix.exit(@intCast(exit_code));
+        std.c._exit(@intCast(exit_code));
     } else {
         // Parent process - add to background jobs
         try self.job_manager.add(pid, original_input);

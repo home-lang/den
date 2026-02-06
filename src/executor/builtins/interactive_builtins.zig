@@ -131,7 +131,7 @@ pub fn collectFilesRecursive(
     defer dir.close(std.Options.debug_io);
 
     var iter = dir.iterate();
-    while (iter.next() catch null) |entry| {
+    while (iter.next(std.Options.debug_io) catch null) |entry| {
         // Skip hidden files unless requested
         if (!show_hidden and entry.name.len > 0 and entry.name[0] == '.') continue;
 

@@ -3,6 +3,9 @@ const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 const Expansion = @import("../utils/expansion.zig").Expansion;
 const builtin = @import("builtin");
+const c = struct {
+    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+};
 const process = @import("../utils/process.zig");
 const TypoCorrection = @import("../utils/typo_correction.zig").TypoCorrection;
 const env_utils = @import("../utils/env.zig");
@@ -416,7 +419,7 @@ pub const Executor = struct {
                 // Execute the command
                 if (self.isBuiltin(cmd.name)) {
                     const exit_code = self.executeBuiltin(cmd) catch 1;
-                    std.posix.exit(@intCast(exit_code));
+                    std.c._exit(@intCast(exit_code));
                 } else {
                     _ = try self.executeExternalInChild(cmd);
                 }
@@ -488,10 +491,9 @@ pub const Executor = struct {
 
         // Exec (no fork - we're already in child)
         // Use C's environ directly which is updated by setenv/unsetenv
-        _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), getCEnviron()) catch {
-            IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
-            std.posix.exit(127);
-        };
+        _ = c.execvp(cmd_z.ptr, @ptrCast(argv.ptr));
+        IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
+        std.c._exit(127);
     }
 
     fn applyRedirections(self: *Executor, redirections: []types.Redirection) !void {
@@ -549,10 +551,10 @@ pub const Executor = struct {
                 if (pid == 0) {
                     // Child - apply redirections and execute builtin
                     self.applyRedirections(command.redirections) catch {
-                        std.posix.exit(1);
+                        std.c._exit(1);
                     };
                     const exit_code = self.executeBuiltin(command) catch 1;
-                    std.posix.exit(@intCast(exit_code));
+                    std.c._exit(@intCast(exit_code));
                 } else {
                     // Parent - wait for child
                     var wait_status_builtin: c_int = 0;
@@ -990,7 +992,7 @@ pub const Executor = struct {
             if (builtin.os.tag == .windows) {
                 return stat.kind == .file;
             }
-            return (stat.mode & 0o111) != 0;
+            return (stat.permissions.toMode() & 0o111) != 0;
         }
 
         // Search in PATH
@@ -1011,7 +1013,7 @@ pub const Executor = struct {
                 // On Windows, also check common extensions
                 if (stat.kind == .file) return true;
             } else {
-                if ((stat.mode & 0o111) != 0) return true;
+                if ((stat.permissions.toMode() & 0o111) != 0) return true;
             }
         }
 
@@ -1160,16 +1162,14 @@ pub const Executor = struct {
         if (pid == 0) {
             // Child process - apply redirections before exec
             self.applyRedirections(command.redirections) catch {
-                std.posix.exit(1);
+                std.c._exit(1);
             };
 
             // Use C's environ directly which is updated by setenv/unsetenv
-            _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), getCEnviron()) catch {
-                // If execvpe returns, it failed
-                IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
-                std.posix.exit(127);
-            };
-            unreachable;
+            _ = c.execvp(cmd_z.ptr, @ptrCast(argv.ptr));
+            // If execvp returns, it failed
+            IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
+            std.c._exit(127);
         } else {
             // Parent process - wait for child
             var wait_status_exec: c_int = 0;
@@ -1223,16 +1223,14 @@ pub const Executor = struct {
         if (pid == 0) {
             // Child process - apply redirections before exec
             self.applyRedirections(command.redirections) catch {
-                std.posix.exit(1);
+                std.c._exit(1);
             };
 
             // Use C's environ directly which is updated by setenv/unsetenv
-            _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv.ptr), getCEnviron()) catch {
-                // If execvpe returns, it failed
-                IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
-                std.posix.exit(127);
-            };
-            unreachable;
+            _ = c.execvp(cmd_z.ptr, @ptrCast(argv.ptr));
+            // If execvp returns, it failed
+            IO.eprint("den: {s}: command not found\n", .{command.name}) catch {};
+            std.c._exit(127);
         } else {
             // Parent process - DON'T wait, just print the PID
             try IO.print("[{d}]\n", .{pid});

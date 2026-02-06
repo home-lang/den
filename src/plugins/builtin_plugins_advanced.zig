@@ -400,7 +400,7 @@ pub const ScriptSuggesterPlugin = struct {
 
             // Iterate files
             var iter = dir.iterate();
-            while (iter.next() catch null) |entry| {
+            while (iter.next(std.Options.debug_io) catch null) |entry| {
                 if (entry.kind == .file) {
                     // Check if executable (simplified - would need stat in real impl)
                     if (scripts_count < scripts_buffer.len) {

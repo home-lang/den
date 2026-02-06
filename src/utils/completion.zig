@@ -249,12 +249,12 @@ pub const Completion = struct {
 
             // Iterate files in directory
             var iter = dir.iterate();
-            while (iter.next() catch continue) |entry| {
+            while (iter.next(std.Options.debug_io) catch continue) |entry| {
                 // Check if file starts with prefix
                 if (entry.kind == .file and std.mem.startsWith(u8, entry.name, prefix)) {
                     // Check if executable
                     const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch continue;
-                    const is_executable = (stat.mode & 0o111) != 0;
+                    const is_executable = (stat.permissions.toMode() & 0o111) != 0;
                     
                     if (is_executable) {
                         if (match_count >= matches_buffer.len) break;
@@ -340,7 +340,7 @@ pub const Completion = struct {
 
         // Iterate directory
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        while (iter.next(std.Options.debug_io) catch null) |entry| {
             // Only show directories
             if (entry.kind != .directory) continue;
 
@@ -440,7 +440,7 @@ pub const Completion = struct {
 
         // Iterate directory
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        while (iter.next(std.Options.debug_io) catch null) |entry| {
             // Skip hidden files unless explicitly requested
             if (!show_hidden and entry.name.len > 0 and entry.name[0] == '.') continue;
 
@@ -515,7 +515,7 @@ pub const Completion = struct {
 
         // Iterate directory
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        while (iter.next(std.Options.debug_io) catch null) |entry| {
             // Skip hidden files unless explicitly requested
             if (!show_hidden and entry.name.len > 0 and entry.name[0] == '.') continue;
 
@@ -676,7 +676,7 @@ pub const Completion = struct {
         defer dir.close(std.Options.debug_io);
 
         var dir_iter = dir.iterate();
-        while (dir_iter.next() catch null) |entry| {
+        while (dir_iter.next(std.Options.debug_io) catch null) |entry| {
             if (entry.kind != .directory) continue;
             if (segment[0] != '.' and entry.name.len > 0 and entry.name[0] == '.') continue;
 
@@ -926,7 +926,7 @@ pub const Completion = struct {
         var match_count: usize = 0;
 
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        while (iter.next(std.Options.debug_io) catch null) |entry| {
             // Skip hidden files unless segment starts with '.'
             if (segment[0] != '.' and entry.name.len > 0 and entry.name[0] == '.') continue;
 
@@ -980,8 +980,8 @@ test "mid-word path expansion - relative path" {
     defer tmp.cleanup();
 
     // Create: testdir/subdir/file
-    try tmp.dir.makeDir("testdir");
-    try tmp.dir.makeDir("testdir/subdir");
+    try tmp.dir.createDir(std.Options.debug_io, "testdir", .default_dir);
+    try tmp.dir.createDir(std.Options.debug_io, "testdir/subdir", .default_dir);
 
     // Change to temp directory for testing
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;

@@ -353,8 +353,8 @@ fn devSetup(_: std.mem.Allocator) !void {
     // Ensure ~/.local/bin exists
     var local_bin_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const local_bin_dir = try std.fmt.bufPrint(&local_bin_dir_buf, "{s}/.local/bin", .{home});
-    std.Io.Dir.cwd().makePath(local_bin_dir) catch |err| {
-        if (err != error.PathAlreadyExists) return err;
+    std.Io.Dir.cwd().createDirPath(std.Options.debug_io, local_bin_dir) catch |err| {
+        return err;
     };
 
     // Create shim file
@@ -371,7 +371,7 @@ fn devSetup(_: std.mem.Allocator) !void {
     try shim_file.writeStreamingAll(std.Options.debug_io, shim_content);
 
     // Make executable
-    try shim_file.setPermissions(std.Options.debug_io, 0o755);
+    try shim_file.setPermissions(std.Options.debug_io, std.Io.File.Permissions.fromMode(0o755));
 
     std.debug.print("Development shim created at: {s}\n", .{shim_path});
     std.debug.print("Make sure ~/.local/bin is in your PATH\n", .{});
@@ -399,8 +399,8 @@ fn setup(_: std.mem.Allocator) !void {
     // Ensure ~/.local/bin exists
     var local_bin_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const local_bin_dir = try std.fmt.bufPrint(&local_bin_dir_buf, "{s}/.local/bin", .{home});
-    std.Io.Dir.cwd().makePath(local_bin_dir) catch |err| {
-        if (err != error.PathAlreadyExists) return err;
+    std.Io.Dir.cwd().createDirPath(std.Options.debug_io, local_bin_dir) catch |err| {
+        return err;
     };
 
     // Create wrapper script
@@ -415,7 +415,7 @@ fn setup(_: std.mem.Allocator) !void {
     defer std.heap.page_allocator.free(wrapper_content);
 
     try wrapper_file.writeStreamingAll(std.Options.debug_io, wrapper_content);
-    try wrapper_file.setPermissions(std.Options.debug_io, 0o755);
+    try wrapper_file.setPermissions(std.Options.debug_io, std.Io.File.Permissions.fromMode(0o755));
 
     std.debug.print("Wrapper installed at: {s}\n", .{wrapper_path});
     std.debug.print("\nTo use Den shell:\n", .{});
@@ -464,7 +464,7 @@ fn uninstall(_: std.mem.Allocator) !void {
     const wrapper_path = try std.fmt.bufPrint(&wrapper_path_buf, "{s}/.local/bin/den", .{home});
 
     // Remove wrapper
-    std.Io.Dir.cwd().deleteFile(wrapper_path) catch |err| {
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, wrapper_path) catch |err| {
         if (err == error.FileNotFound) {
             std.debug.print("Wrapper not found (already uninstalled?)\n", .{});
             return;

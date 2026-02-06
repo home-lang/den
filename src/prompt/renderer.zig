@@ -70,10 +70,11 @@ pub const PromptRenderer = struct {
     /// Expand template string with placeholders
     fn expandTemplate(self: *PromptRenderer, template_str: []const u8, ctx: *const PromptContext) ![]const u8 {
         var result: std.array_list.Managed(u8) = .{
+            .allocator = self.allocator,
             .items = &[_]u8{},
             .capacity = 0,
         };
-        defer result.deinit(self.allocator);
+        defer result.deinit();
 
         var i: usize = 0;
         while (i < template_str.len) {
@@ -89,24 +90,24 @@ pub const PromptRenderer = struct {
                     // Expand placeholder
                     if (try self.registry.expand(placeholder_name, ctx)) |value| {
                         defer self.allocator.free(value);
-                        try result.appendSlice(self.allocator, value);
+                        try result.appendSlice(value);
                     } else if (ctx.getCustom(placeholder_name)) |custom_value| {
-                        try result.appendSlice(self.allocator, custom_value);
+                        try result.appendSlice(custom_value);
                     }
 
                     i = end + 1;
                 } else {
                     // No closing brace, treat as literal
-                    try result.append(self.allocator, '{');
+                    try result.append('{');
                     i += 1;
                 }
             } else {
-                try result.append(self.allocator, template_str[i]);
+                try result.append(template_str[i]);
                 i += 1;
             }
         }
 
-        return try result.toOwnedSlice(self.allocator);
+        return try result.toOwnedSlice();
     }
 
     /// Render left and right prompts with proper spacing
@@ -127,22 +128,23 @@ pub const PromptRenderer = struct {
 
         // Build result with spacing
         var result: std.array_list.Managed(u8) = .{
+            .allocator = self.allocator,
             .items = &[_]u8{},
             .capacity = 0,
         };
-        defer result.deinit(self.allocator);
+        defer result.deinit();
 
-        try result.appendSlice(self.allocator, left);
+        try result.appendSlice(left);
 
         // Add spaces
         var i: usize = 0;
         while (i < spaces_needed) : (i += 1) {
-            try result.append(self.allocator, ' ');
+            try result.append(' ');
         }
 
-        try result.appendSlice(self.allocator, right);
+        try result.appendSlice(right);
 
-        return try result.toOwnedSlice(self.allocator);
+        return try result.toOwnedSlice();
     }
 
     /// Register a custom placeholder

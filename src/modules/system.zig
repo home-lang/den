@@ -78,7 +78,7 @@ fn getLinuxBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     var buf: [16]u8 = undefined;
     var capacity_size: usize = 0;
     while (capacity_size < buf.len) {
-        const n = capacity_file.read(buf[capacity_size..]) catch break;
+        const n = capacity_file.readStreaming(std.Options.debug_io, &.{buf[capacity_size..]}) catch break;
         if (n == 0) break;
         capacity_size += n;
     }
@@ -90,7 +90,7 @@ fn getLinuxBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
 
     var status_size: usize = 0;
     while (status_size < buf.len) {
-        const n = status_file.read(buf[status_size..]) catch break;
+        const n = status_file.readStreaming(std.Options.debug_io, &.{buf[status_size..]}) catch break;
         if (n == 0) break;
         status_size += n;
     }

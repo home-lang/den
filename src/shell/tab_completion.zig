@@ -203,8 +203,7 @@ pub fn getGitBranches(allocator: std.mem.Allocator, prefix: []const u8) ![][]con
     defer results.deinit(allocator);
 
     // Run: git branch -a --format=%(refname:short)
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "git", "branch", "-a", "--format=%(refname:short)" },
     }) catch {
         return &[_][]const u8{};
@@ -247,8 +246,7 @@ pub fn getGitModifiedFiles(allocator: std.mem.Allocator, prefix: []const u8) ![]
     defer results.deinit(allocator);
 
     // Run: git status --porcelain
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "git", "status", "--porcelain" },
     }) catch {
         return &[_][]const u8{};
@@ -626,8 +624,7 @@ fn getDockerContainers(allocator: std.mem.Allocator, prefix: []const u8) ![][]co
     defer results.deinit(allocator);
 
     // Run: docker ps -a --format {{.Names}}
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "docker", "ps", "-a", "--format", "{{.Names}}" },
     }) catch {
         return &[_][]const u8{};
@@ -660,8 +657,7 @@ fn getDockerImages(allocator: std.mem.Allocator, prefix: []const u8) ![][]const 
     defer results.deinit(allocator);
 
     // Run: docker images --format {{.Repository}}:{{.Tag}}
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "docker", "images", "--format", "{{.Repository}}:{{.Tag}}" },
     }) catch {
         return &[_][]const u8{};

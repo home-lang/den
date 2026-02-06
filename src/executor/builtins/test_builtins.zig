@@ -61,7 +61,7 @@ pub fn testBuiltin(command: *types.ParsedCommand) !i32 {
             const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
             defer file.close(std.Options.debug_io);
             const stat = file.stat(std.Options.debug_io) catch return 1;
-            return if (stat.mode & 0o111 != 0) 0 else 1;
+            return if (stat.permissions.toMode() & 0o111 != 0) 0 else 1;
         }
     }
 
@@ -236,14 +236,14 @@ fn evaluateExtendedTestExpr(args: [][]const u8) !bool {
             const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
             defer file.close(std.Options.debug_io);
             const stat = file.stat(std.Options.debug_io) catch return false;
-            return stat.mode & 0o111 != 0;
+            return stat.permissions.toMode() & 0o111 != 0;
         } else if (std.mem.eql(u8, op, "-s")) {
             const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
             defer file.close(std.Options.debug_io);
             const stat = file.stat(std.Options.debug_io) catch return false;
             return stat.size > 0;
         } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
-            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,arg) catch return false;
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return false;
             return stat.kind == .sym_link;
         }
     }
@@ -289,16 +289,16 @@ fn evaluateExtendedTestExpr(args: [][]const u8) !bool {
             const right_num = std.fmt.parseInt(i64, right, 10) catch return false;
             return left_num >= right_num;
         } else if (std.mem.eql(u8, op, "-nt")) {
-            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,left) catch return false;
-            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,right) catch return false;
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return false;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return false;
             return left_stat.mtime.nanoseconds > right_stat.mtime.nanoseconds;
         } else if (std.mem.eql(u8, op, "-ot")) {
-            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,left) catch return false;
-            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,right) catch return false;
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return false;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return false;
             return left_stat.mtime.nanoseconds < right_stat.mtime.nanoseconds;
         } else if (std.mem.eql(u8, op, "-ef")) {
-            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,left) catch return false;
-            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,right) catch return false;
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return false;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return false;
             return left_stat.inode == right_stat.inode;
         }
     }

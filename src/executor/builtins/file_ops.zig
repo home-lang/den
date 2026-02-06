@@ -28,7 +28,7 @@ fn printTree(allocator: std.mem.Allocator, dir_path: []const u8, prefix: []const
     var entries: std.ArrayList(std.Io.Dir.Entry) = .{};
     defer entries.deinit(allocator);
 
-    while (try iter.next()) |entry| {
+    while (try iter.next(std.Options.debug_io)) |entry| {
         try entries.append(allocator, entry);
     }
 
@@ -291,7 +291,7 @@ fn findRecursive(allocator: std.mem.Allocator, dir_path: []const u8, name_patter
 
     var iter = dir.iterate();
 
-    while (try iter.next()) |entry| {
+    while (try iter.next(std.Options.debug_io)) |entry| {
         if (std.mem.eql(u8, entry.name, ".") or std.mem.eql(u8, entry.name, "..")) {
             continue;
         }
@@ -443,7 +443,7 @@ fn fuzzyFindRecursive(
 
     var iter = dir.iterate();
 
-    while (try iter.next()) |entry| {
+    while (try iter.next(std.Options.debug_io)) |entry| {
         if (results.items.len >= max_collect) break;
 
         if (entry.name[0] == '.') continue;
@@ -716,7 +716,7 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
     const EntryInfo = struct {
         name: []const u8,
-        kind: std.Io.Dir.Entry.Kind,
+        kind: std.Io.File.Kind,
         size: u64,
         mtime_ns: i96,
     };
@@ -725,11 +725,11 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     var count: usize = 0;
 
     var iter = dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(std.Options.debug_io)) |entry| {
         if (!show_all and entry.name.len > 0 and entry.name[0] == '.') continue;
         if (count >= 512) break;
 
-        const stat = dir.statFile(std.Options.debug_io, entry.name) catch |err| {
+        const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch |err| {
             if (err == error.IsDir) {
                 const dir_stat = dir.stat(std.Options.debug_io) catch {
                     entries[count] = .{
@@ -800,18 +800,8 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         var total_blocks: u64 = 0;
         i = 0;
         while (i < count) : (i += 1) {
-            const path_buf = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ target_path, entries[i].name });
-            defer allocator.free(path_buf);
-
-            const path_z = try std.posix.toPosixPath(path_buf);
-            var st: std.c.Stat = undefined;
-            const result = std.c.stat(&path_z, &st);
-            if (result != 0) {
-                total_blocks += (entries[i].size + 511) / 512;
-                continue;
-            }
-
-            total_blocks += @intCast(st.blocks);
+            // Approximate blocks from size (512-byte blocks)
+            total_blocks += (entries[i].size + 511) / 512;
         }
         try IO.print("total {d}\n", .{total_blocks});
 
@@ -823,8 +813,7 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             defer allocator.free(path_buf);
 
             const path_z = try std.posix.toPosixPath(path_buf);
-            var st: std.c.Stat = undefined;
-            const stat_result = std.c.stat(&path_z, &st);
+            const maybe_st = dir.statFile(std.Options.debug_io, entry.name, .{}) catch null;
 
             const kind_char: u8 = switch (entry.kind) {
                 .directory => 'd',
@@ -833,8 +822,8 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             };
 
             var perms_buf: [9]u8 = undefined;
-            if (stat_result == 0) {
-                const mode = st.mode;
+            if (maybe_st) |st| {
+                const mode = st.permissions.toMode();
                 perms_buf[0] = if (mode & 0o400 != 0) 'r' else '-';
                 perms_buf[1] = if (mode & 0o200 != 0) 'w' else '-';
                 perms_buf[2] = if (mode & 0o100 != 0) 'x' else '-';
@@ -850,7 +839,7 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             const perms = perms_buf[0..];
 
             var has_xattr = false;
-            if (stat_result == 0) {
+            {
                 const listxattr = struct {
                     extern "c" fn listxattr(path: [*:0]const u8, namebuf: ?[*]u8, size: usize, options: c_int) isize;
                 }.listxattr;
@@ -858,7 +847,7 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
                 has_xattr = xattr_list_size > 0;
             }
 
-            const nlink: u64 = if (stat_result == 0) @intCast(st.nlink) else 1;
+            const nlink: u64 = if (maybe_st) |st| @intCast(st.nlink) else 1;
 
             const username = getenv("USER") orelse "user";
             const groupname = "staff";

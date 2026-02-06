@@ -97,7 +97,7 @@ pub const ScriptManager = struct {
         errdefer self.allocator.free(buffer);
         var total_read: usize = 0;
         while (total_read < read_size) {
-            const n = file.read(buffer[total_read..]) catch |err| {
+            const n = file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]}) catch |err| {
                 std.debug.print("Error reading script '{s}': {}\n", .{ path, err });
                 return error.ScriptReadFailed;
             };

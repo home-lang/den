@@ -56,8 +56,7 @@ pub fn detectPackageVersion(allocator: std.mem.Allocator, cwd: []const u8) ![]co
 
 /// Detect Bun version by running `bun --version`
 pub fn detectBunVersion(allocator: std.mem.Allocator) ![]const u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "bun", "--version" },
     }) catch return error.NotFound;
 
@@ -81,8 +80,7 @@ pub fn detectBunVersion(allocator: std.mem.Allocator) ![]const u8 {
 
 /// Detect Node.js version by running `node --version`
 pub fn detectNodeVersion(allocator: std.mem.Allocator) ![]const u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "node", "--version" },
     }) catch return error.NotFound;
 
@@ -117,8 +115,7 @@ pub fn detectPythonVersion(allocator: std.mem.Allocator) ![]const u8 {
     };
 
     for (commands) |cmd| {
-        const result = std.process.Child.run(.{
-            .allocator = allocator,
+        const result = std.process.run(allocator, std.Options.debug_io, .{
             .argv = cmd,
         }) catch continue;
 
@@ -150,8 +147,7 @@ pub fn detectPythonVersion(allocator: std.mem.Allocator) ![]const u8 {
 
 /// Detect Ruby version by running `ruby --version`
 pub fn detectRubyVersion(allocator: std.mem.Allocator) ![]const u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "ruby", "--version" },
     }) catch return error.NotFound;
 
@@ -184,8 +180,7 @@ pub fn detectRubyVersion(allocator: std.mem.Allocator) ![]const u8 {
 
 /// Detect Go version by running `go version`
 pub fn detectGoVersion(allocator: std.mem.Allocator) ![]const u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "go", "version" },
     }) catch return error.NotFound;
 
@@ -221,8 +216,7 @@ pub fn detectGoVersion(allocator: std.mem.Allocator) ![]const u8 {
 
 /// Detect Rust version by running `rustc --version`
 pub fn detectRustVersion(allocator: std.mem.Allocator) ![]const u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "rustc", "--version" },
     }) catch return error.NotFound;
 
@@ -255,8 +249,7 @@ pub fn detectRustVersion(allocator: std.mem.Allocator) ![]const u8 {
 
 /// Detect Zig version by running `zig version`
 pub fn detectZigVersion(allocator: std.mem.Allocator) ![]const u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, std.Options.debug_io, .{
         .argv = &[_][]const u8{ "zig", "version" },
     }) catch return error.NotFound;
 

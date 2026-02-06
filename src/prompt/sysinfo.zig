@@ -63,7 +63,7 @@ pub const SystemInfo = struct {
             var buf: [256]u8 = undefined;
             var size: usize = 0;
             while (size < buf.len) {
-                const n = try file.read(buf[size..]);
+                const n = try file.readStreaming(std.Options.debug_io, &.{buf[size..]});
                 if (n == 0) break;
                 size += n;
             }
@@ -83,8 +83,7 @@ pub const SystemInfo = struct {
             return false;
         }
 
-        const posix = std.posix;
-        return posix.geteuid() == 0;
+        return std.c.geteuid() == 0;
     }
 
     /// Abbreviate path with home directory (~)

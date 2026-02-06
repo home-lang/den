@@ -43,14 +43,15 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection) !
         const path_z = try allocator.dupeZ(u8, redir.target);
         defer allocator.free(path_z);
 
-        const fd = std.posix.open(
+        const fd = std.c.open(
             path_z,
             .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true },
-            0o644,
-        ) catch |err| {
-            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-            std.posix.exit(1);
-        };
+            @as(std.c.mode_t, 0o644),
+        );
+        if (fd < 0) {
+            try IO.eprint("den: {s}: cannot open\n", .{redir.target});
+            std.c._exit(1);
+        }
 
         if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(fd);
@@ -67,14 +68,15 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
         const path_z = try allocator.dupeZ(u8, redir.target);
         defer allocator.free(path_z);
 
-        const fd = std.posix.open(
+        const fd = std.c.open(
             path_z,
             .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true },
-            0o644,
-        ) catch |err| {
-            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-            std.posix.exit(1);
-        };
+            @as(std.c.mode_t, 0o644),
+        );
+        if (fd < 0) {
+            try IO.eprint("den: {s}: cannot open\n", .{redir.target});
+            std.c._exit(1);
+        }
 
         if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(fd);
@@ -91,14 +93,15 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
         const path_z = try allocator.dupeZ(u8, redir.target);
         defer allocator.free(path_z);
 
-        const fd = std.posix.open(
+        const fd = std.c.open(
             path_z,
             .{ .ACCMODE = .RDONLY },
-            0,
-        ) catch |err| {
-            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-            std.posix.exit(1);
-        };
+            @as(std.c.mode_t, 0),
+        );
+        if (fd < 0) {
+            try IO.eprint("den: {s}: cannot open\n", .{redir.target});
+            std.c._exit(1);
+        }
 
         if (std.c.dup2(fd, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
         std.posix.close(fd);
@@ -115,14 +118,15 @@ fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !voi
         defer allocator.free(path_z);
 
         // Open for read+write, create if doesn't exist
-        const fd = std.posix.open(
+        const fd = std.c.open(
             path_z,
             .{ .ACCMODE = .RDWR, .CREAT = true },
-            0o644,
-        ) catch |err| {
-            try IO.eprint("den: {s}: {}\n", .{ redir.target, err });
-            std.posix.exit(1);
-        };
+            @as(std.c.mode_t, 0o644),
+        );
+        if (fd < 0) {
+            try IO.eprint("den: {s}: cannot open\n", .{redir.target});
+            std.c._exit(1);
+        }
 
         if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(fd);
@@ -179,7 +183,7 @@ fn applyHeredocOrHerestring(
         std.posix.close(read_fd);
         (std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } }).writeStreamingAll(std.Options.debug_io, content) catch {};
         std.posix.close(write_fd);
-        std.posix.exit(0);
+        std.c._exit(0);
     }
 
     // Parent: close write end and dup read end to stdin

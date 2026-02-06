@@ -848,7 +848,7 @@ pub const LineEditor = struct {
         // Flush stdout to ensure prompt is displayed before entering raw mode
         if (builtin.os.tag != .windows) {
             // Force flush by calling fsync on stdout
-            _ = posix.fsync(posix.STDOUT_FILENO) catch {};
+            _ = std.c.fsync(posix.STDOUT_FILENO);
         }
     }
 

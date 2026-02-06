@@ -91,13 +91,13 @@ pub const TypoCorrection = struct {
             defer dir.close(std.Options.debug_io);
 
             var iter = dir.iterate();
-            while (iter.next() catch continue) |entry| {
+            while (iter.next(std.Options.debug_io) catch continue) |entry| {
                 // Include files and symlinks (many commands are symlinks)
                 if (entry.kind != .file and entry.kind != .sym_link) continue;
 
                 // Check if executable
                 const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch continue;
-                const is_executable = (stat.mode & 0o111) != 0;
+                const is_executable = (stat.permissions.toMode() & 0o111) != 0;
                 if (!is_executable) continue;
 
                 // Calculate distance

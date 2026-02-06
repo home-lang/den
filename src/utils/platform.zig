@@ -36,7 +36,7 @@ pub fn waitProcess(pid: ProcessId, options: struct { no_hang: bool = false }) !W
 }
 
 fn waitProcessPosix(pid: std.posix.pid_t, options: struct { no_hang: bool = false }) !WaitResult {
-    const flags: c_int = if (options.no_hang) @bitCast(std.posix.W.NOHANG) else 0;
+    const flags: c_int = if (options.no_hang) std.posix.W.NOHANG else 0;
     var wait_status: c_int = 0;
     const wait_pid = std.c.waitpid(pid, &wait_status, flags);
     const status_u32: u32 = @bitCast(wait_status);
@@ -52,9 +52,9 @@ fn waitProcessPosix(pid: std.posix.pid_t, options: struct { no_hang: bool = fals
 
     const signaled = std.posix.W.IFSIGNALED(status_u32);
     return WaitResult{
-        .status = if (signaled) 128 + @as(i32, std.posix.W.TERMSIG(status_u32)) else std.posix.W.EXITSTATUS(status_u32),
+        .status = if (signaled) 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(status_u32)))) else @as(i32, std.posix.W.EXITSTATUS(status_u32)),
         .signaled = signaled,
-        .signal = if (signaled) std.posix.W.TERMSIG(status_u32) else null,
+        .signal = if (signaled) @as(u8, @intCast(@intFromEnum(std.posix.W.TERMSIG(status_u32)))) else null,
     };
 }
 
@@ -342,7 +342,7 @@ pub fn fileExists(path: []const u8) bool {
 
 /// Check if a path is a directory.
 pub fn isDirectory(path: []const u8) bool {
-    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, path) catch return false;
+    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{}) catch return false;
     return stat.kind == .directory;
 }
 
@@ -357,7 +357,7 @@ pub fn isExecutable(path: []const u8) bool {
             std.mem.endsWith(u8, path, ".bat") or
             std.mem.endsWith(u8, path, ".com");
     } else {
-        std.Io.Dir.cwd().access(std.Options.debug_io, path, .{ .mode = .execute }) catch return false;
+        std.Io.Dir.cwd().access(std.Options.debug_io, path, .{ .execute = true }) catch return false;
         return true;
     }
 }

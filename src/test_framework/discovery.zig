@@ -54,7 +54,7 @@ pub const TestDiscovery = struct {
         defer dir.close(std.Options.debug_io);
 
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(std.Options.debug_io)) |entry| {
             if (entry.kind == .directory) {
                 // Recursively scan subdirectories
                 const sub_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dir_path, entry.name });

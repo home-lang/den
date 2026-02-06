@@ -119,7 +119,7 @@ pub const JobManager = struct {
             if (self.jobs[i]) |job| {
                 // Check if job has completed (non-blocking waitpid)
                 var wait_status: c_int = 0;
-                const wait_pid = std.c.waitpid(job.pid, &wait_status, @bitCast(std.posix.W.NOHANG));
+                const wait_pid = std.c.waitpid(job.pid, &wait_status, std.posix.W.NOHANG);
 
                 if (wait_pid == job.pid) {
                     // Job completed
@@ -171,7 +171,7 @@ pub const JobManager = struct {
 
                     // Check if still running
                     var kill_wait_status: c_int = 0;
-                    const kill_wait_pid = std.c.waitpid(job.pid, &kill_wait_status, @bitCast(std.posix.W.NOHANG));
+                    const kill_wait_pid = std.c.waitpid(job.pid, &kill_wait_status, std.posix.W.NOHANG);
                     if (kill_wait_pid == 0) {
                         // Still running, force kill
                         _ = std.posix.kill(job.pid, std.posix.SIG.KILL) catch {};

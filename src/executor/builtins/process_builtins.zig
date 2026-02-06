@@ -4,6 +4,9 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const utils = @import("../../utils.zig");
+const c_exec = struct {
+    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+};
 
 /// Process-related builtins: times, umask, timeout, time, watch
 
@@ -261,7 +264,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
         // Create null-terminated command name
         const cmd_z = page_alloc.dupeZ(u8, cmd_name) catch {
-            std.posix.exit(127);
+            std.c._exit(127);
         };
 
         // Build argv array with null-terminated strings
@@ -272,19 +275,16 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         for (cmd_args) |arg| {
             if (argv_idx >= argv_buf.len - 1) break;
             const arg_z = page_alloc.dupeZ(u8, arg) catch {
-                std.posix.exit(127);
+                std.c._exit(127);
             };
             argv_buf[argv_idx] = arg_z.ptr;
             argv_idx += 1;
         }
         argv_buf[argv_idx] = null;
 
-        _ = std.posix.execvpeZ(cmd_z.ptr, @ptrCast(argv_buf[0..argv_idx :null]), getCEnviron()) catch {
-            // exec failed
-            std.posix.exit(127);
-        };
+        _ = c_exec.execvp(cmd_z.ptr, @ptrCast(argv_buf[0..argv_idx :null]));
         // If we get here, exec failed
-        std.posix.exit(127);
+        std.c._exit(127);
     }
 
     // Parent process - wait with timeout
@@ -301,14 +301,14 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     while (true) {
         // Check if child has exited (non-blocking)
         var poll_wait_status: c_int = 0;
-        const poll_wait_pid = std.c.waitpid(child_pid, &poll_wait_status, @bitCast(std.posix.W.NOHANG));
+        const poll_wait_pid = std.c.waitpid(child_pid, &poll_wait_status, std.posix.W.NOHANG);
         if (poll_wait_pid != 0) {
             const poll_status_u32: u32 = @bitCast(poll_wait_status);
             // Child exited
             if (std.posix.W.IFEXITED(poll_status_u32)) {
                 return @intCast(std.posix.W.EXITSTATUS(poll_status_u32));
             } else if (std.posix.W.IFSIGNALED(poll_status_u32)) {
-                return 128 + @as(i32, @intCast(std.posix.W.TERMSIG(poll_status_u32)));
+                return 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(poll_status_u32))));
             }
             return 1;
         }
@@ -326,7 +326,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
                 std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(ka_secs * 1_000_000_000 + ka_nanos), .awake) catch {};
                 // Check if still running
                 var check_status: c_int = 0;
-                const check_pid = std.c.waitpid(child_pid, &check_status, @bitCast(std.posix.W.NOHANG));
+                const check_pid = std.c.waitpid(child_pid, &check_status, std.posix.W.NOHANG);
                 if (check_pid == 0) {
                     // Still running, send KILL
                     std.posix.kill(child_pid, std.posix.SIG.KILL) catch {};
@@ -341,7 +341,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
                 if (std.posix.W.IFEXITED(final_status_u32)) {
                     return @intCast(std.posix.W.EXITSTATUS(final_status_u32));
                 } else if (std.posix.W.IFSIGNALED(final_status_u32)) {
-                    return 128 + @as(i32, @intCast(std.posix.W.TERMSIG(final_status_u32)));
+                    return 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(final_status_u32))));
                 }
             }
             return 124; // Standard timeout exit code

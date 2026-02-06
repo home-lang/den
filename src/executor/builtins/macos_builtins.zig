@@ -2,6 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
+const c_exec = struct {
+    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+};
 
 fn getenv(key: [*:0]const u8) ?[]const u8 {
     const value = std.c.getenv(key) orelse return null;
@@ -249,10 +252,8 @@ pub fn show(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         if (fork_ret < 0) return error.Unexpected;
         const pid: std.posix.pid_t = @intCast(fork_ret);
         if (pid == 0) {
-            _ = std.posix.execvpeZ("chflags", @ptrCast(&argv), getCEnviron()) catch {
-                std.posix.exit(127);
-            };
-            unreachable;
+            _ = c_exec.execvp("chflags", @ptrCast(&argv));
+            std.c._exit(127);
         } else {
             var wait_status: c_int = 0;
             _ = std.c.waitpid(pid, &wait_status, 0);
@@ -295,10 +296,8 @@ pub fn hide(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         if (fork_ret2 < 0) return error.Unexpected;
         const pid: std.posix.pid_t = @intCast(fork_ret2);
         if (pid == 0) {
-            _ = std.posix.execvpeZ("chflags", @ptrCast(&argv), getCEnviron()) catch {
-                std.posix.exit(127);
-            };
-            unreachable;
+            _ = c_exec.execvp("chflags", @ptrCast(&argv));
+            std.c._exit(127);
         } else {
             var wait_status: c_int = 0;
             _ = std.c.waitpid(pid, &wait_status, 0);
@@ -460,7 +459,7 @@ fn libraryList() !i32 {
         defer dir.close(std.Options.debug_io);
         var iter = dir.iterate();
         var count: usize = 0;
-        while (iter.next() catch null) |entry| {
+        while (iter.next(std.Options.debug_io) catch null) |entry| {
             if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".den") or
                 std.mem.endsWith(u8, entry.name, ".sh"))
             {
@@ -483,7 +482,7 @@ fn libraryList() !i32 {
         defer dir.close(std.Options.debug_io);
         var iter = dir.iterate();
         var count: usize = 0;
-        while (iter.next() catch null) |entry| {
+        while (iter.next(std.Options.debug_io) catch null) |entry| {
             if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".den") or
                 std.mem.endsWith(u8, entry.name, ".sh"))
             {
@@ -516,7 +515,7 @@ fn libraryPath() !i32 {
     };
 
     for (paths, 1..) |path, i| {
-        const exists = std.Io.Dir.cwd().statFile(std.Options.debug_io,path) catch null;
+        const exists = std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{}) catch null;
         const status = if (exists != null) "\x1b[1;32m+\x1b[0m" else "\x1b[2m-\x1b[0m";
         try IO.print("{s} {}. {s}\n", .{ status, i, path });
     }
@@ -625,7 +624,7 @@ fn libraryLoad(name: []const u8) !i32 {
 
     // If it's an absolute path, use directly
     if (name[0] == '/') {
-        _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,name) catch {
+        _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, name, .{}) catch {
             try IO.eprint("den: library: '{s}' not found\n", .{name});
             return 1;
         };
@@ -639,7 +638,7 @@ fn libraryLoad(name: []const u8) !i32 {
     for (extensions) |ext| {
         const path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}{s}", .{ home, name, ext }) catch continue;
 
-        if (std.Io.Dir.cwd().statFile(std.Options.debug_io,path)) |_| {
+        if (std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{})) |_| {
             try IO.print("\x1b[1;32m+\x1b[0m Found library: {s}\n", .{path});
             try IO.print("  \x1b[2mRun: source {s}\x1b[0m\n", .{path});
             return 0;
@@ -650,7 +649,7 @@ fn libraryLoad(name: []const u8) !i32 {
     for (extensions) |ext| {
         const path = std.fmt.bufPrint(&path_buf, "/usr/local/share/den/lib/{s}{s}", .{ name, ext }) catch continue;
 
-        if (std.Io.Dir.cwd().statFile(std.Options.debug_io,path)) |_| {
+        if (std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{})) |_| {
             try IO.print("\x1b[1;32m+\x1b[0m Found library: {s}\n", .{path});
             try IO.print("  \x1b[2mRun: source {s}\x1b[0m\n", .{path});
             return 0;
@@ -672,7 +671,7 @@ fn libraryCreate(name: []const u8) !i32 {
     var lib_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const lib_dir = std.fmt.bufPrint(&lib_dir_buf, "{s}/.config/den/lib", .{home}) catch return 1;
 
-    std.Io.Dir.cwd().makePath(std.Options.debug_io,lib_dir) catch |err| {
+    std.Io.Dir.cwd().createDirPath(std.Options.debug_io, lib_dir) catch |err| {
         try IO.eprint("den: library: cannot create directory: {}\n", .{err});
         return 1;
     };
@@ -682,7 +681,7 @@ fn libraryCreate(name: []const u8) !i32 {
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}.den", .{ lib_dir, name }) catch return 1;
 
     // Check if file exists
-    if (std.Io.Dir.cwd().statFile(std.Options.debug_io,path)) |_| {
+    if (std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{})) |_| {
         try IO.eprint("den: library: '{s}' already exists\n", .{path});
         return 1;
     } else |_| {}
@@ -754,7 +753,7 @@ fn dotfilesList() !i32 {
         var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ home, dotfile }) catch continue;
 
-        const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,path) catch {
+        const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{}) catch {
             continue;
         };
 
@@ -783,7 +782,7 @@ fn dotfilesList() !i32 {
 
     var iter = dir.iterate();
     var count: usize = 0;
-    while (iter.next() catch null) |entry| {
+    while (iter.next(std.Options.debug_io) catch null) |entry| {
         if (count >= 10) {
             try IO.print("  ... and more\n", .{});
             break;
@@ -825,8 +824,8 @@ fn dotfilesStatus() !i32 {
         var backup_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const backup_path = std.fmt.bufPrint(&backup_buf, "{s}/{s}.bak", .{ home, dotfile }) catch continue;
 
-        const exists = std.Io.Dir.cwd().statFile(std.Options.debug_io,path) catch null;
-        const backup_exists = std.Io.Dir.cwd().statFile(std.Options.debug_io,backup_path) catch null;
+        const exists = std.Io.Dir.cwd().statFile(std.Options.debug_io, path, .{}) catch null;
+        const backup_exists = std.Io.Dir.cwd().statFile(std.Options.debug_io, backup_path, .{}) catch null;
 
         if (exists != null) {
             const stat = exists.?;
@@ -860,13 +859,13 @@ fn dotfilesLink(file: []const u8) !i32 {
     };
 
     // Check if source file exists
-    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,file) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, file, .{}) catch {
         try IO.eprint("dotfiles link: source file '{s}' not found\n", .{file});
         return 1;
     };
 
     // Check if target already exists
-    if (std.Io.Dir.cwd().statFile(std.Options.debug_io,target)) |_| {
+    if (std.Io.Dir.cwd().statFile(std.Options.debug_io, target, .{})) |_| {
         try IO.eprint("den: dotfiles: link: '{s}' already exists\n", .{target});
         try IO.eprint("den: dotfiles: use 'dotfiles backup {s}' first, then try again\n", .{file});
         return 1;
@@ -889,7 +888,7 @@ fn dotfilesLink(file: []const u8) !i32 {
     };
 
     // Create symlink
-    std.posix.symlink(abs_source, target) catch |err| {
+    std.Io.Dir.symLinkAbsolute(std.Options.debug_io, abs_source, target, .{}) catch |err| {
         try IO.eprint("dotfiles link: failed to create symlink: {}\n", .{err});
         return 1;
     };
@@ -910,7 +909,7 @@ fn dotfilesUnlink(file: []const u8) !i32 {
         return 1;
     };
 
-    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io,target) catch {
+    const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, target, .{}) catch {
         try IO.eprint("dotfiles unlink: '{s}' not found\n", .{target});
         return 1;
     };
@@ -954,13 +953,13 @@ fn dotfilesBackup(file: []const u8) !i32 {
     };
 
     // Check if source exists
-    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,source) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, source, .{}) catch {
         try IO.eprint("dotfiles backup: '{s}' not found\n", .{source});
         return 1;
     };
 
     // Copy file
-    std.Io.Dir.cwd().copyFile(std.Options.debug_io,source, std.Io.Dir.cwd(), backup, .{}) catch |err| {
+    std.Io.Dir.cwd().copyFile(source, std.Io.Dir.cwd(), backup, std.Options.debug_io, .{}) catch |err| {
         try IO.eprint("dotfiles backup: failed to copy: {}\n", .{err});
         return 1;
     };
@@ -994,13 +993,13 @@ fn dotfilesRestore(file: []const u8) !i32 {
     };
 
     // Check if backup exists
-    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,backup) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, backup, .{}) catch {
         try IO.eprint("dotfiles restore: backup '{s}' not found\n", .{backup});
         return 1;
     };
 
     // Copy backup to original
-    std.Io.Dir.cwd().copyFile(std.Options.debug_io,backup, std.Io.Dir.cwd(), target, .{}) catch |err| {
+    std.Io.Dir.cwd().copyFile(backup, std.Io.Dir.cwd(), target, std.Options.debug_io, .{}) catch |err| {
         try IO.eprint("dotfiles restore: failed to copy: {}\n", .{err});
         return 1;
     };
@@ -1042,14 +1041,14 @@ fn dotfilesEdit(file: []const u8) !i32 {
     if (pid3 == 0) {
         // Child process
         var editor_buf: [256]u8 = undefined;
-        const editor_z = std.fmt.bufPrintZ(&editor_buf, "{s}", .{editor}) catch std.posix.exit(127);
+        const editor_z = std.fmt.bufPrintZ(&editor_buf, "{s}", .{editor}) catch std.c._exit(127);
 
         var path_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const path_z = std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path}) catch std.posix.exit(127);
+        const path_z = std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path}) catch std.c._exit(127);
 
         const argv = [_]?[*:0]const u8{ editor_z, path_z, null };
-        _ = std.posix.execvpeZ(editor_z, @ptrCast(&argv), getCEnviron()) catch {};
-        std.posix.exit(127);
+        _ = c_exec.execvp(editor_z, @ptrCast(&argv));
+        std.c._exit(127);
     } else {
         // Parent process - wait for editor
         var wait_status3: c_int = 0;
@@ -1083,12 +1082,12 @@ fn dotfilesDiff(file: []const u8) !i32 {
     };
 
     // Check both files exist
-    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,current) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, current, .{}) catch {
         try IO.eprint("dotfiles diff: '{s}' not found\n", .{current});
         return 1;
     };
 
-    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io,backup) catch {
+    _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, backup, .{}) catch {
         try IO.eprint("dotfiles diff: backup '{s}' not found\n", .{backup});
         return 1;
     };
@@ -1104,14 +1103,14 @@ fn dotfilesDiff(file: []const u8) !i32 {
     if (pid4 == 0) {
         // Child process
         var backup_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const backup_z = std.fmt.bufPrintZ(&backup_z_buf, "{s}", .{backup}) catch std.posix.exit(127);
+        const backup_z = std.fmt.bufPrintZ(&backup_z_buf, "{s}", .{backup}) catch std.c._exit(127);
 
         var current_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const current_z = std.fmt.bufPrintZ(&current_z_buf, "{s}", .{current}) catch std.posix.exit(127);
+        const current_z = std.fmt.bufPrintZ(&current_z_buf, "{s}", .{current}) catch std.c._exit(127);
 
         const argv = [_]?[*:0]const u8{ "diff", "-u", "--color=auto", backup_z, current_z, null };
-        _ = std.posix.execvpeZ("diff", @ptrCast(&argv), getCEnviron()) catch {};
-        std.posix.exit(127);
+        _ = c_exec.execvp("diff", @ptrCast(&argv));
+        std.c._exit(127);
     } else {
         // Parent process - wait for diff
         var wait_status4: c_int = 0;

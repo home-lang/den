@@ -205,7 +205,7 @@ pub const GitModule = struct {
         if (child.stdout) |stdout_pipe| {
             var read_buf: [4096]u8 = undefined;
             while (true) {
-                const n = stdout_pipe.read(&read_buf) catch break;
+                const n = stdout_pipe.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try output_buf.appendSlice(self.allocator, read_buf[0..n]);
             }

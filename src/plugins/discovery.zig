@@ -273,7 +273,7 @@ pub const PluginDiscovery = struct {
 
                 // Look for plugin manifests
                 var iter = dir.iterate();
-                while (iter.next() catch null) |entry| {
+                while (iter.next(std.Options.debug_io) catch null) |entry| {
                     if (entry.kind == .directory) {
                         // Look for manifest file in plugin directory
                         const manifest_path = try std.fmt.allocPrint(
