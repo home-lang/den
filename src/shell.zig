@@ -230,33 +230,49 @@ pub const Shell = struct {
         // Get initial mtime for hot-reload
         const config_mtime = getConfigMtime(config_source.path);
 
-        // Initialize environment from system
+        // Initialize environment from system - inherit all parent environment variables
         var env = std.StringHashMap([]const u8).init(allocator);
 
-        // Add some basic environment variables (cross-platform)
-        // Note: Both keys and values must be allocated for proper cleanup
-        const home = getEnvOwned(allocator, "HOME") orelse
-            getEnvOwned(allocator, "USERPROFILE") orelse
-            try allocator.dupe(u8, "/");
-        const home_key = try allocator.dupe(u8, "HOME");
-        try env.put(home_key, home);
+        // Inherit all environment variables from parent process
+        {
+            const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
+            var i: usize = 0;
+            while (c_environ.*[i]) |entry| : (i += 1) {
+                const entry_str = std.mem.span(@as([*:0]const u8, @ptrCast(entry)));
+                if (std.mem.indexOfScalar(u8, entry_str, '=')) |eq_pos| {
+                    const key = try allocator.dupe(u8, entry_str[0..eq_pos]);
+                    const val = try allocator.dupe(u8, entry_str[eq_pos + 1 ..]);
+                    try env.put(key, val);
+                }
+            }
+        }
 
-        const path = getEnvOwned(allocator, "PATH") orelse
-            try allocator.dupe(u8, "/usr/bin:/bin");
-        const path_key = try allocator.dupe(u8, "PATH");
-        try env.put(path_key, path);
+        // Ensure critical variables have fallback values
+        const home = if (env.get("HOME")) |h|
+            try allocator.dupe(u8, h)
+        else blk: {
+            const fallback = getEnvOwned(allocator, "USERPROFILE") orelse
+                try allocator.dupe(u8, "/");
+            const home_key = try allocator.dupe(u8, "HOME");
+            try env.put(home_key, try allocator.dupe(u8, fallback));
+            break :blk fallback;
+        };
+        defer allocator.free(home);
+
+        if (!env.contains("PATH")) {
+            const path_key = try allocator.dupe(u8, "PATH");
+            const path_val = try allocator.dupe(u8, "/usr/bin:/bin");
+            try env.put(path_key, path_val);
+        }
 
         // Load default environment variables from config
         if (config.environment.enabled) {
-            // First, set defaults (only if not already set in system env)
+            // First, set defaults (only if not already in environment)
             for (types.EnvironmentConfig.defaults) |default_var| {
-                const existing = env_utils.getEnvAlloc(allocator, default_var.name) catch null;
-                const key_copy = try allocator.dupe(u8, default_var.name);
-                if (existing == null) {
+                if (!env.contains(default_var.name)) {
+                    const key_copy = try allocator.dupe(u8, default_var.name);
                     const value_copy = try allocator.dupe(u8, default_var.value);
                     try env.put(key_copy, value_copy);
-                } else {
-                    try env.put(key_copy, existing.?);
                 }
             }
 
@@ -785,6 +801,10 @@ pub const Shell = struct {
     }
 
     pub fn executeCommand(self: *Shell, input: []const u8) !void {
+        // Split on unquoted semicolons and execute each part separately.
+        // This ensures variables set by earlier parts are visible to later parts.
+        if (self.splitAndExecuteSemicolons(input)) return;
+
         // Check for array assignment first
         if (shell_mod.isArrayAssignment(input)) {
             try shell_mod.executeArrayAssignment(self, input);
@@ -829,11 +849,23 @@ pub const Shell = struct {
                         }
                     }
                     if (!found_space_outside_quotes) {
-                        // Simple assignment - use setArithVariable which resolves namerefs
-                        const value = trimmed_input[eq_pos + 1 ..];
-                        shell_mod.setArithVariable(self, potential_var, value);
-                        self.last_exit_code = 0;
-                        return;
+                        const raw_value = trimmed_input[eq_pos + 1 ..];
+                        // If value contains expansion characters ($, `), let the full
+                        // pipeline handle it so command substitution works correctly.
+                        var needs_full_pipeline = false;
+                        for (raw_value) |ch| {
+                            if (ch == '$' or ch == '`') {
+                                needs_full_pipeline = true;
+                                break;
+                            }
+                        }
+                        if (!needs_full_pipeline) {
+                            // Simple literal assignment
+                            shell_mod.setArithVariable(self, potential_var, raw_value);
+                            self.last_exit_code = 0;
+                            return;
+                        }
+                        // Fall through to full pipeline for expansion
                     }
                 }
             }
@@ -999,6 +1031,76 @@ pub const Shell = struct {
 
     pub fn executeErrTrap(self: *Shell) void {
         shell_mod.executeErrTrap(self);
+    }
+
+    /// Split input on unquoted semicolons and execute each part separately.
+    /// Returns true if input was split and executed, false if no splitting needed.
+    fn splitAndExecuteSemicolons(self: *Shell, input: []const u8) bool {
+        // Quick check: if no semicolons, skip
+        if (std.mem.indexOfScalar(u8, input, ';') == null) return false;
+
+        // Don't split if this contains control flow keywords that use semicolons
+        const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+        if (std.mem.startsWith(u8, trimmed, "for ") or
+            std.mem.startsWith(u8, trimmed, "for(") or
+            std.mem.startsWith(u8, trimmed, "while ") or
+            std.mem.startsWith(u8, trimmed, "until ") or
+            std.mem.startsWith(u8, trimmed, "if ") or
+            std.mem.startsWith(u8, trimmed, "case ") or
+            std.mem.startsWith(u8, trimmed, "select "))
+        {
+            return false;
+        }
+
+        // Find semicolons that are not inside quotes or $()
+        var parts_buf: [64][]const u8 = undefined;
+        var part_count: usize = 0;
+        var start: usize = 0;
+        var in_single_quote = false;
+        var in_double_quote = false;
+        var paren_depth: u32 = 0;
+        var i: usize = 0;
+
+        while (i < input.len) : (i += 1) {
+            const c = input[i];
+            if (c == '\\' and !in_single_quote and i + 1 < input.len) {
+                i += 1; // skip escaped char
+                continue;
+            }
+            if (c == '\'' and !in_double_quote) {
+                in_single_quote = !in_single_quote;
+            } else if (c == '"' and !in_single_quote) {
+                in_double_quote = !in_double_quote;
+            } else if (!in_single_quote and !in_double_quote) {
+                if (c == '(' and (paren_depth > 0 or (i > 0 and input[i - 1] == '$'))) {
+                    paren_depth += 1;
+                } else if (c == ')' and paren_depth > 0) {
+                    paren_depth -= 1;
+                } else if (c == ';' and paren_depth == 0) {
+                    const part = std.mem.trim(u8, input[start..i], &std.ascii.whitespace);
+                    if (part.len > 0 and part_count < parts_buf.len) {
+                        parts_buf[part_count] = part;
+                        part_count += 1;
+                    }
+                    start = i + 1;
+                }
+            }
+        }
+        // Last part
+        const last_part = std.mem.trim(u8, input[start..], &std.ascii.whitespace);
+        if (last_part.len > 0 and part_count < parts_buf.len) {
+            parts_buf[part_count] = last_part;
+            part_count += 1;
+        }
+
+        // Only split if we found multiple parts
+        if (part_count <= 1) return false;
+
+        // Execute each part separately
+        for (parts_buf[0..part_count]) |part| {
+            self.executeCommand(part) catch {};
+        }
+        return true;
     }
 
     pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {

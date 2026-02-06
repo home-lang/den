@@ -536,6 +536,54 @@ pub const Executor = struct {
             }
         }
 
+        // Handle bare variable assignment: VAR=value (when command name contains =)
+        if (std.mem.indexOfScalar(u8, command.name, '=')) |eq_pos| {
+            if (eq_pos > 0) {
+                const var_name = command.name[0..eq_pos];
+                // Verify it's a valid variable name
+                var is_valid = std.ascii.isAlphabetic(var_name[0]) or var_name[0] == '_';
+                if (is_valid) {
+                    for (var_name[1..]) |ch| {
+                        if (!std.ascii.isAlphanumeric(ch) and ch != '_') {
+                            is_valid = false;
+                            break;
+                        }
+                    }
+                }
+                if (is_valid) {
+                    const value = command.name[eq_pos + 1 ..];
+                    if (self.shell) |shell| {
+                        // Set the variable in the shell environment
+                        const key_copy = self.allocator.dupe(u8, var_name) catch return 1;
+                        const val_copy = self.allocator.dupe(u8, value) catch {
+                            self.allocator.free(key_copy);
+                            return 1;
+                        };
+                        if (shell.environment.fetchRemove(var_name)) |old| {
+                            self.allocator.free(old.key);
+                            self.allocator.free(old.value);
+                        }
+                        shell.environment.put(key_copy, val_copy) catch {
+                            self.allocator.free(key_copy);
+                            self.allocator.free(val_copy);
+                            return 1;
+                        };
+                        // Also set in the C environment for child processes
+                        var name_buf: [512]u8 = undefined;
+                        var val_buf: [4096]u8 = undefined;
+                        if (var_name.len < name_buf.len and value.len < val_buf.len) {
+                            @memcpy(name_buf[0..var_name.len], var_name);
+                            name_buf[var_name.len] = 0;
+                            @memcpy(val_buf[0..value.len], value);
+                            val_buf[value.len] = 0;
+                            _ = libc_env.setenv(name_buf[0..var_name.len :0], val_buf[0..value.len :0], 1);
+                        }
+                    }
+                    return 0;
+                }
+            }
+        }
+
         // Check if it's a builtin
         if (self.isBuiltin(command.name)) {
             // If builtin has redirections, handle appropriately per OS

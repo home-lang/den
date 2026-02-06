@@ -342,6 +342,7 @@ pub const Tokenizer = struct {
         var in_single_quote = false;
         var in_double_quote = false;
         var in_ansi_quote = false; // $'...' ANSI-C quoting
+        var subst_depth: u32 = 0; // Track $(...) / $((...)) nesting depth
 
         // Build the word with escape processing
         var word_buffer: [4096]u8 = undefined;
@@ -407,14 +408,36 @@ pub const Tokenizer = struct {
                 continue;
             }
 
-            // If not in quotes, stop at special characters
-            if (!in_single_quote and !in_double_quote) {
-                if (std.ascii.isWhitespace(char) or
-                    char == '|' or char == ';' or char == '&' or
-                    char == '>' or char == '<' or char == '(' or char == ')')
-                {
-                    break;
+            // If not in quotes, handle special characters
+            if (!in_single_quote and !in_double_quote and !in_ansi_quote) {
+                if (char == '(') {
+                    // Check if this is $( or $(( - command/arithmetic substitution
+                    if (word_len > 0 and word_buffer[word_len - 1] == '$') {
+                        subst_depth += 1;
+                        // Don't break - consume as part of word
+                    } else if (subst_depth > 0) {
+                        // Nested parenthesis inside substitution
+                        subst_depth += 1;
+                    } else {
+                        break; // Standalone ( - break
+                    }
+                } else if (char == ')') {
+                    if (subst_depth > 0) {
+                        subst_depth -= 1;
+                        // Don't break - consume as part of word
+                    } else {
+                        break; // Standalone ) - break
+                    }
+                } else if (subst_depth == 0) {
+                    // Only break on special chars when not inside a substitution
+                    if (std.ascii.isWhitespace(char) or
+                        char == '|' or char == ';' or char == '&' or
+                        char == '>' or char == '<')
+                    {
+                        break;
+                    }
                 }
+                // When subst_depth > 0, all chars (spaces, pipes, etc.) are part of the command
             }
 
             // Add character to word

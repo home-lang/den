@@ -1357,35 +1357,73 @@ pub const Expansion = struct {
         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
     }
 
-    /// Execute a command and return its output
+    /// Execute a command and return its output using fork/exec/pipe
     fn executeCommandForSubstitution(self: *Expansion, command: []const u8) ![]const u8 {
-        // Create a child process to execute the command
-        const argv = [_][]const u8{ "sh", "-c", command };
+        // Create a pipe for stdout capture
+        var pipe_fds: [2]std.posix.fd_t = undefined;
+        if (std.c.pipe(&pipe_fds) != 0) return error.Unexpected;
+        const read_end = pipe_fds[0];
+        const write_end = pipe_fds[1];
 
-        var child = std.process.spawn(std.Options.debug_io, .{
-            .argv = &argv,
-            .stdout = .pipe,
-            .stderr = .ignore,
-        }) catch |err| return err;
+        // Fork the process
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) {
+            std.posix.close(read_end);
+            std.posix.close(write_end);
+            return error.Unexpected;
+        }
+        const pid: std.posix.pid_t = @intCast(fork_ret);
 
-        // Read stdout
-        const stdout = child.stdout.?;
-        const max_output: usize = 1024 * 1024; // Max 1MB output
+        if (pid == 0) {
+            // Child process
+            // Redirect stdout to pipe write end
+            std.posix.close(read_end);
+            if (std.c.dup2(write_end, std.posix.STDOUT_FILENO) < 0) std.c._exit(1);
+            std.posix.close(write_end);
+
+            // Redirect stderr to /dev/null
+            const dev_null_fd = std.c.open("/dev/null", .{ .ACCMODE = .WRONLY }, @as(std.c.mode_t, 0));
+            if (dev_null_fd >= 0) {
+                _ = std.c.dup2(dev_null_fd, std.posix.STDERR_FILENO);
+                std.posix.close(@intCast(dev_null_fd));
+            }
+
+            // Null-terminate the command for execl
+            var cmd_buf: [8192]u8 = undefined;
+            if (command.len >= cmd_buf.len) std.c._exit(1);
+            @memcpy(cmd_buf[0..command.len], command);
+            cmd_buf[command.len] = 0;
+            const cmd_z: [*:0]const u8 = @ptrCast(&cmd_buf);
+
+            // Execute via /bin/sh -c
+            const sh_path: [*:0]const u8 = "/bin/sh";
+            const sh_c: [*:0]const u8 = "-c";
+            const argv_arr = [_:null]?[*:0]const u8{ sh_path, sh_c, cmd_z, null };
+            _ = std.c.execve(sh_path, &argv_arr, @extern(*[*:null]?[*:0]u8, .{ .name = "environ" }).*);
+            std.c._exit(127);
+        }
+
+        // Parent process - read child's stdout
+        std.posix.close(write_end);
+
+        const max_output: usize = 1024 * 1024;
         var output_buffer = std.ArrayList(u8).empty;
+        errdefer output_buffer.deinit(self.allocator);
 
         var read_buf: [4096]u8 = undefined;
         while (true) {
-            const bytes_read = std.posix.read(stdout.handle, &read_buf) catch break;
+            const bytes_read = std.posix.read(read_end, &read_buf) catch break;
             if (bytes_read == 0) break;
             try output_buffer.appendSlice(self.allocator, read_buf[0..bytes_read]);
             if (output_buffer.items.len >= max_output) break;
         }
-        const output = try output_buffer.toOwnedSlice(self.allocator);
+        std.posix.close(read_end);
 
-        const term = try child.wait(std.Options.debug_io);
-        _ = term;
+        // Wait for child to finish
+        var wait_status: c_int = 0;
+        _ = std.c.waitpid(pid, &wait_status, 0);
 
-        return output;
+        return try output_buffer.toOwnedSlice(self.allocator);
     }
 
     /// Expand $((expression)) - arithmetic expansion
