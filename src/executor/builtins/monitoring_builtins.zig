@@ -305,22 +305,25 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
             "nc", "-z", "-w", "3", host_z, port_z, null,
         };
 
-        const pid = std.posix.fork() catch {
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) {
             if (!quiet) {
                 try IO.print("  \x1b[1;31m✗\x1b[0m Failed to fork process\n", .{});
             }
             return 1;
-        };
+        }
+        const pid: std.posix.pid_t = @intCast(fork_ret);
 
         if (pid == 0) {
             const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
-            std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
-            std.posix.dup2(dev_null.handle, std.posix.STDOUT_FILENO) catch {};
+            _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
+            _ = std.c.dup2(dev_null.handle, std.posix.STDOUT_FILENO);
             _ = std.posix.execvpeZ("nc", @ptrCast(&argv), getCEnviron()) catch {};
             std.posix.exit(127);
         } else {
-            const result = std.posix.waitpid(pid, 0);
-            const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+            var wait_status: c_int = 0;
+            _ = std.c.waitpid(pid, &wait_status, 0);
+            const code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
 
             if (code == 0) {
                 if (!quiet) {
@@ -346,22 +349,25 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         else
             [_]?[*:0]const u8{ "ping", "-c", "1", "-W", "3", host_z, null };
 
-        const pid = std.posix.fork() catch {
+        const fork_ret2 = std.c.fork();
+        if (fork_ret2 < 0) {
             if (!quiet) {
                 try IO.print("  \x1b[1;31m✗\x1b[0m Failed to fork process\n", .{});
             }
             return 1;
-        };
+        }
+        const pid: std.posix.pid_t = @intCast(fork_ret2);
 
         if (pid == 0) {
             const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
-            std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
-            std.posix.dup2(dev_null.handle, std.posix.STDOUT_FILENO) catch {};
+            _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
+            _ = std.c.dup2(dev_null.handle, std.posix.STDOUT_FILENO);
             _ = std.posix.execvpeZ("ping", @ptrCast(&argv), getCEnviron()) catch {};
             std.posix.exit(127);
         } else {
-            const result = std.posix.waitpid(pid, 0);
-            const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+            var wait_status2: c_int = 0;
+            _ = std.c.waitpid(pid, &wait_status2, 0);
+            const code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status2))));
 
             if (code == 0) {
                 if (!quiet) {
@@ -646,22 +652,25 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
         else
             [_]?[*:0]const u8{ "ps", "-eo", "pid,pcpu,pmem,rss,comm", null };
 
-        const pipe_fds = std.posix.pipe() catch {
+        var pipe_fds: [2]std.posix.fd_t = undefined;
+        if (std.c.pipe(&pipe_fds) != 0) {
             try IO.eprint("den: proc-monitor: failed to create pipe\n", .{});
             return 1;
-        };
+        }
 
-        const pid = std.posix.fork() catch {
+        const fork_ret3 = std.c.fork();
+        if (fork_ret3 < 0) {
             try IO.eprint("den: proc-monitor: failed to fork\n", .{});
             return 1;
-        };
+        }
+        const pid: std.posix.pid_t = @intCast(fork_ret3);
 
         if (pid == 0) {
             std.posix.close(pipe_fds[0]);
-            std.posix.dup2(pipe_fds[1], std.posix.STDOUT_FILENO) catch {};
+            _ = std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO);
             std.posix.close(pipe_fds[1]);
             const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.posix.exit(127);
-            std.posix.dup2(dev_null.handle, std.posix.STDERR_FILENO) catch {};
+            _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
             _ = std.posix.execvpeZ("ps", @ptrCast(&ps_args), getCEnviron()) catch {};
             std.posix.exit(127);
         } else {
@@ -677,7 +686,10 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
             }
 
             std.posix.close(pipe_fds[0]);
-            _ = std.posix.waitpid(pid, 0);
+            {
+                var reap_status: c_int = 0;
+                _ = std.c.waitpid(pid, &reap_status, 0);
+            }
 
             var line_num: usize = 0;
             var proc_count: usize = 0;

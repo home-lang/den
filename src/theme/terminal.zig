@@ -3,6 +3,30 @@ const color_mod = @import("color.zig");
 
 const ColorSupport = color_mod.ColorSupport;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
+fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
+    const value = getenv(key) orelse return null;
+    return allocator.dupe(u8, value) catch null;
+}
+
+fn getEnvSlice(key: []const u8) ?[]const u8 {
+    var buf: [512]u8 = undefined;
+    if (key.len >= buf.len) return null;
+    @memcpy(buf[0..key.len], key);
+    buf[key.len] = 0;
+    const result = std.c.getenv(buf[0..key.len :0]) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(result)));
+}
+
+fn getEnvSliceOwned(allocator: std.mem.Allocator, key: []const u8) ?[]u8 {
+    const value = getEnvSlice(key) orelse return null;
+    return allocator.dupe(u8, value) catch null;
+}
+
 /// Terminal capabilities
 pub const TerminalCapabilities = struct {
     is_tty: bool,
@@ -53,19 +77,19 @@ pub fn isTTY() bool {
 pub fn detectColorSupport(allocator: std.mem.Allocator) ColorSupport {
 
     // Check NO_COLOR environment variable
-    if (std.process.getEnvVarOwned(allocator, "NO_COLOR") catch null) |no_color| {
+    if (getEnvOwned(allocator, "NO_COLOR")) |no_color| {
         defer allocator.free(no_color);
         if (no_color.len > 0) return .none;
     }
 
     // Check COLORTERM environment variable
-    if (std.process.getEnvVarOwned(allocator, "COLORTERM") catch null) |colorterm| {
+    if (getEnvOwned(allocator, "COLORTERM")) |colorterm| {
         defer allocator.free(colorterm);
         return ColorSupport.fromColorterm(colorterm);
     }
 
     // Check TERM environment variable
-    if (std.process.getEnvVarOwned(allocator, "TERM") catch null) |term| {
+    if (getEnvOwned(allocator, "TERM")) |term| {
         defer allocator.free(term);
 
         if (std.mem.indexOf(u8, term, "256color") != null) {
@@ -107,10 +131,10 @@ pub fn getTerminalSize() TerminalSize {
 fn getTerminalSizeFromEnv() ?TerminalSize {
     const allocator = std.heap.page_allocator;
 
-    const columns = std.process.getEnvVarOwned(allocator, "COLUMNS") catch return null;
+    const columns = getEnvOwned(allocator, "COLUMNS") orelse return null;
     defer allocator.free(columns);
 
-    const lines = std.process.getEnvVarOwned(allocator, "LINES") catch return null;
+    const lines = getEnvOwned(allocator, "LINES") orelse return null;
     defer allocator.free(lines);
 
     const width = std.fmt.parseInt(usize, columns, 10) catch return null;
@@ -143,7 +167,7 @@ fn getTerminalSizeUnix() ?TerminalSize {
 /// Detect Unicode support
 pub fn detectUnicodeSupport(allocator: std.mem.Allocator) bool {
     // Check LANG environment variable
-    if (std.process.getEnvVarOwned(allocator, "LANG") catch null) |lang| {
+    if (getEnvOwned(allocator, "LANG")) |lang| {
         defer allocator.free(lang);
 
         // Check for UTF-8 encoding
@@ -155,7 +179,7 @@ pub fn detectUnicodeSupport(allocator: std.mem.Allocator) bool {
     }
 
     // Check LC_ALL environment variable
-    if (std.process.getEnvVarOwned(allocator, "LC_ALL") catch null) |lc_all| {
+    if (getEnvOwned(allocator, "LC_ALL")) |lc_all| {
         defer allocator.free(lc_all);
 
         if (std.mem.indexOf(u8, lc_all, "UTF-8") != null or
@@ -166,7 +190,7 @@ pub fn detectUnicodeSupport(allocator: std.mem.Allocator) bool {
     }
 
     // Check TERM environment variable
-    if (std.process.getEnvVarOwned(allocator, "TERM") catch null) |term| {
+    if (getEnvOwned(allocator, "TERM")) |term| {
         defer allocator.free(term);
 
         // Some modern terminals
@@ -194,7 +218,7 @@ pub fn detectTerminalEmulator(allocator: std.mem.Allocator) ?[]const u8 {
     };
 
     for (vars) |var_name| {
-        if (std.process.getEnvVarOwned(allocator, var_name) catch null) |value| {
+        if (getEnvSliceOwned(allocator, var_name)) |value| {
             return value;
         }
     }
@@ -204,12 +228,12 @@ pub fn detectTerminalEmulator(allocator: std.mem.Allocator) ?[]const u8 {
 
 /// Detect if running in tmux or screen
 pub fn isMultiplexer(allocator: std.mem.Allocator) bool {
-    if (std.process.getEnvVarOwned(allocator, "TMUX") catch null) |tmux| {
+    if (getEnvOwned(allocator, "TMUX")) |tmux| {
         defer allocator.free(tmux);
         return true;
     }
 
-    if (std.process.getEnvVarOwned(allocator, "TERM") catch null) |term| {
+    if (getEnvOwned(allocator, "TERM")) |term| {
         defer allocator.free(term);
         return std.mem.startsWith(u8, term, "screen");
     }

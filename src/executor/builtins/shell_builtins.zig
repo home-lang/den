@@ -51,18 +51,27 @@ pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 
     // Save current directory as OLDPWD before changing
     var old_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const old_cwd = std.posix.getcwd(&old_cwd_buf) catch null;
+    const old_cwd = blk: {
+        const result = std.c.getcwd(&old_cwd_buf, old_cwd_buf.len) orelse break :blk null;
+        break :blk @as(?[]u8, std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0));
+    };
 
     // Check if path is relative (doesn't start with / or ~ or .)
     const is_relative = path.len > 0 and path[0] != '/' and path[0] != '~' and path[0] != '.';
 
     // Try direct path first
-    if (std.posix.chdir(path)) |_| {
+    const chdir_result = blk: {
+        var path_z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        @memcpy(path_z_buf[0..path.len], path);
+        path_z_buf[path.len] = 0;
+        break :blk std.c.chdir(path_z_buf[0..path.len :0]);
+    };
+    if (chdir_result == 0) {
         if (old_cwd) |cwd| {
             try ctx.setEnv("OLDPWD", cwd);
         }
         return 0;
-    } else |direct_err| {
+    } else {
         // If relative path and CDPATH is set, try CDPATH directories
         if (is_relative) {
             if (ctx.getEnv("CDPATH")) |cdpath| {
@@ -79,20 +88,26 @@ pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                         break :blk cdpath_path.?;
                     };
 
-                    if (std.posix.chdir(full_path)) |_| {
+                    const cdpath_chdir_result = inner_blk: {
+                        var fp_z_buf: [std.fs.max_path_bytes]u8 = undefined;
+                        @memcpy(fp_z_buf[0..full_path.len], full_path);
+                        fp_z_buf[full_path.len] = 0;
+                        break :inner_blk std.c.chdir(fp_z_buf[0..full_path.len :0]);
+                    };
+                    if (cdpath_chdir_result == 0) {
                         try IO.print("{s}\n", .{full_path});
                         if (old_cwd) |cwd| {
                             try ctx.setEnv("OLDPWD", cwd);
                         }
                         return 0;
-                    } else |_| {
+                    } else {
                         continue;
                     }
                 }
             }
         }
 
-        try IO.eprint("den: cd: {s}: {}\n", .{ path, direct_err });
+        try IO.eprint("den: cd: {s}: No such file or directory\n", .{path});
         return 1;
     }
 }
@@ -111,16 +126,22 @@ pub fn pwd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     if (use_physical) {
-        const cwd = std.posix.getcwd(&buf) catch |err| {
-            try IO.eprint("den: pwd: error getting current directory: {}\n", .{err});
-            return 1;
+        const cwd = blk: {
+            const result = std.c.getcwd(&buf, buf.len) orelse {
+                try IO.eprint("den: pwd: error getting current directory: {}\n", .{error.Unexpected});
+                return 1;
+            };
+            break :blk std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0);
         };
         try IO.print("{s}\n", .{cwd});
     } else {
         // -L: Logical path (default) - use PWD env var if set and valid
         if (ctx.getEnv("PWD")) |pwd_val| {
             var real_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-            const real_cwd = std.posix.getcwd(&real_buf) catch null;
+            const real_cwd = blk: {
+                const result = std.c.getcwd(&real_buf, real_buf.len) orelse break :blk null;
+                break :blk @as(?[]u8, std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0));
+            };
 
             if (real_cwd) |_| {
                 try IO.print("{s}\n", .{pwd_val});
@@ -128,9 +149,12 @@ pub fn pwd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             }
         }
         // Fallback to physical path if PWD not set or invalid
-        const cwd = std.posix.getcwd(&buf) catch |err| {
-            try IO.eprint("den: pwd: error getting current directory: {}\n", .{err});
-            return 1;
+        const cwd = blk: {
+            const result = std.c.getcwd(&buf, buf.len) orelse {
+                try IO.eprint("den: pwd: error getting current directory: {}\n", .{error.Unexpected});
+                return 1;
+            };
+            break :blk std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0);
         };
         try IO.print("{s}\n", .{cwd});
     }

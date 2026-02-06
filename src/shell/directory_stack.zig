@@ -12,6 +12,16 @@ const types = @import("../types/mod.zig");
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
+fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
+    const value = getenv(key) orelse return null;
+    return allocator.dupe(u8, value) catch null;
+}
+
 /// Builtin: pushd - push directory onto stack and cd
 /// Supports: pushd (swap), pushd dir, pushd +N/-N (rotate)
 pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
@@ -25,17 +35,23 @@ pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
         // Get current directory
         var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const cwd = try std.posix.getcwd(&cwd_buf);
+        const cwd_result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse return error.Unexpected;
+        const cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cwd_result)), 0);
         const cwd_copy = try shell.allocator.dupe(u8, cwd);
 
         // Pop top of stack and cd to it
         const top_dir = shell.dir_stack[shell.dir_stack_count - 1].?;
-        std.posix.chdir(top_dir) catch |err| {
-            try IO.eprint("den: pushd: {s}: {}\n", .{ top_dir, err });
-            shell.allocator.free(cwd_copy);
-            shell.last_exit_code = 1;
-            return;
-        };
+        {
+            var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            @memcpy(chdir_buf[0..top_dir.len], top_dir);
+            chdir_buf[top_dir.len] = 0;
+            if (std.c.chdir(chdir_buf[0..top_dir.len :0]) != 0) {
+                try IO.eprint("den: pushd: {s}: cannot change directory\n", .{top_dir});
+                shell.allocator.free(cwd_copy);
+                shell.last_exit_code = 1;
+                return;
+            }
+        }
 
         // Push old cwd onto stack
         shell.dir_stack[shell.dir_stack_count - 1] = cwd_copy;
@@ -78,14 +94,20 @@ pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
             // Get current directory before changing
             var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-            const cwd = try std.posix.getcwd(&cwd_buf);
+            const cwd_result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse return error.Unexpected;
+            const cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cwd_result)), 0);
 
             // Try to change to target directory
-            std.posix.chdir(target_dir) catch |err| {
-                try IO.eprint("den: pushd: {s}: {}\n", .{ target_dir, err });
-                shell.last_exit_code = 1;
-                return;
-            };
+            {
+                var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+                @memcpy(chdir_buf[0..target_dir.len], target_dir);
+                chdir_buf[target_dir.len] = 0;
+                if (std.c.chdir(chdir_buf[0..target_dir.len :0]) != 0) {
+                    try IO.eprint("den: pushd: {s}: cannot change directory\n", .{target_dir});
+                    shell.last_exit_code = 1;
+                    return;
+                }
+            }
 
             // Push old cwd onto stack
             if (shell.dir_stack_count >= shell.dir_stack.len) {
@@ -108,7 +130,8 @@ pub fn rotateDirStack(shell: *Shell, index: usize) !void {
 
     // Get current directory
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = try std.posix.getcwd(&cwd_buf);
+    const cwd_result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse return error.Unexpected;
+    const cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cwd_result)), 0);
     const cwd_copy = try shell.allocator.dupe(u8, cwd);
 
     // Build full stack: [cwd, stack[count-1], stack[count-2], ..., stack[0]]
@@ -116,11 +139,16 @@ pub fn rotateDirStack(shell: *Shell, index: usize) !void {
     const target_dir = shell.dir_stack[stack_idx].?;
 
     // Change to target directory
-    std.posix.chdir(target_dir) catch |err| {
-        try IO.eprint("den: pushd: {s}: {}\n", .{ target_dir, err });
-        shell.allocator.free(cwd_copy);
-        return err;
-    };
+    {
+        var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        @memcpy(chdir_buf[0..target_dir.len], target_dir);
+        chdir_buf[target_dir.len] = 0;
+        if (std.c.chdir(chdir_buf[0..target_dir.len :0]) != 0) {
+            try IO.eprint("den: pushd: {s}: cannot change directory\n", .{target_dir});
+            shell.allocator.free(cwd_copy);
+            return error.Unexpected;
+        }
+    }
 
     // Rotate the stack
     shell.allocator.free(shell.dir_stack[stack_idx].?);
@@ -144,7 +172,8 @@ pub fn rotateDirStack(shell: *Shell, index: usize) !void {
 /// Helper to print directory stack
 pub fn printDirStack(shell: *Shell) !void {
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = try std.posix.getcwd(&cwd_buf);
+    const cwd_result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse return error.Unexpected;
+    const cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cwd_result)), 0);
     try IO.print("{s}", .{cwd});
 
     if (shell.dir_stack_count > 0) {
@@ -194,11 +223,16 @@ pub fn builtinPopd(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 defer shell.allocator.free(dir);
                 shell.dir_stack[shell.dir_stack_count] = null;
 
-                std.posix.chdir(dir) catch |err| {
-                    try IO.eprint("den: popd: {s}: {}\n", .{ dir, err });
-                    shell.last_exit_code = 1;
-                    return;
-                };
+                {
+                    var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+                    @memcpy(chdir_buf[0..dir.len], dir);
+                    chdir_buf[dir.len] = 0;
+                    if (std.c.chdir(chdir_buf[0..dir.len :0]) != 0) {
+                        try IO.eprint("den: popd: {s}: cannot change directory\n", .{dir});
+                        shell.last_exit_code = 1;
+                        return;
+                    }
+                }
             } else {
                 // Remove entry at index (without changing directory)
                 const stack_idx = shell.dir_stack_count - index;
@@ -225,11 +259,16 @@ pub fn builtinPopd(shell: *Shell, cmd: *types.ParsedCommand) !void {
     defer shell.allocator.free(dir);
     shell.dir_stack[shell.dir_stack_count] = null;
 
-    std.posix.chdir(dir) catch |err| {
-        try IO.eprint("den: popd: {s}: {}\n", .{ dir, err });
-        shell.last_exit_code = 1;
-        return;
-    };
+    {
+        var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        @memcpy(chdir_buf[0..dir.len], dir);
+        chdir_buf[dir.len] = 0;
+        if (std.c.chdir(chdir_buf[0..dir.len :0]) != 0) {
+            try IO.eprint("den: popd: {s}: cannot change directory\n", .{dir});
+            shell.last_exit_code = 1;
+            return;
+        }
+    }
 
     try printDirStack(shell);
     shell.last_exit_code = 0;
@@ -277,10 +316,11 @@ pub fn builtinDirs(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
     // Get current directory
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = try std.posix.getcwd(&cwd_buf);
+    const cwd_result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse return error.Unexpected;
+    const cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cwd_result)), 0);
 
     // Get home directory for tilde substitution
-    const home = std.process.getEnvVarOwned(shell.allocator, "HOME") catch null;
+    const home = getEnvOwned(shell.allocator, "HOME");
     defer if (home) |h| shell.allocator.free(h);
 
     // Output directory stack

@@ -100,7 +100,7 @@ pub const History = struct {
         defer allocator.free(buffer);
         var total_read: usize = 0;
         while (total_read < read_size) {
-            const bytes_read = try file.read(buffer[total_read..]);
+            const bytes_read = try std.posix.read(file.handle, buffer[total_read..]);
             if (bytes_read == 0) break;
             total_read += bytes_read;
         }

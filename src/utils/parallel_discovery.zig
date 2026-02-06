@@ -63,19 +63,19 @@ pub const ParallelScanner = struct {
     }
 
     fn scanDirectory(self: *ParallelScanner, dir_path: []const u8, extension: []const u8) !void {
-        var dir = std.Io.Dir.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch |err| {
             // Directory doesn't exist or can't be opened, skip it
             if (err == error.FileNotFound or err == error.NotDir) {
                 return;
             }
             return err;
         };
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
 
         var walker = try dir.walk(self.allocator);
         defer walker.deinit();
 
-        while (try walker.next()) |entry| {
+        while (try walker.next(std.Options.debug_io)) |entry| {
             if (entry.kind != .file) continue;
 
             if (std.mem.endsWith(u8, entry.basename, extension)) {

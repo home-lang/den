@@ -139,9 +139,12 @@ pub fn bookmark(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 
         // Get current directory
         var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const cwd = std.posix.getcwd(&cwd_buf) catch {
-            try IO.eprint("den: bookmark: failed to get current directory\n", .{});
-            return 1;
+        const cwd = blk: {
+            const result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse {
+                try IO.eprint("den: bookmark: failed to get current directory\n", .{});
+                return 1;
+            };
+            break :blk std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0);
         };
 
         try ctx.setNamedDir(name, cwd);
@@ -170,10 +173,15 @@ pub fn bookmark(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     const name = first_arg;
 
     if (ctx.getNamedDir(name)) |path| {
-        std.posix.chdir(path) catch |err| {
-            try IO.eprint("den: bookmark: {s}: {}\n", .{ path, err });
-            return 1;
-        };
+        {
+            var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            @memcpy(chdir_buf[0..path.len], path);
+            chdir_buf[path.len] = 0;
+            if (std.c.chdir(chdir_buf[0..path.len :0]) != 0) {
+                try IO.eprint("den: bookmark: {s}: cannot change directory\n", .{path});
+                return 1;
+            }
+        }
         try IO.print("{s}\n", .{path});
     } else {
         try IO.eprint("den: bookmark: '{s}' not found\n", .{name});

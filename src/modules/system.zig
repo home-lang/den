@@ -5,6 +5,16 @@ const builtin = @import("builtin");
 
 const ModuleInfo = types.ModuleInfo;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
+fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
+    const value = getenv(key) orelse return null;
+    return allocator.dupe(u8, value) catch null;
+}
+
 /// Get battery status on macOS
 fn getMacOSBattery(allocator: std.mem.Allocator) !?types.BatteryInfo {
     var child = std.process.spawn(std.Options.debug_io, .{
@@ -443,7 +453,7 @@ pub fn detectTime(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
 /// Detect Nix shell
 pub fn detectNixShell(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
     // Check for IN_NIX_SHELL environment variable
-    const in_nix_shell = std.process.getEnvVarOwned(allocator, "IN_NIX_SHELL") catch return null;
+    const in_nix_shell = getEnvOwned(allocator, "IN_NIX_SHELL") orelse return null;
     defer allocator.free(in_nix_shell);
 
     var info = ModuleInfo.init("nix");
@@ -465,13 +475,13 @@ pub fn detectNixShell(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo 
 /// Detect Docker context
 pub fn detectDocker(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
     // Check for DOCKER_CONTEXT or use docker context show
-    if (std.process.getEnvVarOwned(allocator, "DOCKER_CONTEXT")) |context| {
+    if (getEnvOwned(allocator, "DOCKER_CONTEXT")) |context| {
         var info = ModuleInfo.init("docker");
         info.version = context;
         info.icon = "🐳";
         info.color = "#2496ed";
         return info;
-    } else |_| {
+    } else {
         var child = std.process.spawn(std.Options.debug_io, .{
             .argv = &[_][]const u8{ "docker", "context", "show" },
             .stdout = .pipe,

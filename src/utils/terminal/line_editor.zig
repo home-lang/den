@@ -1789,7 +1789,8 @@ pub const LineEditor = struct {
             const stdout = std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
             _ = try stdout.write(bytes);
         } else {
-            _ = try posix.write(posix.STDERR_FILENO, bytes);
+            const result = std.c.write(posix.STDERR_FILENO, bytes.ptr, bytes.len);
+            if (result < 0) return error.WriteError;
         }
     }
 

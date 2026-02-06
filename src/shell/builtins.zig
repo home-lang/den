@@ -455,11 +455,12 @@ pub fn builtinRealpath(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
     // Use realpath to resolve
     var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const resolved = std.Io.Dir.cwd().realpath(std.Options.debug_io,path, &buf) catch |err| {
+    const resolved_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, path, &buf) catch |err| {
         try IO.eprint("den: realpath: {s}: {}\n", .{ path, err });
         shell.last_exit_code = 1;
         return;
     };
+    const resolved = buf[0..resolved_len];
 
     try IO.print("{s}\n", .{resolved});
     shell.last_exit_code = 0;

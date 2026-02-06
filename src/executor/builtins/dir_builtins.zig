@@ -3,6 +3,16 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
+fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
+    const value = getenv(key) orelse return null;
+    return allocator.dupe(u8, value) catch null;
+}
+
 /// Directory stack builtins: pushd, popd, dirs
 
 pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
@@ -13,10 +23,11 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 
     // Get current directory
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = std.Io.Dir.cwd().realpath(".", &cwd_buf) catch |err| {
+    const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch |err| {
         try IO.eprint("den: pushd: cannot get current directory: {}\n", .{err});
         return 1;
     };
+    const cwd = cwd_buf[0..cwd_len];
 
     if (command.args.len == 0) {
         // pushd with no args: swap top two dirs
@@ -30,10 +41,15 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             return 1;
         };
 
-        std.posix.chdir(top_dir) catch |err| {
-            try IO.eprint("den: pushd: {s}: {}\n", .{ top_dir, err });
-            return 1;
-        };
+        {
+            var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            @memcpy(chdir_buf[0..top_dir.len], top_dir);
+            chdir_buf[top_dir.len] = 0;
+            if (std.c.chdir(chdir_buf[0..top_dir.len :0]) != 0) {
+                try IO.eprint("den: pushd: {s}: cannot change directory\n", .{top_dir});
+                return 1;
+            }
+        }
 
         ctx.allocator.free(shell_ref.dir_stack[shell_ref.dir_stack_count - 1].?);
         shell_ref.dir_stack[shell_ref.dir_stack_count - 1] = try ctx.allocator.dupe(u8, cwd);
@@ -67,10 +83,15 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             return 1;
         };
 
-        std.posix.chdir(target_dir) catch |err| {
-            try IO.eprint("den: pushd: {s}: {}\n", .{ target_dir, err });
-            return 1;
-        };
+        {
+            var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+            @memcpy(chdir_buf[0..target_dir.len], target_dir);
+            chdir_buf[target_dir.len] = 0;
+            if (std.c.chdir(chdir_buf[0..target_dir.len :0]) != 0) {
+                try IO.eprint("den: pushd: {s}: cannot change directory\n", .{target_dir});
+                return 1;
+            }
+        }
 
         ctx.allocator.free(shell_ref.dir_stack[stack_idx].?);
         shell_ref.dir_stack[stack_idx] = try ctx.allocator.dupe(u8, cwd);
@@ -81,10 +102,15 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     // pushd <dir>: push current dir and cd to new dir
     const new_dir = arg;
 
-    std.posix.chdir(new_dir) catch |err| {
-        try IO.eprint("den: pushd: {s}: {}\n", .{ new_dir, err });
-        return 1;
-    };
+    {
+        var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        @memcpy(chdir_buf[0..new_dir.len], new_dir);
+        chdir_buf[new_dir.len] = 0;
+        if (std.c.chdir(chdir_buf[0..new_dir.len :0]) != 0) {
+            try IO.eprint("den: pushd: {s}: cannot change directory\n", .{new_dir});
+            return 1;
+        }
+    }
 
     if (shell_ref.dir_stack_count >= shell_ref.dir_stack.len) {
         try IO.eprint("den: pushd: directory stack full\n", .{});
@@ -152,11 +178,16 @@ pub fn popd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     };
     defer ctx.allocator.free(dir);
 
-    std.posix.chdir(dir) catch |err| {
-        try IO.eprint("den: popd: {s}: {}\n", .{ dir, err });
-        shell_ref.dir_stack_count += 1;
-        return 1;
-    };
+    {
+        var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        @memcpy(chdir_buf[0..dir.len], dir);
+        chdir_buf[dir.len] = 0;
+        if (std.c.chdir(chdir_buf[0..dir.len :0]) != 0) {
+            try IO.eprint("den: popd: {s}: cannot change directory\n", .{dir});
+            shell_ref.dir_stack_count += 1;
+            return 1;
+        }
+    }
 
     shell_ref.dir_stack[shell_ref.dir_stack_count] = null;
 
@@ -205,13 +236,14 @@ pub fn dirs(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 
     // Get current directory
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = std.Io.Dir.cwd().realpath(".", &cwd_buf) catch |err| {
+    const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch |err| {
         try IO.eprint("den: dirs: cannot get current directory: {}\n", .{err});
         return 1;
     };
+    const cwd = cwd_buf[0..cwd_len];
 
     // Get home for tilde substitution
-    const home = std.process.getEnvVarOwned(ctx.allocator, "HOME") catch null;
+    const home = getEnvOwned(ctx.allocator, "HOME");
     defer if (home) |h| ctx.allocator.free(h);
 
     const printPath = struct {

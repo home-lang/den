@@ -172,7 +172,7 @@ pub const Glob = struct {
         // Parse extended glob features
         const parsed = self.parseExtendedGlob(base_pattern);
 
-        var dir = std.Io.Dir.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| {
+        var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch |err| {
             // Can't open directory - return pattern as-is
             if (err == error.FileNotFound or err == error.AccessDenied) {
                 const result = try self.allocator.alloc([]const u8, 1);
@@ -181,11 +181,11 @@ pub const Glob = struct {
             }
             return err;
         };
-        defer dir.close();
+        defer dir.close(std.Options.debug_io);
 
         // Iterate directory and match pattern
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(std.Options.debug_io)) |entry| {
             // Match base pattern
             if (!self.matchPattern(parsed.base, entry.name)) {
                 continue;

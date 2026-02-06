@@ -36,7 +36,7 @@ pub const ExpansionContext = struct {
 fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection) !void {
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
-        try std.posix.dup2(sock, @intCast(redir.fd));
+        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(sock);
     } else {
         // Open file for writing, truncate if exists
@@ -52,7 +52,7 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection) !
             std.posix.exit(1);
         };
 
-        try std.posix.dup2(fd, @intCast(redir.fd));
+        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(fd);
     }
 }
@@ -60,7 +60,7 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection) !
 fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !void {
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
-        try std.posix.dup2(sock, @intCast(redir.fd));
+        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(sock);
     } else {
         // Open file for appending
@@ -76,7 +76,7 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
             std.posix.exit(1);
         };
 
-        try std.posix.dup2(fd, @intCast(redir.fd));
+        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(fd);
     }
 }
@@ -84,7 +84,7 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
 fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
-        try std.posix.dup2(sock, std.posix.STDIN_FILENO);
+        if (std.c.dup2(sock, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
         std.posix.close(sock);
     } else {
         // Open file for reading
@@ -100,7 +100,7 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
             std.posix.exit(1);
         };
 
-        try std.posix.dup2(fd, std.posix.STDIN_FILENO);
+        if (std.c.dup2(fd, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
         std.posix.close(fd);
     }
 }
@@ -108,7 +108,7 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
 fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
     // <> opens file for both reading and writing
     if (networking.openDevNet(redir.target)) |sock| {
-        try std.posix.dup2(sock, @intCast(redir.fd));
+        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(sock);
     } else {
         const path_z = try allocator.dupeZ(u8, redir.target);
@@ -124,7 +124,7 @@ fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !voi
             std.posix.exit(1);
         };
 
-        try std.posix.dup2(fd, @intCast(redir.fd));
+        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(fd);
     }
 }
@@ -136,7 +136,8 @@ fn applyHeredocOrHerestring(
     expansion_context: ?ExpansionContext,
 ) !void {
     // Create a pipe for the content
-    const pipe_fds = try std.posix.pipe();
+    var pipe_fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) return error.Unexpected;
     const read_fd = pipe_fds[0];
     const write_fd = pipe_fds[1];
 
@@ -170,7 +171,9 @@ fn applyHeredocOrHerestring(
     defer allocator.free(content);
 
     // Fork to write content (avoid blocking)
-    const writer_pid = try std.posix.fork();
+    const fork_ret = std.c.fork();
+    if (fork_ret < 0) return error.Unexpected;
+    const writer_pid: std.posix.pid_t = @intCast(fork_ret);
     if (writer_pid == 0) {
         // Child: write content and exit
         std.posix.close(read_fd);
@@ -181,11 +184,14 @@ fn applyHeredocOrHerestring(
 
     // Parent: close write end and dup read end to stdin
     std.posix.close(write_fd);
-    try std.posix.dup2(read_fd, std.posix.STDIN_FILENO);
+    if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
     std.posix.close(read_fd);
 
     // Wait for writer to finish
-    _ = std.posix.waitpid(writer_pid, 0);
+    {
+        var wait_status: c_int = 0;
+        _ = std.c.waitpid(writer_pid, &wait_status, 0);
+    }
 }
 
 fn applyFdDuplicate(redir: types.Redirection) !void {
@@ -197,7 +203,7 @@ fn applyFdDuplicate(redir: types.Redirection) !void {
     };
 
     // Duplicate the target_fd to redir.fd
-    try std.posix.dup2(@intCast(target_fd), @intCast(redir.fd));
+    if (std.c.dup2(@intCast(target_fd), @intCast(redir.fd)) < 0) return error.Unexpected;
 }
 
 fn applyFdClose(redir: types.Redirection) void {
@@ -224,14 +230,14 @@ pub const SavedFds = struct {
     pub fn restore(self: *SavedFds) void {
         // Restore stdout
         if (self.stdout_save) |fd| {
-            std.posix.dup2(fd, std.posix.STDOUT_FILENO) catch {};
+            _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);
             std.posix.close(fd);
             self.stdout_save = null;
         }
 
         // Restore stderr
         if (self.stderr_save) |fd| {
-            std.posix.dup2(fd, std.posix.STDERR_FILENO) catch {};
+            _ = std.c.dup2(fd, std.posix.STDERR_FILENO);
             std.posix.close(fd);
             self.stderr_save = null;
         }

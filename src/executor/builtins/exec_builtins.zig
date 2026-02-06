@@ -122,10 +122,10 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     defer ctx.allocator.free(exe_path_z);
 
     // Replace the current process with the new program
-    const result = std.posix.execveZ(exe_path_z.ptr, @ptrCast(argv.ptr), @ptrCast(envp.ptr));
+    _ = std.c.execve(exe_path_z.ptr, @ptrCast(argv.ptr), @ptrCast(envp.ptr));
 
     // If execve returns, it failed
-    try IO.eprint("den: exec: {}\n", .{result});
+    try IO.eprint("den: exec: execve failed\n", .{});
     return 126;
 }
 
@@ -277,26 +277,30 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     // Create pipes for bidirectional communication
     // pipe_to_coproc: parent writes to [1], coproc reads from [0]
     // pipe_from_coproc: coproc writes to [1], parent reads from [0]
-    const pipe_to_coproc = std.posix.pipe() catch |err| {
-        try IO.eprint("coproc: failed to create pipe: {s}\n", .{@errorName(err)});
+    var pipe_to_coproc: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_to_coproc) != 0) {
+        try IO.eprint("coproc: failed to create pipe\n", .{});
         return 1;
-    };
-    const pipe_from_coproc = std.posix.pipe() catch |err| {
+    }
+    var pipe_from_coproc: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_from_coproc) != 0) {
         std.posix.close(pipe_to_coproc[0]);
         std.posix.close(pipe_to_coproc[1]);
-        try IO.eprint("coproc: failed to create pipe: {s}\n", .{@errorName(err)});
+        try IO.eprint("coproc: failed to create pipe\n", .{});
         return 1;
-    };
+    }
 
     // Fork to create coprocess
-    const pid = std.posix.fork() catch |err| {
+    const fork_ret = std.c.fork();
+    if (fork_ret < 0) {
         std.posix.close(pipe_to_coproc[0]);
         std.posix.close(pipe_to_coproc[1]);
         std.posix.close(pipe_from_coproc[0]);
         std.posix.close(pipe_from_coproc[1]);
-        try IO.eprint("coproc: failed to fork: {s}\n", .{@errorName(err)});
+        try IO.eprint("coproc: failed to fork\n", .{});
         return 1;
-    };
+    }
+    const pid: std.posix.pid_t = @intCast(fork_ret);
 
     if (pid == 0) {
         // Child process (coprocess)
@@ -305,11 +309,11 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         std.posix.close(pipe_from_coproc[0]);
 
         // Redirect stdin from pipe_to_coproc[0]
-        std.posix.dup2(pipe_to_coproc[0], std.posix.STDIN_FILENO) catch std.process.exit(1);
+        if (std.c.dup2(pipe_to_coproc[0], std.posix.STDIN_FILENO) < 0) std.process.exit(1);
         std.posix.close(pipe_to_coproc[0]);
 
         // Redirect stdout to pipe_from_coproc[1]
-        std.posix.dup2(pipe_from_coproc[1], std.posix.STDOUT_FILENO) catch std.process.exit(1);
+        if (std.c.dup2(pipe_from_coproc[1], std.posix.STDOUT_FILENO) < 0) std.process.exit(1);
         std.posix.close(pipe_from_coproc[1]);
 
         // Execute the command

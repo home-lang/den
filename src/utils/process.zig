@@ -105,7 +105,8 @@ pub fn createPipe() !Pipe {
 }
 
 fn createPipePosix() !Pipe {
-    const fds = try std.posix.pipe();
+    var fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&fds) != 0) return error.Unexpected;
     return Pipe{
         .read = fds[0],
         .write = fds[1],
@@ -187,7 +188,7 @@ pub fn duplicateHandleTo(source: FileHandle, target: FileHandle) !void {
 }
 
 fn duplicateHandleToPosix(source: std.posix.fd_t, target: std.posix.fd_t) !void {
-    _ = try std.posix.dup2(source, target);
+    if (std.c.dup2(source, target) < 0) return error.Unexpected;
 }
 
 fn duplicateHandleToWindows(source: std.os.windows.HANDLE, target: std.os.windows.HANDLE) !void {
@@ -255,11 +256,13 @@ pub fn waitProcess(pid: ProcessId, options: WaitOptions) !WaitResult {
 }
 
 fn waitProcessPosix(pid: std.posix.pid_t, options: WaitOptions) !WaitResult {
-    const flags: u32 = if (options.no_hang) std.posix.W.NOHANG else 0;
+    const flags: c_int = if (options.no_hang) @bitCast(std.posix.W.NOHANG) else 0;
 
-    const result = std.posix.waitpid(pid, flags);
+    var wait_status: c_int = 0;
+    const wait_pid = std.c.waitpid(pid, &wait_status, flags);
+    const status_u32: u32 = @bitCast(wait_status);
 
-    if (result.pid == 0 and options.no_hang) {
+    if (wait_pid == 0 and options.no_hang) {
         // Process still running
         return WaitResult{
             .pid = pid,
@@ -270,16 +273,16 @@ fn waitProcessPosix(pid: std.posix.pid_t, options: WaitOptions) !WaitResult {
 
     var exit_status = ExitStatus{ .code = 0 };
 
-    if (std.posix.W.IFEXITED(result.status)) {
-        exit_status.code = @intCast(std.posix.W.EXITSTATUS(result.status));
-    } else if (std.posix.W.IFSIGNALED(result.status)) {
+    if (std.posix.W.IFEXITED(status_u32)) {
+        exit_status.code = @intCast(std.posix.W.EXITSTATUS(status_u32));
+    } else if (std.posix.W.IFSIGNALED(status_u32)) {
         exit_status.signaled = true;
-        exit_status.signal = @intCast(std.posix.W.TERMSIG(result.status));
+        exit_status.signal = @intCast(std.posix.W.TERMSIG(status_u32));
         exit_status.code = 128 + @as(i32, @intCast(exit_status.signal.?));
     }
 
     return WaitResult{
-        .pid = result.pid,
+        .pid = wait_pid,
         .status = exit_status,
         .still_running = false,
     };
@@ -424,7 +427,7 @@ pub fn getCurrentProcessId() ProcessId {
     if (builtin.os.tag == .windows) {
         return std.os.windows.kernel32.GetCurrentProcess();
     } else {
-        return std.posix.getpid();
+        return std.c.getpid();
     }
 }
 

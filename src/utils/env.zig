@@ -25,10 +25,14 @@ const WindowsEnvCache = struct {
             }
         }
 
-        // Not cached, fetch from OS
-        const value = std.process.getEnvVarOwned(self.allocator.allocator(), key) catch {
-            return null;
-        };
+        // Not cached, fetch from OS using null-terminated key
+        var key_buf: [512]u8 = undefined;
+        if (key.len >= key_buf.len) return null;
+        @memcpy(key_buf[0..key.len], key);
+        key_buf[key.len] = 0;
+        const raw_value = std.c.getenv(key_buf[0..key.len :0]) orelse return null;
+        const raw_span = std.mem.span(@as([*:0]const u8, @ptrCast(raw_value)));
+        const value = self.allocator.allocator().dupe(u8, raw_span) catch return null;
         const key_copy = self.allocator.allocator().dupe(u8, key) catch {
             self.allocator.allocator().free(value);
             return null;

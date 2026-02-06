@@ -36,26 +36,30 @@ pub fn executePosix(
 
     // Create all pipes
     for (0..num_pipes) |i| {
-        pipes_buffer[i] = try std.posix.pipe();
+        var fds: [2]std.posix.fd_t = undefined;
+        if (std.c.pipe(&fds) != 0) return error.Unexpected;
+        pipes_buffer[i] = fds;
     }
 
     // Spawn all commands in the pipeline
     var pids_buffer: [MAX_PIPES + 1]std.posix.pid_t = undefined;
 
     for (commands, 0..) |*cmd, i| {
-        const pid = try std.posix.fork();
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) return error.Unexpected;
+        const pid: std.posix.pid_t = @intCast(fork_ret);
 
         if (pid == 0) {
             // Child process
 
             // Set up stdin from previous pipe
             if (i > 0) {
-                try std.posix.dup2(pipes_buffer[i - 1][0], std.posix.STDIN_FILENO);
+                if (std.c.dup2(pipes_buffer[i - 1][0], std.posix.STDIN_FILENO) < 0) return error.Unexpected;
             }
 
             // Set up stdout to next pipe
             if (i < num_pipes) {
-                try std.posix.dup2(pipes_buffer[i][1], std.posix.STDOUT_FILENO);
+                if (std.c.dup2(pipes_buffer[i][1], std.posix.STDOUT_FILENO) < 0) return error.Unexpected;
             }
 
             // Close all pipe fds in child
@@ -91,8 +95,9 @@ pub fn executePosix(
     var last_status: i32 = 0;
     var pipefail_status: i32 = 0;
     for (pids_buffer[0..commands.len]) |pid| {
-        const result = std.posix.waitpid(pid, 0);
-        const status: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+        var wait_status: c_int = 0;
+        _ = std.c.waitpid(pid, &wait_status, 0);
+        const status: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
         last_status = status;
         // For pipefail: track rightmost non-zero exit status
         if (status != 0) {

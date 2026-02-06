@@ -4,10 +4,12 @@ const parser_mod = @import("parser/mod.zig");
 const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
 
-fn getenv(key: [*:0]const u8) ?[]const u8 {
-    const value = std.c.getenv(key) orelse return null;
-    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
+    const raw = std.c.getenv(key) orelse return null;
+    const value = std.mem.span(@as([*:0]const u8, @ptrCast(raw)));
+    return allocator.dupe(u8, value) catch null;
 }
+
 const Terminal = @import("utils/terminal.zig");
 const LineEditor = Terminal.LineEditor;
 const Completion = @import("utils/completion.zig").Completion;
@@ -233,13 +235,13 @@ pub const Shell = struct {
 
         // Add some basic environment variables (cross-platform)
         // Note: Both keys and values must be allocated for proper cleanup
-        const home = std.process.getEnvVarOwned(allocator, "HOME") catch
-            std.process.getEnvVarOwned(allocator, "USERPROFILE") catch
+        const home = getEnvOwned(allocator, "HOME") orelse
+            getEnvOwned(allocator, "USERPROFILE") orelse
             try allocator.dupe(u8, "/");
         const home_key = try allocator.dupe(u8, "HOME");
         try env.put(home_key, home);
 
-        const path = std.process.getEnvVarOwned(allocator, "PATH") catch
+        const path = getEnvOwned(allocator, "PATH") orelse
             try allocator.dupe(u8, "/usr/bin:/bin");
         const path_key = try allocator.dupe(u8, "PATH");
         try env.put(path_key, path);
@@ -248,7 +250,7 @@ pub const Shell = struct {
         if (config.environment.enabled) {
             // First, set defaults (only if not already set in system env)
             for (types.EnvironmentConfig.defaults) |default_var| {
-                const existing = std.process.getEnvVarOwned(allocator, default_var.name) catch null;
+                const existing = env_utils.getEnvAlloc(allocator, default_var.name) catch null;
                 const key_copy = try allocator.dupe(u8, default_var.name);
                 if (existing == null) {
                     const value_copy = try allocator.dupe(u8, default_var.value);

@@ -64,7 +64,8 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
 
     // Get current working directory for glob expansion
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = try std.posix.getcwd(&cwd_buf);
+    const cwd_result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse return error.Unexpected;
+    const cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cwd_result)), 0);
 
     for (chain.commands) |*cmd| {
         // Expand command name (variables only, no globs for command names)

@@ -245,15 +245,18 @@ pub fn show(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             null,
         };
 
-        const pid = try std.posix.fork();
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) return error.Unexpected;
+        const pid: std.posix.pid_t = @intCast(fork_ret);
         if (pid == 0) {
             _ = std.posix.execvpeZ("chflags", @ptrCast(&argv), getCEnviron()) catch {
                 std.posix.exit(127);
             };
             unreachable;
         } else {
-            const result = std.posix.waitpid(pid, 0);
-            const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+            var wait_status: c_int = 0;
+            _ = std.c.waitpid(pid, &wait_status, 0);
+            const code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
             if (code != 0) {
                 try IO.eprint("den: show: failed to show {s}\n", .{file});
                 exit_code = code;
@@ -288,15 +291,18 @@ pub fn hide(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             null,
         };
 
-        const pid = try std.posix.fork();
+        const fork_ret2 = std.c.fork();
+        if (fork_ret2 < 0) return error.Unexpected;
+        const pid: std.posix.pid_t = @intCast(fork_ret2);
         if (pid == 0) {
             _ = std.posix.execvpeZ("chflags", @ptrCast(&argv), getCEnviron()) catch {
                 std.posix.exit(127);
             };
             unreachable;
         } else {
-            const result = std.posix.waitpid(pid, 0);
-            const code: i32 = @intCast(std.posix.W.EXITSTATUS(result.status));
+            var wait_status: c_int = 0;
+            _ = std.c.waitpid(pid, &wait_status, 0);
+            const code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
             if (code != 0) {
                 try IO.eprint("den: hide: failed to hide {s}\n", .{file});
                 exit_code = code;
@@ -868,9 +874,12 @@ fn dotfilesLink(file: []const u8) !i32 {
 
     // Get absolute path to source
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = std.posix.getcwd(&cwd_buf) catch {
-        try IO.eprint("den: dotfiles: cannot get current directory\n", .{});
-        return 1;
+    const cwd = blk: {
+        const result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse {
+            try IO.eprint("den: dotfiles: cannot get current directory\n", .{});
+            return 1;
+        };
+        break :blk std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0);
     };
 
     var abs_source_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
@@ -1023,12 +1032,14 @@ fn dotfilesEdit(file: []const u8) !i32 {
     try IO.print("Opening {s} with {s}...\n", .{ path, editor });
 
     // Fork and exec editor
-    const pid = std.posix.fork() catch {
+    const fork_ret3 = std.c.fork();
+    if (fork_ret3 < 0) {
         try IO.eprint("dotfiles edit: failed to fork\n", .{});
         return 1;
-    };
+    }
+    const pid3: std.posix.pid_t = @intCast(fork_ret3);
 
-    if (pid == 0) {
+    if (pid3 == 0) {
         // Child process
         var editor_buf: [256]u8 = undefined;
         const editor_z = std.fmt.bufPrintZ(&editor_buf, "{s}", .{editor}) catch std.posix.exit(127);
@@ -1041,8 +1052,9 @@ fn dotfilesEdit(file: []const u8) !i32 {
         std.posix.exit(127);
     } else {
         // Parent process - wait for editor
-        const result = std.posix.waitpid(pid, 0);
-        return @intCast(std.posix.W.EXITSTATUS(result.status));
+        var wait_status3: c_int = 0;
+        _ = std.c.waitpid(pid3, &wait_status3, 0);
+        return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status3))));
     }
 }
 
@@ -1082,12 +1094,14 @@ fn dotfilesDiff(file: []const u8) !i32 {
     };
 
     // Fork and exec diff
-    const pid = std.posix.fork() catch {
+    const fork_ret4 = std.c.fork();
+    if (fork_ret4 < 0) {
         try IO.eprint("dotfiles diff: failed to fork\n", .{});
         return 1;
-    };
+    }
+    const pid4: std.posix.pid_t = @intCast(fork_ret4);
 
-    if (pid == 0) {
+    if (pid4 == 0) {
         // Child process
         var backup_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const backup_z = std.fmt.bufPrintZ(&backup_z_buf, "{s}", .{backup}) catch std.posix.exit(127);
@@ -1100,8 +1114,9 @@ fn dotfilesDiff(file: []const u8) !i32 {
         std.posix.exit(127);
     } else {
         // Parent process - wait for diff
-        const result = std.posix.waitpid(pid, 0);
-        const code = std.posix.W.EXITSTATUS(result.status);
+        var wait_status4: c_int = 0;
+        _ = std.c.waitpid(pid4, &wait_status4, 0);
+        const code = std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status4)));
         // diff returns 0 if same, 1 if different, 2 if error
         if (code == 0) {
             try IO.print("\x1b[1;32m+\x1b[0m No differences\n", .{});

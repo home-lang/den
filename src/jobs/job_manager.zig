@@ -118,11 +118,12 @@ pub const JobManager = struct {
         while (i < self.jobs.len) {
             if (self.jobs[i]) |job| {
                 // Check if job has completed (non-blocking waitpid)
-                const result = std.posix.waitpid(job.pid, std.posix.W.NOHANG);
+                var wait_status: c_int = 0;
+                const wait_pid = std.c.waitpid(job.pid, &wait_status, @bitCast(std.posix.W.NOHANG));
 
-                if (result.pid == job.pid) {
+                if (wait_pid == job.pid) {
                     // Job completed
-                    const exit_status = getExitStatus(result.status);
+                    const exit_status = getExitStatus(@as(u32, @bitCast(wait_status)));
                     try IO.print("[{d}]  Done ({d})    {s}\n", .{ job.job_id, exit_status, job.command });
 
                     // Free command string and remove from array
@@ -169,12 +170,14 @@ pub const JobManager = struct {
                     std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 100_000_000)), .awake) catch {}; // 100ms
 
                     // Check if still running
-                    const result = std.posix.waitpid(job.pid, std.posix.W.NOHANG);
-                    if (result.pid == 0) {
+                    var kill_wait_status: c_int = 0;
+                    const kill_wait_pid = std.c.waitpid(job.pid, &kill_wait_status, @bitCast(std.posix.W.NOHANG));
+                    if (kill_wait_pid == 0) {
                         // Still running, force kill
                         _ = std.posix.kill(job.pid, std.posix.SIG.KILL) catch {};
                         // Reap the zombie
-                        _ = std.posix.waitpid(job.pid, 0);
+                        var reap_status: c_int = 0;
+                        _ = std.c.waitpid(job.pid, &reap_status, 0);
                     }
                 }
             }
@@ -336,8 +339,9 @@ pub const JobManager = struct {
         try IO.print("{s}\n", .{job.command});
 
         // Wait for the job to complete
-        const result = std.posix.waitpid(job.pid, 0);
-        const exit_status = getExitStatus(result.status);
+        var fg_wait_status: c_int = 0;
+        _ = std.c.waitpid(job.pid, &fg_wait_status, 0);
+        const exit_status = getExitStatus(@as(u32, @bitCast(fg_wait_status)));
 
         // Remove from background jobs
         self.remove(job_slot.?);
@@ -453,8 +457,9 @@ pub const JobManager = struct {
                 }
 
                 const job = self.jobs[slot.?].?;
-                const result = std.posix.waitpid(job.pid, 0);
-                last_status = getExitStatus(result.status);
+                var specific_wait_status: c_int = 0;
+                _ = std.c.waitpid(job.pid, &specific_wait_status, 0);
+                last_status = getExitStatus(@as(u32, @bitCast(specific_wait_status)));
                 self.remove(slot.?);
             }
             return last_status;
@@ -463,8 +468,9 @@ pub const JobManager = struct {
             var last_status: i32 = 0;
             for (&self.jobs, 0..) |*maybe_job, i| {
                 if (maybe_job.*) |job| {
-                    const result = std.posix.waitpid(job.pid, 0);
-                    last_status = getExitStatus(result.status);
+                    var all_wait_status: c_int = 0;
+                    _ = std.c.waitpid(job.pid, &all_wait_status, 0);
+                    last_status = getExitStatus(@as(u32, @bitCast(all_wait_status)));
                     self.allocator.free(job.command);
                     maybe_job.* = null;
                     self.job_count -= 1;

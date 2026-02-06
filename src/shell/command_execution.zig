@@ -130,7 +130,9 @@ pub fn executeInBackground(self: *Shell, chain: *types.CommandChain, original_in
     }
 
     // Fork the process
-    const pid = try std.posix.fork();
+    const fork_ret = std.c.fork();
+    if (fork_ret < 0) return error.Unexpected;
+    const pid: std.posix.pid_t = @intCast(fork_ret);
 
     if (pid == 0) {
         // Child process - execute the chain

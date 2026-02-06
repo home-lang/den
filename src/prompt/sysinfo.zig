@@ -1,5 +1,15 @@
 const std = @import("std");
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
+fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
+    const value = getenv(key) orelse return null;
+    return allocator.dupe(u8, value) catch null;
+}
+
 /// System information provider
 pub const SystemInfo = struct {
     allocator: std.mem.Allocator,
@@ -17,7 +27,7 @@ pub const SystemInfo = struct {
 
     /// Get home directory
     pub fn getHomeDir(self: *SystemInfo) !?[]const u8 {
-        if (std.process.getEnvVarOwned(self.allocator, "HOME") catch null) |home| {
+        if (getEnvOwned(self.allocator, "HOME")) |home| {
             return home;
         }
 
@@ -26,11 +36,11 @@ pub const SystemInfo = struct {
 
     /// Get current user name
     pub fn getUsername(self: *SystemInfo) ![]const u8 {
-        if (std.process.getEnvVarOwned(self.allocator, "USER") catch null) |user| {
+        if (getEnvOwned(self.allocator, "USER")) |user| {
             return user;
         }
 
-        if (std.process.getEnvVarOwned(self.allocator, "USERNAME") catch null) |user| {
+        if (getEnvOwned(self.allocator, "USERNAME")) |user| {
             return user;
         }
 
@@ -39,7 +49,7 @@ pub const SystemInfo = struct {
 
     /// Get hostname
     pub fn getHostname(self: *SystemInfo) ![]const u8 {
-        if (std.process.getEnvVarOwned(self.allocator, "HOSTNAME") catch null) |hostname| {
+        if (getEnvOwned(self.allocator, "HOSTNAME")) |hostname| {
             return hostname;
         }
 

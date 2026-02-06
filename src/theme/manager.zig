@@ -8,6 +8,16 @@ const ColorRenderer = color_mod.ColorRenderer;
 const TerminalCapabilities = terminal_mod.TerminalCapabilities;
 const ColorSupport = color_mod.ColorSupport;
 
+fn getenv(key: [*:0]const u8) ?[]const u8 {
+    const value = std.c.getenv(key) orelse return null;
+    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
+}
+
+fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
+    const value = getenv(key) orelse return null;
+    return allocator.dupe(u8, value) catch null;
+}
+
 /// Color scheme (light or dark)
 pub const ColorScheme = enum {
     dark,
@@ -16,7 +26,7 @@ pub const ColorScheme = enum {
 
     pub fn detect(allocator: std.mem.Allocator) ColorScheme {
         // Check COLORFGBG environment variable (format: "foreground;background")
-        if (std.process.getEnvVarOwned(allocator, "COLORFGBG") catch null) |colorfgbg| {
+        if (getEnvOwned(allocator, "COLORFGBG")) |colorfgbg| {
             defer allocator.free(colorfgbg);
 
             // Parse background color number

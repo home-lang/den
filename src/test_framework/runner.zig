@@ -99,7 +99,7 @@ pub const TestRunner = struct {
         if (child.stdout) |stdout_pipe| {
             var read_buf: [4096]u8 = undefined;
             while (true) {
-                const n = stdout_pipe.read(&read_buf) catch break;
+                const n = std.posix.read(stdout_pipe.handle, &read_buf) catch break;
                 if (n == 0) break;
                 try stdout_buf.appendSlice(self.allocator, read_buf[0..n]);
                 if (stdout_buf.items.len >= 1024 * 1024) break;
@@ -113,7 +113,7 @@ pub const TestRunner = struct {
         if (child.stderr) |stderr_pipe| {
             var read_buf: [4096]u8 = undefined;
             while (true) {
-                const n = stderr_pipe.read(&read_buf) catch break;
+                const n = std.posix.read(stderr_pipe.handle, &read_buf) catch break;
                 if (n == 0) break;
                 try stderr_buf.appendSlice(self.allocator, read_buf[0..n]);
                 if (stderr_buf.items.len >= 1024 * 1024) break;

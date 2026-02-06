@@ -276,7 +276,8 @@ pub const PluginAPI = struct {
         _ = self.shell orelse return null;
 
         var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const cwd = std.posix.getcwd(&cwd_buf) catch return null;
+        const cwd_result = std.c.getcwd(&cwd_buf, cwd_buf.len) orelse return null;
+        const cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cwd_result)), 0);
         return self.allocator.dupe(u8, cwd) catch null;
     }
 

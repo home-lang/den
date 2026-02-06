@@ -917,7 +917,7 @@ pub const Expansion = struct {
                 std.fmt.bufPrint(&buf, "den: {s}: {s}\n", .{ var_name, error_msg }) catch "den: parameter null or not set\n"
             else
                 std.fmt.bufPrint(&buf, "den: {s}: parameter null or not set\n", .{var_name}) catch "den: parameter null or not set\n";
-            _ = posix.write(posix.STDERR_FILENO, msg) catch {};
+            _ = std.c.write(posix.STDERR_FILENO, msg.ptr, msg.len);
             return error.ParameterNullOrNotSet;
         }
 
@@ -1236,7 +1236,7 @@ pub const Expansion = struct {
             const posix = std.posix;
             var buf: [256]u8 = undefined;
             const msg = std.fmt.bufPrint(&buf, "den: {s}: unbound variable\n", .{var_name}) catch "den: unbound variable\n";
-            _ = posix.write(posix.STDERR_FILENO, msg) catch {};
+            _ = std.c.write(posix.STDERR_FILENO, msg.ptr, msg.len);
             return error.UnboundVariable;
         }
 
@@ -1375,7 +1375,7 @@ pub const Expansion = struct {
 
         var read_buf: [4096]u8 = undefined;
         while (true) {
-            const bytes_read = stdout.read(&read_buf) catch break;
+            const bytes_read = std.posix.read(stdout.handle, &read_buf) catch break;
             if (bytes_read == 0) break;
             try output_buffer.appendSlice(self.allocator, read_buf[0..bytes_read]);
             if (output_buffer.items.len >= max_output) break;
@@ -1466,8 +1466,8 @@ pub const Expansion = struct {
                 } else {
                     // Try to get cwd as fallback
                     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-                    if (std.Io.Dir.cwd().realpath(".", &cwd_buf)) |path| {
-                        break :blk try self.allocator.dupe(u8, path);
+                    if (std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf)) |path_len| {
+                        break :blk try self.allocator.dupe(u8, cwd_buf[0..path_len]);
                     } else |_| {
                         break :blk try self.allocator.dupe(u8, "~+");
                     }
@@ -1559,16 +1559,19 @@ pub const Expansion = struct {
         const command = input[2..end];
 
         // Create a pipe
-        const pipe_fds = std.posix.pipe() catch {
+        var pipe_fds: [2]std.posix.fd_t = undefined;
+        if (std.c.pipe(&pipe_fds) != 0) {
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-        };
+        }
 
         // Fork a child process
-        const fork_result = std.posix.fork() catch {
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) {
             std.posix.close(pipe_fds[0]);
             std.posix.close(pipe_fds[1]);
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-        };
+        }
+        const fork_result: std.posix.pid_t = @intCast(fork_ret);
 
         if (fork_result == 0) {
             // Child process
@@ -1577,18 +1580,18 @@ pub const Expansion = struct {
                 // Close read end
                 std.posix.close(pipe_fds[0]);
                 // Redirect stdout to write end of pipe
-                std.posix.dup2(pipe_fds[1], std.posix.STDOUT_FILENO) catch {
+                if (std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO) < 0) {
                     std.process.exit(1);
-                };
+                }
                 std.posix.close(pipe_fds[1]);
             } else {
                 // >(cmd) - child reads from pipe, parent writes
                 // Close write end
                 std.posix.close(pipe_fds[1]);
                 // Redirect stdin to read end of pipe
-                std.posix.dup2(pipe_fds[0], std.posix.STDIN_FILENO) catch {
+                if (std.c.dup2(pipe_fds[0], std.posix.STDIN_FILENO) < 0) {
                     std.process.exit(1);
-                };
+                }
                 std.posix.close(pipe_fds[0]);
             }
 
@@ -1607,7 +1610,7 @@ pub const Expansion = struct {
                 @ptrCast(&cmd_buf),
                 null,
             };
-            std.posix.execveZ("/bin/sh", &argv, @ptrCast(std.os.environ.ptr)) catch {};
+            _ = std.c.execve("/bin/sh", &argv, @ptrCast(getCEnviron()));
             std.process.exit(127);
         }
 
@@ -1628,6 +1631,17 @@ pub const Expansion = struct {
         return ExpansionResult{ .value = fd_path, .consumed = end + 1, .owned = true };
     }
 };
+
+/// Get C environment pointer (platform-specific)
+fn getCEnviron() [*:null]const ?[*:0]const u8 {
+    if (builtin.os.tag == .macos) {
+        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
+        return @ptrCast(NSGetEnviron().*);
+    } else {
+        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
+        return @ptrCast(c_environ.*);
+    }
+}
 
 /// Get user's home directory from passwd database
 /// Uses POSIX getpwnam for lookup

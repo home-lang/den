@@ -36,10 +36,12 @@ pub fn waitProcess(pid: ProcessId, options: struct { no_hang: bool = false }) !W
 }
 
 fn waitProcessPosix(pid: std.posix.pid_t, options: struct { no_hang: bool = false }) !WaitResult {
-    const flags: u32 = if (options.no_hang) std.posix.W.NOHANG else 0;
-    const result = std.posix.waitpid(pid, flags);
+    const flags: c_int = if (options.no_hang) @bitCast(std.posix.W.NOHANG) else 0;
+    var wait_status: c_int = 0;
+    const wait_pid = std.c.waitpid(pid, &wait_status, flags);
+    const status_u32: u32 = @bitCast(wait_status);
 
-    if (result.pid == 0 and options.no_hang) {
+    if (wait_pid == 0 and options.no_hang) {
         // Process still running
         return WaitResult{
             .status = 0,
@@ -48,11 +50,11 @@ fn waitProcessPosix(pid: std.posix.pid_t, options: struct { no_hang: bool = fals
         };
     }
 
-    const signaled = std.posix.W.IFSIGNALED(result.status);
+    const signaled = std.posix.W.IFSIGNALED(status_u32);
     return WaitResult{
-        .status = if (signaled) 128 + @as(i32, std.posix.W.TERMSIG(result.status)) else std.posix.W.EXITSTATUS(result.status),
+        .status = if (signaled) 128 + @as(i32, std.posix.W.TERMSIG(status_u32)) else std.posix.W.EXITSTATUS(status_u32),
         .signaled = signaled,
-        .signal = if (signaled) std.posix.W.TERMSIG(result.status) else null,
+        .signal = if (signaled) std.posix.W.TERMSIG(status_u32) else null,
     };
 }
 
@@ -292,7 +294,8 @@ pub fn createPipe() !Pipe {
     if (builtin.os.tag == .windows) {
         return createPipeWindows();
     } else {
-        const fds = try std.posix.pipe();
+        var fds: [2]std.posix.fd_t = undefined;
+        if (std.c.pipe(&fds) != 0) return error.Unexpected;
         return Pipe{
             .read_end = fds[0],
             .write_end = fds[1],
@@ -313,7 +316,7 @@ pub fn duplicateFd(old_fd: std.posix.fd_t, new_fd: std.posix.fd_t) !void {
         _ = new_fd;
         return error.NotSupported;
     } else {
-        _ = try std.posix.dup2(old_fd, new_fd);
+        if (std.c.dup2(old_fd, new_fd) < 0) return error.Unexpected;
     }
 }
 

@@ -148,7 +148,7 @@ fn benchmarkSequentialDiscovery(allocator: std.mem.Allocator) !void {
         var walker = try dir.walk(allocator);
         defer walker.deinit();
 
-        while (try walker.next()) |entry| {
+        while (try walker.next(std.Options.debug_io)) |entry| {
             if (entry.kind != .file) continue;
             if (std.mem.endsWith(u8, entry.basename, ".zig")) {
                 const full_path = try std.fs.path.join(

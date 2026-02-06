@@ -59,10 +59,11 @@ pub fn realpath(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !BuiltinResult 
 
     const path = cmd.args[0];
     var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const real = std.Io.Dir.cwd().realpath(path, &buf) catch |err| {
+    const real_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, path, &buf) catch |err| {
         try IO.eprint("den: realpath: {s}: {}\n", .{ path, err });
         return BuiltinResult{ .exit_code = 1 };
     };
+    const real = buf[0..real_len];
 
     try IO.print("{s}\n", .{real});
     return BuiltinResult{ .exit_code = 0 };
@@ -73,10 +74,11 @@ pub fn pwd(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !BuiltinResult {
     _ = cmd;
 
     var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd = std.Io.Dir.cwd().realpath(".", &buf) catch |err| {
+    const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &buf) catch |err| {
         try IO.eprint("den: pwd: {}\n", .{err});
         return BuiltinResult{ .exit_code = 1 };
     };
+    const cwd = buf[0..cwd_len];
 
     try IO.print("{s}\n", .{cwd});
 

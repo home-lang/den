@@ -985,15 +985,27 @@ test "mid-word path expansion - relative path" {
 
     // Change to temp directory for testing
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const original_cwd = try std.Io.Dir.cwd().realpath(std.Options.debug_io, ".", &cwd_buf);
+    const original_cwd_len = try std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf);
+    const original_cwd = cwd_buf[0..original_cwd_len];
     const original_cwd_owned = try allocator.dupe(u8, original_cwd);
     defer allocator.free(original_cwd_owned);
 
     var tmp_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const tmp_path = try tmp.dir.realpath(std.Options.debug_io, ".", &tmp_path_buf);
+    const tmp_path_len = try tmp.dir.realPathFile(std.Options.debug_io, ".", &tmp_path_buf);
+    const tmp_path = tmp_path_buf[0..tmp_path_len];
     try std.Io.Dir.cwd().setAsCwd(std.Options.debug_io);
-    try std.posix.chdir(tmp_path);
-    defer std.posix.chdir(original_cwd_owned) catch {};
+    {
+        var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        @memcpy(chdir_buf[0..tmp_path.len], tmp_path);
+        chdir_buf[tmp_path.len] = 0;
+        if (std.c.chdir(chdir_buf[0..tmp_path.len :0]) != 0) return error.ChdirFailed;
+    }
+    defer {
+        var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        @memcpy(chdir_buf[0..original_cwd_owned.len], original_cwd_owned);
+        chdir_buf[original_cwd_owned.len] = 0;
+        _ = std.c.chdir(chdir_buf[0..original_cwd_owned.len :0]);
+    }
 
     // Test expansion of t/s (should expand to testdir/subdir)
     const test_path = "t/s";

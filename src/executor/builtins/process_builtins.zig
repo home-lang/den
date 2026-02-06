@@ -247,10 +247,12 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     const sig = parseSignalName(signal_name);
 
     // Fork and exec the command
-    const fork_result = std.posix.fork() catch |err| {
-        try IO.eprint("den: timeout: fork failed: {}\n", .{err});
+    const fork_ret = std.c.fork();
+    if (fork_ret < 0) {
+        try IO.eprint("den: timeout: fork failed\n", .{});
         return 1;
-    };
+    }
+    const fork_result: std.posix.pid_t = @intCast(fork_ret);
 
     if (fork_result == 0) {
         // Child process - exec the command
@@ -290,20 +292,23 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     const timeout_ns: u64 = @intFromFloat(duration_secs * 1_000_000_000);
     const start_time = std.time.Instant.now() catch {
         // Can't get time, just wait normally
-        const result = std.posix.waitpid(child_pid, 0);
-        return @intCast(std.posix.W.EXITSTATUS(result.status));
+        var wait_status_fallback: c_int = 0;
+        _ = std.c.waitpid(child_pid, &wait_status_fallback, 0);
+        return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status_fallback))));
     };
 
     // Poll for child completion with timeout
     while (true) {
         // Check if child has exited (non-blocking)
-        const wait_result = std.posix.waitpid(child_pid, std.posix.W.NOHANG);
-        if (wait_result.pid != 0) {
+        var poll_wait_status: c_int = 0;
+        const poll_wait_pid = std.c.waitpid(child_pid, &poll_wait_status, @bitCast(std.posix.W.NOHANG));
+        if (poll_wait_pid != 0) {
+            const poll_status_u32: u32 = @bitCast(poll_wait_status);
             // Child exited
-            if (std.posix.W.IFEXITED(wait_result.status)) {
-                return @intCast(std.posix.W.EXITSTATUS(wait_result.status));
-            } else if (std.posix.W.IFSIGNALED(wait_result.status)) {
-                return 128 + @as(i32, @intCast(std.posix.W.TERMSIG(wait_result.status)));
+            if (std.posix.W.IFEXITED(poll_status_u32)) {
+                return @intCast(std.posix.W.EXITSTATUS(poll_status_u32));
+            } else if (std.posix.W.IFSIGNALED(poll_status_u32)) {
+                return 128 + @as(i32, @intCast(std.posix.W.TERMSIG(poll_status_u32)));
             }
             return 1;
         }
@@ -320,20 +325,23 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
                 const ka_nanos: u64 = @intFromFloat((ka - @as(f64, @floatFromInt(ka_secs))) * 1_000_000_000);
                 std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(ka_secs * 1_000_000_000 + ka_nanos), .awake) catch {};
                 // Check if still running
-                const check = std.posix.waitpid(child_pid, std.posix.W.NOHANG);
-                if (check.pid == 0) {
+                var check_status: c_int = 0;
+                const check_pid = std.c.waitpid(child_pid, &check_status, @bitCast(std.posix.W.NOHANG));
+                if (check_pid == 0) {
                     // Still running, send KILL
                     std.posix.kill(child_pid, std.posix.SIG.KILL) catch {};
                 }
             }
 
             // Wait for child to actually exit
-            const final_result = std.posix.waitpid(child_pid, 0);
+            var final_wait_status: c_int = 0;
+            _ = std.c.waitpid(child_pid, &final_wait_status, 0);
+            const final_status_u32: u32 = @bitCast(final_wait_status);
             if (preserve_status) {
-                if (std.posix.W.IFEXITED(final_result.status)) {
-                    return @intCast(std.posix.W.EXITSTATUS(final_result.status));
-                } else if (std.posix.W.IFSIGNALED(final_result.status)) {
-                    return 128 + @as(i32, @intCast(std.posix.W.TERMSIG(final_result.status)));
+                if (std.posix.W.IFEXITED(final_status_u32)) {
+                    return @intCast(std.posix.W.EXITSTATUS(final_status_u32));
+                } else if (std.posix.W.IFSIGNALED(final_status_u32)) {
+                    return 128 + @as(i32, @intCast(std.posix.W.TERMSIG(final_status_u32)));
                 }
             }
             return 124; // Standard timeout exit code
