@@ -34,16 +34,14 @@ pub fn testBuiltin(command: *types.ParsedCommand) !i32 {
         } else if (std.mem.eql(u8, op, "-n")) {
             return if (arg.len > 0) 0 else 1;
         } else if (std.mem.eql(u8, op, "-f")) {
-            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
-            defer file.close(std.Options.debug_io);
-            const stat = file.stat(std.Options.debug_io) catch return 1;
+            // Use stat to check file type without opening (works even without read permissions)
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
             return if (stat.kind == .file) 0 else 1;
         } else if (std.mem.eql(u8, op, "-d")) {
-            var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, arg, .{}) catch return 1;
-            dir.close(std.Options.debug_io);
-            return 0;
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
+            return if (stat.kind == .directory) 0 else 1;
         } else if (std.mem.eql(u8, op, "-e")) {
-            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return 1;
+            _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
             return 0;
         } else if (std.mem.eql(u8, op, "-r")) {
             const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
@@ -58,9 +56,7 @@ pub fn testBuiltin(command: *types.ParsedCommand) !i32 {
                 std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return 1;
                 return 0;
             }
-            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
-            defer file.close(std.Options.debug_io);
-            const stat = file.stat(std.Options.debug_io) catch return 1;
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
             return if (stat.permissions.toMode() & 0o111 != 0) 0 else 1;
         }
     }

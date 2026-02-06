@@ -70,6 +70,12 @@ pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         if (old_cwd) |cwd| {
             try ctx.setEnv("OLDPWD", cwd);
         }
+        // Update PWD to reflect the new current directory
+        var new_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        if (std.c.getcwd(&new_cwd_buf, new_cwd_buf.len)) |result| {
+            const new_cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0);
+            try ctx.setEnv("PWD", new_cwd);
+        }
         return 0;
     } else {
         // If relative path and CDPATH is set, try CDPATH directories
@@ -98,6 +104,12 @@ pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                         try IO.print("{s}\n", .{full_path});
                         if (old_cwd) |cwd| {
                             try ctx.setEnv("OLDPWD", cwd);
+                        }
+                        // Update PWD to reflect the new current directory
+                        var new_cdpath_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+                        if (std.c.getcwd(&new_cdpath_cwd_buf, new_cdpath_cwd_buf.len)) |cdpath_result| {
+                            const new_cdpath_cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cdpath_result)), 0);
+                            try ctx.setEnv("PWD", new_cdpath_cwd);
                         }
                         return 0;
                     } else {

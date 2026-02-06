@@ -136,13 +136,17 @@ pub const Executor = struct {
                     .and_op => {
                         // && - only execute if previous succeeded
                         if (last_exit_code != 0) {
-                            return last_exit_code;
+                            // Skip this command but continue checking subsequent operators
+                            i += 1;
+                            continue;
                         }
                     },
                     .or_op => {
                         // || - only execute if previous failed
                         if (last_exit_code == 0) {
-                            return last_exit_code;
+                            // Skip this command but continue checking subsequent operators
+                            i += 1;
+                            continue;
                         }
                     },
                     .pipe => {

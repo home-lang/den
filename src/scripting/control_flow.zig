@@ -610,9 +610,9 @@ pub const ControlFlowExecutor = struct {
 
     /// Expand a value (variables, command substitution, etc.)
     fn expandValue(self: *ControlFlowExecutor, value: []const u8) ![]const u8 {
-        // Simple implementation - just dupe for now
-        // In full implementation, this would use the expansion engine
-        return try self.allocator.dupe(u8, value);
+        var expander = Expansion.init(self.allocator, &self.shell.environment, self.shell.last_exit_code);
+        const expanded = try expander.expand(value);
+        return expanded;
     }
 
     /// Match a pattern (supports literals and simple globs)

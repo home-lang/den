@@ -884,6 +884,20 @@ pub const Shell = struct {
             return;
         }
 
+        // Check for one-liner control flow: for/while/until/if/case
+        if (std.mem.startsWith(u8, trimmed_input, "for ") or
+            std.mem.startsWith(u8, trimmed_input, "while ") or
+            std.mem.startsWith(u8, trimmed_input, "until ") or
+            std.mem.startsWith(u8, trimmed_input, "if ") or
+            std.mem.startsWith(u8, trimmed_input, "case "))
+        {
+            self.executeControlFlowOneliner(trimmed_input) catch |err| {
+                try IO.eprint("den: control flow error: {}\n", .{err});
+                self.last_exit_code = 1;
+            };
+            return;
+        }
+
         // Check if input contains a C-style for loop after other commands (e.g., "total=0; for ((...")
         // This handles cases like: total=0; for ((i=1; i<=5; i++)); do total=$((total + i)); done; echo $total
         if (!self.in_cstyle_for_body and std.mem.indexOf(u8, trimmed_input, "for ((") != null) {
@@ -1033,28 +1047,13 @@ pub const Shell = struct {
         shell_mod.executeErrTrap(self);
     }
 
-    /// Split input on unquoted semicolons and execute each part separately.
-    /// Returns true if input was split and executed, false if no splitting needed.
-    fn splitAndExecuteSemicolons(self: *Shell, input: []const u8) bool {
-        // Quick check: if no semicolons, skip
-        if (std.mem.indexOfScalar(u8, input, ';') == null) return false;
-
-        // Don't split if this contains control flow keywords that use semicolons
-        const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
-        if (std.mem.startsWith(u8, trimmed, "for ") or
-            std.mem.startsWith(u8, trimmed, "for(") or
-            std.mem.startsWith(u8, trimmed, "while ") or
-            std.mem.startsWith(u8, trimmed, "until ") or
-            std.mem.startsWith(u8, trimmed, "if ") or
-            std.mem.startsWith(u8, trimmed, "case ") or
-            std.mem.startsWith(u8, trimmed, "select "))
-        {
-            return false;
-        }
-
-        // Find semicolons that are not inside quotes or $()
-        var parts_buf: [64][]const u8 = undefined;
-        var part_count: usize = 0;
+    /// Execute a one-liner control flow statement (for/while/until/if/case).
+    /// Converts semicolons to line breaks and feeds to the ControlFlowParser/Executor.
+    fn executeControlFlowOneliner(self: *Shell, input: []const u8) !void {
+        // Convert one-liner to multi-line by splitting on semicolons,
+        // but respecting quotes, $() substitutions, and nested constructs.
+        var lines_buf: [256][]const u8 = undefined;
+        var line_count: usize = 0;
         var start: usize = 0;
         var in_single_quote = false;
         var in_double_quote = false;
@@ -1064,7 +1063,7 @@ pub const Shell = struct {
         while (i < input.len) : (i += 1) {
             const c = input[i];
             if (c == '\\' and !in_single_quote and i + 1 < input.len) {
-                i += 1; // skip escaped char
+                i += 1;
                 continue;
             }
             if (c == '\'' and !in_double_quote) {
@@ -1077,13 +1076,225 @@ pub const Shell = struct {
                 } else if (c == ')' and paren_depth > 0) {
                     paren_depth -= 1;
                 } else if (c == ';' and paren_depth == 0) {
-                    const part = std.mem.trim(u8, input[start..i], &std.ascii.whitespace);
-                    if (part.len > 0 and part_count < parts_buf.len) {
-                        parts_buf[part_count] = part;
-                        part_count += 1;
+                    // Check for ;; (case terminator) - keep it with the preceding part
+                    if (i + 1 < input.len and input[i + 1] == ';') {
+                        // Include the ;; in the current part, split after it
+                        const part = std.mem.trim(u8, input[start .. i + 2], &std.ascii.whitespace);
+                        if (part.len > 0 and line_count < lines_buf.len) {
+                            lines_buf[line_count] = part;
+                            line_count += 1;
+                        }
+                        i += 1; // skip second ;
+                        start = i + 1;
+                    } else {
+                        const part = std.mem.trim(u8, input[start..i], &std.ascii.whitespace);
+                        if (part.len > 0 and line_count < lines_buf.len) {
+                            lines_buf[line_count] = part;
+                            line_count += 1;
+                        }
+                        start = i + 1;
                     }
-                    start = i + 1;
                 }
+            }
+        }
+        // Last part
+        const last_part = std.mem.trim(u8, input[start..], &std.ascii.whitespace);
+        if (last_part.len > 0 and line_count < lines_buf.len) {
+            lines_buf[line_count] = last_part;
+            line_count += 1;
+        }
+
+        if (line_count == 0) return;
+
+        // Post-process: split lines that start with "do ", "then ", "else "
+        // into separate lines, since the parser expects these as standalone keywords.
+        // Also handle "case ... in PATTERN)" by splitting after " in ".
+        var expanded_buf: [512][]const u8 = undefined;
+        var expanded_count: usize = 0;
+        for (lines_buf[0..line_count]) |line| {
+            if (expanded_count >= expanded_buf.len) break;
+            // Handle "case VALUE in PATTERN)" - split after " in "
+            if (std.mem.startsWith(u8, line, "case ")) {
+                if (std.mem.indexOf(u8, line[5..], " in ")) |in_off| {
+                    const in_pos = 5 + in_off;
+                    // "case VALUE in" part
+                    expanded_buf[expanded_count] = line[0 .. in_pos + 3]; // up to and including " in"
+                    expanded_count += 1;
+                    if (expanded_count < expanded_buf.len) {
+                        const rest = std.mem.trim(u8, line[in_pos + 4 ..], &std.ascii.whitespace);
+                        if (rest.len > 0) {
+                            expanded_buf[expanded_count] = rest;
+                            expanded_count += 1;
+                        }
+                    }
+                    continue;
+                }
+            }
+            const keywords = [_][]const u8{ "do ", "then ", "else " };
+            var found_keyword = false;
+            for (keywords) |kw| {
+                if (std.mem.startsWith(u8, line, kw)) {
+                    expanded_buf[expanded_count] = line[0 .. kw.len - 1]; // "do" or "then" or "else"
+                    expanded_count += 1;
+                    if (expanded_count < expanded_buf.len) {
+                        const rest = std.mem.trim(u8, line[kw.len..], &std.ascii.whitespace);
+                        if (rest.len > 0) {
+                            expanded_buf[expanded_count] = rest;
+                            expanded_count += 1;
+                        }
+                    }
+                    found_keyword = true;
+                    break;
+                }
+            }
+            if (!found_keyword) {
+                expanded_buf[expanded_count] = line;
+                expanded_count += 1;
+            }
+        }
+
+        const lines = expanded_buf[0..expanded_count];
+
+        var cf_parser = ControlFlowParser.init(self.allocator);
+        var cf_executor = ControlFlowExecutor.init(self);
+
+        if (std.mem.startsWith(u8, input, "for ")) {
+            const result = try cf_parser.parseFor(lines, 0);
+            var loop = result.loop;
+            defer loop.deinit();
+            self.last_exit_code = try cf_executor.executeFor(&loop);
+        } else if (std.mem.startsWith(u8, input, "while ")) {
+            const result = try cf_parser.parseWhile(lines, 0, false);
+            var loop = result.loop;
+            defer loop.deinit();
+            self.last_exit_code = try cf_executor.executeWhile(&loop);
+        } else if (std.mem.startsWith(u8, input, "until ")) {
+            const result = try cf_parser.parseWhile(lines, 0, true);
+            var loop = result.loop;
+            defer loop.deinit();
+            self.last_exit_code = try cf_executor.executeWhile(&loop);
+        } else if (std.mem.startsWith(u8, input, "if ")) {
+            const result = try cf_parser.parseIf(lines, 0);
+            var stmt = result.stmt;
+            defer stmt.deinit();
+            self.last_exit_code = try cf_executor.executeIf(&stmt);
+        } else if (std.mem.startsWith(u8, input, "case ")) {
+            const result = try cf_parser.parseCase(lines, 0);
+            var stmt = result.stmt;
+            defer stmt.deinit();
+            self.last_exit_code = try cf_executor.executeCase(&stmt);
+        }
+    }
+
+    /// Check if a word at position is a control flow opener keyword.
+    /// The word must be at a word boundary (start of string or after whitespace/semicolon).
+    fn isControlFlowOpener(input: []const u8, pos: usize) bool {
+        const openers = [_][]const u8{ "for ", "while ", "until ", "if ", "case ", "select " };
+        for (openers) |kw| {
+            if (pos + kw.len <= input.len and std.mem.eql(u8, input[pos..][0..kw.len], kw)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Check if a word at position is a control flow closer keyword.
+    fn isControlFlowCloser(input: []const u8, pos: usize) bool {
+        const closers = [_]struct { word: []const u8, for_kw: []const u8 }{
+            .{ .word = "done", .for_kw = "done" },
+            .{ .word = "fi", .for_kw = "fi" },
+            .{ .word = "esac", .for_kw = "esac" },
+        };
+        for (closers) |c| {
+            const wlen = c.word.len;
+            if (pos + wlen <= input.len and std.mem.eql(u8, input[pos..][0..wlen], c.word)) {
+                // Must be at end of string or followed by whitespace/semicolon
+                if (pos + wlen == input.len or
+                    input[pos + wlen] == ' ' or input[pos + wlen] == ';' or
+                    input[pos + wlen] == '\t' or input[pos + wlen] == '\n')
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// Split input on unquoted semicolons and execute each part separately.
+    /// Returns true if input was split and executed, false if no splitting needed.
+    /// Tracks control flow depth so semicolons inside for/while/if/case constructs
+    /// are NOT treated as split points.
+    fn splitAndExecuteSemicolons(self: *Shell, input: []const u8) bool {
+        // Quick check: if no semicolons, skip
+        if (std.mem.indexOfScalar(u8, input, ';') == null) return false;
+
+        // Find semicolons that are not inside quotes, $(), or control flow constructs
+        var parts_buf: [64][]const u8 = undefined;
+        var part_count: usize = 0;
+        var start: usize = 0;
+        var in_single_quote = false;
+        var in_double_quote = false;
+        var paren_depth: u32 = 0;
+        var cf_depth: u32 = 0; // control flow nesting depth
+        var i: usize = 0;
+        var at_word_start = true; // track word boundaries for keyword detection
+
+        while (i < input.len) : (i += 1) {
+            const c = input[i];
+            if (c == '\\' and !in_single_quote and i + 1 < input.len) {
+                i += 1; // skip escaped char
+                at_word_start = false;
+                continue;
+            }
+            if (c == '\'' and !in_double_quote) {
+                in_single_quote = !in_single_quote;
+                at_word_start = false;
+            } else if (c == '"' and !in_single_quote) {
+                in_double_quote = !in_double_quote;
+                at_word_start = false;
+            } else if (!in_single_quote and !in_double_quote) {
+                if (c == '(' and (paren_depth > 0 or (i > 0 and input[i - 1] == '$'))) {
+                    paren_depth += 1;
+                    at_word_start = false;
+                } else if (c == ')' and paren_depth > 0) {
+                    paren_depth -= 1;
+                    at_word_start = false;
+                } else if (paren_depth == 0) {
+                    // Track control flow nesting at word boundaries
+                    if (at_word_start and isControlFlowOpener(input, i)) {
+                        cf_depth += 1;
+                        at_word_start = false;
+                    } else if (at_word_start and cf_depth > 0 and isControlFlowCloser(input, i)) {
+                        cf_depth -= 1;
+                        at_word_start = false;
+                    } else if (c == ';') {
+                        // Skip double semicolons (;;) used in case statements
+                        if (i + 1 < input.len and input[i + 1] == ';') {
+                            i += 1;
+                            at_word_start = true;
+                            continue;
+                        }
+                        if (cf_depth == 0) {
+                            const part = std.mem.trim(u8, input[start..i], &std.ascii.whitespace);
+                            if (part.len > 0 and part_count < parts_buf.len) {
+                                parts_buf[part_count] = part;
+                                part_count += 1;
+                            }
+                            start = i + 1;
+                        }
+                        at_word_start = true;
+                        continue;
+                    } else if (c == ' ' or c == '\t' or c == '\n') {
+                        at_word_start = true;
+                        continue;
+                    } else {
+                        at_word_start = false;
+                    }
+                } else {
+                    at_word_start = false;
+                }
+            } else {
+                at_word_start = false;
             }
         }
         // Last part
