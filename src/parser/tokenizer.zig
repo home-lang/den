@@ -190,8 +190,23 @@ pub const Tokenizer = struct {
             // Fast path: use lookup table for two-char operators
             // Inside [[ ]], skip redirect-like operators (< and > based)
             if (lookupTwoCharOperator(c1, c2)) |op| blk: {
-                if (self.in_double_bracket and (c1 == '<' or c1 == '>' or (c1 == '2' and c2 == '>'))) {
-                    break :blk;
+                if (self.in_double_bracket) {
+                    // Inside [[ ]], only allow || and && as word tokens (not shell operators)
+                    // Also skip redirects
+                    if (c1 == '<' or c1 == '>' or (c1 == '2' and c2 == '>')) {
+                        break :blk;
+                    }
+                    if ((c1 == '&' and c2 == '&') or (c1 == '|' and c2 == '|')) {
+                        self.pos += 2;
+                        self.column += 2;
+                        const duped = self.allocator.dupe(u8, op.value) catch break :blk;
+                        return Token{
+                            .type = .word,
+                            .value = duped,
+                            .line = start_line,
+                            .column = start_col,
+                        };
+                    }
                 }
                 // Special case for heredoc/herestring (<<< vs <<)
                 if (op.token_type == .heredoc) {
@@ -276,6 +291,29 @@ pub const Tokenizer = struct {
                     // Process substitution >( - read the whole construct
                     return try self.readProcessSubstitution(false, start_line, start_col);
                 }
+                // Check for >&N (FD duplication, shorthand for 1>&N)
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '&') {
+                    var target_end = self.pos + 2;
+                    if (target_end < self.input.len and self.input[target_end] == '-') {
+                        target_end += 1;
+                    } else {
+                        while (target_end < self.input.len and std.ascii.isDigit(self.input[target_end])) {
+                            target_end += 1;
+                        }
+                    }
+                    if (target_end > self.pos + 2) {
+                        const token_value = self.input[self.pos..target_end];
+                        const len = target_end - self.pos;
+                        self.pos = target_end;
+                        self.column += len;
+                        return Token{
+                            .type = .redirect_fd_dup,
+                            .value = token_value,
+                            .line = start_line,
+                            .column = start_col,
+                        };
+                    }
+                }
                 self.pos += 1;
                 self.column += 1;
                 return Token{
@@ -303,6 +341,29 @@ pub const Tokenizer = struct {
                     // Process substitution <( - read the whole construct
                     return try self.readProcessSubstitution(true, start_line, start_col);
                 }
+                // Check for <&N (FD duplication, shorthand for 0<&N)
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '&') {
+                    var target_end = self.pos + 2;
+                    if (target_end < self.input.len and self.input[target_end] == '-') {
+                        target_end += 1;
+                    } else {
+                        while (target_end < self.input.len and std.ascii.isDigit(self.input[target_end])) {
+                            target_end += 1;
+                        }
+                    }
+                    if (target_end > self.pos + 2) {
+                        const token_value = self.input[self.pos..target_end];
+                        const len = target_end - self.pos;
+                        self.pos = target_end;
+                        self.column += len;
+                        return Token{
+                            .type = .redirect_fd_dup,
+                            .value = token_value,
+                            .line = start_line,
+                            .column = start_col,
+                        };
+                    }
+                }
                 self.pos += 1;
                 self.column += 1;
                 return Token{
@@ -313,6 +374,17 @@ pub const Tokenizer = struct {
                 };
             },
             '(' => {
+                if (self.in_double_bracket) {
+                    self.pos += 1;
+                    self.column += 1;
+                    const duped = try self.allocator.dupe(u8, "(");
+                    return Token{
+                        .type = .word,
+                        .value = duped,
+                        .line = start_line,
+                        .column = start_col,
+                    };
+                }
                 self.pos += 1;
                 self.column += 1;
                 return Token{
@@ -323,6 +395,17 @@ pub const Tokenizer = struct {
                 };
             },
             ')' => {
+                if (self.in_double_bracket) {
+                    self.pos += 1;
+                    self.column += 1;
+                    const duped = try self.allocator.dupe(u8, ")");
+                    return Token{
+                        .type = .word,
+                        .value = duped,
+                        .line = start_line,
+                        .column = start_col,
+                    };
+                }
                 self.pos += 1;
                 self.column += 1;
                 return Token{

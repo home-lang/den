@@ -224,14 +224,11 @@ fn evaluateExtendedTestExpr(args: [][]const u8, shell: ?*Shell) !bool {
         } else if (std.mem.eql(u8, op, "-n")) {
             return arg.len > 0;
         } else if (std.mem.eql(u8, op, "-f")) {
-            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
-            defer file.close(std.Options.debug_io);
-            const stat = file.stat(std.Options.debug_io) catch return false;
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return false;
             return stat.kind == .file;
         } else if (std.mem.eql(u8, op, "-d")) {
-            var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, arg, .{}) catch return false;
-            dir.close(std.Options.debug_io);
-            return true;
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return false;
+            return stat.kind == .directory;
         } else if (std.mem.eql(u8, op, "-e")) {
             std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return false;
             return true;

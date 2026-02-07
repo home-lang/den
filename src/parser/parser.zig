@@ -229,11 +229,14 @@ pub const Parser = struct {
                         }
                     }
 
-                    // Extract source FD
+                    // Extract source FD (default: 1 for >&, 0 for <&)
                     const source_fd_str = token_value[0..op_pos];
-                    const source_fd = std.fmt.parseInt(u32, source_fd_str, 10) catch {
-                        return error.InvalidFileDescriptor;
-                    };
+                    const source_fd = if (source_fd_str.len == 0)
+                        (if (token_value[op_pos] == '>') @as(u32, 1) else @as(u32, 0))
+                    else
+                        std.fmt.parseInt(u32, source_fd_str, 10) catch {
+                            return error.InvalidFileDescriptor;
+                        };
 
                     // Extract target FD (skip >& or <&)
                     const target_fd_str = token_value[op_pos + 2 ..];

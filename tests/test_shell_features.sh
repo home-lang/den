@@ -774,6 +774,26 @@ check "arith /=" "5" "$(timeout 3 $DEN -c 'x=15; echo $((x/=3))')"
 check "arith %=" "2" "$(timeout 3 $DEN -c 'x=17; echo $((x%=5))')"
 
 # ===========================================================================
+# 113. [[ && ]] and [[ || ]] inside double brackets
+# ===========================================================================
+check "[[ && ]]" "yes" "$(timeout 3 $DEN -c '[[ 1 -eq 1 && 2 -eq 2 ]] && echo yes || echo no')"
+check "[[ || ]]" "yes" "$(timeout 3 $DEN -c '[[ 1 -eq 2 || 2 -eq 2 ]] && echo yes || echo no')"
+check "[[ && false ]]" "no" "$(timeout 3 $DEN -c '[[ 1 -eq 1 && 2 -eq 3 ]] && echo yes || echo no')"
+
+# ===========================================================================
+# 114. File tests (stat-based, not requiring open)
+# ===========================================================================
+check "[[ -f /etc/hosts ]]" "yes" "$(timeout 3 $DEN -c '[[ -f /etc/hosts ]] && echo yes || echo no')"
+check "[[ -d /tmp ]]" "yes" "$(timeout 3 $DEN -c '[[ -d /tmp ]] && echo yes || echo no')"
+check "[[ -e /etc/hosts ]]" "yes" "$(timeout 3 $DEN -c '[[ -e /etc/hosts ]] && echo yes || echo no')"
+
+# ===========================================================================
+# 115. FD duplication shorthand >&N / <&N
+# ===========================================================================
+check ">&2 redirect" "hello" "$(timeout 3 $DEN -c 'echo hello >&2' 2>&1)"
+check "[[ paren group ]]" "yes" "$(timeout 3 $DEN -c '[[ ( 1 -eq 1 ) && ( 2 -eq 2 ) ]] && echo yes || echo no')"
+
+# ===========================================================================
 # Results
 # ===========================================================================
 echo ""
