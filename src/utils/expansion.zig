@@ -123,6 +123,7 @@ pub const Expansion = struct {
     option_nounset: bool, // set -u: error on unset variable
     cmd_cache: ?*ExpansionCache, // Optional cache for command substitution results
     line_number: u32, // $LINENO
+    shell_start_time: i64, // For $SECONDS
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), last_exit_code: i32) Expansion {
         return .{
@@ -141,6 +142,7 @@ pub const Expansion = struct {
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
+            .shell_start_time = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0,
         };
     }
 
@@ -198,6 +200,7 @@ pub const Expansion = struct {
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
+            .shell_start_time = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0,
         };
     }
 
@@ -630,9 +633,23 @@ pub const Expansion = struct {
                         }
                         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     } else {
-                        // ${arr[index]} - specific index
-                        const index = std.fmt.parseInt(usize, index_part, 10) catch {
-                            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                        // ${arr[index]} - specific index (may contain variable like $i)
+                        var resolved_index = index_part;
+                        if (std.mem.indexOfScalar(u8, index_part, '$') != null) {
+                            // Expand variables in the index
+                            if (self.environment.get(std.mem.trim(u8, index_part, &[_]u8{ '$', ' ' }))) |val| {
+                                resolved_index = val;
+                            }
+                        }
+                        // Try arithmetic evaluation for expressions
+                        const index = std.fmt.parseInt(usize, resolved_index, 10) catch blk: {
+                            var arith = @import("arithmetic.zig").Arithmetic.initWithVariables(self.allocator, self.environment);
+                            arith.local_vars = self.local_vars;
+                            arith.arrays = self.arrays;
+                            const arith_result = arith.eval(resolved_index) catch {
+                                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                            };
+                            break :blk if (arith_result >= 0) @as(usize, @intCast(arith_result)) else 0;
                         };
                         if (index < array.len) {
                             const value = try self.allocator.dupe(u8, array[index]);
@@ -1174,6 +1191,14 @@ pub const Expansion = struct {
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
+        if (std.mem.eql(u8, content, "SECONDS")) {
+            var buf: [16]u8 = undefined;
+            const now = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0;
+            const elapsed = now - self.shell_start_time;
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{elapsed}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+        }
 
         // Simple braced variable - use getVariableValue for nameref resolution
         if (self.getVariableValue(content)) |value| {
@@ -1416,6 +1441,14 @@ pub const Expansion = struct {
         if (std.mem.eql(u8, var_name, "LINENO")) {
             var buf: [16]u8 = undefined;
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{self.line_number}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+        }
+        if (std.mem.eql(u8, var_name, "SECONDS")) {
+            var buf: [16]u8 = undefined;
+            const now = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0;
+            const elapsed = now - self.shell_start_time;
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{elapsed}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end, .owned = true };
         }
@@ -1715,6 +1748,7 @@ pub const Expansion = struct {
         // Evaluate arithmetic expression with variable support
         var arith = Arithmetic.initWithVariables(self.allocator, self.environment);
         arith.local_vars = self.local_vars;
+        arith.arrays = self.arrays;
         const result_value = arith.eval(expr) catch {
             // On error, return 0
             const value = try std.fmt.allocPrint(self.allocator, "0", .{});

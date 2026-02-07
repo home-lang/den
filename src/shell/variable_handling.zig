@@ -45,10 +45,32 @@ pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void
         }
     }
 
+    // Apply case conversion if variable has lowercase/uppercase attribute
+    var final_value = value;
+    var case_buf: ?[]u8 = null;
+    if (self.var_attributes.get(resolved_name)) |attrs| {
+        if (attrs.lowercase) {
+            const lower = try self.allocator.alloc(u8, value.len);
+            for (value, 0..) |c, i| {
+                lower[i] = std.ascii.toLower(c);
+            }
+            case_buf = lower;
+            final_value = lower;
+        } else if (attrs.uppercase) {
+            const upper = try self.allocator.alloc(u8, value.len);
+            for (value, 0..) |c, i| {
+                upper[i] = std.ascii.toUpper(c);
+            }
+            case_buf = upper;
+            final_value = upper;
+        }
+    }
+    errdefer if (case_buf) |buf| self.allocator.free(buf);
+
     // If inside a function and the variable exists as a local, update local instead
     if (self.function_manager.currentFrame()) |frame| {
         if (frame.local_vars.getKey(resolved_name)) |_| {
-            const val = try self.allocator.dupe(u8, value);
+            const val = if (case_buf) |buf| buf else try self.allocator.dupe(u8, final_value);
             const gop = try frame.local_vars.getOrPut(resolved_name);
             if (gop.found_existing) {
                 self.allocator.free(gop.value_ptr.*);
@@ -65,7 +87,7 @@ pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void
     } else {
         gop.key_ptr.* = try self.allocator.dupe(u8, resolved_name);
     }
-    gop.value_ptr.* = try self.allocator.dupe(u8, value);
+    gop.value_ptr.* = if (case_buf) |buf| buf else try self.allocator.dupe(u8, final_value);
 }
 
 /// Check if input is an array element assignment: name[index]=value

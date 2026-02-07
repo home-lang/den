@@ -109,6 +109,7 @@ pub const Arithmetic = struct {
     variables: ?*std.StringHashMap([]const u8) = null,
     local_vars: ?*std.StringHashMap([]const u8) = null,
     cache: ?*ExpressionCache = null,
+    arrays: ?*std.StringHashMap([][]const u8) = null,
 
     pub fn init(allocator: std.mem.Allocator) Arithmetic {
         return .{ .allocator = allocator, .variables = null, .cache = null };
@@ -189,6 +190,7 @@ pub const Arithmetic = struct {
             .allocator = self.allocator,
             .variables = self.variables,
             .local_vars = self.local_vars,
+            .arrays = self.arrays,
         };
 
         const result = try parser.parseExpression();
@@ -244,6 +246,7 @@ const Parser = struct {
     allocator: std.mem.Allocator,
     variables: ?*std.StringHashMap([]const u8),
     local_vars: ?*std.StringHashMap([]const u8) = null,
+    arrays: ?*std.StringHashMap([][]const u8) = null,
 
     // Entry point - lowest precedence
     fn parseExpression(self: *Parser) ArithmeticError!i64 {
@@ -645,6 +648,27 @@ const Parser = struct {
         }
 
         const var_name = self.input[start..self.pos];
+
+        // Check for array access: arr[index]
+        if (self.pos < self.input.len and self.input[self.pos] == '[') {
+            self.pos += 1; // skip [
+            const index_val = self.parseExpression() catch 0;
+            self.skipWhitespace();
+            if (self.pos < self.input.len and self.input[self.pos] == ']') {
+                self.pos += 1; // skip ]
+            }
+            const index = if (index_val >= 0) @as(usize, @intCast(index_val)) else 0;
+            if (self.arrays) |arrays| {
+                if (arrays.get(var_name)) |array| {
+                    if (index < array.len) {
+                        const trimmed = std.mem.trim(u8, array[index], &std.ascii.whitespace);
+                        if (trimmed.len == 0) return 0;
+                        return std.fmt.parseInt(i64, trimmed, 10) catch 0;
+                    }
+                }
+            }
+            return 0;
+        }
 
         // Look up variable value - check local vars first, then global
         if (self.local_vars) |locals| {

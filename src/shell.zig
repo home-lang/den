@@ -906,6 +906,7 @@ pub const Shell = struct {
                                 const cur_val = std.fmt.parseInt(i64, current, 10) catch 0;
                                 // Evaluate right side
                                 var arith_c = @import("utils/arithmetic.zig").Arithmetic.initWithVariables(self.allocator, &self.environment);
+                                arith_c.arrays = &self.arrays;
                                 const rhs = arith_c.eval(value_expr_c) catch 0;
                                 // Apply operator
                                 const new_val_i: i64 = if (std.mem.eql(u8, cop, "+="))
@@ -951,6 +952,7 @@ pub const Shell = struct {
                         const value_expr = std.mem.trim(u8, expr[eq_idx + 1 ..], &std.ascii.whitespace);
                         // Evaluate the right side
                         var arith = @import("utils/arithmetic.zig").Arithmetic.initWithVariables(self.allocator, &self.environment);
+                        arith.arrays = &self.arrays;
                         const result = arith.eval(value_expr) catch 0;
                         var buf: [32]u8 = undefined;
                         const val_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
@@ -961,6 +963,7 @@ pub const Shell = struct {
                 }
                 // Non-assignment: evaluate and set exit code based on result
                 var arith = @import("utils/arithmetic.zig").Arithmetic.initWithVariables(self.allocator, &self.environment);
+                arith.arrays = &self.arrays;
                 const result = arith.eval(expr) catch 0;
                 self.last_exit_code = if (result != 0) @as(i32, 0) else @as(i32, 1);
                 return;
@@ -1138,6 +1141,49 @@ pub const Shell = struct {
                         } else if (c == ' ' and !in_single_quote and !in_double_quote) {
                             found_space_outside_quotes = true;
                             break;
+                        }
+                    }
+                    if (found_space_outside_quotes) {
+                        // Check if ALL space-separated tokens are assignments (a=1 b=2 c=3)
+                        var all_assignments = true;
+                        var any_needs_pipeline = false;
+                        var check_iter = std.mem.tokenizeScalar(u8, trimmed_input, ' ');
+                        while (check_iter.next()) |tok| {
+                            var found_eq = false;
+                            var valid_name = true;
+                            for (tok, 0..) |tc, ti| {
+                                if (tc == '=') {
+                                    found_eq = ti > 0;
+                                    // Check if value needs pipeline
+                                    const tval = tok[ti + 1 ..];
+                                    for (tval) |vc| {
+                                        if (vc == '$' or vc == '`') {
+                                            any_needs_pipeline = true;
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                }
+                                if (!std.ascii.isAlphanumeric(tc) and tc != '_') {
+                                    valid_name = false;
+                                    break;
+                                }
+                            }
+                            if (!found_eq or !valid_name) {
+                                all_assignments = false;
+                                break;
+                            }
+                        }
+                        if (all_assignments and !any_needs_pipeline) {
+                            // Execute each assignment
+                            var assign_iter = std.mem.tokenizeScalar(u8, trimmed_input, ' ');
+                            while (assign_iter.next()) |tok| {
+                                self.executeCommand(tok) catch |err| {
+                                    if (err == error.Exit) return err;
+                                };
+                            }
+                            self.last_exit_code = 0;
+                            return;
                         }
                     }
                     if (!found_space_outside_quotes) {
@@ -1997,7 +2043,7 @@ pub const Shell = struct {
                 } else if (c == ')' and paren_depth > 0) {
                     paren_depth -= 1;
                     at_word_start = false;
-                } else if (c == '{' and at_word_start) {
+                } else if (c == '{' and at_word_start and (i + 1 >= input.len or input[i + 1] == ' ' or input[i + 1] == '\t' or input[i + 1] == '\n')) {
                     brace_depth += 1;
                     at_word_start = false;
                 } else if (c == '}' and brace_depth > 0 and at_word_start) {

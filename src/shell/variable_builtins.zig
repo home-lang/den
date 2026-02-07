@@ -137,7 +137,17 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
         // Print all variables with attributes
         var it = shell.var_attributes.iterator();
         while (it.next()) |entry| {
-            try printDeclare(entry.key_ptr.*, entry.value_ptr.*);
+            try printDeclareWithValue(shell, entry.key_ptr.*, entry.value_ptr.*);
+        }
+        shell.last_exit_code = 0;
+        return;
+    }
+
+    // Print mode with specific variable names: declare -p var1 var2 ...
+    if (print_mode) {
+        for (cmd.args[arg_start..]) |var_name| {
+            const var_attrs = shell.var_attributes.get(var_name) orelse types.VarAttributes{};
+            try printDeclareWithValue(shell, var_name, var_attrs);
         }
         shell.last_exit_code = 0;
         return;
@@ -321,6 +331,75 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
     }
 
     shell.last_exit_code = 0;
+}
+
+/// Helper to print declare output with value
+fn printDeclareWithValue(shell: *Shell, name: []const u8, attrs: types.VarAttributes) !void {
+    var flags_buf: [16]u8 = undefined;
+    var flags_len: usize = 0;
+
+    if (attrs.readonly) { flags_buf[flags_len] = 'r'; flags_len += 1; }
+    if (attrs.integer) { flags_buf[flags_len] = 'i'; flags_len += 1; }
+    if (attrs.exported) { flags_buf[flags_len] = 'x'; flags_len += 1; }
+    if (attrs.lowercase) { flags_buf[flags_len] = 'l'; flags_len += 1; }
+    if (attrs.uppercase) { flags_buf[flags_len] = 'u'; flags_len += 1; }
+    if (attrs.nameref) { flags_buf[flags_len] = 'n'; flags_len += 1; }
+    if (attrs.indexed_array) { flags_buf[flags_len] = 'a'; flags_len += 1; }
+    if (attrs.assoc_array) { flags_buf[flags_len] = 'A'; flags_len += 1; }
+
+    // Check for array value
+    if (attrs.indexed_array) {
+        if (shell.arrays.get(name)) |array| {
+            if (flags_len > 0) {
+                try IO.print("declare -{s} {s}=", .{ flags_buf[0..flags_len], name });
+            } else {
+                try IO.print("declare -- {s}=", .{name});
+            }
+            try IO.print("(", .{});
+            for (array, 0..) |elem, i| {
+                if (i > 0) try IO.print(" ", .{});
+                try IO.print("[{d}]=\"{s}\"", .{ i, elem });
+            }
+            try IO.print(")\n", .{});
+            return;
+        }
+    }
+
+    // Check for assoc array value
+    if (attrs.assoc_array) {
+        if (shell.assoc_arrays.get(name)) |assoc| {
+            if (flags_len > 0) {
+                try IO.print("declare -{s} {s}=", .{ flags_buf[0..flags_len], name });
+            } else {
+                try IO.print("declare -- {s}=", .{name});
+            }
+            try IO.print("(", .{});
+            var first = true;
+            var iter = assoc.iterator();
+            while (iter.next()) |entry| {
+                if (!first) try IO.print(" ", .{});
+                try IO.print("[{s}]=\"{s}\"", .{ entry.key_ptr.*, entry.value_ptr.* });
+                first = false;
+            }
+            try IO.print(")\n", .{});
+            return;
+        }
+    }
+
+    // Regular variable
+    if (flags_len > 0) {
+        if (shell.environment.get(name)) |value| {
+            try IO.print("declare -{s} {s}=\"{s}\"\n", .{ flags_buf[0..flags_len], name, value });
+        } else {
+            try IO.print("declare -{s} {s}\n", .{ flags_buf[0..flags_len], name });
+        }
+    } else {
+        if (shell.environment.get(name)) |value| {
+            try IO.print("declare -- {s}=\"{s}\"\n", .{ name, value });
+        } else {
+            try IO.print("declare -- {s}\n", .{name});
+        }
+    }
 }
 
 /// Helper to print declare output

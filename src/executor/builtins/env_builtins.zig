@@ -333,6 +333,44 @@ pub fn unset(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 
     if (unset_variables) {
         for (command.args[arg_start..]) |var_name| {
+            // Check for array element syntax: arr[index]
+            if (std.mem.indexOfScalar(u8, var_name, '[')) |bracket_pos| {
+                if (bracket_pos > 0 and std.mem.indexOfScalar(u8, var_name[bracket_pos..], ']') != null) {
+                    const arr_name = var_name[0..bracket_pos];
+                    const close_pos = bracket_pos + (std.mem.indexOfScalar(u8, var_name[bracket_pos..], ']') orelse 0);
+                    const index_str = var_name[bracket_pos + 1 .. close_pos];
+                    if (ctx.hasShell()) {
+                        const shell_ref = try ctx.getShell();
+                        // Handle indexed array element unset
+                        if (shell_ref.arrays.get(arr_name)) |array| {
+                            if (std.fmt.parseInt(usize, index_str, 10)) |index| {
+                                if (index < array.len) {
+                                    // Remove element by creating new array without it
+                                    shell_ref.allocator.free(array[index]);
+                                    var new_array = shell_ref.allocator.alloc([]const u8, array.len - 1) catch continue;
+                                    var di: usize = 0;
+                                    for (0..array.len) |si| {
+                                        if (si == index) continue;
+                                        new_array[di] = array[si];
+                                        di += 1;
+                                    }
+                                    shell_ref.allocator.free(array);
+                                    const key = shell_ref.arrays.getKey(arr_name).?;
+                                    shell_ref.arrays.putAssumeCapacity(key, new_array);
+                                }
+                            } else |_| {}
+                        }
+                        // Handle assoc array element unset
+                        if (shell_ref.assoc_arrays.getPtr(arr_name)) |assoc| {
+                            if (assoc.fetchRemove(index_str)) |kv| {
+                                shell_ref.allocator.free(kv.key);
+                                shell_ref.allocator.free(kv.value);
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
             ctx.unsetEnv(var_name);
         }
     }

@@ -512,10 +512,31 @@ pub fn executeArithmeticStatement(self: *Shell, stmt: []const u8) void {
 pub fn setArithVariable(self: *Shell, name: []const u8, value: []const u8) void {
     const resolved_name = self.resolveNameref(name);
 
+    // Apply case conversion if variable has lowercase/uppercase attribute
+    var final_value = value;
+    var case_buf: ?[]u8 = null;
+    if (self.var_attributes.get(resolved_name)) |attrs| {
+        if (attrs.lowercase) {
+            const lower = self.allocator.alloc(u8, value.len) catch null;
+            if (lower) |buf| {
+                for (value, 0..) |c, i| buf[i] = std.ascii.toLower(c);
+                case_buf = buf;
+                final_value = buf;
+            }
+        } else if (attrs.uppercase) {
+            const upper = self.allocator.alloc(u8, value.len) catch null;
+            if (upper) |buf| {
+                for (value, 0..) |c, i| buf[i] = std.ascii.toUpper(c);
+                case_buf = buf;
+                final_value = buf;
+            }
+        }
+    }
+
     // If inside a function and the variable exists as a local, update local instead
     if (self.function_manager.currentFrame()) |frame| {
         if (frame.local_vars.getKey(resolved_name)) |_| {
-            const val = self.allocator.dupe(u8, value) catch return;
+            const val = if (case_buf) |buf| buf else self.allocator.dupe(u8, final_value) catch return;
             const gop = frame.local_vars.getOrPut(resolved_name) catch {
                 self.allocator.free(val);
                 return;
@@ -528,7 +549,7 @@ pub fn setArithVariable(self: *Shell, name: []const u8, value: []const u8) void 
         }
     }
 
-    const val = self.allocator.dupe(u8, value) catch return;
+    const val = if (case_buf) |buf| buf else self.allocator.dupe(u8, final_value) catch return;
 
     const gop = self.environment.getOrPut(resolved_name) catch {
         self.allocator.free(val);

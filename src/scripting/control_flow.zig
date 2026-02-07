@@ -1,6 +1,7 @@
 const std = @import("std");
 const Shell = @import("../shell.zig").Shell;
 const Expansion = @import("../utils/expansion.zig").Expansion;
+const BraceExpander = @import("../utils/brace.zig").BraceExpander;
 
 /// Control flow statement type
 pub const ControlFlowType = enum {
@@ -344,10 +345,26 @@ pub const ControlFlowExecutor = struct {
                         try expanded_items.append(self.allocator, try self.allocator.dupe(u8, word));
                     }
                     if (expanded.ptr != item.ptr) self.allocator.free(expanded);
-                } else if (expanded.ptr != item.ptr) {
-                    try expanded_items.append(self.allocator, expanded);
                 } else {
-                    try expanded_items.append(self.allocator, try self.allocator.dupe(u8, item));
+                    // Try brace expansion on the result
+                    const to_expand = if (expanded.ptr != item.ptr) expanded else item;
+                    if (std.mem.indexOfScalar(u8, to_expand, '{') != null and std.mem.indexOf(u8, to_expand, "..") != null) {
+                        var brace_exp = BraceExpander.init(self.allocator);
+                        const brace_results = brace_exp.expand(to_expand) catch {
+                            try expanded_items.append(self.allocator, try self.allocator.dupe(u8, to_expand));
+                            if (expanded.ptr != item.ptr) self.allocator.free(expanded);
+                            continue;
+                        };
+                        defer self.allocator.free(brace_results);
+                        for (brace_results) |br| {
+                            try expanded_items.append(self.allocator, br); // already duped by BraceExpander
+                        }
+                        if (expanded.ptr != item.ptr) self.allocator.free(expanded);
+                    } else if (expanded.ptr != item.ptr) {
+                        try expanded_items.append(self.allocator, expanded);
+                    } else {
+                        try expanded_items.append(self.allocator, try self.allocator.dupe(u8, item));
+                    }
                 }
             }
         }
