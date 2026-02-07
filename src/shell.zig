@@ -1087,6 +1087,13 @@ pub const Shell = struct {
             return;
         }
 
+        // Check for pipeline into control flow: cmd | while/for/if/until/case ...
+        // The parser can't handle this because it splits on semicolons inside while/for/etc.
+        // We handle it here by manually setting up the pipe and executing both sides.
+        if (std.mem.indexOf(u8, trimmed_input, "|") != null) {
+            if (self.handlePipeToControlFlow(trimmed_input)) return;
+        }
+
         // Check if input contains a C-style for loop after other commands (e.g., "total=0; for ((...")
         // This handles cases like: total=0; for ((i=1; i<=5; i++)); do total=$((total + i)); done; echo $total
         if (!self.in_cstyle_for_body and std.mem.indexOf(u8, trimmed_input, "for ((") != null) {
@@ -1549,6 +1556,97 @@ pub const Shell = struct {
         if (cf_executor.continue_levels > 0) {
             self.continue_levels = cf_executor.continue_levels;
         }
+    }
+
+    /// Handle pipeline into control flow: cmd | while/for/if/until/case ...
+    /// Returns true if the pattern was detected and handled, false otherwise.
+    fn handlePipeToControlFlow(self: *Shell, input: []const u8) bool {
+        // Find the last top-level pipe that leads into a control flow keyword
+        var pipe_pos: ?usize = null;
+        var in_sq = false;
+        var in_dq = false;
+        var paren_d: u32 = 0;
+        var i: usize = 0;
+        while (i < input.len) : (i += 1) {
+            const c = input[i];
+            if (c == '\\' and !in_sq and i + 1 < input.len) {
+                i += 1;
+                continue;
+            }
+            if (c == '\'' and !in_dq) {
+                in_sq = !in_sq;
+            } else if (c == '"' and !in_sq) {
+                in_dq = !in_dq;
+            } else if (!in_sq and !in_dq) {
+                if (c == '(') paren_d += 1;
+                if (c == ')' and paren_d > 0) paren_d -= 1;
+                if (c == '|' and paren_d == 0 and (i + 1 >= input.len or input[i + 1] != '|')) {
+                    // Single | (not ||)
+                    pipe_pos = i;
+                }
+            }
+        }
+
+        const pp = pipe_pos orelse return false;
+        if (pp + 1 >= input.len) return false;
+
+        // Check if the part after the last pipe starts with a control flow keyword
+        const right = std.mem.trim(u8, input[pp + 1 ..], &std.ascii.whitespace);
+        const cf_keywords = [_][]const u8{ "while ", "for ", "until ", "if ", "case " };
+        var is_cf = false;
+        for (cf_keywords) |kw| {
+            if (std.mem.startsWith(u8, right, kw)) {
+                is_cf = true;
+                break;
+            }
+        }
+        if (!is_cf) return false;
+
+        // Split: left side is everything before the last pipe, right side is control flow
+        const left = std.mem.trim(u8, input[0..pp], &std.ascii.whitespace);
+        if (left.len == 0) return false;
+
+        // Set up a pipe, fork for the left side, execute right side with piped stdin
+        var fds: [2]std.posix.fd_t = undefined;
+        if (std.c.pipe(&fds) != 0) return false;
+
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) {
+            std.posix.close(fds[0]);
+            std.posix.close(fds[1]);
+            return false;
+        }
+        const pid: std.posix.pid_t = @intCast(fork_ret);
+
+        if (pid == 0) {
+            // Child: execute left side, stdout -> pipe write end
+            std.posix.close(fds[0]);
+            _ = std.c.dup2(fds[1], std.posix.STDOUT_FILENO);
+            std.posix.close(fds[1]);
+            self.executeCommand(left) catch {};
+            std.c._exit(@intCast(if (self.last_exit_code >= 0) @as(u32, @intCast(self.last_exit_code)) else 1));
+        }
+
+        // Parent: execute right side (control flow) with stdin <- pipe read end
+        std.posix.close(fds[1]);
+        const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
+        _ = std.c.dup2(fds[0], std.posix.STDIN_FILENO);
+        std.posix.close(fds[0]);
+
+        // Execute the control flow command
+        self.executeCommand(right) catch {};
+
+        // Restore stdin
+        if (saved_stdin >= 0) {
+            _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
+            std.posix.close(saved_stdin);
+        }
+
+        // Wait for child
+        var wait_status: c_int = 0;
+        _ = std.c.waitpid(pid, &wait_status, 0);
+
+        return true;
     }
 
     /// Check if a word at position is a control flow opener keyword.

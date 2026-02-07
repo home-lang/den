@@ -42,6 +42,7 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
     const line = try IO.readLine(self.allocator);
     if (line) |value| {
         defer self.allocator.free(value);
+        self.last_exit_code = 0;
 
         if (cmd.args.len == 1) {
             // Single variable: assign entire line
@@ -94,6 +95,9 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
                 }
             }
         }
+    } else {
+        // EOF: return 1 (like bash)
+        self.last_exit_code = 1;
     }
 }
 

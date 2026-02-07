@@ -58,6 +58,12 @@ const PROCESS_TERMINATE: u32 = 0x0001;
 
 // Networking code moved to networking.zig
 
+/// Helper to execute control flow commands in a pipeline child process.
+/// Isolated as a standalone function to avoid inferred error set conflicts.
+fn executeControlFlowInPipeline(shell: *Shell, command: []const u8) void {
+    shell.executeCommand(command) catch {};
+}
+
 pub const Executor = struct {
     allocator: std.mem.Allocator,
     environment: *std.StringHashMap([]const u8),
@@ -421,7 +427,32 @@ pub const Executor = struct {
                 }
 
                 // Execute the command
-                if (self.isBuiltin(cmd.name)) {
+                // Check if this is a control flow construct (while, for, if, until, case)
+                if (self.isControlFlowKeyword(cmd.name)) {
+                    // Reconstruct the full command string and execute via shell
+                    if (self.shell) |shell| {
+                        var buf: [8192]u8 = undefined;
+                        var pos: usize = 0;
+                        // Add command name
+                        if (pos + cmd.name.len < buf.len) {
+                            @memcpy(buf[pos..][0..cmd.name.len], cmd.name);
+                            pos += cmd.name.len;
+                        }
+                        // Add args
+                        for (cmd.args) |arg| {
+                            if (pos + 1 + arg.len < buf.len) {
+                                buf[pos] = ' ';
+                                pos += 1;
+                                @memcpy(buf[pos..][0..arg.len], arg);
+                                pos += arg.len;
+                            }
+                        }
+                        executeControlFlowInPipeline(shell, buf[0..pos]);
+                        std.c._exit(@intCast(if (shell.last_exit_code >= 0) @as(u32, @intCast(shell.last_exit_code)) else 1));
+                    } else {
+                        std.c._exit(1);
+                    }
+                } else if (self.isBuiltin(cmd.name)) {
                     const exit_code = self.executeBuiltin(cmd) catch 1;
                     std.c._exit(@intCast(exit_code));
                 } else {
@@ -807,6 +838,15 @@ pub const Executor = struct {
         };
         for (builtin_names) |b| {
             if (std.mem.eql(u8, name, b)) return true;
+        }
+        return false;
+    }
+
+    /// Check if a command name is a control flow keyword (while, for, if, until, case, select)
+    fn isControlFlowKeyword(_: *Executor, name: []const u8) bool {
+        const cf_keywords = [_][]const u8{ "while", "for", "until", "if", "case", "select" };
+        for (cf_keywords) |kw| {
+            if (std.mem.eql(u8, name, kw)) return true;
         }
         return false;
     }

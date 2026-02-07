@@ -95,7 +95,6 @@ pub fn dispatchBuiltin(self: *Shell, cmd: *types.ParsedCommand) !DispatchResult 
     // I/O builtins
     if (std.mem.eql(u8, name, "read")) {
         try shell_mod.builtinRead(self, cmd);
-        self.last_exit_code = 0;
         return .handled;
     }
     if (std.mem.eql(u8, name, "printf")) {

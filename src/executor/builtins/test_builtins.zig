@@ -52,6 +52,9 @@ fn evaluateTestArgs(args: []const []const u8) !i32 {
         } else if (std.mem.eql(u8, op, "-e")) {
             _ = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
             return 0;
+        } else if (std.mem.eql(u8, op, "-s")) {
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
+            return if (stat.size > 0) 0 else 1;
         } else if (std.mem.eql(u8, op, "-r")) {
             const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
             file.close(std.Options.debug_io);

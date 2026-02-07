@@ -296,6 +296,20 @@ if [ -n "$R" ]; then check "RANDOM" "nonempty" "nonempty"; else check "RANDOM" "
 check "LINENO" "1" "$(timeout 3 $DEN -c 'echo $LINENO' 2>/dev/null)"
 
 # ===========================================================================
+# 33. Test -s operator
+# ===========================================================================
+check "[ -s file ]" "yes" "$(timeout 3 $DEN -c '[ -s /etc/hosts ] && echo yes || echo no')"
+check "[ -s empty ]" "no" "$(timeout 3 $DEN -c '[ -s /dev/null ] && echo yes || echo no')"
+
+# ===========================================================================
+# 34. Pipe to control flow (while read)
+# ===========================================================================
+check "pipe | while read" "a
+b
+c" "$(timeout 5 $DEN -c 'printf "a\nb\nc\n" | while read line; do echo $line; done')"
+check "read EOF exit" "1" "$(printf "" | timeout 3 $DEN -c 'read x; echo $?')"
+
+# ===========================================================================
 # Results
 # ===========================================================================
 echo ""

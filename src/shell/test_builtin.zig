@@ -91,6 +91,14 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
             };
             shell.last_exit_code = 0;
             return;
+        } else if (std.mem.eql(u8, op, "-s")) {
+            // File exists and is not empty
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            shell.last_exit_code = if (stat.size > 0) 0 else 1;
+            return;
         }
     }
 
