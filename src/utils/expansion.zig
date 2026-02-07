@@ -122,6 +122,7 @@ pub const Expansion = struct {
     shell: ?*anyopaque, // Optional shell reference for function local vars
     option_nounset: bool, // set -u: error on unset variable
     cmd_cache: ?*ExpansionCache, // Optional cache for command substitution results
+    line_number: u32, // $LINENO
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), last_exit_code: i32) Expansion {
         return .{
@@ -139,6 +140,7 @@ pub const Expansion = struct {
             .shell = null,
             .option_nounset = false,
             .cmd_cache = null,
+            .line_number = 1,
         };
     }
 
@@ -166,6 +168,7 @@ pub const Expansion = struct {
             .shell = null,
             .option_nounset = false,
             .cmd_cache = null,
+            .line_number = 1,
         };
     }
 
@@ -194,6 +197,7 @@ pub const Expansion = struct {
             .shell = shell,
             .option_nounset = false,
             .cmd_cache = null,
+            .line_number = 1,
         };
     }
 
@@ -607,9 +611,14 @@ pub const Expansion = struct {
             }
         }
 
-        // Check for string/array length: ${#VAR}
+        // Check for string/array length: ${#VAR} or ${#arr[@]}
         if (content.len > 0 and content[0] == '#') {
-            const var_name = content[1..];
+            const raw_name = content[1..];
+            // Strip trailing [@] or [*] for array length lookups
+            const var_name = if (std.mem.endsWith(u8, raw_name, "[@]") or std.mem.endsWith(u8, raw_name, "[*]"))
+                raw_name[0 .. raw_name.len - 3]
+            else
+                raw_name;
             // First check indexed arrays
             if (self.arrays) |arrays| {
                 if (arrays.get(var_name)) |array| {
@@ -829,6 +838,67 @@ pub const Expansion = struct {
             }
         }
 
+        // Check for case conversion: ${VAR^^} (uppercase all), ${VAR,,} (lowercase all),
+        // ${VAR^} (uppercase first), ${VAR,} (lowercase first)
+        if (std.mem.indexOf(u8, content, "^^")) |sep_pos| {
+            if (sep_pos > 0) {
+                const var_name_cc = content[0..sep_pos];
+                if (self.environment.get(var_name_cc)) |value| {
+                    const result = try self.allocator.alloc(u8, value.len);
+                    for (value, 0..) |c, ci| {
+                        result[ci] = std.ascii.toUpper(c);
+                    }
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+        if (std.mem.indexOf(u8, content, ",,")) |sep_pos| {
+            if (sep_pos > 0) {
+                const var_name_cc = content[0..sep_pos];
+                if (self.environment.get(var_name_cc)) |value| {
+                    const result = try self.allocator.alloc(u8, value.len);
+                    for (value, 0..) |c, ci| {
+                        result[ci] = std.ascii.toLower(c);
+                    }
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+        // ${VAR^} - uppercase first character only
+        if (content.len > 1 and content[content.len - 1] == '^') {
+            const var_name_cc = content[0 .. content.len - 1];
+            // Make sure it's not ^^ (already handled above)
+            if (var_name_cc.len > 0 and var_name_cc[var_name_cc.len - 1] != '^') {
+                if (self.environment.get(var_name_cc)) |value| {
+                    if (value.len > 0) {
+                        const result = try self.allocator.dupe(u8, value);
+                        result[0] = std.ascii.toUpper(value[0]);
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    }
+                    return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+        // ${VAR,} - lowercase first character only
+        if (content.len > 1 and content[content.len - 1] == ',') {
+            const var_name_cc = content[0 .. content.len - 1];
+            // Make sure it's not ,, (already handled above)
+            if (var_name_cc.len > 0 and var_name_cc[var_name_cc.len - 1] != ',') {
+                if (self.environment.get(var_name_cc)) |value| {
+                    if (value.len > 0) {
+                        const result = try self.allocator.dupe(u8, value);
+                        result[0] = std.ascii.toLower(value[0]);
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    }
+                    return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
         // Check for parameter expansion patterns BEFORE replacement (which also uses /)
         // ${VAR##pattern} - remove longest prefix match (greedy)
         if (std.mem.indexOf(u8, content, "##")) |sep_pos| {
@@ -993,6 +1063,23 @@ pub const Expansion = struct {
 
             // Variable is unset or empty, return empty string
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+        }
+
+        // Handle special dynamic variables in braced form
+        if (std.mem.eql(u8, content, "RANDOM")) {
+            var buf: [16]u8 = undefined;
+            const seed: u64 = if (std.time.Instant.now()) |inst| @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec)) else |_| @as(u64, @intCast(std.c.getpid()));
+            var prng = std.Random.DefaultPrng.init(seed);
+            const val = prng.random().intRangeAtMost(u16, 0, 32767);
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{val}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+        }
+        if (std.mem.eql(u8, content, "LINENO")) {
+            var buf: [16]u8 = undefined;
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{self.line_number}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
 
         // Simple braced variable - use getVariableValue for nameref resolution
@@ -1222,6 +1309,23 @@ pub const Expansion = struct {
         }
 
         const var_name = input[1..end];
+
+        // Handle special dynamic variables
+        if (std.mem.eql(u8, var_name, "RANDOM")) {
+            var buf: [16]u8 = undefined;
+            const seed: u64 = if (std.time.Instant.now()) |inst| @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec)) else |_| @as(u64, @intCast(std.c.getpid()));
+            var prng = std.Random.DefaultPrng.init(seed);
+            const val = prng.random().intRangeAtMost(u16, 0, 32767);
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{val}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+        }
+        if (std.mem.eql(u8, var_name, "LINENO")) {
+            var buf: [16]u8 = undefined;
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{self.line_number}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+        }
 
         // Use getVariableValue which handles local vars and nameref resolution
         if (self.getVariableValue(var_name)) |value| {

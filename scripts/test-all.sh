@@ -102,7 +102,7 @@ if [ "$QUICK_MODE" = false ]; then
     echo "--- Integration Tests ---"
 
     # Build the shell
-    zig build -Doptimize=ReleaseFast 2>/dev/null
+    zig build -Doptimize=ReleaseSafe 2>/dev/null
 
     # Basic execution test
     run_test "Basic execution" "echo 'echo hello' | ./zig-out/bin/den 2>/dev/null | grep -q hello"
@@ -112,6 +112,11 @@ if [ "$QUICK_MODE" = false ]; then
 
     # Variable expansion
     run_test "Variable expansion" "echo 'FOO=bar; echo \$FOO' | ./zig-out/bin/den 2>/dev/null | grep -q bar"
+
+    # 5. Comprehensive shell feature tests
+    echo ""
+    echo "--- Shell Feature Tests ---"
+    run_test "Shell features" "DEN=./zig-out/bin/den $PROJECT_DIR/tests/test_shell_features.sh"
 fi
 
 # Summary

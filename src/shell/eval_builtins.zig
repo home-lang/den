@@ -31,34 +31,68 @@ fn formatParseError(err: anyerror) []const u8 {
     };
 }
 
-/// Builtin: read - read line from stdin into variable
+/// Builtin: read - read line from stdin into variable(s)
 pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
     if (cmd.args.len == 0) {
-        try IO.eprint("den: read: usage: read varname\n", .{});
+        try IO.eprint("den: read: usage: read varname [varname ...]\n", .{});
         return;
     }
-
-    const varname = cmd.args[0];
 
     // Read line from stdin
     const line = try IO.readLine(self.allocator);
     if (line) |value| {
         defer self.allocator.free(value);
 
-        // Store in environment
-        const value_copy = try self.allocator.dupe(u8, value);
-
-        // Get or put entry to avoid memory leak
-        const gop = try self.environment.getOrPut(varname);
-        if (gop.found_existing) {
-            // Free old value and update
-            self.allocator.free(gop.value_ptr.*);
-            gop.value_ptr.* = value_copy;
+        if (cmd.args.len == 1) {
+            // Single variable: assign entire line
+            const value_copy = try self.allocator.dupe(u8, value);
+            const gop = try self.environment.getOrPut(cmd.args[0]);
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+                gop.value_ptr.* = value_copy;
+            } else {
+                gop.key_ptr.* = try self.allocator.dupe(u8, cmd.args[0]);
+                gop.value_ptr.* = value_copy;
+            }
         } else {
-            // New key - duplicate it
-            const key = try self.allocator.dupe(u8, varname);
-            gop.key_ptr.* = key;
-            gop.value_ptr.* = value_copy;
+            // Multiple variables: split by whitespace
+            var word_start: usize = 0;
+            var var_idx: usize = 0;
+            var pos: usize = 0;
+
+            // Skip leading whitespace
+            while (pos < value.len and (value[pos] == ' ' or value[pos] == '\t')) pos += 1;
+
+            while (var_idx < cmd.args.len) : (var_idx += 1) {
+                const varname = cmd.args[var_idx];
+                var word_value: []const u8 = "";
+
+                if (var_idx == cmd.args.len - 1) {
+                    // Last variable gets remaining text
+                    if (pos < value.len) {
+                        word_value = value[pos..];
+                    }
+                } else {
+                    // Find next word
+                    word_start = pos;
+                    while (pos < value.len and value[pos] != ' ' and value[pos] != '\t') pos += 1;
+                    if (pos > word_start) {
+                        word_value = value[word_start..pos];
+                    }
+                    // Skip whitespace for next word
+                    while (pos < value.len and (value[pos] == ' ' or value[pos] == '\t')) pos += 1;
+                }
+
+                const val_copy = try self.allocator.dupe(u8, word_value);
+                const gop = try self.environment.getOrPut(varname);
+                if (gop.found_existing) {
+                    self.allocator.free(gop.value_ptr.*);
+                    gop.value_ptr.* = val_copy;
+                } else {
+                    gop.key_ptr.* = try self.allocator.dupe(u8, varname);
+                    gop.value_ptr.* = val_copy;
+                }
+            }
         }
     }
 }

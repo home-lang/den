@@ -17,7 +17,17 @@ pub fn testBuiltin(command: *types.ParsedCommand) !i32 {
         return 2;
     } else command.args;
 
+    return evaluateTestArgs(args);
+}
+
+fn evaluateTestArgs(args: []const []const u8) !i32 {
     if (args.len == 0) return 1; // Empty test is false
+
+    // Handle negation: ! expr
+    if (args.len >= 2 and std.mem.eql(u8, args[0], "!")) {
+        const result = try evaluateTestArgs(args[1..]);
+        return if (result == 0) 1 else 0;
+    }
 
     // Single argument - test if non-empty string
     if (args.len == 1) {
@@ -34,7 +44,6 @@ pub fn testBuiltin(command: *types.ParsedCommand) !i32 {
         } else if (std.mem.eql(u8, op, "-n")) {
             return if (arg.len > 0) 0 else 1;
         } else if (std.mem.eql(u8, op, "-f")) {
-            // Use stat to check file type without opening (works even without read permissions)
             const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
             return if (stat.kind == .file) 0 else 1;
         } else if (std.mem.eql(u8, op, "-d")) {

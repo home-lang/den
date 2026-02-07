@@ -77,6 +77,7 @@ pub fn checkFunctionDefinitionStart(self: *Shell, trimmed: []const u8) !bool {
             var body_count: usize = 0;
             {
                 var cf_depth: u32 = 0;
+                var br_depth: u32 = 0; // Track nested brace depth for inner function defs
                 var seg_start: usize = 0;
                 var si: usize = 0;
                 var in_sq = false;
@@ -92,6 +93,12 @@ pub fn checkFunctionDefinitionStart(self: *Shell, trimmed: []const u8) !bool {
                     } else if (bc == '"' and !in_sq) {
                         in_dq = !in_dq;
                     } else if (!in_sq and !in_dq) {
+                        // Track brace nesting for nested function definitions
+                        if (bc == '{') {
+                            br_depth += 1;
+                        } else if (bc == '}' and br_depth > 0) {
+                            br_depth -= 1;
+                        }
                         // Track control flow nesting
                         if (isControlFlowWord(body_content, si, "for ") or
                             isControlFlowWord(body_content, si, "while ") or
@@ -106,7 +113,7 @@ pub fn checkFunctionDefinitionStart(self: *Shell, trimmed: []const u8) !bool {
                         {
                             if (cf_depth > 0) cf_depth -= 1;
                         }
-                        if (bc == ';' and cf_depth == 0) {
+                        if (bc == ';' and cf_depth == 0 and br_depth == 0) {
                             // Skip ;; in case statements
                             if (si + 1 < body_content.len and body_content[si + 1] == ';') {
                                 si += 1;

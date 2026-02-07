@@ -248,11 +248,7 @@ pub fn dispatchBuiltin(self: *Shell, cmd: *types.ParsedCommand) !DispatchResult 
     }
 
     // Misc
-    if (std.mem.eql(u8, name, "getopts")) {
-        try IO.print("den: getopts: option parsing not yet implemented\n", .{});
-        self.last_exit_code = 1;
-        return .handled;
-    }
+    // getopts: handled by executor's state_builtins.getopts (real implementation)
     if (std.mem.eql(u8, name, "times")) {
         try IO.print("0m0.000s 0m0.000s\n", .{}); // Shell user/sys time
         try IO.print("0m0.000s 0m0.000s\n", .{}); // Children user/sys time

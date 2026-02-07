@@ -70,7 +70,7 @@ pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void
 
 /// Check if input is an array assignment: name=(value1 value2 ...)
 pub fn isArrayAssignment(input: []const u8) bool {
-    // Look for pattern: name=(...)
+    // Look for pattern: name=(...) or name+=(...)
     const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return false;
     if (eq_pos >= input.len - 1) return false;
     if (input[eq_pos + 1] != '(') return false;
@@ -79,10 +79,12 @@ pub fn isArrayAssignment(input: []const u8) bool {
     return std.mem.indexOfScalar(u8, input[eq_pos + 2 ..], ')') != null;
 }
 
-/// Parse and execute array assignment
+/// Parse and execute array assignment (or array append with +=)
 pub fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
     const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return error.InvalidSyntax;
-    const name = std.mem.trim(u8, input[0..eq_pos], &std.ascii.whitespace);
+    const is_append = eq_pos > 0 and input[eq_pos - 1] == '+';
+    const name_end = if (is_append) eq_pos - 1 else eq_pos;
+    const name = std.mem.trim(u8, input[0..name_end], &std.ascii.whitespace);
 
     // Validate variable name
     if (name.len == 0) return error.InvalidVariableName;
@@ -139,20 +141,39 @@ pub fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
         array[i] = try self.allocator.dupe(u8, token);
     }
 
-    // Store array
-    const key = try self.allocator.dupe(u8, name);
-
-    // Free old array if exists
-    if (self.arrays.get(name)) |old_array| {
-        for (old_array) |item| {
-            self.allocator.free(item);
+    if (is_append) {
+        // Append to existing array
+        if (self.arrays.get(name)) |old_array| {
+            const new_array = try self.allocator.alloc([]const u8, old_array.len + array.len);
+            @memcpy(new_array[0..old_array.len], old_array);
+            @memcpy(new_array[old_array.len..], array);
+            // Free old array slice (but keep element strings since they're now in new_array)
+            self.allocator.free(old_array);
+            // Free new elements slice (elements are now in new_array)
+            self.allocator.free(array);
+            const gop = try self.arrays.getOrPut(name);
+            gop.value_ptr.* = new_array;
+        } else {
+            // No existing array - just create new one
+            const key = try self.allocator.dupe(u8, name);
+            try self.arrays.put(key, array);
         }
-        self.allocator.free(old_array);
-        const old_key = self.arrays.getKey(name).?;
-        self.allocator.free(old_key);
-        _ = self.arrays.remove(name);
-    }
+    } else {
+        // Store array (replace)
+        const key = try self.allocator.dupe(u8, name);
 
-    try self.arrays.put(key, array);
+        // Free old array if exists
+        if (self.arrays.get(name)) |old_array| {
+            for (old_array) |item| {
+                self.allocator.free(item);
+            }
+            self.allocator.free(old_array);
+            const old_key = self.arrays.getKey(name).?;
+            self.allocator.free(old_key);
+            _ = self.arrays.remove(name);
+        }
+
+        try self.arrays.put(key, array);
+    }
     self.last_exit_code = 0;
 }

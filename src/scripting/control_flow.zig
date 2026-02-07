@@ -653,6 +653,16 @@ pub const ControlFlowExecutor = struct {
 
             last_exit = self.shell.last_exit_code;
 
+            // Transfer break/continue signals from shell builtins to executor
+            if (self.shell.break_levels > 0) {
+                self.break_levels = self.shell.break_levels;
+                self.shell.break_levels = 0;
+            }
+            if (self.shell.continue_levels > 0) {
+                self.continue_levels = self.shell.continue_levels;
+                self.shell.continue_levels = 0;
+            }
+
             // Check for break/continue request
             if (self.break_levels > 0 or self.continue_levels > 0) {
                 return last_exit;

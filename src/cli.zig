@@ -562,7 +562,26 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
         return error.MissingCommandString;
     }
 
-    const command = args[0];
+    const raw_command = args[0];
+
+    // Handle backslash-newline continuation: remove \<newline> sequences
+    var cmd_buf: [16384]u8 = undefined;
+    var cmd_len: usize = 0;
+    {
+        var ci: usize = 0;
+        while (ci < raw_command.len) {
+            if (raw_command[ci] == '\\' and ci + 1 < raw_command.len and raw_command[ci + 1] == '\n') {
+                ci += 2; // Skip backslash-newline (line continuation)
+            } else {
+                if (cmd_len < cmd_buf.len) {
+                    cmd_buf[cmd_len] = raw_command[ci];
+                    cmd_len += 1;
+                }
+                ci += 1;
+            }
+        }
+    }
+    const command = cmd_buf[0..cmd_len];
 
     var den_shell = try shell.Shell.initWithConfig(allocator, config_path);
     defer den_shell.deinit();

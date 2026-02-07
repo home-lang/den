@@ -43,6 +43,17 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
         return;
     }
 
+    // Handle negation: [ ! expr ]
+    if (args.len >= 2 and std.mem.eql(u8, args[0], "!")) {
+        // Create a temporary command with the remaining args
+        var negated_cmd = cmd.*;
+        negated_cmd.args = args[1..];
+        builtinTest(shell, &negated_cmd) catch {};
+        // Negate the result
+        shell.last_exit_code = if (shell.last_exit_code == 0) @as(i32, 1) else @as(i32, 0);
+        return;
+    }
+
     // Unary operators
     if (args.len == 2) {
         const op = args[0];

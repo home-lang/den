@@ -393,9 +393,20 @@ pub const Tokenizer = struct {
                         // Outside quotes: backslash escapes next char
                         self.pos += 2;
                         self.column += 2;
-                        if (word_len < word_buffer.len) {
-                            word_buffer[word_len] = next_char;
-                            word_len += 1;
+                        if (next_char == '$' or next_char == '`') {
+                            // Preserve backslash before $ and ` so expansion phase
+                            // can recognize them as escaped (literal) characters
+                            if (word_len + 1 < word_buffer.len) {
+                                word_buffer[word_len] = '\\';
+                                word_len += 1;
+                                word_buffer[word_len] = next_char;
+                                word_len += 1;
+                            }
+                        } else {
+                            if (word_len < word_buffer.len) {
+                                word_buffer[word_len] = next_char;
+                                word_len += 1;
+                            }
                         }
                     }
                 } else {
@@ -423,6 +434,13 @@ pub const Tokenizer = struct {
                 } else {
                     in_single_quote = !in_single_quote;
                 }
+                // When inside $() or backticks, preserve quote chars in the buffer
+                if (subst_depth > 0 or in_backtick) {
+                    if (word_len < word_buffer.len) {
+                        word_buffer[word_len] = char;
+                        word_len += 1;
+                    }
+                }
                 self.pos += 1;
                 self.column += 1;
                 continue;
@@ -430,6 +448,13 @@ pub const Tokenizer = struct {
 
             if (char == '"' and !in_single_quote and !in_ansi_quote) {
                 in_double_quote = !in_double_quote;
+                // When inside $() or backticks, preserve quote chars in the buffer
+                if (subst_depth > 0 or in_backtick) {
+                    if (word_len < word_buffer.len) {
+                        word_buffer[word_len] = char;
+                        word_len += 1;
+                    }
+                }
                 self.pos += 1;
                 self.column += 1;
                 continue;

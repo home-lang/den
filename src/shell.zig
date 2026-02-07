@@ -834,6 +834,105 @@ pub const Shell = struct {
             return;
         }
 
+        // Check for arithmetic command: (( expression ))
+        if (fn_trimmed.len > 4 and std.mem.startsWith(u8, fn_trimmed, "((") and std.mem.endsWith(u8, fn_trimmed, "))")) {
+            const expr = std.mem.trim(u8, fn_trimmed[2 .. fn_trimmed.len - 2], &std.ascii.whitespace);
+            if (expr.len > 0) {
+                // Handle post-increment: (( x++ ))
+                if (std.mem.endsWith(u8, expr, "++")) {
+                    const var_name = std.mem.trim(u8, expr[0 .. expr.len - 2], &std.ascii.whitespace);
+                    if (var_name.len > 0) {
+                        const current = shell_mod.getVariableValue(self, var_name) orelse "0";
+                        const num = std.fmt.parseInt(i64, current, 10) catch 0;
+                        var buf: [32]u8 = undefined;
+                        const new_val = std.fmt.bufPrint(&buf, "{d}", .{num + 1}) catch "0";
+                        shell_mod.setArithVariable(self, var_name, new_val);
+                        self.last_exit_code = if (num != 0) @as(i32, 0) else @as(i32, 1);
+                        return;
+                    }
+                }
+                // Handle post-decrement: (( x-- ))
+                if (std.mem.endsWith(u8, expr, "--")) {
+                    const var_name = std.mem.trim(u8, expr[0 .. expr.len - 2], &std.ascii.whitespace);
+                    if (var_name.len > 0) {
+                        const current = shell_mod.getVariableValue(self, var_name) orelse "0";
+                        const num = std.fmt.parseInt(i64, current, 10) catch 0;
+                        var buf: [32]u8 = undefined;
+                        const new_val = std.fmt.bufPrint(&buf, "{d}", .{num - 1}) catch "0";
+                        shell_mod.setArithVariable(self, var_name, new_val);
+                        self.last_exit_code = if (num != 0) @as(i32, 0) else @as(i32, 1);
+                        return;
+                    }
+                }
+                // Handle pre-increment: (( ++x ))
+                if (std.mem.startsWith(u8, expr, "++")) {
+                    const var_name = std.mem.trim(u8, expr[2..], &std.ascii.whitespace);
+                    if (var_name.len > 0) {
+                        const current = shell_mod.getVariableValue(self, var_name) orelse "0";
+                        const num = std.fmt.parseInt(i64, current, 10) catch 0;
+                        const new_num = num + 1;
+                        var buf: [32]u8 = undefined;
+                        const new_val = std.fmt.bufPrint(&buf, "{d}", .{new_num}) catch "0";
+                        shell_mod.setArithVariable(self, var_name, new_val);
+                        self.last_exit_code = if (new_num != 0) @as(i32, 0) else @as(i32, 1);
+                        return;
+                    }
+                }
+                // Handle pre-decrement: (( --x ))
+                if (std.mem.startsWith(u8, expr, "--")) {
+                    const var_name = std.mem.trim(u8, expr[2..], &std.ascii.whitespace);
+                    if (var_name.len > 0) {
+                        const current = shell_mod.getVariableValue(self, var_name) orelse "0";
+                        const num = std.fmt.parseInt(i64, current, 10) catch 0;
+                        const new_num = num - 1;
+                        var buf: [32]u8 = undefined;
+                        const new_val = std.fmt.bufPrint(&buf, "{d}", .{new_num}) catch "0";
+                        shell_mod.setArithVariable(self, var_name, new_val);
+                        self.last_exit_code = if (new_num != 0) @as(i32, 0) else @as(i32, 1);
+                        return;
+                    }
+                }
+                // Handle assignment: (( x = expr ))
+                if (std.mem.indexOf(u8, expr, "=")) |eq_idx| {
+                    // Make sure it's not == or != or <= or >=
+                    const is_comparison = (eq_idx > 0 and (expr[eq_idx - 1] == '!' or expr[eq_idx - 1] == '<' or expr[eq_idx - 1] == '>')) or
+                        (eq_idx + 1 < expr.len and expr[eq_idx + 1] == '=');
+                    if (!is_comparison) {
+                        const var_name = std.mem.trim(u8, expr[0..eq_idx], &std.ascii.whitespace);
+                        const value_expr = std.mem.trim(u8, expr[eq_idx + 1 ..], &std.ascii.whitespace);
+                        // Evaluate the right side
+                        var arith = @import("utils/arithmetic.zig").Arithmetic.initWithVariables(self.allocator, &self.environment);
+                        const result = arith.eval(value_expr) catch 0;
+                        var buf: [32]u8 = undefined;
+                        const val_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                        shell_mod.setArithVariable(self, var_name, val_str);
+                        self.last_exit_code = 0;
+                        return;
+                    }
+                }
+                // Non-assignment: evaluate and set exit code based on result
+                var arith = @import("utils/arithmetic.zig").Arithmetic.initWithVariables(self.allocator, &self.environment);
+                const result = arith.eval(expr) catch 0;
+                self.last_exit_code = if (result != 0) @as(i32, 0) else @as(i32, 1);
+                return;
+            }
+        }
+
+        // Check for compound command group: { command; }
+        if (fn_trimmed.len > 2 and fn_trimmed[0] == '{' and fn_trimmed[fn_trimmed.len - 1] == '}') {
+            // Must have space after { (bash requirement)
+            if (fn_trimmed.len > 1 and (fn_trimmed[1] == ' ' or fn_trimmed[1] == '\t' or fn_trimmed[1] == '\n')) {
+                const inner = std.mem.trim(u8, fn_trimmed[1 .. fn_trimmed.len - 1], &std.ascii.whitespace);
+                if (inner.len > 0) {
+                    // Execute in current shell context (no fork)
+                    self.executeCommand(inner) catch |err| {
+                        if (err == error.Exit) return err;
+                    };
+                    return;
+                }
+            }
+        }
+
         // Check for subshell: (command)
         if (fn_trimmed.len > 2 and fn_trimmed[0] == '(' and fn_trimmed[fn_trimmed.len - 1] == ')') {
             // Execute the inner command in a subshell (fork to isolate env changes)
@@ -923,6 +1022,14 @@ pub const Shell = struct {
                             }
                         }
                         if (!needs_full_pipeline) {
+                            // Check if readonly before assignment
+                            if (self.var_attributes.get(potential_var)) |attrs| {
+                                if (attrs.readonly) {
+                                    try IO.eprint("den: {s}: readonly variable\n", .{potential_var});
+                                    self.last_exit_code = 1;
+                                    return;
+                                }
+                            }
                             // Simple literal assignment - strip surrounding quotes
                             const stripped = if (raw_value.len >= 2 and
                                 ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
@@ -1073,10 +1180,13 @@ pub const Shell = struct {
         }
 
         // Check for shell-context builtins (jobs, history, etc.)
+        // Skip direct dispatch if there are redirections - let the executor handle them
         if (chain.commands.len == 1 and chain.operators.len == 0) {
             const cmd = &chain.commands[0];
-            if (try shell_mod.dispatchBuiltin(self, cmd) == .handled) {
-                return;
+            if (cmd.redirections.len == 0) {
+                if (try shell_mod.dispatchBuiltin(self, cmd) == .handled) {
+                    return;
+                }
             }
         }
 
@@ -1430,6 +1540,14 @@ pub const Shell = struct {
             var stmt = result.stmt;
             defer stmt.deinit();
             self.last_exit_code = try cf_executor.executeCase(&stmt);
+        }
+
+        // Propagate break/continue from executor to shell so outer loops can see them
+        if (cf_executor.break_levels > 0) {
+            self.break_levels = cf_executor.break_levels;
+        }
+        if (cf_executor.continue_levels > 0) {
+            self.continue_levels = cf_executor.continue_levels;
         }
     }
 
