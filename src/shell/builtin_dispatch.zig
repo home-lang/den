@@ -15,6 +15,21 @@ pub const DispatchResult = enum {
     not_builtin,
 };
 
+/// Check if a command name is a shell-level builtin (handled by dispatchBuiltin)
+pub fn isShellBuiltin(name: []const u8) bool {
+    const shell_builtins = [_][]const u8{
+        "read", "printf", "mapfile", "readarray", "test", "[", "[[",
+        "declare", "typeset", "local", "readonly", "let", "shift",
+        "return", "break", "continue", "eval", "command", "builtin",
+        "source", ".", "exec", "kill", "enable", "shopt",
+        "complete", "compgen", "caller", "umask", "time", "hash",
+    };
+    for (shell_builtins) |b| {
+        if (std.mem.eql(u8, name, b)) return true;
+    }
+    return false;
+}
+
 /// Try to dispatch a command as a shell builtin
 /// Returns .handled if the command was executed, .not_builtin otherwise
 pub fn dispatchBuiltin(self: *Shell, cmd: *types.ParsedCommand) !DispatchResult {

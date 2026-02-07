@@ -189,6 +189,25 @@ pub const FunctionManager = struct {
         try self.pushFrame(name, args);
         defer self.popFrame();
 
+        // Set FUNCNAME variable for this function scope
+        const prev_funcname = shell.environment.get("FUNCNAME");
+        const name_copy = self.allocator.dupe(u8, name) catch null;
+        if (name_copy) |nc| {
+            shell.environment.put("FUNCNAME", nc) catch {};
+        }
+        defer {
+            if (prev_funcname) |pf| {
+                shell.environment.put("FUNCNAME", pf) catch {};
+            } else {
+                _ = shell.environment.remove("FUNCNAME");
+            }
+            if (name_copy) |nc| {
+                if (prev_funcname == null or prev_funcname.?.ptr != nc.ptr) {
+                    self.allocator.free(nc);
+                }
+            }
+        }
+
         var exit_code: i32 = 0;
 
         // Execute function body with control flow support

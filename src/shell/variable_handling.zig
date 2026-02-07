@@ -268,3 +268,132 @@ pub fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
     }
     self.last_exit_code = 0;
 }
+
+/// Parse and execute associative array assignment: name=([key1]=val1 [key2]=val2 ...)
+pub fn executeAssocArrayAssignment(self: *Shell, input: []const u8) !void {
+    const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return error.InvalidSyntax;
+    const name = std.mem.trim(u8, input[0..eq_pos], &std.ascii.whitespace);
+
+    if (name.len == 0) return error.InvalidVariableName;
+
+    const start_paren = eq_pos + 1;
+    if (start_paren >= input.len or input[start_paren] != '(') return error.InvalidSyntax;
+    const end_paren = std.mem.lastIndexOfScalar(u8, input, ')') orelse return error.InvalidSyntax;
+
+    // Get or create the associative array
+    const gop = try self.assoc_arrays.getOrPut(name);
+    if (!gop.found_existing) {
+        const key = try self.allocator.dupe(u8, name);
+        gop.key_ptr.* = key;
+        gop.value_ptr.* = std.StringHashMap([]const u8).init(self.allocator);
+    } else {
+        // Clear existing entries
+        var iter = gop.value_ptr.iterator();
+        while (iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        gop.value_ptr.clearRetainingCapacity();
+    }
+
+    if (end_paren <= start_paren + 1) {
+        self.last_exit_code = 0;
+        return;
+    }
+
+    // Parse [key]=value pairs
+    const content = input[start_paren + 1 .. end_paren];
+    var i: usize = 0;
+    while (i < content.len) {
+        while (i < content.len and (content[i] == ' ' or content[i] == '\t')) i += 1;
+        if (i >= content.len) break;
+
+        if (content[i] == '[') {
+            const key_start = i + 1;
+            const close_bracket = std.mem.indexOfScalar(u8, content[key_start..], ']') orelse break;
+            const akey = content[key_start .. key_start + close_bracket];
+            i = key_start + close_bracket + 1;
+            if (i < content.len and content[i] == '=') {
+                i += 1;
+                var val_start = i;
+                var val_end = i;
+                if (i < content.len and (content[i] == '"' or content[i] == '\'')) {
+                    const quote = content[i];
+                    i += 1;
+                    val_start = i;
+                    while (i < content.len and content[i] != quote) i += 1;
+                    val_end = i;
+                    if (i < content.len) i += 1;
+                } else {
+                    while (i < content.len and content[i] != ' ' and content[i] != '\t') i += 1;
+                    val_end = i;
+                }
+                const dup_key = try self.allocator.dupe(u8, akey);
+                const dup_val = try self.allocator.dupe(u8, content[val_start..val_end]);
+                const inner_gop = try gop.value_ptr.getOrPut(dup_key);
+                if (inner_gop.found_existing) {
+                    self.allocator.free(inner_gop.key_ptr.*);
+                    self.allocator.free(inner_gop.value_ptr.*);
+                }
+                inner_gop.key_ptr.* = dup_key;
+                inner_gop.value_ptr.* = dup_val;
+            }
+        } else {
+            while (i < content.len and content[i] != ' ' and content[i] != '\t') i += 1;
+        }
+    }
+    self.last_exit_code = 0;
+}
+
+/// Check if input is an associative array element assignment: name[key]=value (where name is declared -A)
+pub fn isAssocArrayElementAssignment(self: *Shell, input: []const u8) bool {
+    const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+    const bracket_pos = std.mem.indexOfScalar(u8, trimmed, '[') orelse return false;
+    if (bracket_pos == 0) return false;
+    for (trimmed[0..bracket_pos]) |c| {
+        if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
+    }
+    const close_bracket = std.mem.indexOfScalar(u8, trimmed[bracket_pos..], ']') orelse return false;
+    const abs_close = bracket_pos + close_bracket;
+    if (abs_close + 1 >= trimmed.len) return false;
+    if (trimmed[abs_close + 1] != '=') return false;
+    const arr_name = trimmed[0..bracket_pos];
+    return self.assoc_arrays.contains(arr_name);
+}
+
+/// Execute associative array element assignment: name[key]=value
+pub fn executeAssocArrayElementAssignment(self: *Shell, input: []const u8) !void {
+    const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+    const bracket_pos = std.mem.indexOfScalar(u8, trimmed, '[') orelse return;
+    const name = trimmed[0..bracket_pos];
+
+    const close_bracket = std.mem.indexOfScalar(u8, trimmed[bracket_pos..], ']') orelse return;
+    const abs_close = bracket_pos + close_bracket;
+    const key = trimmed[bracket_pos + 1 .. abs_close];
+
+    var raw_value = trimmed[abs_close + 2 ..];
+    if (raw_value.len >= 2 and
+        ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
+        (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
+    {
+        raw_value = raw_value[1 .. raw_value.len - 1];
+    }
+
+    const gop = try self.assoc_arrays.getOrPut(name);
+    if (!gop.found_existing) {
+        const dup_name = try self.allocator.dupe(u8, name);
+        gop.key_ptr.* = dup_name;
+        gop.value_ptr.* = std.StringHashMap([]const u8).init(self.allocator);
+    }
+
+    const dup_key = try self.allocator.dupe(u8, key);
+    const dup_val = try self.allocator.dupe(u8, raw_value);
+    const inner_gop = try gop.value_ptr.getOrPut(dup_key);
+    if (inner_gop.found_existing) {
+        self.allocator.free(inner_gop.key_ptr.*);
+        self.allocator.free(inner_gop.value_ptr.*);
+    }
+    inner_gop.key_ptr.* = dup_key;
+    inner_gop.value_ptr.* = dup_val;
+    self.last_exit_code = 0;
+}

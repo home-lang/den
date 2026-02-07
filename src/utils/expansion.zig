@@ -520,6 +520,70 @@ pub const Expansion = struct {
             };
             const index_part = content[bracket_pos + 1 .. bracket_pos + close_bracket];
 
+            // Handle ${!arr[@]} / ${!arr[*]} - array indices/keys
+            if (var_name.len > 1 and var_name[0] == '!' and
+                (std.mem.eql(u8, index_part, "@") or std.mem.eql(u8, index_part, "*")))
+            {
+                const actual_name = var_name[1..];
+                // Try indexed arrays
+                if (self.arrays) |arrays| {
+                    if (arrays.get(actual_name)) |array| {
+                        if (array.len == 0) {
+                            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                        }
+                        var total_len: usize = 0;
+                        for (0..array.len) |i| {
+                            var nbuf: [20]u8 = undefined;
+                            const ns = std.fmt.bufPrint(&nbuf, "{d}", .{i}) catch continue;
+                            total_len += ns.len;
+                        }
+                        total_len += array.len - 1; // spaces
+                        var result = try self.allocator.alloc(u8, total_len);
+                        var pos: usize = 0;
+                        for (0..array.len) |i| {
+                            var nbuf: [20]u8 = undefined;
+                            const ns = std.fmt.bufPrint(&nbuf, "{d}", .{i}) catch continue;
+                            @memcpy(result[pos..][0..ns.len], ns);
+                            pos += ns.len;
+                            if (i < array.len - 1) {
+                                result[pos] = ' ';
+                                pos += 1;
+                            }
+                        }
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    }
+                }
+                // Try associative arrays
+                if (self.assoc_arrays) |assoc_arrays| {
+                    if (assoc_arrays.get(actual_name)) |assoc| {
+                        if (assoc.count() == 0) {
+                            return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                        }
+                        var keys = std.ArrayList([]const u8).empty;
+                        defer keys.deinit(self.allocator);
+                        var iter = assoc.iterator();
+                        while (iter.next()) |entry| {
+                            try keys.append(self.allocator, entry.key_ptr.*);
+                        }
+                        var total_len: usize = 0;
+                        for (keys.items) |k| total_len += k.len;
+                        if (keys.items.len > 1) total_len += keys.items.len - 1;
+                        var result = try self.allocator.alloc(u8, total_len);
+                        var pos: usize = 0;
+                        for (keys.items, 0..) |k, ki| {
+                            @memcpy(result[pos..][0..k.len], k);
+                            pos += k.len;
+                            if (ki < keys.items.len - 1) {
+                                result[pos] = ' ';
+                                pos += 1;
+                            }
+                        }
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    }
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+
             // First try indexed arrays
             if (self.arrays) |arrays| {
                 if (arrays.get(var_name)) |array| {
@@ -1583,7 +1647,70 @@ pub const Expansion = struct {
         }
 
         // Extract expression (between (( and ))
-        const expr = input[3..end - 1];
+        const raw_expr = input[3..end - 1];
+
+        // Pre-expand ${...} parameter expansions within the arithmetic expression
+        // Uses direct environment lookups to avoid recursive error set issues
+        var arith_buf: [4096]u8 = undefined;
+        var arith_len: usize = 0;
+        var arith_expanded = false;
+        if (std.mem.indexOf(u8, raw_expr, "${") != null) {
+            var ri: usize = 0;
+            while (ri < raw_expr.len) {
+                if (ri + 1 < raw_expr.len and raw_expr[ri] == '$' and raw_expr[ri + 1] == '{') {
+                    // Find matching }
+                    var depth_b: u32 = 1;
+                    var bi: usize = ri + 2;
+                    while (bi < raw_expr.len and depth_b > 0) {
+                        if (raw_expr[bi] == '{') depth_b += 1;
+                        if (raw_expr[bi] == '}') depth_b -= 1;
+                        if (depth_b > 0) bi += 1;
+                    }
+                    if (depth_b == 0) {
+                        const var_content = raw_expr[ri + 2 .. bi];
+                        var replacement: ?[]const u8 = null;
+                        var repl_buf: [32]u8 = undefined;
+
+                        if (var_content.len > 0 and var_content[0] == '#') {
+                            // ${#var} - string length
+                            const vname = var_content[1..];
+                            const val = if (self.local_vars) |lv| lv.get(vname) orelse self.environment.get(vname) else self.environment.get(vname);
+                            if (val) |v| {
+                                replacement = std.fmt.bufPrint(&repl_buf, "{d}", .{v.len}) catch null;
+                            } else {
+                                replacement = "0";
+                            }
+                        } else {
+                            // ${var} - variable value
+                            const val = if (self.local_vars) |lv| lv.get(var_content) orelse self.environment.get(var_content) else self.environment.get(var_content);
+                            replacement = val orelse "0";
+                        }
+
+                        if (replacement) |repl| {
+                            if (arith_len + repl.len <= arith_buf.len) {
+                                @memcpy(arith_buf[arith_len..][0..repl.len], repl);
+                                arith_len += repl.len;
+                            }
+                            arith_expanded = true;
+                        }
+                        ri = bi + 1;
+                    } else {
+                        if (arith_len < arith_buf.len) {
+                            arith_buf[arith_len] = raw_expr[ri];
+                            arith_len += 1;
+                        }
+                        ri += 1;
+                    }
+                } else {
+                    if (arith_len < arith_buf.len) {
+                        arith_buf[arith_len] = raw_expr[ri];
+                        arith_len += 1;
+                    }
+                    ri += 1;
+                }
+            }
+        }
+        const expr: []const u8 = if (arith_expanded) arith_buf[0..arith_len] else raw_expr;
 
         // Evaluate arithmetic expression with variable support
         var arith = Arithmetic.initWithVariables(self.allocator, self.environment);

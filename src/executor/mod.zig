@@ -471,22 +471,54 @@ pub const Executor = struct {
             std.posix.close(pipes_buffer[i][1]);
         }
 
-        // Wait for all children
+        // Wait for all children and collect PIPESTATUS
         var last_status: i32 = 0;
         var pipefail_status: i32 = 0;
-        for (pids_buffer[0..commands.len]) |pid| {
+        var pipestatus_buf: [17]i32 = undefined;
+        for (pids_buffer[0..commands.len], 0..) |pid, pi| {
             var wait_status: c_int = 0;
             _ = std.c.waitpid(pid, &wait_status, 0);
             const status: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
             last_status = status;
+            pipestatus_buf[pi] = status;
             // For pipefail: track rightmost non-zero exit status
             if (status != 0) {
                 pipefail_status = status;
             }
         }
 
-        // Handle pipefail option
+        // Set PIPESTATUS array in the shell
         if (self.shell) |shell| {
+            // Free old PIPESTATUS array if it exists
+            if (shell.arrays.get("PIPESTATUS")) |old_arr| {
+                for (old_arr) |item| {
+                    shell.allocator.free(item);
+                }
+                shell.allocator.free(old_arr);
+                const old_key = shell.arrays.getKey("PIPESTATUS").?;
+                shell.allocator.free(old_key);
+                _ = shell.arrays.remove("PIPESTATUS");
+            }
+            // Create new PIPESTATUS array
+            const ps_arr = shell.allocator.alloc([]const u8, commands.len) catch null;
+            if (ps_arr) |arr| {
+                var all_ok = true;
+                for (0..commands.len) |pi| {
+                    var num_buf: [12]u8 = undefined;
+                    const s = std.fmt.bufPrint(&num_buf, "{d}", .{pipestatus_buf[pi]}) catch "0";
+                    arr[pi] = shell.allocator.dupe(u8, s) catch {
+                        all_ok = false;
+                        break;
+                    };
+                }
+                if (all_ok) {
+                    const key = shell.allocator.dupe(u8, "PIPESTATUS") catch null;
+                    if (key) |k| {
+                        shell.arrays.put(k, arr) catch {};
+                    }
+                }
+            }
+
             if (shell.option_pipefail and pipefail_status != 0) {
                 return pipefail_status;
             }

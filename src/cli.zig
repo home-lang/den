@@ -603,14 +603,113 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
     var den_shell = try shell.Shell.initWithConfig(allocator, config_path);
     defer den_shell.deinit();
 
-    // Execute the command
-    den_shell.executeCommand(command) catch |err| {
-        den_shell.executeExitTrap();
-        if (json_output) {
-            try IO.print("{{\"error\":\"{s}\",\"exit_code\":{d}}}\n", .{ @errorName(err), den_shell.last_exit_code });
+    // If multi-line, process line-by-line using script-style execution
+    if (std.mem.indexOfScalar(u8, command, '\n') != null) {
+        const control_flow = @import("scripting/control_flow.zig");
+        const functions = @import("scripting/functions.zig");
+
+        // Preprocess heredocs before splitting into lines
+        // This converts heredocs to herestrings so they become single-line
+        var effective_cmd: []const u8 = command;
+        var heredoc_buf: ?[]const u8 = null;
+        defer if (heredoc_buf) |hb| allocator.free(hb);
+        if (std.mem.indexOf(u8, command, "<<") != null) {
+            if (den_shell.preprocessHeredoc(command)) |rewritten| {
+                heredoc_buf = rewritten;
+                effective_cmd = rewritten;
+            }
         }
-        return err;
-    };
+
+        var lines_buffer: [10000][]const u8 = undefined;
+        var lines_count: usize = 0;
+        var line_iter = std.mem.splitScalar(u8, effective_cmd, '\n');
+        while (line_iter.next()) |line| {
+            if (lines_count >= lines_buffer.len) break;
+            lines_buffer[lines_count] = line;
+            lines_count += 1;
+        }
+        const lines = lines_buffer[0..lines_count];
+
+        var line_num: usize = 0;
+        var parser = control_flow.ControlFlowParser.init(allocator);
+        var executor = control_flow.ControlFlowExecutor.init(&den_shell);
+        var func_parser = functions.FunctionParser.init(allocator);
+
+        while (line_num < lines.len) : (line_num += 1) {
+            den_shell.current_line = line_num + 1;
+            const trimmed = std.mem.trim(u8, lines[line_num], &std.ascii.whitespace);
+            if (trimmed.len == 0 or trimmed[0] == '#') continue;
+
+            // Check function definitions
+            const is_func_kw = std.mem.startsWith(u8, trimmed, "function ");
+            var is_paren_syntax = false;
+            if (std.mem.indexOf(u8, trimmed, "()")) |_| {
+                if (std.mem.indexOf(u8, trimmed, "{") != null) {
+                    is_paren_syntax = true;
+                } else if (line_num + 1 < lines.len) {
+                    const next_t = std.mem.trim(u8, lines[line_num + 1], &std.ascii.whitespace);
+                    if (std.mem.startsWith(u8, next_t, "{")) is_paren_syntax = true;
+                }
+            }
+            if (is_func_kw or is_paren_syntax) {
+                const result = func_parser.parseFunction(lines, line_num) catch break;
+                den_shell.function_manager.defineFunction(result.name, result.body, false) catch break;
+                line_num = result.end;
+                continue;
+            }
+
+            // Control flow
+            if (std.mem.startsWith(u8, trimmed, "if ")) {
+                var result = parser.parseIf(lines, line_num) catch break;
+                defer result.stmt.deinit();
+                den_shell.last_exit_code = executor.executeIf(&result.stmt) catch 1;
+                line_num = result.end;
+                continue;
+            }
+            if (std.mem.startsWith(u8, trimmed, "while ")) {
+                var result = parser.parseWhile(lines, line_num, false) catch break;
+                defer result.loop.deinit();
+                den_shell.last_exit_code = executor.executeWhile(&result.loop) catch 1;
+                line_num = result.end;
+                continue;
+            }
+            if (std.mem.startsWith(u8, trimmed, "until ")) {
+                var result = parser.parseWhile(lines, line_num, true) catch break;
+                defer result.loop.deinit();
+                den_shell.last_exit_code = executor.executeWhile(&result.loop) catch 1;
+                line_num = result.end;
+                continue;
+            }
+            if (std.mem.startsWith(u8, trimmed, "for ")) {
+                var result = parser.parseFor(lines, line_num) catch break;
+                defer result.loop.deinit();
+                den_shell.last_exit_code = executor.executeFor(&result.loop) catch 1;
+                line_num = result.end;
+                continue;
+            }
+            if (std.mem.startsWith(u8, trimmed, "case ")) {
+                var result = parser.parseCase(lines, line_num) catch break;
+                defer result.stmt.deinit();
+                den_shell.last_exit_code = executor.executeCase(&result.stmt) catch 1;
+                line_num = result.end;
+                continue;
+            }
+
+            // Regular command
+            den_shell.executeCommand(trimmed) catch {};
+            if (den_shell.option_errexit and den_shell.last_exit_code != 0) break;
+        }
+        den_shell.current_line = 0;
+    } else {
+        // Single-line command
+        den_shell.executeCommand(command) catch |err| {
+            den_shell.executeExitTrap();
+            if (json_output) {
+                try IO.print("{{\"error\":\"{s}\",\"exit_code\":{d}}}\n", .{ @errorName(err), den_shell.last_exit_code });
+            }
+            return err;
+        };
+    }
 
     // Fire EXIT trap before leaving
     den_shell.executeExitTrap();

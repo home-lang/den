@@ -146,6 +146,9 @@ pub const isArrayAssignment = variable_handling.isArrayAssignment;
 pub const executeArrayAssignment = variable_handling.executeArrayAssignment;
 pub const isArrayElementAssignment = variable_handling.isArrayElementAssignment;
 pub const executeArrayElementAssignment = variable_handling.executeArrayElementAssignment;
+pub const executeAssocArrayAssignment = variable_handling.executeAssocArrayAssignment;
+pub const isAssocArrayElementAssignment = variable_handling.isAssocArrayElementAssignment;
+pub const executeAssocArrayElementAssignment = variable_handling.executeAssocArrayElementAssignment;
 
 // Re-export command execution functions
 pub const tryFastPath = command_execution.tryFastPath;
@@ -155,6 +158,7 @@ pub const executeInBackground = command_execution.executeInBackground;
 
 // Re-export builtin dispatch
 pub const dispatchBuiltin = builtin_dispatch.dispatchBuiltin;
+pub const isShellBuiltin = builtin_dispatch.isShellBuiltin;
 pub const DispatchResult = builtin_dispatch.DispatchResult;
 
 // Re-export tab completion functions

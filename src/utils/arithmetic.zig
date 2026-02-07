@@ -131,6 +131,45 @@ pub const Arithmetic = struct {
     pub fn eval(self: *Arithmetic, expr: []const u8) !i64 {
         const trimmed = std.mem.trim(u8, expr, &std.ascii.whitespace);
 
+        // Handle comma operator (lowest precedence): evaluate each sub-expression, return last
+        // Only split on top-level commas (not inside parentheses)
+        var depth: usize = 0;
+        var has_comma = false;
+        for (trimmed) |ch| {
+            if (ch == '(') depth += 1;
+            if (ch == ')') {
+                if (depth > 0) depth -= 1;
+            }
+            if (ch == ',' and depth == 0) {
+                has_comma = true;
+                break;
+            }
+        }
+        if (has_comma) {
+            var result: i64 = 0;
+            var start: usize = 0;
+            depth = 0;
+            for (trimmed, 0..) |ch, ci| {
+                if (ch == '(') depth += 1;
+                if (ch == ')') {
+                    if (depth > 0) depth -= 1;
+                }
+                if ((ch == ',' and depth == 0) or ci == trimmed.len - 1) {
+                    const sub_end = if (ch == ',' and depth == 0) ci else ci + 1;
+                    const sub = std.mem.trim(u8, trimmed[start..sub_end], &std.ascii.whitespace);
+                    if (sub.len > 0) {
+                        result = try self.evalSingle(sub);
+                    }
+                    start = ci + 1;
+                }
+            }
+            return result;
+        }
+
+        return self.evalSingle(trimmed);
+    }
+
+    fn evalSingle(self: *Arithmetic, trimmed: []const u8) !i64 {
         // Only cache expressions without variables (they're deterministic)
         const has_variables = self.variables != null and self.expressionHasVariables(trimmed);
 

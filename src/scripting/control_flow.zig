@@ -333,9 +333,18 @@ pub const ControlFlowExecutor = struct {
                     try expanded_items.append(self.allocator, try self.allocator.dupe(u8, word));
                 }
             } else {
-                // Regular item - expand variables but keep as single item
+                // Regular item - expand variables/command substitutions
                 const expanded = expander.expand(item) catch item;
-                if (expanded.ptr != item.ptr) {
+                // If the item contained a command substitution, word-split the result
+                const has_subst = std.mem.indexOf(u8, item, "$(") != null or std.mem.indexOfScalar(u8, item, '`') != null;
+                const is_quoted = item.len >= 2 and item[0] == '"' and item[item.len - 1] == '"';
+                if (has_subst and !is_quoted and std.mem.indexOfAny(u8, expanded, " \t\n") != null) {
+                    var word_iter = std.mem.tokenizeAny(u8, expanded, " \t\n");
+                    while (word_iter.next()) |word| {
+                        try expanded_items.append(self.allocator, try self.allocator.dupe(u8, word));
+                    }
+                    if (expanded.ptr != item.ptr) self.allocator.free(expanded);
+                } else if (expanded.ptr != item.ptr) {
                     try expanded_items.append(self.allocator, expanded);
                 } else {
                     try expanded_items.append(self.allocator, try self.allocator.dupe(u8, item));
@@ -1048,11 +1057,63 @@ pub const ControlFlowParser = struct {
 
         var items_buffer: [100][]const u8 = undefined;
         var items_count: usize = 0;
-        var items_iter = std.mem.tokenizeAny(u8, items_str, " \t");
-        while (items_iter.next()) |item| {
-            if (items_count >= items_buffer.len) return error.TooManyItems;
-            items_buffer[items_count] = try self.allocator.dupe(u8, item);
-            items_count += 1;
+        // Use shell-aware tokenization to respect $(...), `...`, and quotes
+        {
+            var ti: usize = 0;
+            while (ti < items_str.len) {
+                while (ti < items_str.len and (items_str[ti] == ' ' or items_str[ti] == '\t')) ti += 1;
+                if (ti >= items_str.len) break;
+                const word_start = ti;
+                var paren_depth: u32 = 0;
+                var in_sq = false;
+                var in_dq = false;
+                var in_bt = false;
+                while (ti < items_str.len) {
+                    const c = items_str[ti];
+                    if (in_sq) {
+                        if (c == '\'') in_sq = false;
+                        ti += 1;
+                        continue;
+                    }
+                    if (c == '\'' and !in_dq and paren_depth == 0 and !in_bt) {
+                        in_sq = true;
+                        ti += 1;
+                        continue;
+                    }
+                    if (c == '"' and !in_sq) {
+                        in_dq = !in_dq;
+                        ti += 1;
+                        continue;
+                    }
+                    if (c == '`') {
+                        in_bt = !in_bt;
+                        ti += 1;
+                        continue;
+                    }
+                    if (!in_dq and !in_bt and paren_depth == 0 and (c == ' ' or c == '\t')) break;
+                    if (c == '$' and ti + 1 < items_str.len and items_str[ti + 1] == '(') {
+                        paren_depth += 1;
+                        ti += 2;
+                        continue;
+                    }
+                    if (c == '(' and paren_depth > 0) {
+                        paren_depth += 1;
+                        ti += 1;
+                        continue;
+                    }
+                    if (c == ')' and paren_depth > 0) {
+                        paren_depth -= 1;
+                        ti += 1;
+                        continue;
+                    }
+                    ti += 1;
+                }
+                if (ti > word_start) {
+                    if (items_count >= items_buffer.len) return error.TooManyItems;
+                    items_buffer[items_count] = try self.allocator.dupe(u8, items_str[word_start..ti]);
+                    items_count += 1;
+                }
+            }
         }
 
         var body_buffer: [1000][]const u8 = undefined;

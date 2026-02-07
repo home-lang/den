@@ -892,10 +892,59 @@ pub const Shell = struct {
                         return;
                     }
                 }
+                // Handle compound assignment operators: (( x += expr )), (( x -= expr )), etc.
+                const compound_ops = [_][]const u8{ "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "|=", "^=" };
+                var handled_compound = false;
+                inline for (compound_ops) |cop| {
+                    if (!handled_compound) {
+                        if (std.mem.indexOf(u8, expr, cop)) |op_idx| {
+                            const var_name_c = std.mem.trim(u8, expr[0..op_idx], &std.ascii.whitespace);
+                            const value_expr_c = std.mem.trim(u8, expr[op_idx + cop.len ..], &std.ascii.whitespace);
+                            if (var_name_c.len > 0 and value_expr_c.len > 0) {
+                                // Get current value
+                                const current = shell_mod.getVariableValue(self, var_name_c) orelse "0";
+                                const cur_val = std.fmt.parseInt(i64, current, 10) catch 0;
+                                // Evaluate right side
+                                var arith_c = @import("utils/arithmetic.zig").Arithmetic.initWithVariables(self.allocator, &self.environment);
+                                const rhs = arith_c.eval(value_expr_c) catch 0;
+                                // Apply operator
+                                const new_val_i: i64 = if (std.mem.eql(u8, cop, "+="))
+                                    cur_val +| rhs
+                                else if (std.mem.eql(u8, cop, "-="))
+                                    cur_val -| rhs
+                                else if (std.mem.eql(u8, cop, "*="))
+                                    cur_val *| rhs
+                                else if (std.mem.eql(u8, cop, "/="))
+                                    if (rhs != 0) @divTrunc(cur_val, rhs) else 0
+                                else if (std.mem.eql(u8, cop, "%="))
+                                    if (rhs != 0) @rem(cur_val, rhs) else 0
+                                else if (std.mem.eql(u8, cop, "&="))
+                                    cur_val & rhs
+                                else if (std.mem.eql(u8, cop, "|="))
+                                    cur_val | rhs
+                                else if (std.mem.eql(u8, cop, "^="))
+                                    cur_val ^ rhs
+                                else if (std.mem.eql(u8, cop, "<<="))
+                                    std.math.shl(i64, cur_val, @as(u6, @intCast(@min(@max(rhs, 0), 63))))
+                                else if (std.mem.eql(u8, cop, ">>="))
+                                    std.math.shr(i64, cur_val, @as(u6, @intCast(@min(@max(rhs, 0), 63))))
+                                else
+                                    cur_val;
+                                var buf_c: [32]u8 = undefined;
+                                const val_str_c = std.fmt.bufPrint(&buf_c, "{d}", .{new_val_i}) catch "0";
+                                shell_mod.setArithVariable(self, var_name_c, val_str_c);
+                                self.last_exit_code = 0;
+                                handled_compound = true;
+                            }
+                        }
+                    }
+                }
+                if (handled_compound) return;
+
                 // Handle assignment: (( x = expr ))
                 if (std.mem.indexOf(u8, expr, "=")) |eq_idx| {
                     // Make sure it's not == or != or <= or >=
-                    const is_comparison = (eq_idx > 0 and (expr[eq_idx - 1] == '!' or expr[eq_idx - 1] == '<' or expr[eq_idx - 1] == '>')) or
+                    const is_comparison = (eq_idx > 0 and (expr[eq_idx - 1] == '!' or expr[eq_idx - 1] == '<' or expr[eq_idx - 1] == '>' or expr[eq_idx - 1] == '+' or expr[eq_idx - 1] == '-' or expr[eq_idx - 1] == '*' or expr[eq_idx - 1] == '/' or expr[eq_idx - 1] == '%' or expr[eq_idx - 1] == '&' or expr[eq_idx - 1] == '|' or expr[eq_idx - 1] == '^')) or
                         (eq_idx + 1 < expr.len and expr[eq_idx + 1] == '=');
                     if (!is_comparison) {
                         const var_name = std.mem.trim(u8, expr[0..eq_idx], &std.ascii.whitespace);
@@ -964,9 +1013,84 @@ pub const Shell = struct {
             }
         }
 
+        // Check for local name=(values...) - handle before tokenizer since ( would be treated as subshell
+        if (std.mem.startsWith(u8, fn_trimmed, "local ")) {
+            if (std.mem.indexOf(u8, fn_trimmed, "=(") != null) {
+                if (std.mem.lastIndexOfScalar(u8, fn_trimmed, ')') != null) {
+                    // Skip "local " and any flags
+                    var lpos: usize = 6;
+                    while (lpos < fn_trimmed.len and fn_trimmed[lpos] == ' ') lpos += 1;
+                    while (lpos < fn_trimmed.len and fn_trimmed[lpos] == '-') {
+                        lpos += 1;
+                        while (lpos < fn_trimmed.len and fn_trimmed[lpos] != ' ') lpos += 1;
+                        while (lpos < fn_trimmed.len and fn_trimmed[lpos] == ' ') lpos += 1;
+                    }
+                    const assignment = fn_trimmed[lpos..];
+                    try shell_mod.executeArrayAssignment(self, assignment);
+                    return;
+                }
+            }
+        }
+
+        // Check for declare/typeset with inline array: declare -a name=(values...)
+        // Must be handled before tokenizer since ( would be treated as subshell
+        if (std.mem.startsWith(u8, fn_trimmed, "declare ") or std.mem.startsWith(u8, fn_trimmed, "typeset ")) {
+            if (std.mem.indexOf(u8, fn_trimmed, "=(") != null) {
+                if (std.mem.lastIndexOfScalar(u8, fn_trimmed, ')') != null) {
+                    // Parse flags
+                    const cmd_len: usize = if (std.mem.startsWith(u8, fn_trimmed, "declare ")) 8 else 8;
+                    var fpos: usize = cmd_len;
+                    var has_a_flag = false;
+                    var has_big_a_flag = false;
+                    // Skip flags (words starting with -)
+                    while (fpos < fn_trimmed.len) {
+                        while (fpos < fn_trimmed.len and fn_trimmed[fpos] == ' ') fpos += 1;
+                        if (fpos >= fn_trimmed.len or fn_trimmed[fpos] != '-') break;
+                        fpos += 1; // skip -
+                        while (fpos < fn_trimmed.len and fn_trimmed[fpos] != ' ') {
+                            if (fn_trimmed[fpos] == 'a') has_a_flag = true;
+                            if (fn_trimmed[fpos] == 'A') has_big_a_flag = true;
+                            fpos += 1;
+                        }
+                    }
+                    while (fpos < fn_trimmed.len and fn_trimmed[fpos] == ' ') fpos += 1;
+
+                    if (has_a_flag) {
+                        // Extract name=(values...) and execute as array assignment
+                        const assignment = fn_trimmed[fpos..];
+                        try shell_mod.executeArrayAssignment(self, assignment);
+                        // Set indexed_array attribute
+                        if (std.mem.indexOfScalar(u8, assignment, '=')) |eq| {
+                            const vname = assignment[0..eq];
+                            const var_builtins = @import("shell/variable_builtins.zig");
+                            try var_builtins.setVarAttributes(self, vname, types.VarAttributes{ .indexed_array = true }, false);
+                        }
+                        return;
+                    }
+                    if (has_big_a_flag) {
+                        // Handle declare -A name=([key1]=val1 [key2]=val2 ...)
+                        const assignment = fn_trimmed[fpos..];
+                        try shell_mod.executeAssocArrayAssignment(self, assignment);
+                        if (std.mem.indexOfScalar(u8, assignment, '=')) |eq| {
+                            const vname = assignment[0..eq];
+                            const var_builtins = @import("shell/variable_builtins.zig");
+                            try var_builtins.setVarAttributes(self, vname, types.VarAttributes{ .assoc_array = true }, false);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
         // Check for array assignment first: name=(...)
         if (shell_mod.isArrayAssignment(input)) {
             try shell_mod.executeArrayAssignment(self, input);
+            return;
+        }
+
+        // Check for associative array element assignment: name[key]=value (for declared -A arrays)
+        if (shell_mod.isAssocArrayElementAssignment(self, input)) {
+            try shell_mod.executeAssocArrayElementAssignment(self, input);
             return;
         }
 
@@ -1043,7 +1167,28 @@ pub const Shell = struct {
                                 raw_value[1 .. raw_value.len - 1]
                             else
                                 raw_value;
-                            if (is_append) {
+                            // Check if variable has integer attribute
+                            const has_integer_attr = if (self.var_attributes.get(potential_var)) |attrs| attrs.integer else false;
+
+                            if (has_integer_attr) {
+                                // Integer attribute: evaluate as arithmetic
+                                const arith_mod = @import("utils/arithmetic.zig");
+                                var arith = arith_mod.Arithmetic.initWithVariables(self.allocator, &self.environment);
+                                if (is_append) {
+                                    const existing = shell_mod.getVariableValue(self, potential_var) orelse "0";
+                                    const existing_num = std.fmt.parseInt(i64, existing, 10) catch 0;
+                                    const add_num = arith.eval(stripped) catch 0;
+                                    const result = existing_num + add_num;
+                                    var buf: [32]u8 = undefined;
+                                    const result_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                                    shell_mod.setArithVariable(self, potential_var, result_str);
+                                } else {
+                                    const result = arith.eval(stripped) catch 0;
+                                    var buf: [32]u8 = undefined;
+                                    const result_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                                    shell_mod.setArithVariable(self, potential_var, result_str);
+                                }
+                            } else if (is_append) {
                                 // += append: get existing value and concatenate
                                 const existing = shell_mod.getVariableValue(self, potential_var) orelse "";
                                 const combined = self.allocator.alloc(u8, existing.len + stripped.len) catch {
@@ -1204,16 +1349,93 @@ pub const Shell = struct {
         }
 
         // Check for shell-context builtins (jobs, history, etc.)
-        // Skip direct dispatch if there are redirections - let the executor handle them
         if (chain.commands.len == 1 and chain.operators.len == 0) {
             const cmd = &chain.commands[0];
             if (cmd.redirections.len == 0) {
                 if (try shell_mod.dispatchBuiltin(self, cmd) == .handled) {
-                    // Fire ERR trap for non-zero exit codes from builtins
                     if (self.last_exit_code != 0) {
                         shell_mod.executeErrTrap(self);
                     }
                     return;
+                }
+            } else if (shell_mod.isShellBuiltin(cmd.name)) {
+                // Shell-level builtin with redirections: apply redirections manually
+                var saved_fds: [3]c_int = .{ -1, -1, -1 };
+                var applied = false;
+                for (cmd.redirections) |redir| {
+                    switch (redir.kind) {
+                        .input => {
+                            const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
+                            defer self.allocator.free(path_z);
+                            const fd = std.c.open(path_z, .{}, @as(c_uint, 0));
+                            if (fd >= 0) {
+                                saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
+                                _ = std.c.dup2(fd, std.posix.STDIN_FILENO);
+                                std.posix.close(@intCast(fd));
+                                applied = true;
+                            }
+                        },
+                        .output_truncate, .output_append => {
+                            const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
+                            defer self.allocator.free(path_z);
+                            const flags: std.c.O = if (redir.kind == .output_append)
+                                .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }
+                            else
+                                .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true };
+                            const fd = std.c.open(path_z, flags, @as(c_uint, 0o644));
+                            if (fd >= 0) {
+                                saved_fds[1] = std.c.dup(std.posix.STDOUT_FILENO);
+                                _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);
+                                std.posix.close(@intCast(fd));
+                                applied = true;
+                            }
+                        },
+                        .herestring => {
+                            // Create pipe, write herestring content + newline to it, redirect stdin
+                            var pipe_fds: [2]std.posix.fd_t = undefined;
+                            if (std.c.pipe(&pipe_fds) == 0) {
+                                const read_fd = pipe_fds[0];
+                                const write_fd = pipe_fds[1];
+                                // Strip surrounding quotes if present
+                                const target = redir.target;
+                                const unquoted = if (target.len >= 2 and
+                                    ((target[0] == '"' and target[target.len - 1] == '"') or
+                                    (target[0] == '\'' and target[target.len - 1] == '\'')))
+                                    target[1 .. target.len - 1]
+                                else
+                                    target;
+                                // Write content + newline
+                                const hs_file = std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } };
+                                hs_file.writeStreamingAll(std.Options.debug_io, unquoted) catch {};
+                                hs_file.writeStreamingAll(std.Options.debug_io, "\n") catch {};
+                                std.posix.close(write_fd);
+                                // Redirect stdin
+                                saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
+                                _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
+                                std.posix.close(read_fd);
+                                applied = true;
+                            }
+                        },
+                        else => {},
+                    }
+                }
+                if (applied) {
+                    const result = shell_mod.dispatchBuiltin(self, cmd) catch .not_builtin;
+                    // Restore saved fds
+                    if (saved_fds[0] >= 0) {
+                        _ = std.c.dup2(saved_fds[0], std.posix.STDIN_FILENO);
+                        std.posix.close(@intCast(saved_fds[0]));
+                    }
+                    if (saved_fds[1] >= 0) {
+                        _ = std.c.dup2(saved_fds[1], std.posix.STDOUT_FILENO);
+                        std.posix.close(@intCast(saved_fds[1]));
+                    }
+                    if (result == .handled) {
+                        if (self.last_exit_code != 0) {
+                            shell_mod.executeErrTrap(self);
+                        }
+                        return;
+                    }
                 }
             }
         }
@@ -1274,7 +1496,7 @@ pub const Shell = struct {
     /// Preprocess heredoc: convert multi-line heredoc to herestring.
     /// Input like "cat <<EOF\nhello\nworld\nEOF" becomes "cat <<< 'hello\nworld'"
     /// Returns null if no heredoc found or processing fails.
-    fn preprocessHeredoc(self: *Shell, input: []const u8) ?[]const u8 {
+    pub fn preprocessHeredoc(self: *Shell, input: []const u8) ?[]const u8 {
         // Find << that's not <<< (herestring)
         var search_pos: usize = 0;
         const heredoc_pos = while (search_pos < input.len) {
@@ -1366,6 +1588,37 @@ pub const Shell = struct {
         // Remove trailing newline if present
         if (heredoc_content.len > 0 and heredoc_content[heredoc_content.len - 1] == '\n') {
             heredoc_content = heredoc_content[0 .. heredoc_content.len - 1];
+        }
+
+        // For <<- (strip tabs), strip leading tabs from each line of content
+        var stripped_buf: [8192]u8 = undefined;
+        if (strip_tabs and heredoc_content.len > 0) {
+            var spos: usize = 0;
+            var cstart: usize = 0;
+            while (cstart <= heredoc_content.len) {
+                const cend = if (cstart < heredoc_content.len)
+                    (std.mem.indexOfScalarPos(u8, heredoc_content, cstart, '\n') orelse heredoc_content.len)
+                else
+                    heredoc_content.len;
+                // Add newline between lines
+                if (cstart > 0 and spos < stripped_buf.len) {
+                    stripped_buf[spos] = '\n';
+                    spos += 1;
+                }
+                // Skip leading tabs
+                var lstart = cstart;
+                while (lstart < cend and heredoc_content[lstart] == '\t') lstart += 1;
+                // Copy content after tabs
+                const line_len = cend - lstart;
+                const copy_len = @min(line_len, stripped_buf.len - spos);
+                if (copy_len > 0) {
+                    @memcpy(stripped_buf[spos .. spos + copy_len], heredoc_content[lstart .. lstart + copy_len]);
+                    spos += copy_len;
+                }
+                if (cend >= heredoc_content.len) break;
+                cstart = cend + 1;
+            }
+            heredoc_content = stripped_buf[0..spos];
         }
 
         // Build the command part (everything before <<)
@@ -1747,7 +2000,7 @@ pub const Shell = struct {
                 } else if (c == '{' and at_word_start) {
                     brace_depth += 1;
                     at_word_start = false;
-                } else if (c == '}' and brace_depth > 0) {
+                } else if (c == '}' and brace_depth > 0 and at_word_start) {
                     brace_depth -= 1;
                     at_word_start = false;
                 } else if (paren_depth == 0) {

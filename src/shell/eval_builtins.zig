@@ -33,10 +33,40 @@ fn formatParseError(err: anyerror) []const u8 {
 
 /// Builtin: read - read line from stdin into variable(s)
 pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
-    if (cmd.args.len == 0) {
-        try IO.eprint("den: read: usage: read varname [varname ...]\n", .{});
-        return;
+    // Parse flags: -r (raw), -p (prompt), -a (array), -n (nchars), -s (silent), -d (delim)
+    var var_start: usize = 0;
+    var prompt: ?[]const u8 = null;
+    var array_mode = false;
+
+    while (var_start < cmd.args.len) {
+        const arg = cmd.args[var_start];
+        if (arg.len > 0 and arg[0] == '-') {
+            if (std.mem.eql(u8, arg, "-r")) {
+                var_start += 1;
+            } else if (std.mem.eql(u8, arg, "-a") and var_start + 1 < cmd.args.len) {
+                array_mode = true;
+                var_start += 1;
+            } else if (std.mem.eql(u8, arg, "-p") and var_start + 1 < cmd.args.len) {
+                var_start += 1;
+                prompt = cmd.args[var_start];
+                var_start += 1;
+            } else if (arg.len >= 2 and arg[1] == 'p') {
+                prompt = arg[2..];
+                var_start += 1;
+            } else {
+                var_start += 1;
+            }
+        } else {
+            break;
+        }
     }
+
+    if (var_start >= cmd.args.len) {
+        // No variable names - use REPLY
+        var_start = cmd.args.len; // will be handled below
+    }
+
+    const var_names = cmd.args[var_start..];
 
     // Read line from stdin
     const line = try IO.readLine(self.allocator);
@@ -44,44 +74,143 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         defer self.allocator.free(value);
         self.last_exit_code = 0;
 
-        if (cmd.args.len == 1) {
-            // Single variable: assign entire line
+        // Get IFS (default: space, tab, newline)
+        const ifs = self.environment.get("IFS") orelse " \t\n";
+
+        // Handle -a flag: read into array
+        if (array_mode) {
+            const arr_name = if (var_names.len >= 1) var_names[0] else "REPLY";
+            // Split by IFS into words
+            var words_buf: [256][]const u8 = undefined;
+            var word_count: usize = 0;
+            var pos: usize = 0;
+            while (pos < value.len and word_count < words_buf.len) {
+                // Skip IFS chars
+                while (pos < value.len) {
+                    var is_delim = false;
+                    for (ifs) |ic| {
+                        if (value[pos] == ic) { is_delim = true; break; }
+                    }
+                    if (!is_delim) break;
+                    pos += 1;
+                }
+                if (pos >= value.len) break;
+                const wstart = pos;
+                while (pos < value.len) {
+                    var is_delim = false;
+                    for (ifs) |ic| {
+                        if (value[pos] == ic) { is_delim = true; break; }
+                    }
+                    if (is_delim) break;
+                    pos += 1;
+                }
+                words_buf[word_count] = value[wstart..pos];
+                word_count += 1;
+            }
+            // Create the array
+            const arr = try self.allocator.alloc([]const u8, word_count);
+            for (0..word_count) |i| {
+                arr[i] = try self.allocator.dupe(u8, words_buf[i]);
+            }
+            // Free old array if exists
+            if (self.arrays.get(arr_name)) |old_arr| {
+                for (old_arr) |item| self.allocator.free(item);
+                self.allocator.free(old_arr);
+                const old_key = self.arrays.getKey(arr_name).?;
+                self.allocator.free(old_key);
+                _ = self.arrays.remove(arr_name);
+            }
+            const key = try self.allocator.dupe(u8, arr_name);
+            try self.arrays.put(key, arr);
+            return;
+        }
+
+        if (var_names.len <= 1) {
+            // Single variable (or REPLY): assign entire line
+            const target = if (var_names.len == 1) var_names[0] else "REPLY";
             const value_copy = try self.allocator.dupe(u8, value);
-            const gop = try self.environment.getOrPut(cmd.args[0]);
+            const gop = try self.environment.getOrPut(target);
             if (gop.found_existing) {
                 self.allocator.free(gop.value_ptr.*);
                 gop.value_ptr.* = value_copy;
             } else {
-                gop.key_ptr.* = try self.allocator.dupe(u8, cmd.args[0]);
+                gop.key_ptr.* = try self.allocator.dupe(u8, target);
                 gop.value_ptr.* = value_copy;
             }
         } else {
-            // Multiple variables: split by whitespace
-            var word_start: usize = 0;
+            // Multiple variables: split by IFS
             var var_idx: usize = 0;
             var pos: usize = 0;
 
-            // Skip leading whitespace
-            while (pos < value.len and (value[pos] == ' ' or value[pos] == '\t')) pos += 1;
+            // Check if IFS contains whitespace chars
+            var has_ifs_ws = false;
+            for (ifs) |ic| {
+                if (ic == ' ' or ic == '\t' or ic == '\n') {
+                    has_ifs_ws = true;
+                    break;
+                }
+            }
 
-            while (var_idx < cmd.args.len) : (var_idx += 1) {
-                const varname = cmd.args[var_idx];
+            // Skip leading IFS whitespace
+            if (has_ifs_ws) {
+                while (pos < value.len) {
+                    var is_ws = false;
+                    for (ifs) |ic| {
+                        if (value[pos] == ic and (ic == ' ' or ic == '\t' or ic == '\n')) {
+                            is_ws = true;
+                            break;
+                        }
+                    }
+                    if (!is_ws) break;
+                    pos += 1;
+                }
+            }
+
+            while (var_idx < var_names.len) : (var_idx += 1) {
+                const varname = var_names[var_idx];
                 var word_value: []const u8 = "";
 
-                if (var_idx == cmd.args.len - 1) {
+                if (var_idx == var_names.len - 1) {
                     // Last variable gets remaining text
                     if (pos < value.len) {
                         word_value = value[pos..];
                     }
                 } else {
-                    // Find next word
-                    word_start = pos;
-                    while (pos < value.len and value[pos] != ' ' and value[pos] != '\t') pos += 1;
+                    // Find next word by splitting on IFS
+                    const word_start = pos;
+                    while (pos < value.len) {
+                        var is_delim = false;
+                        for (ifs) |ic| {
+                            if (value[pos] == ic) {
+                                is_delim = true;
+                                break;
+                            }
+                        }
+                        if (is_delim) break;
+                        pos += 1;
+                    }
                     if (pos > word_start) {
                         word_value = value[word_start..pos];
                     }
-                    // Skip whitespace for next word
-                    while (pos < value.len and (value[pos] == ' ' or value[pos] == '\t')) pos += 1;
+                    // Skip delimiter(s)
+                    if (pos < value.len) {
+                        // Skip one non-whitespace IFS delimiter
+                        if (!has_ifs_ws or (value[pos] != ' ' and value[pos] != '\t' and value[pos] != '\n')) {
+                            pos += 1;
+                        }
+                        // Skip any IFS whitespace
+                        while (pos < value.len) {
+                            var is_ws = false;
+                            for (ifs) |ic| {
+                                if (value[pos] == ic and (ic == ' ' or ic == '\t' or ic == '\n')) {
+                                    is_ws = true;
+                                    break;
+                                }
+                            }
+                            if (!is_ws) break;
+                            pos += 1;
+                        }
+                    }
                 }
 
                 const val_copy = try self.allocator.dupe(u8, word_value);

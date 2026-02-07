@@ -359,6 +359,190 @@ check "trap ERR" "TRAPPED
 after" "$(timeout 3 $DEN -c 'trap "echo TRAPPED" ERR; false; echo after' 2>&1)"
 
 # ===========================================================================
+# 43. declare -a inline array
+# ===========================================================================
+check "declare -a" "y" "$(timeout 3 $DEN -c 'declare -a arr=(x y z); echo ${arr[1]}')"
+check "declare -a all" "hello world" "$(timeout 3 $DEN -c 'declare -a arr=(hello world); echo ${arr[@]}')"
+
+# ===========================================================================
+# 44. declare -i integer attribute
+# ===========================================================================
+check "declare -i +=" "8" "$(timeout 3 $DEN -c 'declare -i x=5; x+=3; echo $x')"
+check "declare -i expr" "10" "$(timeout 3 $DEN -c 'declare -i x=5+5; echo $x')"
+
+# ===========================================================================
+# 45. declare -A associative arrays
+# ===========================================================================
+check "declare -A inline" "val1" "$(timeout 3 $DEN -c 'declare -A m=([key1]=val1 [key2]=val2); echo ${m[key1]}')"
+check "declare -A subscript" "bar" "$(timeout 3 $DEN -c 'declare -A m; m[foo]=bar; echo ${m[foo]}')"
+
+# ===========================================================================
+# 46. printf -v
+# ===========================================================================
+check "printf -v" "num: 42" "$(timeout 3 $DEN -c 'printf -v result "num: %d" 42; echo $result')"
+
+# ===========================================================================
+# 47. Array slicing
+# ===========================================================================
+check "arr slice" "b c" "$(timeout 3 $DEN -c 'arr=(a b c d); echo ${arr[@]:1:2}')"
+
+# ===========================================================================
+# 48. Command substitution in for loop
+# ===========================================================================
+check "for cmd subst" "a b c" "$(timeout 3 $DEN -c 'for i in $(echo a b c); do echo $i; done' | tr '\n' ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# 49. IFS in read
+# ===========================================================================
+check "IFS read" "a b c" "$(echo "a:b:c" | timeout 3 $DEN -c 'IFS=:; read x y z; echo "$x $y $z"')"
+check "read -r" "hello" "$(echo "hello" | timeout 3 $DEN -c 'read -r x; echo $x')"
+
+# ===========================================================================
+# 50. Heredoc tab strip
+# ===========================================================================
+check "heredoc <<-" "hello" "$(timeout 3 $DEN -c $'cat <<-EOF\n\thello\nEOF')"
+
+# ===========================================================================
+# 51. PIPESTATUS
+# ===========================================================================
+check "PIPESTATUS" "0 1 0" "$(timeout 3 $DEN -c 'true | false | true; echo ${PIPESTATUS[@]}')"
+check "PIPESTATUS idx" "1" "$(timeout 3 $DEN -c 'true | false | true; echo ${PIPESTATUS[1]}')"
+
+# ===========================================================================
+# 52. Herestring with read
+# ===========================================================================
+check "read herestring" "hello" "$(timeout 3 $DEN -c 'read x <<< "hello"; echo $x')"
+check "read -a herestring" "y" "$(timeout 3 $DEN -c 'read -a arr <<< "x y z"; echo ${arr[1]}')"
+
+# ===========================================================================
+# 53. Array indices
+# ===========================================================================
+check "arr indices" "0 1 2" "$(timeout 3 $DEN -c 'arr=(a b c); echo ${!arr[@]}')"
+
+# ===========================================================================
+# 54. Arithmetic comma operator
+# ===========================================================================
+check "arith comma" "7" "$(timeout 3 $DEN -c 'echo $(( 1+2, 3+4 ))')"
+
+# ===========================================================================
+# 55. Multi-line -c (control flow)
+# ===========================================================================
+check "multiline if" "yes" "$(timeout 3 $DEN -c $'if true\nthen\necho yes\nfi')"
+check "multiline for" "a b c" "$(timeout 3 $DEN -c $'for i in a b c\ndo\necho $i\ndone' | tr '\n' ' ' | sed 's/ $//')"
+check "multiline while" "3" "$(timeout 3 $DEN -c $'i=0\nwhile [ $i -lt 3 ]\ndo\ni=$((i+1))\ndone\necho $i')"
+
+# ===========================================================================
+# 56. FUNCNAME variable
+# ===========================================================================
+check "FUNCNAME" "myfunc" "$(timeout 3 $DEN -c 'myfunc() { echo $FUNCNAME; }; myfunc')"
+
+# ===========================================================================
+# 57. Arithmetic compound assignment operators
+# ===========================================================================
+check "(( x += ))" "15" "$(timeout 3 $DEN -c 'x=10; (( x += 5 )); echo $x')"
+check "(( x -= ))" "7" "$(timeout 3 $DEN -c 'x=10; (( x -= 3 )); echo $x')"
+check "(( x *= ))" "20" "$(timeout 3 $DEN -c 'x=10; (( x *= 2 )); echo $x')"
+check "(( x /= ))" "3" "$(timeout 3 $DEN -c 'x=10; (( x /= 3 )); echo $x')"
+
+# ===========================================================================
+# 58. Local array in function
+# ===========================================================================
+check "local arr in func" "1 2 3" "$(timeout 3 $DEN -c 'f() { local arr=(1 2 3); echo ${arr[@]}; }; f')"
+check "func body with \${}" "a b c" "$(timeout 3 $DEN -c 'f() { x=(a b c); echo ${x[@]}; }; f')"
+
+# ===========================================================================
+# 59. Multiline function definition via -c
+# ===========================================================================
+check "multiline func" "hi world" "$(timeout 3 $DEN -c $'greet() {\necho "hi $1"\n}\ngreet world')"
+
+# ===========================================================================
+# 60. Assoc array keys
+# ===========================================================================
+# Assoc array key count (order may vary, just check count)
+ASSOC_KEYS=$(timeout 3 $DEN -c 'declare -A m=([a]=1 [b]=2); echo ${!m[@]}' | wc -w | tr -d " ")
+check "assoc keys count" "2" "$ASSOC_KEYS"
+
+# ===========================================================================
+# 61. Arithmetic with parameter expansion
+# ===========================================================================
+check "arith \${#x}" "4" "$(timeout 3 $DEN -c 'x=abc; echo $(( ${#x} + 1 ))')"
+check "arith \${x}" "15" "$(timeout 3 $DEN -c 'x=10; echo $(( ${x} + 5 ))')"
+
+# ===========================================================================
+# 62. Case with pipe pattern
+# ===========================================================================
+check "case pipe pattern" "matched" "$(timeout 3 $DEN -c 'x=b; case $x in a|b|c) echo matched;; esac')"
+
+# ===========================================================================
+# 63. Indirect variable expansion
+# ===========================================================================
+check "indirect var" "hello" "$(timeout 3 $DEN -c 'x=hello; ref=x; echo ${!ref}')"
+
+# ===========================================================================
+# 64. Nested func calls
+# ===========================================================================
+check "nested func call" "a
+b" "$(timeout 3 $DEN -c 'a() { echo a; }; b() { a; echo b; }; b')"
+
+# ===========================================================================
+# 65. Subshell variable isolation
+# ===========================================================================
+check "subshell var" "inner outer" "$(timeout 3 $DEN -c 'x=outer; (x=inner; echo $x); echo $x' | tr '\n' ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# 66. Heredoc with quoted delimiter (no expansion)
+# ===========================================================================
+check "heredoc quoted" 'hello $x' "$(timeout 3 $DEN -c 'x=world; cat << "EOF"
+hello $x
+EOF')"
+
+# ===========================================================================
+# 67. Parameter error ${:?}
+# ===========================================================================
+check "param error" "den: x: not set" "$(timeout 3 $DEN -c 'echo ${x:?not set}' 2>&1 | head -1)"
+
+# ===========================================================================
+# 68. Until loop
+# ===========================================================================
+check "until loop" "3" "$(timeout 3 $DEN -c 'i=0; until [ $i -ge 3 ]; do i=$((i+1)); done; echo $i')"
+
+# ===========================================================================
+# 69. Multi-line case via -c
+# ===========================================================================
+check "multiline case" "matched" "$(timeout 3 $DEN -c $'x=hello\ncase $x in\nhello) echo matched;;\n*) echo nope;;\nesac')"
+
+# ===========================================================================
+# 70. String repeat with printf
+# ===========================================================================
+check "printf repeat str" "-----" "$(timeout 3 $DEN -c 'printf "%.0s-" 1 2 3 4 5')"
+
+# ===========================================================================
+# 71. Parameter substitution remove
+# ===========================================================================
+check "param remove" "hello " "$(timeout 3 $DEN -c 'x="hello world"; echo ${x/world}')"
+
+# ===========================================================================
+# 72. Conditional arithmetic
+# ===========================================================================
+check "if (( ))" "big" "$(timeout 3 $DEN -c 'x=5; if (( x > 3 )); then echo big; fi')"
+check "while (( ))" "3" "$(timeout 3 $DEN -c 'i=0; while (( i < 3 )); do (( i++ )); done; echo $i')"
+
+# ===========================================================================
+# 73. Herestring with variable expansion
+# ===========================================================================
+check "herestring var" "hello world" "$(timeout 3 $DEN -c 'x=hello; read y <<< "$x world"; echo $y')"
+
+# ===========================================================================
+# 74. Export from function
+# ===========================================================================
+check "export in func" "123" "$(timeout 3 $DEN -c 'f() { export X=123; }; f; echo $X')"
+
+# ===========================================================================
+# 75. Read multiple lines from pipe
+# ===========================================================================
+check "read multi line" "line1 line2" "$(printf "line1\nline2\n" | timeout 3 $DEN -c 'read a; read b; echo "$a $b"')"
+
+# ===========================================================================
 # Results
 # ===========================================================================
 echo ""
