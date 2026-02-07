@@ -1454,6 +1454,7 @@ pub const Expansion = struct {
 
         // Evaluate arithmetic expression with variable support
         var arith = Arithmetic.initWithVariables(self.allocator, self.environment);
+        arith.local_vars = self.local_vars;
         const result_value = arith.eval(expr) catch {
             // On error, return 0
             const value = try std.fmt.allocPrint(self.allocator, "0", .{});

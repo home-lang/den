@@ -594,6 +594,17 @@ pub const ControlFlowExecutor = struct {
 
     /// Evaluate a condition (runs command and checks exit code)
     fn evaluateCondition(self: *ControlFlowExecutor, condition: []const u8) bool {
+        const trimmed = std.mem.trim(u8, condition, &std.ascii.whitespace);
+
+        // Handle ! negation prefix
+        if (std.mem.startsWith(u8, trimmed, "! ")) {
+            const inner = std.mem.trim(u8, trimmed[2..], &std.ascii.whitespace);
+            self.shell.executeCommand(inner) catch {
+                return true; // negation of failure = true
+            };
+            return self.shell.last_exit_code != 0;
+        }
+
         // Execute condition command
         self.shell.executeCommand(condition) catch {
             return false;

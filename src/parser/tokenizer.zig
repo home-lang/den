@@ -343,6 +343,7 @@ pub const Tokenizer = struct {
         var in_double_quote = false;
         var in_ansi_quote = false; // $'...' ANSI-C quoting
         var subst_depth: u32 = 0; // Track $(...) / $((...)) nesting depth
+        var brace_depth: u32 = 0; // Track ${...} parameter expansion depth
         var in_backtick = false; // Track `...` command substitution
 
         // Build the word with escape processing
@@ -448,7 +449,16 @@ pub const Tokenizer = struct {
                     self.column += 1;
                     continue;
                 }
-                if (char == '(') {
+                if (char == '{') {
+                    // Check if this is ${ - parameter expansion
+                    if (word_len > 0 and word_buffer[word_len - 1] == '$') {
+                        brace_depth += 1;
+                    } else if (brace_depth > 0) {
+                        brace_depth += 1;
+                    }
+                } else if (char == '}' and brace_depth > 0) {
+                    brace_depth -= 1;
+                } else if (char == '(') {
                     // Check if this is $( or $(( - command/arithmetic substitution
                     if (word_len > 0 and word_buffer[word_len - 1] == '$') {
                         subst_depth += 1;
@@ -456,18 +466,18 @@ pub const Tokenizer = struct {
                     } else if (subst_depth > 0) {
                         // Nested parenthesis inside substitution
                         subst_depth += 1;
-                    } else if (!in_backtick) {
-                        break; // Standalone ( - break (but not inside backticks)
+                    } else if (!in_backtick and brace_depth == 0) {
+                        break; // Standalone ( - break (but not inside backticks/braces)
                     }
                 } else if (char == ')') {
                     if (subst_depth > 0) {
                         subst_depth -= 1;
                         // Don't break - consume as part of word
-                    } else if (!in_backtick) {
-                        break; // Standalone ) - break (but not inside backticks)
+                    } else if (!in_backtick and brace_depth == 0) {
+                        break; // Standalone ) - break (but not inside backticks/braces)
                     }
-                } else if (subst_depth == 0 and !in_backtick) {
-                    // Only break on special chars when not inside a substitution or backtick
+                } else if (subst_depth == 0 and brace_depth == 0 and !in_backtick) {
+                    // Only break on special chars when not inside a substitution, brace, or backtick
                     if (std.ascii.isWhitespace(char) or
                         char == '|' or char == ';' or char == '&' or
                         char == '>' or char == '<')

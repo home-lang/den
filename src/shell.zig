@@ -816,6 +816,17 @@ pub const Shell = struct {
         // This ensures variables set by earlier parts are visible to later parts.
         if (self.splitAndExecuteSemicolons(input)) return;
 
+        // Handle ! negation prefix (negate exit code)
+        const neg_trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+        if (std.mem.startsWith(u8, neg_trimmed, "! ")) {
+            const inner = std.mem.trim(u8, neg_trimmed[2..], &std.ascii.whitespace);
+            if (inner.len > 0) {
+                self.executeCommand(inner) catch {};
+                self.last_exit_code = if (self.last_exit_code == 0) @as(i32, 1) else @as(i32, 0);
+                return;
+            }
+        }
+
         // Check for function definition (name() { ... } or function name { ... })
         const fn_trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
         if (try self.checkFunctionDefinitionStart(fn_trimmed)) {
@@ -860,12 +871,15 @@ pub const Shell = struct {
             return;
         }
 
-        // Check for simple variable assignment: VAR=value (no spaces before =)
+        // Check for simple variable assignment: VAR=value or VAR+=value (no spaces before =)
         // This handles both regular assignments and nameref assignments
         const trimmed_input = std.mem.trim(u8, input, &std.ascii.whitespace);
         if (std.mem.indexOf(u8, trimmed_input, "=")) |eq_pos| {
+            // Check for += append operator
+            const is_append = eq_pos > 0 and trimmed_input[eq_pos - 1] == '+';
+            const var_end = if (is_append) eq_pos - 1 else eq_pos;
             // Check if this is a simple assignment (no spaces before =, valid var name)
-            const potential_var = trimmed_input[0..eq_pos];
+            const potential_var = trimmed_input[0..var_end];
             // Verify it's a valid variable name (no spaces, starts with letter or underscore)
             if (potential_var.len > 0 and
                 std.mem.indexOfScalar(u8, potential_var, ' ') == null and
@@ -916,7 +930,20 @@ pub const Shell = struct {
                                 raw_value[1 .. raw_value.len - 1]
                             else
                                 raw_value;
-                            shell_mod.setArithVariable(self, potential_var, stripped);
+                            if (is_append) {
+                                // += append: get existing value and concatenate
+                                const existing = shell_mod.getVariableValue(self, potential_var) orelse "";
+                                const combined = self.allocator.alloc(u8, existing.len + stripped.len) catch {
+                                    shell_mod.setArithVariable(self, potential_var, stripped);
+                                    self.last_exit_code = 0;
+                                    return;
+                                };
+                                @memcpy(combined[0..existing.len], existing);
+                                @memcpy(combined[existing.len..], stripped);
+                                shell_mod.setArithVariable(self, potential_var, combined);
+                            } else {
+                                shell_mod.setArithVariable(self, potential_var, stripped);
+                            }
                             self.last_exit_code = 0;
                             return;
                         }
@@ -1531,8 +1558,19 @@ pub const Shell = struct {
             part_count += 1;
         }
 
-        // Only split if we found multiple parts
-        if (part_count <= 1) return false;
+        // If we only have 1 part but the input had semicolons (trailing semicolons),
+        // still handle it so it doesn't fall through to the parser with a dangling ';'
+        if (part_count == 0) return false;
+        if (part_count == 1) {
+            // Only handle if the part is different from the original input
+            // (i.e., we actually stripped a trailing semicolon).
+            // If the part IS the full input, semicolons were inside control flow/quotes
+            // and we must return false to avoid infinite recursion.
+            const trimmed_orig = std.mem.trim(u8, input, &std.ascii.whitespace);
+            if (std.mem.eql(u8, parts_buf[0], trimmed_orig)) return false;
+            self.executeCommand(parts_buf[0]) catch {};
+            return true;
+        }
 
         // Execute each part separately
         for (parts_buf[0..part_count]) |part| {

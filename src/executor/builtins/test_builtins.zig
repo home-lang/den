@@ -333,7 +333,8 @@ pub fn globMatch(str: []const u8, pattern: []const u8) bool {
     return p_idx == pattern.len;
 }
 
-/// Simple regex matching for [[ =~ ]]
+/// Regex matching for [[ =~ ]]
+/// Supports: ., *, +, ?, ^, $, [...], [^...], character ranges
 fn matchRegex(str: []const u8, pattern: []const u8) bool {
     if (pattern.len == 0) return true;
 
@@ -345,21 +346,17 @@ fn matchRegex(str: []const u8, pattern: []const u8) bool {
     if (anchored_end and actual_pattern.len > 0) actual_pattern = actual_pattern[0 .. actual_pattern.len - 1];
 
     if (actual_pattern.len == 0) {
-        return str.len == 0;
+        if (anchored_start and anchored_end) return str.len == 0;
+        return true;
     }
 
-    if (anchored_start and anchored_end) {
-        return simplePatternMatch(str, actual_pattern);
-    } else if (anchored_start) {
-        return str.len >= actual_pattern.len and simplePatternMatch(str[0..actual_pattern.len], actual_pattern);
-    } else if (anchored_end) {
-        if (str.len < actual_pattern.len) return false;
-        return simplePatternMatch(str[str.len - actual_pattern.len ..], actual_pattern);
+    if (anchored_start) {
+        return regexMatch(str, 0, actual_pattern, 0, anchored_end);
     } else {
-        if (str.len < actual_pattern.len) return false;
+        // Try matching at each position
         var i: usize = 0;
-        while (i <= str.len - actual_pattern.len) : (i += 1) {
-            if (simplePatternMatch(str[i .. i + actual_pattern.len], actual_pattern)) {
+        while (i <= str.len) : (i += 1) {
+            if (regexMatch(str, i, actual_pattern, 0, anchored_end)) {
                 return true;
             }
         }
@@ -367,10 +364,112 @@ fn matchRegex(str: []const u8, pattern: []const u8) bool {
     }
 }
 
-fn simplePatternMatch(str: []const u8, pattern: []const u8) bool {
-    if (str.len != pattern.len) return false;
-    for (str, pattern) |s, p| {
-        if (p != '.' and s != p) return false;
+/// Recursive regex matching engine
+fn regexMatch(str: []const u8, si: usize, pattern: []const u8, pi: usize, anchored_end: bool) bool {
+    var s = si;
+    var p = pi;
+
+    while (p < pattern.len) {
+        // Parse current pattern element
+        const elem_start = p;
+        var elem_end = p;
+
+        if (pattern[p] == '[') {
+            // Bracket expression - find closing ]
+            elem_end = p + 1;
+            if (elem_end < pattern.len and pattern[elem_end] == '^') elem_end += 1;
+            if (elem_end < pattern.len and pattern[elem_end] == ']') elem_end += 1;
+            while (elem_end < pattern.len and pattern[elem_end] != ']') : (elem_end += 1) {}
+            if (elem_end < pattern.len) elem_end += 1; // include ]
+        } else if (pattern[p] == '\\' and p + 1 < pattern.len) {
+            elem_end = p + 2;
+        } else {
+            elem_end = p + 1;
+        }
+
+        // Check for quantifier
+        const has_plus = elem_end < pattern.len and pattern[elem_end] == '+';
+        const has_star = elem_end < pattern.len and pattern[elem_end] == '*';
+        const has_question = elem_end < pattern.len and pattern[elem_end] == '?';
+
+        const next_p = if (has_plus or has_star or has_question) elem_end + 1 else elem_end;
+
+        if (has_star or has_plus) {
+            // Greedy match: try matching as many as possible, then backtrack
+            var count: usize = 0;
+            while (s + count < str.len and matchElement(str[s + count], pattern[elem_start..elem_end])) {
+                count += 1;
+            }
+            // For +, need at least 1
+            const min_count: usize = if (has_plus) 1 else 0;
+            // Try from max to min
+            var try_count: usize = count;
+            while (true) {
+                if (try_count >= min_count) {
+                    if (regexMatch(str, s + try_count, pattern, next_p, anchored_end)) {
+                        return true;
+                    }
+                }
+                if (try_count == 0) break;
+                try_count -= 1;
+            }
+            return false;
+        } else if (has_question) {
+            // Optional: try with and without
+            if (s < str.len and matchElement(str[s], pattern[elem_start..elem_end])) {
+                if (regexMatch(str, s + 1, pattern, next_p, anchored_end)) return true;
+            }
+            return regexMatch(str, s, pattern, next_p, anchored_end);
+        } else {
+            // Exact match of one element
+            if (s >= str.len) return false;
+            if (!matchElement(str[s], pattern[elem_start..elem_end])) return false;
+            s += 1;
+            p = next_p;
+        }
     }
+
+    // Pattern exhausted
+    if (anchored_end) return s == str.len;
     return true;
+}
+
+/// Match a single character against a pattern element
+fn matchElement(ch: u8, elem: []const u8) bool {
+    if (elem.len == 0) return false;
+
+    if (elem[0] == '.') return true;
+    if (elem[0] == '\\' and elem.len >= 2) {
+        return switch (elem[1]) {
+            'd' => ch >= '0' and ch <= '9',
+            'w' => std.ascii.isAlphanumeric(ch) or ch == '_',
+            's' => std.ascii.isWhitespace(ch),
+            'D' => !(ch >= '0' and ch <= '9'),
+            'W' => !std.ascii.isAlphanumeric(ch) and ch != '_',
+            'S' => !std.ascii.isWhitespace(ch),
+            else => ch == elem[1],
+        };
+    }
+    if (elem[0] == '[') {
+        // Bracket expression
+        if (elem.len < 2) return false;
+        const negate = elem[1] == '^';
+        const start_idx: usize = if (negate) 2 else 1;
+        const end_idx = if (elem.len > 0 and elem[elem.len - 1] == ']') elem.len - 1 else elem.len;
+        var matched = false;
+        var i: usize = start_idx;
+        while (i < end_idx) {
+            if (i + 2 < end_idx and elem[i + 1] == '-') {
+                // Range: a-z
+                if (ch >= elem[i] and ch <= elem[i + 2]) matched = true;
+                i += 3;
+            } else {
+                if (ch == elem[i]) matched = true;
+                i += 1;
+            }
+        }
+        return if (negate) !matched else matched;
+    }
+
+    return ch == elem[0];
 }

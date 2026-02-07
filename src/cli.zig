@@ -544,6 +544,11 @@ fn runScript(allocator: std.mem.Allocator, args: []const []const u8, config_path
 
     try den_shell.runScript(script_path, "den", script_args);
     den_shell.executeExitTrap();
+
+    // Propagate exit code to OS
+    if (den_shell.last_exit_code != 0) {
+        std.process.exit(@intCast(@as(u32, @bitCast(den_shell.last_exit_code))));
+    }
 }
 
 /// Run command string (-c "command")
@@ -577,6 +582,11 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
     // Output JSON result if requested
     if (json_output) {
         try IO.print("{{\"exit_code\":{d}}}\n", .{den_shell.last_exit_code});
+    }
+
+    // Propagate exit code to OS (critical for scripts and tools like Claude Code)
+    if (den_shell.last_exit_code != 0) {
+        std.process.exit(@intCast(@as(u32, @bitCast(den_shell.last_exit_code))));
     }
 }
 
