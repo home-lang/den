@@ -524,24 +524,42 @@ pub const Expansion = struct {
             if (self.arrays) |arrays| {
                 if (arrays.get(var_name)) |array| {
                     if (std.mem.eql(u8, index_part, "@") or std.mem.eql(u8, index_part, "*")) {
-                        // ${arr[@]} or ${arr[*]} - all elements
-                        if (array.len == 0) {
+                        // Check for array slicing: ${arr[@]:offset:length}
+                        const after_bracket = content[bracket_pos + close_bracket + 1 ..];
+                        var slice_start: usize = 0;
+                        var slice_len: ?usize = null;
+                        if (after_bracket.len > 0 and after_bracket[0] == ':') {
+                            const slice_params = after_bracket[1..];
+                            if (std.mem.indexOfScalar(u8, slice_params, ':')) |second_colon| {
+                                slice_start = std.fmt.parseInt(usize, slice_params[0..second_colon], 10) catch 0;
+                                slice_len = std.fmt.parseInt(usize, slice_params[second_colon + 1 ..], 10) catch null;
+                            } else {
+                                slice_start = std.fmt.parseInt(usize, slice_params, 10) catch 0;
+                            }
+                        }
+
+                        // Apply slicing
+                        const start = @min(slice_start, array.len);
+                        const end_idx = if (slice_len) |sl| @min(start + sl, array.len) else array.len;
+                        const sliced = array[start..end_idx];
+
+                        if (sliced.len == 0) {
                             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                         }
                         var total_len: usize = 0;
-                        for (array) |item| {
+                        for (sliced) |item| {
                             total_len += item.len;
                         }
-                        if (array.len > 1) {
-                            total_len += array.len - 1; // spaces
+                        if (sliced.len > 1) {
+                            total_len += sliced.len - 1; // spaces
                         }
 
                         var result = try self.allocator.alloc(u8, total_len);
                         var pos: usize = 0;
-                        for (array, 0..) |item, i| {
+                        for (sliced, 0..) |item, i| {
                             @memcpy(result[pos..pos + item.len], item);
                             pos += item.len;
-                            if (i < array.len - 1) {
+                            if (i < sliced.len - 1) {
                                 result[pos] = ' ';
                                 pos += 1;
                             }

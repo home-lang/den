@@ -11,14 +11,32 @@ const Shell = @import("../shell.zig").Shell;
 
 /// Builtin: printf - formatted output with full format string support
 pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
-    _ = shell;
-
     if (cmd.args.len == 0) {
         return;
     }
 
-    const format = cmd.args[0];
-    var arg_idx: usize = 1;
+    // Handle -v flag: printf -v varname format args...
+    var var_name: ?[]const u8 = null;
+    var format_idx: usize = 0;
+    if (cmd.args.len >= 3 and std.mem.eql(u8, cmd.args[0], "-v")) {
+        var_name = cmd.args[1];
+        format_idx = 2;
+    }
+
+    const format = cmd.args[format_idx];
+    var arg_idx: usize = format_idx + 1;
+
+    // For -v flag: redirect stdout to a pipe to capture output
+    var saved_stdout: c_int = -1;
+    var pipe_fds: [2]c_int = .{ -1, -1 };
+    if (var_name != null) {
+        if (std.c.pipe(&pipe_fds) == 0) {
+            saved_stdout = std.c.dup(std.posix.STDOUT_FILENO);
+            _ = std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO);
+            std.posix.close(@intCast(pipe_fds[1]));
+            pipe_fds[1] = -1;
+        }
+    }
 
     // In bash, printf reuses the format string for remaining arguments
     // e.g., printf "%s\n" a b c prints a\nb\nc
@@ -248,6 +266,40 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
         }
     }
     } // end outer while (did_consume_arg) loop for format reuse
+
+    // For -v flag: read captured output and store in variable
+    if (var_name) |vname| {
+        if (saved_stdout >= 0) {
+            // Restore stdout
+            _ = std.c.dup2(saved_stdout, std.posix.STDOUT_FILENO);
+            std.posix.close(@intCast(saved_stdout));
+
+            // Read captured output from pipe
+            if (pipe_fds[0] >= 0) {
+                var result_buf: [4096]u8 = undefined;
+                const n = std.c.read(pipe_fds[0], &result_buf, result_buf.len);
+                std.posix.close(@intCast(pipe_fds[0]));
+                if (n > 0) {
+                    const output = result_buf[0..@intCast(n)];
+                    // Store in shell variable
+                    const val = shell.allocator.dupe(u8, output) catch return;
+                    const gop = shell.environment.getOrPut(vname) catch {
+                        shell.allocator.free(val);
+                        return;
+                    };
+                    if (gop.found_existing) {
+                        shell.allocator.free(gop.value_ptr.*);
+                    } else {
+                        gop.key_ptr.* = shell.allocator.dupe(u8, vname) catch {
+                            shell.allocator.free(val);
+                            return;
+                        };
+                    }
+                    gop.value_ptr.* = val;
+                }
+            }
+        }
+    }
 }
 
 /// Helper for printf - format signed integer with width/padding

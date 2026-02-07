@@ -110,9 +110,6 @@ pub fn dispatchBuiltin(self: *Shell, cmd: *types.ParsedCommand) !DispatchResult 
     // Test/conditionals
     if (std.mem.eql(u8, name, "test") or std.mem.eql(u8, name, "[") or std.mem.eql(u8, name, "[[")) {
         try shell_mod.builtinTest(self, cmd);
-        if (self.last_exit_code != 0) {
-            shell_mod.executeErrTrap(self);
-        }
         return .handled;
     }
 
@@ -138,7 +135,6 @@ pub fn dispatchBuiltin(self: *Shell, cmd: *types.ParsedCommand) !DispatchResult 
     }
     if (std.mem.eql(u8, name, "false")) {
         self.last_exit_code = 1;
-        shell_mod.executeErrTrap(self);
         return .handled;
     }
     if (std.mem.eql(u8, name, ":")) {

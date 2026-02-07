@@ -174,6 +174,31 @@ pub fn set(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     while (arg_idx < command.args.len) {
         const arg = command.args[arg_idx];
 
+        // Handle set -- args... (set positional parameters)
+        if (std.mem.eql(u8, arg, "--")) {
+            if (ctx.hasShell()) {
+                const shell_ref = try ctx.getShell();
+                // Clear existing positional parameters
+                var pi: usize = 0;
+                while (pi < shell_ref.positional_params.len) : (pi += 1) {
+                    if (shell_ref.positional_params[pi]) |param| {
+                        shell_ref.allocator.free(param);
+                        shell_ref.positional_params[pi] = null;
+                    }
+                }
+                // Set new positional parameters from remaining args
+                shell_ref.positional_params_count = 0;
+                var new_idx: usize = 0;
+                var rest_idx = arg_idx + 1;
+                while (rest_idx < command.args.len and new_idx < shell_ref.positional_params.len) : (rest_idx += 1) {
+                    shell_ref.positional_params[new_idx] = shell_ref.allocator.dupe(u8, command.args[rest_idx]) catch null;
+                    new_idx += 1;
+                }
+                shell_ref.positional_params_count = new_idx;
+            }
+            return 0;
+        }
+
         // Handle shell options (-e, -E, +e, +E, etc.)
         if (arg.len > 0 and (arg[0] == '-' or arg[0] == '+')) {
             const enable = arg[0] == '-';

@@ -229,6 +229,38 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
             try setVarAttributes(shell, var_name, attrs, remove_attrs);
         } else if (attrs.indexed_array) {
             // Handle indexed array
+            if (var_value) |val| {
+                if (val.len > 0 and val[0] == '(') {
+                    // Reconstruct the full array assignment: name=(values...)
+                    // The value may have been split across args by tokenizer
+                    var buf: [4096]u8 = undefined;
+                    var pos: usize = 0;
+                    // Write "name="
+                    const name_len = @min(var_name.len, buf.len - pos);
+                    @memcpy(buf[pos .. pos + name_len], var_name[0..name_len]);
+                    pos += name_len;
+                    if (pos < buf.len) { buf[pos] = '='; pos += 1; }
+                    // Write first value part
+                    const val_len = @min(val.len, buf.len - pos);
+                    @memcpy(buf[pos .. pos + val_len], val[0..val_len]);
+                    pos += val_len;
+                    // If value doesn't end with ), join remaining args
+                    if (val[val.len - 1] != ')') {
+                        for (cmd.args[arg_start + 1 ..]) |extra| {
+                            if (pos < buf.len) { buf[pos] = ' '; pos += 1; }
+                            const extra_len = @min(extra.len, buf.len - pos);
+                            @memcpy(buf[pos .. pos + extra_len], extra[0..extra_len]);
+                            pos += extra_len;
+                            if (extra.len > 0 and extra[extra.len - 1] == ')') break;
+                        }
+                    }
+                    const variable_handling = @import("variable_handling.zig");
+                    try variable_handling.executeArrayAssignment(shell, buf[0..pos]);
+                    try setVarAttributes(shell, var_name, attrs, remove_attrs);
+                    shell.last_exit_code = 0;
+                    return;
+                }
+            }
             const gop = try shell.arrays.getOrPut(var_name);
             if (!gop.found_existing) {
                 const key = try shell.allocator.dupe(u8, var_name);

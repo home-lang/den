@@ -147,13 +147,27 @@ pub fn executeArrayElementAssignment(self: *Shell, input: []const u8) !void {
 
 /// Check if input is an array assignment: name=(value1 value2 ...)
 pub fn isArrayAssignment(input: []const u8) bool {
+    const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
     // Look for pattern: name=(...) or name+=(...)
-    const eq_pos = std.mem.indexOfScalar(u8, input, '=') orelse return false;
-    if (eq_pos >= input.len - 1) return false;
-    if (input[eq_pos + 1] != '(') return false;
+    const eq_pos = std.mem.indexOfScalar(u8, trimmed, '=') orelse return false;
+    if (eq_pos >= trimmed.len - 1) return false;
+    if (trimmed[eq_pos + 1] != '(') return false;
+
+    // Verify the part before = is a valid variable name (no spaces)
+    const name_end = if (eq_pos > 0 and trimmed[eq_pos - 1] == '+') eq_pos - 1 else eq_pos;
+    if (name_end == 0) return false;
+    const name = trimmed[0..name_end];
+    // Must not contain spaces (rules out "declare -a arr")
+    if (std.mem.indexOfScalar(u8, name, ' ') != null) return false;
+    // First char must be letter or underscore
+    if (!std.ascii.isAlphabetic(name[0]) and name[0] != '_') return false;
+    // All chars must be alphanumeric or underscore
+    for (name) |c| {
+        if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
+    }
 
     // Check for closing paren
-    return std.mem.indexOfScalar(u8, input[eq_pos + 2 ..], ')') != null;
+    return std.mem.indexOfScalar(u8, trimmed[eq_pos + 2 ..], ')') != null;
 }
 
 /// Parse and execute array assignment (or array append with +=)

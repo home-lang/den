@@ -55,6 +55,7 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
     expander.arrays = &self.arrays; // Add indexed array support
     expander.assoc_arrays = &self.assoc_arrays; // Add associative array support
     expander.var_attributes = &self.var_attributes; // Add nameref support
+    expander.option_nounset = self.option_nounset; // Pass set -u flag
     // Set local vars pointer if inside a function
     if (self.function_manager.currentFrame()) |frame| {
         expander.local_vars = &frame.local_vars;

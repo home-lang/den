@@ -1123,6 +1123,10 @@ pub const Shell = struct {
         // This avoids the full tokenizer/parser for common cases like "ls", "echo hello", etc.
         if (self.tryFastPath(trimmed_input)) |exit_code| {
             self.last_exit_code = exit_code;
+            // Fire ERR trap on non-zero exit codes
+            if (exit_code != 0) {
+                shell_mod.executeErrTrap(self);
+            }
             // Execute post_command hooks
             var post_context = HookContext{
                 .hook_type = .post_command,
@@ -1155,7 +1159,14 @@ pub const Shell = struct {
         defer chain.deinit(self.allocator);
 
         // Expand variables in all commands
-        try self.expandCommandChain(&chain);
+        self.expandCommandChain(&chain) catch |err| {
+            if (err == error.UnboundVariable) {
+                self.last_exit_code = 1;
+                if (self.option_errexit) return error.Exit;
+                return;
+            }
+            return err;
+        };
 
         // Expand aliases in command names
         try self.expandAliases(&chain);
@@ -1198,6 +1209,10 @@ pub const Shell = struct {
             const cmd = &chain.commands[0];
             if (cmd.redirections.len == 0) {
                 if (try shell_mod.dispatchBuiltin(self, cmd) == .handled) {
+                    // Fire ERR trap for non-zero exit codes from builtins
+                    if (self.last_exit_code != 0) {
+                        shell_mod.executeErrTrap(self);
+                    }
                     return;
                 }
             }
@@ -1229,7 +1244,7 @@ pub const Shell = struct {
             };
 
             self.last_exit_code = exit_code;
-            // Note: ERR trap is executed in executeChain after each command
+            // Note: ERR trap is already executed inside executor.executeChain
         }
 
         // Execute post_command hooks
