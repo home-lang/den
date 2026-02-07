@@ -157,27 +157,34 @@ pub const BraceExpander = struct {
 
     fn expandSequence(self: *BraceExpander, prefix: []const u8, content: []const u8, suffix: []const u8, sep_pos: usize) ![][]const u8 {
         const start_str = content[0..sep_pos];
-        const end_str = content[sep_pos + 2 ..];
+        const rest = content[sep_pos + 2 ..];
+
+        // Check for step: {start..end..step}
+        var end_str = rest;
+        var step_val: ?i64 = null;
+        if (std.mem.indexOf(u8, rest, "..")) |second_sep| {
+            end_str = rest[0..second_sep];
+            const step_str = rest[second_sep + 2 ..];
+            step_val = std.fmt.parseInt(i64, step_str, 10) catch null;
+        }
 
         // Try to parse as integers first
         const start_num = std.fmt.parseInt(i64, start_str, 10) catch {
-            // Try as characters
+            // Try as characters (support step for chars too)
             if (start_str.len == 1 and end_str.len == 1) {
                 return try self.expandCharSequence(prefix, start_str[0], end_str[0], suffix);
             }
 
-            // Invalid sequence, return as-is
+            // Invalid sequence, return as literal (no braces to prevent infinite recursion)
             const result = try self.allocator.alloc([]const u8, 1);
-            const full = try std.fmt.allocPrint(self.allocator, "{s}{{{s}}}{s}", .{ prefix, content, suffix });
-            result[0] = full;
+            result[0] = try std.fmt.allocPrint(self.allocator, "{s}{{{s}}}{s}", .{ prefix, content, suffix });
             return result;
         };
 
         const end_num = std.fmt.parseInt(i64, end_str, 10) catch {
-            // Invalid sequence, return as-is
+            // Invalid sequence, return as literal
             const result = try self.allocator.alloc([]const u8, 1);
-            const full = try std.fmt.allocPrint(self.allocator, "{s}{{{s}}}{s}", .{ prefix, content, suffix });
-            result[0] = full;
+            result[0] = try std.fmt.allocPrint(self.allocator, "{s}{{{s}}}{s}", .{ prefix, content, suffix });
             return result;
         };
 
@@ -191,12 +198,16 @@ pub const BraceExpander = struct {
         else
             0;
 
-        return try self.expandNumericSequence(prefix, start_num, end_num, suffix, pad_width);
+        return try self.expandNumericSequence(prefix, start_num, end_num, suffix, pad_width, step_val);
     }
 
-    fn expandNumericSequence(self: *BraceExpander, prefix: []const u8, start: i64, end: i64, suffix: []const u8, pad_width: usize) ![][]const u8 {
-        const step: i64 = if (start <= end) 1 else -1;
-        const count = @abs(end - start) + 1;
+    fn expandNumericSequence(self: *BraceExpander, prefix: []const u8, start: i64, end: i64, suffix: []const u8, pad_width: usize, custom_step: ?i64) ![][]const u8 {
+        // Direction is always determined by start/end, step magnitude from user
+        const direction: i64 = if (start <= end) 1 else -1;
+        const step: i64 = if (custom_step) |cs| (if (cs == 0) direction else direction * @as(i64, @intCast(@abs(cs)))) else direction;
+        const abs_step = @abs(step);
+        const range = @abs(end - start);
+        const count = range / abs_step + 1;
 
         if (count > 1000) {
             // Limit to prevent abuse

@@ -16,20 +16,55 @@ const Shell = @import("../shell.zig").Shell;
 
 /// Builtin: local - declare local variables in function scope
 pub fn builtinLocal(shell: *Shell, cmd: *types.ParsedCommand) !void {
+    // Parse flags
+    var attrs = types.VarAttributes{};
+    var arg_start: usize = 0;
+    while (arg_start < cmd.args.len) {
+        const arg = cmd.args[arg_start];
+        if (arg.len > 0 and arg[0] == '-') {
+            arg_start += 1;
+            for (arg[1..]) |c| {
+                switch (c) {
+                    'i' => attrs.integer = true,
+                    'l' => attrs.lowercase = true,
+                    'u' => attrs.uppercase = true,
+                    'r' => attrs.readonly = true,
+                    'x' => attrs.exported = true,
+                    'a' => attrs.indexed_array = true,
+                    'A' => attrs.assoc_array = true,
+                    'n' => attrs.nameref = true,
+                    else => {},
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
     // Check if we're inside a function
     if (shell.function_manager.currentFrame() == null) {
         // Outside function - use environment variables as fallback
-        if (cmd.args.len == 0) {
+        if (arg_start >= cmd.args.len) {
             try IO.eprint("local: can only be used in a function\n", .{});
             shell.last_exit_code = 1;
             return;
         }
 
         // Still set variables for compatibility
-        for (cmd.args) |arg| {
+        for (cmd.args[arg_start..]) |arg| {
             if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
                 const var_name = arg[0..eq_pos];
-                const var_value = arg[eq_pos + 1 ..];
+                var var_value: []const u8 = arg[eq_pos + 1 ..];
+
+                // Apply integer attribute
+                if (attrs.integer) {
+                    var arith = arithmetic.Arithmetic.initWithVariables(shell.allocator, &shell.environment);
+                    const result = arith.eval(var_value) catch 0;
+                    var buf: [32]u8 = undefined;
+                    const num_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                    var_value = num_str;
+                }
+
                 const value = try shell.allocator.dupe(u8, var_value);
                 const gop = try shell.environment.getOrPut(var_name);
                 if (gop.found_existing) {
@@ -40,13 +75,14 @@ pub fn builtinLocal(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     gop.key_ptr.* = key;
                     gop.value_ptr.* = value;
                 }
+                try setVarAttributes(shell, var_name, attrs, false);
             }
         }
         shell.last_exit_code = 0;
         return;
     }
 
-    if (cmd.args.len == 0) {
+    if (arg_start >= cmd.args.len) {
         // List local variables in current function
         if (shell.function_manager.currentFrame()) |frame| {
             var iter = frame.local_vars.iterator();
@@ -59,15 +95,43 @@ pub fn builtinLocal(shell: *Shell, cmd: *types.ParsedCommand) !void {
     }
 
     // Set local variables in function scope
-    for (cmd.args) |arg| {
+    for (cmd.args[arg_start..]) |arg| {
         if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
             const var_name = arg[0..eq_pos];
-            const var_value = arg[eq_pos + 1 ..];
-            shell.function_manager.setLocal(var_name, var_value) catch {
-                try IO.eprint("local: {s}: failed to set variable\n", .{var_name});
-                shell.last_exit_code = 1;
-                return;
-            };
+            var var_value: []const u8 = arg[eq_pos + 1 ..];
+
+            // Apply integer attribute
+            if (attrs.integer) {
+                var arith = arithmetic.Arithmetic.initWithVariables(shell.allocator, &shell.environment);
+                const result = arith.eval(var_value) catch 0;
+                var buf: [32]u8 = undefined;
+                const num_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                var_value = num_str;
+            }
+
+            // Apply case conversion
+            if (attrs.lowercase) {
+                const lower = try shell.allocator.alloc(u8, var_value.len);
+                for (var_value, 0..) |c, i| {
+                    lower[i] = std.ascii.toLower(c);
+                }
+                shell.function_manager.setLocal(var_name, lower) catch {};
+                shell.allocator.free(lower);
+            } else if (attrs.uppercase) {
+                const upper = try shell.allocator.alloc(u8, var_value.len);
+                for (var_value, 0..) |c, i| {
+                    upper[i] = std.ascii.toUpper(c);
+                }
+                shell.function_manager.setLocal(var_name, upper) catch {};
+                shell.allocator.free(upper);
+            } else {
+                shell.function_manager.setLocal(var_name, var_value) catch {
+                    try IO.eprint("local: {s}: failed to set variable\n", .{var_name});
+                    shell.last_exit_code = 1;
+                    return;
+                };
+            }
+            try setVarAttributes(shell, var_name, attrs, false);
         } else {
             // Declare empty variable
             shell.function_manager.setLocal(arg, "") catch {

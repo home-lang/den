@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const builtin = @import("builtin");
+const Shell = @import("../../shell.zig").Shell;
 
 /// Test builtins: test, [, [[
 /// Extracted from executor/mod.zig for better modularity
@@ -121,7 +122,7 @@ fn evaluateTestArgs(args: []const []const u8) !i32 {
 }
 
 /// Extended test builtin [[ ]] with pattern matching and regex support
-pub fn extendedTest(command: *types.ParsedCommand) !i32 {
+pub fn extendedTest(command: *types.ParsedCommand, shell: ?*Shell) !i32 {
     // Remove trailing ]] if present
     var args = command.args;
     if (args.len > 0 and std.mem.eql(u8, args[args.len - 1], "]]")) {
@@ -154,7 +155,7 @@ pub fn extendedTest(command: *types.ParsedCommand) !i32 {
         }
 
         // Evaluate the sub-expression
-        const sub_result = try evaluateExtendedTestExpr(args[i..expr_end]);
+        const sub_result = try evaluateExtendedTestExpr(args[i..expr_end], shell);
 
         // Apply pending operator
         if (pending_op) |op| {
@@ -186,12 +187,12 @@ pub fn extendedTest(command: *types.ParsedCommand) !i32 {
 }
 
 /// Evaluate a single extended test expression (without && / ||)
-fn evaluateExtendedTestExpr(args: [][]const u8) !bool {
+fn evaluateExtendedTestExpr(args: [][]const u8, shell: ?*Shell) !bool {
     if (args.len == 0) return false;
 
     // Handle negation
     if (args.len >= 1 and std.mem.eql(u8, args[0], "!")) {
-        return !(try evaluateExtendedTestExpr(args[1..]));
+        return !(try evaluateExtendedTestExpr(args[1..], shell));
     }
 
     // Handle parentheses
@@ -204,7 +205,7 @@ fn evaluateExtendedTestExpr(args: [][]const u8) !bool {
             if (depth > 0) close_idx += 1;
         }
         if (close_idx < args.len) {
-            return try evaluateExtendedTestExpr(args[1..close_idx]);
+            return try evaluateExtendedTestExpr(args[1..close_idx], shell);
         }
     }
 
@@ -259,6 +260,16 @@ fn evaluateExtendedTestExpr(args: [][]const u8) !bool {
         } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
             const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return false;
             return stat.kind == .sym_link;
+        } else if (std.mem.eql(u8, op, "-v")) {
+            // Variable is set - check environment, arrays, and local vars
+            if (shell) |s| {
+                if (s.environment.get(arg) != null) return true;
+                if (s.arrays.contains(arg) or s.assoc_arrays.contains(arg)) return true;
+                if (s.function_manager.currentFrame()) |frame| {
+                    if (frame.local_vars.contains(arg)) return true;
+                }
+            }
+            return false;
         }
     }
 

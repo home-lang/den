@@ -116,7 +116,6 @@ pub fn executeArrayElementAssignment(self: *Shell, input: []const u8) !void {
     const close_bracket = std.mem.indexOfScalar(u8, trimmed[bracket_pos..], ']') orelse return;
     const abs_close = bracket_pos + close_bracket;
     const index_str = trimmed[bracket_pos + 1 .. abs_close];
-    const index = std.fmt.parseInt(usize, index_str, 10) catch return;
 
     // Value is everything after ]=
     var raw_value = trimmed[abs_close + 2 ..];
@@ -128,7 +127,27 @@ pub fn executeArrayElementAssignment(self: *Shell, input: []const u8) !void {
         raw_value = raw_value[1 .. raw_value.len - 1];
     }
 
-    // Get or create the array
+    // Check if this is an associative array
+    if (self.assoc_arrays.contains(name)) {
+        const gop = try self.assoc_arrays.getOrPut(name);
+        if (!gop.found_existing) {
+            gop.key_ptr.* = try self.allocator.dupe(u8, name);
+            gop.value_ptr.* = std.StringHashMap([]const u8).init(self.allocator);
+        }
+        const inner_gop = try gop.value_ptr.getOrPut(index_str);
+        if (inner_gop.found_existing) {
+            self.allocator.free(inner_gop.value_ptr.*);
+        } else {
+            inner_gop.key_ptr.* = try self.allocator.dupe(u8, index_str);
+        }
+        inner_gop.value_ptr.* = try self.allocator.dupe(u8, raw_value);
+        self.last_exit_code = 0;
+        return;
+    }
+
+    const index = std.fmt.parseInt(usize, index_str, 10) catch return;
+
+    // Get or create the indexed array
     if (self.arrays.get(name)) |old_array| {
         // Extend if needed
         if (index < old_array.len) {

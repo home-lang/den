@@ -593,20 +593,22 @@ pub const Expansion = struct {
                     if (std.mem.eql(u8, index_part, "@") or std.mem.eql(u8, index_part, "*")) {
                         // Check for array slicing: ${arr[@]:offset:length}
                         const after_bracket = content[bracket_pos + close_bracket + 1 ..];
-                        var slice_start: usize = 0;
+                        var slice_offset: i64 = 0;
                         var slice_len: ?usize = null;
                         if (after_bracket.len > 0 and after_bracket[0] == ':') {
-                            const slice_params = after_bracket[1..];
+                            const slice_params = std.mem.trim(u8, after_bracket[1..], " ");
                             if (std.mem.indexOfScalar(u8, slice_params, ':')) |second_colon| {
-                                slice_start = std.fmt.parseInt(usize, slice_params[0..second_colon], 10) catch 0;
-                                slice_len = std.fmt.parseInt(usize, slice_params[second_colon + 1 ..], 10) catch null;
+                                slice_offset = std.fmt.parseInt(i64, std.mem.trim(u8, slice_params[0..second_colon], " "), 10) catch 0;
+                                slice_len = std.fmt.parseInt(usize, std.mem.trim(u8, slice_params[second_colon + 1 ..], " "), 10) catch null;
                             } else {
-                                slice_start = std.fmt.parseInt(usize, slice_params, 10) catch 0;
+                                slice_offset = std.fmt.parseInt(i64, slice_params, 10) catch 0;
                             }
                         }
 
-                        // Apply slicing
-                        const start = @min(slice_start, array.len);
+                        // Apply slicing (negative offset counts from end)
+                        const arr_len: i64 = @intCast(array.len);
+                        const effective_offset = if (slice_offset < 0) @max(arr_len + slice_offset, 0) else slice_offset;
+                        const start: usize = @intCast(@min(effective_offset, arr_len));
                         const end_idx = if (slice_len) |sl| @min(start + sl, array.len) else array.len;
                         const sliced = array[start..end_idx];
 
@@ -710,15 +712,37 @@ pub const Expansion = struct {
             }
         }
 
-        // Check for string/array length: ${#VAR} or ${#arr[@]}
+        // Check for string/array length: ${#VAR} or ${#arr[@]} or ${#arr[index]}
         if (content.len > 0 and content[0] == '#') {
             const raw_name = content[1..];
             // Strip trailing [@] or [*] for array length lookups
-            const var_name = if (std.mem.endsWith(u8, raw_name, "[@]") or std.mem.endsWith(u8, raw_name, "[*]"))
+            const is_all = std.mem.endsWith(u8, raw_name, "[@]") or std.mem.endsWith(u8, raw_name, "[*]");
+            const var_name = if (is_all)
                 raw_name[0 .. raw_name.len - 3]
+            else if (std.mem.indexOfScalar(u8, raw_name, '[')) |bp|
+                raw_name[0..bp]
             else
                 raw_name;
-            // First check indexed arrays
+            // Check for specific array element length: ${#arr[index]}
+            if (!is_all) {
+                if (std.mem.indexOfScalar(u8, raw_name, '[')) |bp| {
+                    if (std.mem.indexOfScalar(u8, raw_name[bp..], ']')) |cb| {
+                        const idx_str = raw_name[bp + 1 .. bp + cb];
+                        if (self.arrays) |arrays| {
+                            if (arrays.get(var_name)) |array| {
+                                const idx = std.fmt.parseInt(usize, idx_str, 10) catch 0;
+                                if (idx < array.len) {
+                                    const len_str = try std.fmt.allocPrint(self.allocator, "{d}", .{array[idx].len});
+                                    return ExpansionResult{ .value = len_str, .consumed = end + 1, .owned = true };
+                                }
+                                const zero = try self.allocator.dupe(u8, "0");
+                                return ExpansionResult{ .value = zero, .consumed = end + 1, .owned = true };
+                            }
+                        }
+                    }
+                }
+            }
+            // First check indexed arrays (array length)
             if (self.arrays) |arrays| {
                 if (arrays.get(var_name)) |array| {
                     const value = try std.fmt.allocPrint(self.allocator, "{d}", .{array.len});
@@ -1025,8 +1049,9 @@ pub const Expansion = struct {
         }
 
         // ${VAR#pattern} - remove shortest prefix match
+        // But NOT ${VAR/#pat/rep} which is prefix substitution (# after /)
         if (std.mem.indexOf(u8, content, "#")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 1) {
+            if (sep_pos > 0 and sep_pos < content.len - 1 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
                 const var_name_pp = content[0..sep_pos];
                 const pp_pattern = content[sep_pos + 1 ..];
 
@@ -1040,7 +1065,7 @@ pub const Expansion = struct {
 
         // ${VAR%%pattern} - remove longest suffix match (greedy)
         if (std.mem.indexOf(u8, content, "%%")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 2) {
+            if (sep_pos > 0 and sep_pos < content.len - 2 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
                 const var_name_pp = content[0..sep_pos];
                 const pp_pattern = content[sep_pos + 2 ..];
 
@@ -1053,8 +1078,9 @@ pub const Expansion = struct {
         }
 
         // ${VAR%pattern} - remove shortest suffix match
+        // But NOT ${VAR/%pat/rep} which is suffix substitution (% after /)
         if (std.mem.indexOf(u8, content, "%")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 1) {
+            if (sep_pos > 0 and sep_pos < content.len - 1 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
                 const var_name_pp = content[0..sep_pos];
                 const pp_pattern = content[sep_pos + 1 ..];
 
@@ -1067,29 +1093,54 @@ pub const Expansion = struct {
         }
 
         // Check for replacement: ${VAR/pattern/replacement} or ${VAR//pattern/replacement}
+        // Also handles ${VAR/#pattern/rep} (prefix) and ${VAR/%pattern/rep} (suffix)
         if (std.mem.indexOf(u8, content, "/")) |slash_pos| {
             if (slash_pos > 0) {
                 const var_name = content[0..slash_pos];
                 const rest = content[slash_pos..];
 
-                // Check if it's // (replace all) or / (replace first)
+                // Check if it's // (replace all), /# (prefix), /% (suffix), or / (replace first)
                 const replace_all = rest.len > 1 and rest[1] == '/';
-                const pattern_start: usize = if (replace_all) 2 else 1;
+                const anchor_prefix = rest.len > 1 and rest[1] == '#';
+                const anchor_suffix = rest.len > 1 and rest[1] == '%';
+                const pattern_start: usize = if (replace_all or anchor_prefix or anchor_suffix) 2 else 1;
 
                 // Find the second slash for the replacement
                 if (std.mem.indexOf(u8, rest[pattern_start..], "/")) |second_slash| {
                     const pattern = rest[pattern_start .. pattern_start + second_slash];
                     const replacement = rest[pattern_start + second_slash + 1 ..];
 
-                    if (self.environment.get(var_name)) |value| {
-                        const result = try self.replaceInString(value, pattern, replacement, replace_all);
-                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    if (self.getVariableValue(var_name)) |value| {
+                        if (anchor_prefix) {
+                            // ${VAR/#pattern/replacement} - replace at start
+                            if (std.mem.startsWith(u8, value, pattern)) {
+                                const result = try self.allocator.alloc(u8, replacement.len + value.len - pattern.len);
+                                @memcpy(result[0..replacement.len], replacement);
+                                @memcpy(result[replacement.len..], value[pattern.len..]);
+                                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                            }
+                            const result = try self.allocator.dupe(u8, value);
+                            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                        } else if (anchor_suffix) {
+                            // ${VAR/%pattern/replacement} - replace at end
+                            if (std.mem.endsWith(u8, value, pattern)) {
+                                const result = try self.allocator.alloc(u8, value.len - pattern.len + replacement.len);
+                                @memcpy(result[0 .. value.len - pattern.len], value[0 .. value.len - pattern.len]);
+                                @memcpy(result[value.len - pattern.len ..], replacement);
+                                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                            }
+                            const result = try self.allocator.dupe(u8, value);
+                            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                        } else {
+                            const result = try self.replaceInString(value, pattern, replacement, replace_all);
+                            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                        }
                     }
                 } else {
                     // No second slash - replacement is empty string (deletion)
                     const pattern = rest[pattern_start..];
 
-                    if (self.environment.get(var_name)) |value| {
+                    if (self.getVariableValue(var_name)) |value| {
                         const result = try self.replaceInString(value, pattern, "", replace_all);
                         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     }
@@ -1175,6 +1226,34 @@ pub const Expansion = struct {
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         }
 
+        // Non-colon variants: check if set (regardless of empty)
+        // ${VAR-default}: use default only if VAR is unset
+        if (std.mem.indexOfScalar(u8, content, '-')) |sep_pos| {
+            if (sep_pos > 0 and (sep_pos < 2 or content[sep_pos - 1] != ':')) {
+                const var_name = content[0..sep_pos];
+                const default_value = content[sep_pos + 1 ..];
+                if (self.getVariableValue(var_name)) |value| {
+                    const result = try self.allocator.dupe(u8, value);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                const result = try self.allocator.dupe(u8, default_value);
+                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+            }
+        }
+
+        // ${VAR+word}: use word if VAR is set (even if empty)
+        if (std.mem.indexOfScalar(u8, content, '+')) |sep_pos| {
+            if (sep_pos > 0 and (sep_pos < 2 or content[sep_pos - 1] != ':')) {
+                const var_name = content[0..sep_pos];
+                const alt_value = content[sep_pos + 1 ..];
+                if (self.getVariableValue(var_name) != null) {
+                    const result = try self.allocator.dupe(u8, alt_value);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
         // Handle special dynamic variables in braced form
         if (std.mem.eql(u8, content, "RANDOM")) {
             var buf: [16]u8 = undefined;
@@ -1198,6 +1277,77 @@ pub const Expansion = struct {
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{elapsed}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+        }
+        if (std.mem.eql(u8, content, "PPID")) {
+            var buf: [16]u8 = undefined;
+            const ppid = std.c.getppid();
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{ppid}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+        }
+        if (std.mem.eql(u8, content, "BASHPID")) {
+            var buf: [16]u8 = undefined;
+            const pid = std.c.getpid();
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{pid}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+        }
+        if (std.mem.eql(u8, content, "EUID")) {
+            var buf: [16]u8 = undefined;
+            const uid = std.c.geteuid();
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+        }
+        if (std.mem.eql(u8, content, "UID")) {
+            var buf: [16]u8 = undefined;
+            const uid = std.c.getuid();
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+        }
+
+        // Handle ${var@operator} transform operators
+        if (content.len > 2 and content[content.len - 2] == '@') {
+            const var_name = content[0 .. content.len - 2];
+            const op = content[content.len - 1];
+            if (self.getVariableValue(var_name)) |value| {
+                switch (op) {
+                    'U' => {
+                        // Uppercase all
+                        const result = try self.allocator.alloc(u8, value.len);
+                        for (value, 0..) |c, i| result[i] = std.ascii.toUpper(c);
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    },
+                    'L' => {
+                        // Lowercase all
+                        const result = try self.allocator.alloc(u8, value.len);
+                        for (value, 0..) |c, i| result[i] = std.ascii.toLower(c);
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    },
+                    'u' => {
+                        // Uppercase first character
+                        const result = try self.allocator.dupe(u8, value);
+                        if (result.len > 0) result[0] = std.ascii.toUpper(result[0]);
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    },
+                    'l' => {
+                        // Lowercase first character
+                        const result = try self.allocator.dupe(u8, value);
+                        if (result.len > 0) result[0] = std.ascii.toLower(result[0]);
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    },
+                    'Q' => {
+                        // Quote the value
+                        const result = try self.allocator.alloc(u8, value.len + 2);
+                        result[0] = '\'';
+                        @memcpy(result[1 .. value.len + 1], value);
+                        result[value.len + 1] = '\'';
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    },
+                    else => {},
+                }
+            }
         }
 
         // Simple braced variable - use getVariableValue for nameref resolution
@@ -1449,6 +1599,34 @@ pub const Expansion = struct {
             const now = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0;
             const elapsed = now - self.shell_start_time;
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{elapsed}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+        }
+        if (std.mem.eql(u8, var_name, "PPID")) {
+            var buf: [16]u8 = undefined;
+            const ppid = std.c.getppid();
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{ppid}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+        }
+        if (std.mem.eql(u8, var_name, "BASHPID")) {
+            var buf: [16]u8 = undefined;
+            const pid = std.c.getpid();
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{pid}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+        }
+        if (std.mem.eql(u8, var_name, "EUID")) {
+            var buf: [16]u8 = undefined;
+            const uid = std.c.geteuid();
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
+            const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+        }
+        if (std.mem.eql(u8, var_name, "UID")) {
+            var buf: [16]u8 = undefined;
+            const uid = std.c.getuid();
+            const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end, .owned = true };
         }

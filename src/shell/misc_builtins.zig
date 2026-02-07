@@ -78,43 +78,19 @@ pub fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
     }
     const content = buffer[0..total_read];
 
-    // Execute each line by tokenizing and executing directly
+    // Execute each line in the shell's context so variables persist
     var lines = std.mem.splitScalar(u8, content, '\n');
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
         if (trimmed.len == 0) continue;
         if (trimmed[0] == '#') continue; // Skip comments
 
-        // Tokenize the line
-        var tokenizer = parser_mod.Tokenizer.init(self.allocator, trimmed);
-        const tokens = tokenizer.tokenize() catch |err| {
-            try IO.eprint("den: source: parse error: {}\n", .{err});
-            self.last_exit_code = 1;
-            continue; // Continue with next line instead of returning
-        };
-        defer tokenizer.deinitTokens(tokens);
-
-        // Parse tokens
-        var p = parser_mod.Parser.init(self.allocator, tokens);
-        var chain = p.parse() catch |err| {
-            try IO.eprint("den: source: parse error: {}\n", .{err});
+        // Use @as to break circular error set inference
+        const cmd_fn = @as(*const fn (*Shell, []const u8) anyerror!void, @ptrCast(&Shell.executeCommand));
+        cmd_fn(self, trimmed) catch {
             self.last_exit_code = 1;
             continue;
         };
-        defer chain.deinit(self.allocator);
-
-        // Expand variables and aliases
-        try self.expandCommandChain(&chain);
-        try self.expandAliases(&chain);
-
-        // Execute the command chain
-        var executor = executor_mod.Executor.init(self.allocator, &self.environment);
-        const exit_code = executor.executeChain(&chain) catch |err| {
-            try IO.eprint("den: source: execution error: {}\n", .{err});
-            self.last_exit_code = 1;
-            continue;
-        };
-        self.last_exit_code = exit_code;
     }
 }
 

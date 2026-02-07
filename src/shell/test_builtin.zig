@@ -91,6 +91,21 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
             };
             shell.last_exit_code = 0;
             return;
+        } else if (std.mem.eql(u8, op, "-v")) {
+            // Variable is set - check environment, local vars, and arrays
+            var is_set = shell.environment.get(arg) != null;
+            if (!is_set) {
+                // Check if it's an array
+                is_set = shell.arrays.contains(arg) or shell.assoc_arrays.contains(arg);
+            }
+            if (!is_set) {
+                // Check local vars in function scope
+                if (shell.function_manager.currentFrame()) |frame| {
+                    is_set = frame.local_vars.contains(arg);
+                }
+            }
+            shell.last_exit_code = if (is_set) 0 else 1;
+            return;
         } else if (std.mem.eql(u8, op, "-s")) {
             // File exists and is not empty
             const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {

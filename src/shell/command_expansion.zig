@@ -82,9 +82,19 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
         var expanded_args_buffer: [128][]const u8 = undefined;
         var expanded_args_count: usize = 0;
 
+        var prev_arg_is_v: bool = false;
         for (cmd.args) |arg| {
-            // First expand variables
-            const var_expanded = try expander.expand(arg);
+            // For [[ -v varname ]], don't expand the variable name after -v
+            const skip_expansion = skip_globs and prev_arg_is_v;
+            if (skip_globs) {
+                prev_arg_is_v = std.mem.eql(u8, arg, "-v");
+            }
+
+            // First expand variables (unless this is a -v operand in [[ ]])
+            const var_expanded = if (skip_expansion)
+                try self.allocator.dupe(u8, arg)
+            else
+                try expander.expand(arg);
 
             if (skip_globs) {
                 // For [[ ]], only do variable expansion, no brace/glob expansion

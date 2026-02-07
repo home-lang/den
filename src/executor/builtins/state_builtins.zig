@@ -306,8 +306,8 @@ pub fn getopts(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     const optind = std.fmt.parseInt(usize, optind_str, 10) catch 1;
 
     // Check if we're past the end of params
-    if (optind > params.len) {
-        try ctx.environment.put("OPTARG", try ctx.allocator.dupe(u8, ""));
+    if (optind == 0 or optind > params.len) {
+        try setEnvVar(ctx, "OPTARG", "");
         return 1;
     }
 
@@ -315,21 +315,22 @@ pub fn getopts(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 
     // Check if current param doesn't start with '-' or is just '-'
     if (current.len == 0 or current[0] != '-' or std.mem.eql(u8, current, "-")) {
-        try ctx.environment.put("OPTARG", try ctx.allocator.dupe(u8, ""));
+        try setEnvVar(ctx, "OPTARG", "");
         return 1;
     }
 
     // Handle '--' (end of options)
     if (std.mem.eql(u8, current, "--")) {
         const new_optind = try std.fmt.allocPrint(ctx.allocator, "{d}", .{optind + 1});
-        try ctx.environment.put("OPTIND", new_optind);
-        try ctx.environment.put("OPTARG", try ctx.allocator.dupe(u8, ""));
+        try setEnvVar(ctx, "OPTIND", new_optind);
+        ctx.allocator.free(new_optind);
+        try setEnvVar(ctx, "OPTARG", "");
         return 1;
     }
 
     // Extract the flag (first character after '-')
     if (current.len < 2) {
-        try ctx.environment.put("OPTARG", try ctx.allocator.dupe(u8, ""));
+        try setEnvVar(ctx, "OPTARG", "");
         return 1;
     }
 
@@ -345,21 +346,34 @@ pub fn getopts(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     // Set the variable to the flag character
-    try ctx.environment.put(var_name, try ctx.allocator.dupe(u8, flag));
+    try setEnvVar(ctx, var_name, flag);
 
     // Handle argument if needed
     if (expects_arg) {
         const arg_value = if (optind < params.len) params[optind] else "";
-        try ctx.environment.put("OPTARG", try ctx.allocator.dupe(u8, arg_value));
+        try setEnvVar(ctx, "OPTARG", arg_value);
         const new_optind = try std.fmt.allocPrint(ctx.allocator, "{d}", .{optind + 2});
-        try ctx.environment.put("OPTIND", new_optind);
+        try setEnvVar(ctx, "OPTIND", new_optind);
+        ctx.allocator.free(new_optind);
     } else {
-        try ctx.environment.put("OPTARG", try ctx.allocator.dupe(u8, ""));
+        try setEnvVar(ctx, "OPTARG", "");
         const new_optind = try std.fmt.allocPrint(ctx.allocator, "{d}", .{optind + 1});
-        try ctx.environment.put("OPTIND", new_optind);
+        try setEnvVar(ctx, "OPTIND", new_optind);
+        ctx.allocator.free(new_optind);
     }
 
     return 0;
+}
+
+/// Helper to safely set environment variable with proper key/value ownership
+fn setEnvVar(ctx: *BuiltinContext, name: []const u8, value: []const u8) !void {
+    const gop = try ctx.environment.getOrPut(name);
+    if (gop.found_existing) {
+        ctx.allocator.free(gop.value_ptr.*);
+    } else {
+        gop.key_ptr.* = try ctx.allocator.dupe(u8, name);
+    }
+    gop.value_ptr.* = try ctx.allocator.dupe(u8, value);
 }
 
 /// hook - manage custom command hooks

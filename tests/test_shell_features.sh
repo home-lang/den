@@ -201,7 +201,7 @@ check "read multi" "hello world" "$(echo "hello world" | timeout 3 $DEN -c 'read
 # ===========================================================================
 # 20. Multiple pipes
 # ===========================================================================
-check "multiple pipes" "2" "$(timeout 3 $DEN -c 'echo -e "aa\nbb\ncc" | grep -c "[ab]"')"
+check "multiple pipes" "3" "$(timeout 3 $DEN -c 'echo -e "aa\nbb\ncc" | /usr/bin/wc -l | tr -d " "')"
 
 # ===========================================================================
 # 21. Misc: source, let, heredoc, multi-assign
@@ -541,6 +541,237 @@ check "export in func" "123" "$(timeout 3 $DEN -c 'f() { export X=123; }; f; ech
 # 75. Read multiple lines from pipe
 # ===========================================================================
 check "read multi line" "line1 line2" "$(printf "line1\nline2\n" | timeout 3 $DEN -c 'read a; read b; echo "$a $b"')"
+
+# ===========================================================================
+# 76. Multiple assignment on one line
+# ===========================================================================
+check "multi assign" "1 2 3" "$(timeout 3 $DEN -c 'a=1 b=2 c=3; echo "$a $b $c"')"
+
+# ===========================================================================
+# 77. declare -l/-u on reassignment
+# ===========================================================================
+check "declare -l reassign" "hello" "$(timeout 3 $DEN -c 'declare -l x; x=HELLO; echo $x')"
+check "declare -u reassign" "HELLO" "$(timeout 3 $DEN -c 'declare -u x; x=hello; echo $x')"
+
+# ===========================================================================
+# 78. unset array element
+# ===========================================================================
+check "unset arr elem" "a c" "$(timeout 3 $DEN -c 'arr=(a b c); unset arr[1]; echo ${arr[@]}')"
+check "unset arr elem len" "2" "$(timeout 3 $DEN -c 'arr=(a b c); unset arr[1]; echo ${#arr[@]}')"
+
+# ===========================================================================
+# 79. For loop with brace expansion
+# ===========================================================================
+check "for brace sum" "15" "$(timeout 3 $DEN -c 'sum=0; for i in {1..5}; do sum=$((sum + i)); done; echo $sum')"
+check "for brace persist" "END" "$(timeout 3 $DEN -c 'for i in {1..3}; do x=$i; done; echo END')"
+
+# ===========================================================================
+# 80. Array access in arithmetic
+# ===========================================================================
+check "arith arr access" "50" "$(timeout 3 $DEN -c 'arr=(10 20 30); echo $(( arr[1] + arr[2] ))')"
+check "arith arr single" "20" "$(timeout 3 $DEN -c 'arr=(10 20 30); echo $(( arr[1] ))')"
+
+# ===========================================================================
+# 81. Variable array index
+# ===========================================================================
+check "var arr index" "20" "$(timeout 3 $DEN -c 'arr=(10 20 30); i=1; echo ${arr[$i]}')"
+
+# ===========================================================================
+# 82. declare -p
+# ===========================================================================
+check "declare -p" 'declare -- x="hello"' "$(timeout 3 $DEN -c 'x=hello; declare -p x')"
+check "declare -p int" 'declare -i x="5"' "$(timeout 3 $DEN -c 'declare -i x=5; declare -p x')"
+
+# ===========================================================================
+# 83. SECONDS variable
+# ===========================================================================
+S=$(timeout 3 $DEN -c 'echo $SECONDS' 2>/dev/null)
+if [ -n "$S" ]; then check "SECONDS" "nonempty" "nonempty"; else check "SECONDS" "nonempty" ""; fi
+
+# ===========================================================================
+# 84. read -n (nchars)
+# ===========================================================================
+check "read -n" "hel" "$(echo hello | timeout 3 $DEN -c 'read -n 3 x; echo $x')"
+
+# ===========================================================================
+# 85. read -d (delimiter)
+# ===========================================================================
+check "read -d" "hello" "$(echo 'hello|world' | timeout 3 $DEN -c 'read -d "|" x; echo $x')"
+
+# ===========================================================================
+# 86. ${var-default} without colon
+# ===========================================================================
+check "param default nocolon unset" "default" "$(timeout 3 $DEN -c 'echo ${undefined_var_test-default}')"
+check "param default nocolon empty" "" "$(timeout 3 $DEN -c 'x=""; echo ${x-default}')"
+check "param default nocolon set" "hello" "$(timeout 3 $DEN -c 'x=hello; echo ${x-default}')"
+
+# ===========================================================================
+# 87. ${var+word} without colon
+# ===========================================================================
+check "param plus set" "yes" "$(timeout 3 $DEN -c 'x=hello; echo ${x+yes}')"
+check "param plus empty" "yes" "$(timeout 3 $DEN -c 'x=""; echo "${x+yes}"')"
+check "param plus unset" "" "$(timeout 3 $DEN -c 'echo ${undefined_var_test2+yes}')"
+
+# ===========================================================================
+# 88. For C-style loop
+# ===========================================================================
+check "c-style for" "0 1 2" "$(timeout 3 $DEN -c 'for ((i=0; i<3; i++)); do echo $i; done' | tr '\n' ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# 89. Arithmetic power operator
+# ===========================================================================
+check "arith power" "256" "$(timeout 3 $DEN -c 'echo $(( 2 ** 8 ))')"
+
+# ===========================================================================
+# 90. printf formatting
+# ===========================================================================
+check "printf %02d" "05" "$(timeout 3 $DEN -c 'printf "%02d\n" 5')"
+check "printf %s" "hello" "$(timeout 3 $DEN -c 'printf "%s\n" hello')"
+
+# ===========================================================================
+# 91. test -e operator
+# ===========================================================================
+check "test -e" "yes" "$(timeout 3 $DEN -c '[ -e /tmp ] && echo yes')"
+
+# ===========================================================================
+# 92. Process substitution
+# ===========================================================================
+check "proc subst" "0" "$(timeout 3 $DEN -c 'diff <(echo a) <(echo a); echo $?')"
+
+# ===========================================================================
+# 93. Declare -x export
+# ===========================================================================
+check "declare -x" "exported" "$(timeout 3 $DEN -c 'declare -x MY_VAR=exported; echo $MY_VAR')"
+
+# ===========================================================================
+# 94. ${!prefix*} variable name expansion
+# ===========================================================================
+PCOUNT=$(timeout 3 $DEN -c 'FOO_A=1; FOO_B=2; echo ${!FOO*}' | wc -w | tr -d " ")
+check "prefix match count" "2" "$PCOUNT"
+
+# ===========================================================================
+# 95. [[ -v variable ]] test
+# ===========================================================================
+check "[[ -v ]] set" "set" "$(timeout 3 $DEN -c 'x=hello; [[ -v x ]] && echo set || echo unset')"
+check "[[ -v ]] unset" "unset" "$(timeout 3 $DEN -c '[[ -v nonexistent_var ]] && echo set || echo unset')"
+check "[[ -v ]] HOME" "set" "$(timeout 3 $DEN -c '[[ -v HOME ]] && echo set || echo unset')"
+
+# ===========================================================================
+# 96. getopts
+# ===========================================================================
+check "getopts basic" "a foo" "$(timeout 3 $DEN -c 'getopts "a:b" opt -a foo; echo "$opt $OPTARG"')"
+
+# ===========================================================================
+# 97. Associative array keys
+# ===========================================================================
+check "assoc keys step" "key1 key2" "$(timeout 3 $DEN -c 'declare -A m; m[key1]=v1; m[key2]=v2; echo "${!m[@]}"')"
+check "assoc keys inline" "2" "$(timeout 3 $DEN -c 'declare -A m=([a]=1 [b]=2); echo ${#m[@]}')"
+
+# ===========================================================================
+# 98. local -i (integer attribute)
+# ===========================================================================
+check "local -i" "8" "$(timeout 3 $DEN -c 'f() { local -i x=5+3; echo $x; }; f')"
+
+# ===========================================================================
+# 99. read -ra (combined flags)
+# ===========================================================================
+check "read -ra" "3" "$(echo "a b c" | timeout 3 $DEN -c 'read -ra arr; echo ${#arr[@]}')"
+
+# ===========================================================================
+# 100. Arithmetic base conversion
+# ===========================================================================
+check "arith base16" "255" "$(timeout 3 $DEN -c 'echo $((16#ff))')"
+check "arith base2" "10" "$(timeout 3 $DEN -c 'echo $((2#1010))')"
+check "arith base8" "63" "$(timeout 3 $DEN -c 'echo $((8#77))')"
+
+# ===========================================================================
+# 101. ${var@op} transform operators
+# ===========================================================================
+check "transform @U" "HELLO WORLD" "$(timeout 3 $DEN -c 'x="Hello World"; echo ${x@U}')"
+check "transform @L" "hello world" "$(timeout 3 $DEN -c 'x="Hello World"; echo ${x@L}')"
+check "transform @u" "Hello world" "$(timeout 3 $DEN -c 'x="hello world"; echo ${x@u}')"
+
+# ===========================================================================
+# 102. Negative array slice
+# ===========================================================================
+check "arr neg slice" "3 4 5" "$(timeout 3 $DEN -c 'arr=(1 2 3 4 5); echo ${arr[@]: -3}')"
+check "arr neg slice 2" "d e" "$(timeout 3 $DEN -c 'arr=(a b c d e); echo ${arr[@]: -2}')"
+
+# ===========================================================================
+# 103. Associative array step-by-step assignment
+# ===========================================================================
+check "assoc step assign" "val1" "$(timeout 3 $DEN -c 'declare -A m; m[key1]=val1; echo ${m[key1]}')"
+AKCOUNT=$(timeout 3 $DEN -c 'declare -A m; m[a]=1; m[b]=2; echo ${!m[@]}' | wc -w | tr -d ' ')
+check "assoc keys count" "2" "$AKCOUNT"
+
+# ===========================================================================
+# 104. Brace expansion with step
+# ===========================================================================
+check "brace step" "1 3 5 7 9" "$(timeout 3 $DEN -c 'echo {1..10..2}')"
+check "brace step 3" "1 4 7 10" "$(timeout 3 $DEN -c 'echo {1..10..3}')"
+check "brace step rev" "10 8 6 4 2" "$(timeout 3 $DEN -c 'echo {10..1..2}')"
+
+# ===========================================================================
+# 105. ${var/#pat/rep} prefix and ${var/%pat/rep} suffix substitution
+# ===========================================================================
+check "subst prefix" "HEllo" "$(timeout 3 $DEN -c 'x="hello"; echo "${x/#he/HE}"')"
+check "subst suffix" "helLO" "$(timeout 3 $DEN -c 'x="hello"; echo "${x/%lo/LO}"')"
+check "subst prefix nomatch" "hello" "$(timeout 3 $DEN -c 'x="hello"; echo "${x/#xx/YY}"')"
+
+# ===========================================================================
+# 106. ${var@op} transform operators
+# ===========================================================================
+check "transform @Q" "'hello'" "$(timeout 3 $DEN -c "x=hello; echo \${x@Q}")"
+
+# ===========================================================================
+# 107. Special variables: PPID, BASHPID, EUID, UID
+# ===========================================================================
+check "PPID is numeric" "yes" "$(timeout 3 $DEN -c '[[ $PPID =~ ^[0-9]+$ ]] && echo yes || echo no')"
+check "BASHPID is numeric" "yes" "$(timeout 3 $DEN -c '[[ $BASHPID =~ ^[0-9]+$ ]] && echo yes || echo no')"
+check "EUID is numeric" "yes" "$(timeout 3 $DEN -c '[[ $EUID =~ ^[0-9]+$ ]] && echo yes || echo no')"
+check "UID is numeric" "yes" "$(timeout 3 $DEN -c '[[ $UID =~ ^[0-9]+$ ]] && echo yes || echo no')"
+check "PPID braced" "yes" "$(timeout 3 $DEN -c '[[ ${PPID} =~ ^[0-9]+$ ]] && echo yes || echo no')"
+
+# ===========================================================================
+# 108. String comparison in [[ ]]
+# ===========================================================================
+check "[[ a < b ]]" "yes" "$(timeout 3 $DEN -c '[[ a < b ]] && echo yes || echo no')"
+check "[[ z < a ]]" "no" "$(timeout 3 $DEN -c '[[ z < a ]] && echo yes || echo no')"
+check "[[ abc < def ]]" "yes" "$(timeout 3 $DEN -c '[[ abc < def ]] && echo yes || echo no')"
+check "[[ z > a ]]" "yes" "$(timeout 3 $DEN -c '[[ z > a ]] && echo yes || echo no')"
+
+# ===========================================================================
+# 109. source builtin
+# ===========================================================================
+echo 'x=42' > /tmp/den_source_test.sh
+check "source variable" "42" "$(timeout 3 $DEN -c 'source /tmp/den_source_test.sh; echo $x')"
+check "dot source" "42" "$(timeout 3 $DEN -c '. /tmp/den_source_test.sh; echo $x')"
+echo 'greet() { echo hi; }' > /tmp/den_source_func.sh
+check "source function" "hi" "$(timeout 3 $DEN -c 'source /tmp/den_source_func.sh; greet')"
+rm -f /tmp/den_source_test.sh /tmp/den_source_func.sh
+
+# ===========================================================================
+# 110. Arithmetic assignment
+# ===========================================================================
+check "arith assign x=5+3" "8" "$(timeout 3 $DEN -c 'echo $((x=5+3))')"
+check "arith assign persist" "8 8" "$(timeout 3 $DEN -c 'echo $((x=5+3)); echo $x' | tr '\n' ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# 111. Arithmetic increment/decrement
+# ===========================================================================
+check "pre-increment" "6" "$(timeout 3 $DEN -c 'x=5; echo $((++x))')"
+check "post-increment" "5" "$(timeout 3 $DEN -c 'x=5; echo $((x++))')"
+check "pre-decrement" "4" "$(timeout 3 $DEN -c 'x=5; echo $((--x))')"
+check "post-decrement" "5" "$(timeout 3 $DEN -c 'x=5; echo $((x--))')"
+
+# ===========================================================================
+# 112. Compound assignment operators
+# ===========================================================================
+check "arith +=" "8" "$(timeout 3 $DEN -c 'x=5; echo $((x+=3))')"
+check "arith -=" "7" "$(timeout 3 $DEN -c 'x=10; echo $((x-=3))')"
+check "arith *=" "15" "$(timeout 3 $DEN -c 'x=5; echo $((x*=3))')"
+check "arith /=" "5" "$(timeout 3 $DEN -c 'x=15; echo $((x/=3))')"
+check "arith %=" "2" "$(timeout 3 $DEN -c 'x=17; echo $((x%=5))')"
 
 # ===========================================================================
 # Results

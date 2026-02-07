@@ -248,8 +248,30 @@ const Parser = struct {
     local_vars: ?*std.StringHashMap([]const u8) = null,
     arrays: ?*std.StringHashMap([][]const u8) = null,
 
-    // Entry point - lowest precedence
+    // Entry point - lowest precedence (assignment)
     fn parseExpression(self: *Parser) ArithmeticError!i64 {
+        self.skipWhitespace();
+        // Check for assignment: identifier = expr (but not ==)
+        const save_pos = self.pos;
+        if (self.pos < self.input.len and (std.ascii.isAlphabetic(self.input[self.pos]) or self.input[self.pos] == '_')) {
+            var end = self.pos;
+            while (end < self.input.len and (std.ascii.isAlphanumeric(self.input[end]) or self.input[end] == '_')) {
+                end += 1;
+            }
+            const var_name = self.input[self.pos..end];
+            var eq_pos = end;
+            // Skip whitespace before =
+            while (eq_pos < self.input.len and self.input[eq_pos] == ' ') eq_pos += 1;
+            if (eq_pos < self.input.len and self.input[eq_pos] == '=' and
+                (eq_pos + 1 >= self.input.len or self.input[eq_pos + 1] != '='))
+            {
+                self.pos = eq_pos + 1;
+                const value = try self.parseExpression();
+                self.storeVariable(var_name, value);
+                return value;
+            }
+        }
+        self.pos = save_pos;
         return try self.parseTernary();
     }
 
@@ -562,12 +584,82 @@ const Parser = struct {
         return left;
     }
 
-    // Unary: + - ! ~
+    // Get a variable's numeric value
+    fn getVariableValue(self: *Parser, var_name: []const u8) i64 {
+        if (self.local_vars) |locals| {
+            if (locals.get(var_name)) |value| {
+                const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+                if (trimmed.len == 0) return 0;
+                return std.fmt.parseInt(i64, trimmed, 10) catch 0;
+            }
+        }
+        if (self.variables) |vars| {
+            if (vars.get(var_name)) |value| {
+                const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+                if (trimmed.len == 0) return 0;
+                return std.fmt.parseInt(i64, trimmed, 10) catch 0;
+            }
+        }
+        return 0;
+    }
+
+    // Store a value into a variable
+    fn storeVariable(self: *Parser, var_name: []const u8, value: i64) void {
+        if (self.variables) |vars| {
+            var buf: [32]u8 = undefined;
+            const val_str = std.fmt.bufPrint(&buf, "{d}", .{value}) catch return;
+            const duped_val = self.allocator.dupe(u8, val_str) catch return;
+            const gop = vars.getOrPut(var_name) catch return;
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+            } else {
+                gop.key_ptr.* = self.allocator.dupe(u8, var_name) catch return;
+            }
+            gop.value_ptr.* = duped_val;
+        }
+    }
+
+    // Unary: + - ! ~ ++x --x
     fn parseUnary(self: *Parser) ArithmeticError!i64 {
         self.skipWhitespace();
 
         if (self.pos < self.input.len) {
             const ch = self.input[self.pos];
+            // Pre-increment ++x
+            if (ch == '+' and self.pos + 1 < self.input.len and self.input[self.pos + 1] == '+') {
+                self.pos += 2;
+                self.skipWhitespace();
+                const save = self.pos;
+                // Parse variable name
+                while (self.pos < self.input.len and (std.ascii.isAlphanumeric(self.input[self.pos]) or self.input[self.pos] == '_')) {
+                    self.pos += 1;
+                }
+                if (self.pos > save) {
+                    const vname = self.input[save..self.pos];
+                    const cur = self.getVariableValue(vname);
+                    const new_val = cur + 1;
+                    self.storeVariable(vname, new_val);
+                    return new_val;
+                }
+                self.pos = save;
+            }
+            // Pre-decrement --x
+            if (ch == '-' and self.pos + 1 < self.input.len and self.input[self.pos + 1] == '-') {
+                self.pos += 2;
+                self.skipWhitespace();
+                const save = self.pos;
+                while (self.pos < self.input.len and (std.ascii.isAlphanumeric(self.input[self.pos]) or self.input[self.pos] == '_')) {
+                    self.pos += 1;
+                }
+                if (self.pos > save) {
+                    const vname = self.input[save..self.pos];
+                    const cur = self.getVariableValue(vname);
+                    const new_val = cur - 1;
+                    self.storeVariable(vname, new_val);
+                    return new_val;
+                }
+                self.pos = save;
+            }
             if (ch == '-') {
                 self.pos += 1;
                 const value = try self.parseUnary();
@@ -648,6 +740,40 @@ const Parser = struct {
         }
 
         const var_name = self.input[start..self.pos];
+
+        // Check for post-increment x++ / post-decrement x--
+        if (self.pos + 1 < self.input.len and self.input[self.pos] == '+' and self.input[self.pos + 1] == '+') {
+            self.pos += 2;
+            const cur = self.getVariableValue(var_name);
+            self.storeVariable(var_name, cur + 1);
+            return cur; // post-increment returns old value
+        }
+        if (self.pos + 1 < self.input.len and self.input[self.pos] == '-' and self.input[self.pos + 1] == '-') {
+            self.pos += 2;
+            const cur = self.getVariableValue(var_name);
+            self.storeVariable(var_name, cur - 1);
+            return cur; // post-decrement returns old value
+        }
+
+        // Check for compound assignment operators: +=, -=, *=, /=, %=
+        if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '=') {
+            const op_char = self.input[self.pos];
+            if (op_char == '+' or op_char == '-' or op_char == '*' or op_char == '/' or op_char == '%') {
+                self.pos += 2;
+                const rhs = self.parseExpression() catch return error.UnexpectedEnd;
+                const cur = self.getVariableValue(var_name);
+                const new_val = switch (op_char) {
+                    '+' => cur + rhs,
+                    '-' => cur - rhs,
+                    '*' => cur * rhs,
+                    '/' => if (rhs != 0) @divTrunc(cur, rhs) else return error.DivisionByZero,
+                    '%' => if (rhs != 0) @rem(cur, rhs) else return error.DivisionByZero,
+                    else => unreachable,
+                };
+                self.storeVariable(var_name, new_val);
+                return new_val;
+            }
+        }
 
         // Check for array access: arr[index]
         if (self.pos < self.input.len and self.input[self.pos] == '[') {
@@ -735,6 +861,19 @@ const Parser = struct {
 
         if (start == self.pos) {
             return error.InvalidNumber;
+        }
+
+        // Check for base#value syntax (e.g., 16#ff, 2#1010, 8#77)
+        if (self.pos < self.input.len and self.input[self.pos] == '#') {
+            const base = std.fmt.parseInt(u8, self.input[start..self.pos], 10) catch return error.InvalidNumber;
+            if (base < 2 or base > 64) return error.InvalidNumber;
+            self.pos += 1; // skip '#'
+            const val_start = self.pos;
+            while (self.pos < self.input.len and (std.ascii.isAlphanumeric(self.input[self.pos]) or self.input[self.pos] == '_' or self.input[self.pos] == '@')) {
+                self.pos += 1;
+            }
+            if (val_start == self.pos) return error.InvalidNumber;
+            return std.fmt.parseInt(i64, self.input[val_start..self.pos], base) catch error.InvalidNumber;
         }
 
         const num_str = self.input[start..self.pos];

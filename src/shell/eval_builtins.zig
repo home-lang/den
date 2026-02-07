@@ -37,24 +37,52 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
     var var_start: usize = 0;
     var prompt: ?[]const u8 = null;
     var array_mode = false;
+    var nchars: ?usize = null;
+    var delimiter: ?u8 = null;
 
     while (var_start < cmd.args.len) {
         const arg = cmd.args[var_start];
-        if (arg.len > 0 and arg[0] == '-') {
-            if (std.mem.eql(u8, arg, "-r")) {
-                var_start += 1;
-            } else if (std.mem.eql(u8, arg, "-a") and var_start + 1 < cmd.args.len) {
-                array_mode = true;
-                var_start += 1;
-            } else if (std.mem.eql(u8, arg, "-p") and var_start + 1 < cmd.args.len) {
-                var_start += 1;
-                prompt = cmd.args[var_start];
-                var_start += 1;
-            } else if (arg.len >= 2 and arg[1] == 'p') {
-                prompt = arg[2..];
-                var_start += 1;
-            } else {
-                var_start += 1;
+        if (arg.len > 1 and arg[0] == '-') {
+            var_start += 1;
+            var ci: usize = 1;
+            while (ci < arg.len) : (ci += 1) {
+                switch (arg[ci]) {
+                    'r', 's' => {}, // raw mode, silent - just flags
+                    'a' => array_mode = true,
+                    'p' => {
+                        // -p can have inline value (-pPrompt) or next arg
+                        if (ci + 1 < arg.len) {
+                            prompt = arg[ci + 1 ..];
+                            ci = arg.len; // consumed rest
+                        } else if (var_start < cmd.args.len) {
+                            prompt = cmd.args[var_start];
+                            var_start += 1;
+                        }
+                    },
+                    'n' => {
+                        // -n can have inline value (-n3) or next arg
+                        if (ci + 1 < arg.len) {
+                            nchars = std.fmt.parseInt(usize, arg[ci + 1 ..], 10) catch null;
+                            ci = arg.len;
+                        } else if (var_start < cmd.args.len) {
+                            nchars = std.fmt.parseInt(usize, cmd.args[var_start], 10) catch null;
+                            var_start += 1;
+                        }
+                    },
+                    'd' => {
+                        // -d can have inline value (-d|) or next arg
+                        if (ci + 1 < arg.len) {
+                            delimiter = arg[ci + 1];
+                            ci = arg.len;
+                        } else if (var_start < cmd.args.len) {
+                            if (cmd.args[var_start].len > 0) {
+                                delimiter = cmd.args[var_start][0];
+                            }
+                            var_start += 1;
+                        }
+                    },
+                    else => {},
+                }
             }
         } else {
             break;
@@ -68,8 +96,42 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
 
     const var_names = cmd.args[var_start..];
 
-    // Read line from stdin
-    const line = try IO.readLine(self.allocator);
+    // Read from stdin: handle -n (nchars) and -d (delimiter)
+    const line = if (nchars) |n| blk: {
+        // Read exactly N characters
+        const buf = try self.allocator.alloc(u8, n);
+        var count: usize = 0;
+        const stdin_fd = std.posix.STDIN_FILENO;
+        while (count < n) {
+            var byte: [1]u8 = undefined;
+            const bytes_read = std.c.read(stdin_fd, &byte, 1);
+            if (bytes_read <= 0) break;
+            buf[count] = byte[0];
+            count += 1;
+        }
+        if (count == 0) {
+            self.allocator.free(buf);
+            break :blk @as(?[]u8, null);
+        }
+        break :blk @as(?[]u8, try self.allocator.dupe(u8, buf[0..count]));
+    } else if (delimiter) |d| blk: {
+        // Read until delimiter character
+        var buf: [4096]u8 = undefined;
+        var count: usize = 0;
+        const stdin_fd = std.posix.STDIN_FILENO;
+        while (count < buf.len) {
+            var byte: [1]u8 = undefined;
+            const bytes_read = std.c.read(stdin_fd, &byte, 1);
+            if (bytes_read <= 0) break;
+            if (byte[0] == d) break;
+            buf[count] = byte[0];
+            count += 1;
+        }
+        if (count == 0) {
+            break :blk @as(?[]u8, null);
+        }
+        break :blk @as(?[]u8, try self.allocator.dupe(u8, buf[0..count]));
+    } else try IO.readLine(self.allocator);
     if (line) |value| {
         defer self.allocator.free(value);
         self.last_exit_code = 0;

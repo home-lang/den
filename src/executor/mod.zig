@@ -931,7 +931,7 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "test") or std.mem.eql(u8, command.name, "[")) {
             return try test_builtins.testBuiltin(command);
         } else if (std.mem.eql(u8, command.name, "[[")) {
-            return try test_builtins.extendedTest(command);
+            return try test_builtins.extendedTest(command, self.shell);
         } else if (std.mem.eql(u8, command.name, "which")) {
             return try builtins.command_builtins.which(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "type")) {

@@ -86,6 +86,7 @@ pub const Tokenizer = struct {
     line: usize,
     column: usize,
     allocator: std.mem.Allocator,
+    in_double_bracket: bool,
 
     pub fn init(allocator: std.mem.Allocator, input: []const u8) Tokenizer {
         return .{
@@ -94,6 +95,7 @@ pub const Tokenizer = struct {
             .line = 1,
             .column = 1,
             .allocator = allocator,
+            .in_double_bracket = false,
         };
     }
 
@@ -140,8 +142,8 @@ pub const Tokenizer = struct {
 
         const char = self.input[self.pos];
 
-        // Check for FD duplication patterns (N>&M or N<&M)
-        if (std.ascii.isDigit(char)) {
+        // Check for FD duplication patterns (N>&M or N<&M) - not inside [[ ]]
+        if (!self.in_double_bracket and std.ascii.isDigit(char)) {
             var lookahead = self.pos + 1;
             // Skip digits to get the FD number
             while (lookahead < self.input.len and std.ascii.isDigit(self.input[lookahead])) {
@@ -186,7 +188,11 @@ pub const Tokenizer = struct {
             const c2 = self.input[self.pos + 1];
 
             // Fast path: use lookup table for two-char operators
-            if (lookupTwoCharOperator(c1, c2)) |op| {
+            // Inside [[ ]], skip redirect-like operators (< and > based)
+            if (lookupTwoCharOperator(c1, c2)) |op| blk: {
+                if (self.in_double_bracket and (c1 == '<' or c1 == '>' or (c1 == '2' and c2 == '>'))) {
+                    break :blk;
+                }
                 // Special case for heredoc/herestring (<<< vs <<)
                 if (op.token_type == .heredoc) {
                     self.pos += 2;
@@ -253,6 +259,18 @@ pub const Tokenizer = struct {
                 };
             },
             '>' => {
+                // Inside [[ ]], treat > as a word (string comparison operator)
+                if (self.in_double_bracket) {
+                    self.pos += 1;
+                    self.column += 1;
+                    const duped = try self.allocator.dupe(u8, ">");
+                    return Token{
+                        .type = .word,
+                        .value = duped,
+                        .line = start_line,
+                        .column = start_col,
+                    };
+                }
                 // Check for >( process substitution
                 if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '(') {
                     // Process substitution >( - read the whole construct
@@ -268,6 +286,18 @@ pub const Tokenizer = struct {
                 };
             },
             '<' => {
+                // Inside [[ ]], treat < as a word (string comparison operator)
+                if (self.in_double_bracket) {
+                    self.pos += 1;
+                    self.column += 1;
+                    const duped = try self.allocator.dupe(u8, "<");
+                    return Token{
+                        .type = .word,
+                        .value = duped,
+                        .line = start_line,
+                        .column = start_col,
+                    };
+                }
                 // Check for <( process substitution
                 if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '(') {
                     // Process substitution <( - read the whole construct
@@ -642,6 +672,15 @@ pub const Tokenizer = struct {
         while (try self.nextToken()) |token| {
             if (token.type == .eof) break;
             if (token.type == .newline) continue; // Skip newlines for now
+
+            // Track [[ ]] context for operator handling
+            if (token.type == .word) {
+                if (std.mem.eql(u8, token.value, "[[")) {
+                    self.in_double_bracket = true;
+                } else if (std.mem.eql(u8, token.value, "]]")) {
+                    self.in_double_bracket = false;
+                }
+            }
 
             if (token_count >= tokens_buffer.len) {
                 return error.TooManyTokens;
