@@ -144,6 +144,8 @@ pub const getVariableValue = variable_handling.getVariableValue;
 pub const setVariableValue = variable_handling.setVariableValue;
 pub const isArrayAssignment = variable_handling.isArrayAssignment;
 pub const executeArrayAssignment = variable_handling.executeArrayAssignment;
+pub const isArrayElementAssignment = variable_handling.isArrayElementAssignment;
+pub const executeArrayElementAssignment = variable_handling.executeArrayElementAssignment;
 
 // Re-export command execution functions
 pub const tryFastPath = command_execution.tryFastPath;

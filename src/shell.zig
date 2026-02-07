@@ -964,9 +964,15 @@ pub const Shell = struct {
             }
         }
 
-        // Check for array assignment first
+        // Check for array assignment first: name=(...)
         if (shell_mod.isArrayAssignment(input)) {
             try shell_mod.executeArrayAssignment(self, input);
+            return;
+        }
+
+        // Check for array element assignment: name[index]=value
+        if (shell_mod.isArrayElementAssignment(input)) {
+            try shell_mod.executeArrayElementAssignment(self, input);
             return;
         }
 

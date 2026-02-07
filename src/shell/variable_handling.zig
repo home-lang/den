@@ -68,6 +68,83 @@ pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void
     gop.value_ptr.* = try self.allocator.dupe(u8, value);
 }
 
+/// Check if input is an array element assignment: name[index]=value
+pub fn isArrayElementAssignment(input: []const u8) bool {
+    const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+    // Look for pattern: name[index]=value
+    const bracket_pos = std.mem.indexOfScalar(u8, trimmed, '[') orelse return false;
+    if (bracket_pos == 0) return false;
+    // Verify name part is valid
+    for (trimmed[0..bracket_pos]) |c| {
+        if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
+    }
+    // Find closing bracket followed by =
+    const close_bracket = std.mem.indexOfScalar(u8, trimmed[bracket_pos..], ']') orelse return false;
+    const abs_close = bracket_pos + close_bracket;
+    if (abs_close + 1 >= trimmed.len) return false;
+    return trimmed[abs_close + 1] == '=';
+}
+
+/// Execute array element assignment: name[index]=value
+pub fn executeArrayElementAssignment(self: *Shell, input: []const u8) !void {
+    const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+    const bracket_pos = std.mem.indexOfScalar(u8, trimmed, '[') orelse return;
+    const name = trimmed[0..bracket_pos];
+
+    const close_bracket = std.mem.indexOfScalar(u8, trimmed[bracket_pos..], ']') orelse return;
+    const abs_close = bracket_pos + close_bracket;
+    const index_str = trimmed[bracket_pos + 1 .. abs_close];
+    const index = std.fmt.parseInt(usize, index_str, 10) catch return;
+
+    // Value is everything after ]=
+    var raw_value = trimmed[abs_close + 2 ..];
+    // Strip quotes
+    if (raw_value.len >= 2 and
+        ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
+        (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
+    {
+        raw_value = raw_value[1 .. raw_value.len - 1];
+    }
+
+    // Get or create the array
+    if (self.arrays.get(name)) |old_array| {
+        // Extend if needed
+        if (index < old_array.len) {
+            // Replace existing element
+            self.allocator.free(old_array[index]);
+            old_array[index] = try self.allocator.dupe(u8, raw_value);
+        } else {
+            // Extend the array
+            var new_array = try self.allocator.alloc([]const u8, index + 1);
+            // Copy old elements
+            var i: usize = 0;
+            while (i < old_array.len) : (i += 1) {
+                new_array[i] = old_array[i];
+            }
+            // Fill gaps with empty strings
+            while (i < index) : (i += 1) {
+                new_array[i] = try self.allocator.dupe(u8, "");
+            }
+            new_array[index] = try self.allocator.dupe(u8, raw_value);
+            self.allocator.free(old_array);
+            // Re-insert into map
+            const key = self.arrays.getKey(name).?;
+            self.arrays.putAssumeCapacity(key, new_array);
+        }
+    } else {
+        // Create new array with this element
+        var new_array = try self.allocator.alloc([]const u8, index + 1);
+        var i: usize = 0;
+        while (i < index) : (i += 1) {
+            new_array[i] = try self.allocator.dupe(u8, "");
+        }
+        new_array[index] = try self.allocator.dupe(u8, raw_value);
+        const key = try self.allocator.dupe(u8, name);
+        try self.arrays.put(key, new_array);
+    }
+    self.last_exit_code = 0;
+}
+
 /// Check if input is an array assignment: name=(value1 value2 ...)
 pub fn isArrayAssignment(input: []const u8) bool {
     // Look for pattern: name=(...) or name+=(...)

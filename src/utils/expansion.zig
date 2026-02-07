@@ -806,11 +806,22 @@ pub const Expansion = struct {
 
                         if (std.mem.indexOf(u8, params, ":")) |second_colon| {
                             // ${VAR:offset:length}
-                            offset = std.fmt.parseInt(i64, params[0..second_colon], 10) catch 0;
+                            const offset_str = params[0..second_colon];
+                            // Strip parens: ${x:(-2)} -> -2
+                            const clean_offset = if (offset_str.len >= 2 and offset_str[0] == '(' and offset_str[offset_str.len - 1] == ')')
+                                offset_str[1 .. offset_str.len - 1]
+                            else
+                                offset_str;
+                            offset = std.fmt.parseInt(i64, std.mem.trim(u8, clean_offset, &std.ascii.whitespace), 10) catch 0;
                             length = std.fmt.parseInt(usize, params[second_colon + 1 ..], 10) catch null;
                         } else {
                             // ${VAR:offset}
-                            offset = std.fmt.parseInt(i64, params, 10) catch 0;
+                            // Strip parens: ${x:(-2)} -> -2
+                            const clean_params = if (params.len >= 2 and params[0] == '(' and params[params.len - 1] == ')')
+                                params[1 .. params.len - 1]
+                            else
+                                params;
+                            offset = std.fmt.parseInt(i64, std.mem.trim(u8, clean_params, &std.ascii.whitespace), 10) catch 0;
                         }
 
                         // Handle negative offset (from end of string)

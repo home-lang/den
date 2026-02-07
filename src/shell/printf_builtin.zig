@@ -19,8 +19,15 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
     const format = cmd.args[0];
     var arg_idx: usize = 1;
-    var i: usize = 0;
 
+    // In bash, printf reuses the format string for remaining arguments
+    // e.g., printf "%s\n" a b c prints a\nb\nc
+    var did_consume_arg = true;
+    while (did_consume_arg) {
+        did_consume_arg = false;
+        if (arg_idx >= cmd.args.len and arg_idx > 1) break;
+
+    var i: usize = 0;
     while (i < format.len) {
         if (format[i] == '%' and i + 1 < format.len) {
             // Parse optional flags, width, and precision
@@ -94,6 +101,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                         try IO.print("{s}", .{str});
                     }
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == 'd' or spec == 'i') {
@@ -102,6 +110,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     const num = std.fmt.parseInt(i64, cmd.args[arg_idx], 10) catch 0;
                     try printfInt(num, width, zero_pad, left_justify);
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == 'u') {
@@ -110,6 +119,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     const num = std.fmt.parseInt(u64, cmd.args[arg_idx], 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 10, false);
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == 'x') {
@@ -118,6 +128,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     const num = std.fmt.parseInt(u64, cmd.args[arg_idx], 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 16, false);
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == 'X') {
@@ -126,6 +137,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     const num = std.fmt.parseInt(u64, cmd.args[arg_idx], 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 16, true);
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == 'o') {
@@ -134,6 +146,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     const num = std.fmt.parseInt(u64, cmd.args[arg_idx], 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 8, false);
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == 'c') {
@@ -144,6 +157,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                         try IO.print("{c}", .{arg[0]});
                     }
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == 'f' or spec == 'F') {
@@ -152,6 +166,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
                     try printfFloat(num, width, precision, left_justify);
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == '%') {
@@ -163,6 +178,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 if (arg_idx < cmd.args.len) {
                     try printWithEscapes(cmd.args[arg_idx]);
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else if (spec == 'q') {
@@ -170,6 +186,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 if (arg_idx < cmd.args.len) {
                     try IO.print("'{s}'", .{cmd.args[arg_idx]});
                     arg_idx += 1;
+                    did_consume_arg = true;
                 }
                 i = j + 1;
             } else {
@@ -230,6 +247,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
             i += 1;
         }
     }
+    } // end outer while (did_consume_arg) loop for format reuse
 }
 
 /// Helper for printf - format signed integer with width/padding

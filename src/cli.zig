@@ -32,37 +32,41 @@ pub const CliArgs = struct {
     allocator: std.mem.Allocator,
     config_path: ?[]const u8 = null, // Custom config path from --config flag
     json_output: bool = false, // Output results in JSON format (for -c commands)
+    // Ownership tracking: the heap-allocated argv slice (args may be a sub-slice of this)
+    _owned_argv: ?[]const []const u8 = null,
 
     pub fn deinit(self: *CliArgs) void {
-        _ = self;
+        if (self._owned_argv) |owned| {
+            self.allocator.free(owned);
+        }
     }
 };
 
 /// Parse command line arguments
 pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !CliArgs {
     var args = try process_args.iterateAllocator(allocator);
-    defer args.deinit();
+    // NOTE: Do NOT defer args.deinit() here — the allocated strings are
+    // owned by the returned CliArgs and must survive this function call.
+    // The caller is responsible for the lifetime (CliArgs.deinit handles it).
 
     // Skip program name
     _ = args.next();
 
-    // Collect all arguments
-    var argv_buffer: [64][]const u8 = undefined;
-    var argv_count: usize = 0;
+    // Collect all arguments into a heap-allocated list so they survive this function
+    var argv_list = std.ArrayList([]const u8){};
+    defer argv_list.deinit(allocator);
 
     while (args.next()) |arg| {
-        if (argv_count >= argv_buffer.len) break;
-        argv_buffer[argv_count] = arg;
-        argv_count += 1;
+        try argv_list.append(allocator, arg);
     }
 
-    const argv = argv_buffer[0..argv_count];
+    const argv = argv_list.items;
 
     // Parse global flags first (--config, --json)
     var config_path: ?[]const u8 = null;
     var json_output: bool = false;
-    var remaining_argv_buffer: [64][]const u8 = undefined;
-    var remaining_count: usize = 0;
+    var remaining_list = std.ArrayList([]const u8){};
+    errdefer remaining_list.deinit(allocator);
     var i: usize = 0;
 
     while (i < argv.len) {
@@ -88,17 +92,15 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
             i += 1;
             continue;
         }
-        if (remaining_count < remaining_argv_buffer.len) {
-            remaining_argv_buffer[remaining_count] = arg;
-            remaining_count += 1;
-        }
+        try remaining_list.append(allocator, arg);
         i += 1;
     }
 
-    const remaining_argv = remaining_argv_buffer[0..remaining_count];
+    const remaining_argv = try remaining_list.toOwnedSlice(allocator);
 
     // No arguments = interactive shell
     if (remaining_argv.len == 0) {
+        allocator.free(remaining_argv);
         return CliArgs{
             .command = .interactive,
             .args = &[_][]const u8{},
@@ -109,62 +111,73 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
 
     const first_arg = remaining_argv[0];
 
+    // Helper: sub-args (everything after the subcommand name)
+    const sub_args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{};
+
     // Check for subcommands
     if (std.mem.eql(u8, first_arg, "shell")) {
         return CliArgs{
             .command = .shell,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "exec")) {
         return CliArgs{
             .command = .exec,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "complete")) {
         return CliArgs{
             .command = .complete,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "completion")) {
         return CliArgs{
             .command = .completion,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "dev-setup")) {
         return CliArgs{
             .command = .dev_setup,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "setup")) {
         return CliArgs{
             .command = .setup,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "set-shell")) {
         return CliArgs{
             .command = .set_shell,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "uninstall")) {
         return CliArgs{
             .command = .uninstall,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "version") or std.mem.eql(u8, first_arg, "--version") or std.mem.eql(u8, first_arg, "-v")) {
         return CliArgs{
@@ -172,6 +185,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
             .args = &[_][]const u8{},
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "help") or std.mem.eql(u8, first_arg, "--help") or std.mem.eql(u8, first_arg, "-h")) {
         return CliArgs{
@@ -179,15 +193,17 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
             .args = &[_][]const u8{},
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     } else if (std.mem.eql(u8, first_arg, "-c")) {
         // -c "command" - run command string
         return CliArgs{
             .command = .command_string,
-            .args = if (remaining_argv.len > 1) remaining_argv[1..] else &[_][]const u8{},
+            .args = sub_args,
             .allocator = allocator,
             .config_path = config_path,
             .json_output = json_output,
+            ._owned_argv = remaining_argv,
         };
     } else {
         // Assume it's a script file
@@ -196,6 +212,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
             .args = remaining_argv,
             .allocator = allocator,
             .config_path = config_path,
+            ._owned_argv = remaining_argv,
         };
     }
 }

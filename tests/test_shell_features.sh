@@ -310,6 +310,38 @@ c" "$(timeout 5 $DEN -c 'printf "a\nb\nc\n" | while read line; do echo $line; do
 check "read EOF exit" "1" "$(printf "" | timeout 3 $DEN -c 'read x; echo $?')"
 
 # ===========================================================================
+# 35. Printf repeat pattern
+# ===========================================================================
+check "printf repeat" "a
+b
+c" "$(timeout 3 $DEN -c 'printf "%s\n" a b c')"
+check "printf repeat int" "1 2 3" "$(timeout 3 $DEN -c 'printf "%d " 1 2 3' | sed 's/ $//')"
+
+# ===========================================================================
+# 36. Shift in functions
+# ===========================================================================
+check "shift in func" "x y" "$(timeout 3 $DEN -c 'f() { echo $1; shift; echo $1; }; f x y' | tr '\n' ' ' | sed 's/ $//')"
+check "shift 2 in func" "c" "$(timeout 3 $DEN -c 'f() { shift 2; echo $1; }; f a b c')"
+
+# ===========================================================================
+# 37. Negative substring extraction
+# ===========================================================================
+check "substr negative" "lo" "$(timeout 3 $DEN -c 'x=hello; echo ${x:(-2)}')"
+check "substr neg:len" "l" "$(timeout 3 $DEN -c 'x=hello; echo ${x:(-2):1}')"
+
+# ===========================================================================
+# 38. Array element assignment
+# ===========================================================================
+check "arr elem assign" "world" "$(timeout 3 $DEN -c 'arr=(a b c); arr[1]=world; echo ${arr[1]}')"
+check "arr elem extend" "d" "$(timeout 3 $DEN -c 'arr=(a b c); arr[3]=d; echo ${arr[3]}')"
+
+# ===========================================================================
+# 39. Test string comparison
+# ===========================================================================
+check "test str <" "yes" "$(timeout 3 $DEN -c '[ "abc" \< "def" ] && echo yes || echo no')"
+check "test str >" "yes" "$(timeout 3 $DEN -c '[ "def" \> "abc" ] && echo yes || echo no')"
+
+# ===========================================================================
 # Results
 # ===========================================================================
 echo ""

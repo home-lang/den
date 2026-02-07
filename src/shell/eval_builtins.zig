@@ -327,6 +327,40 @@ pub fn builtinShift(self: *Shell, cmd: *types.ParsedCommand) !void {
     else
         1;
 
+    // If inside a function, shift the function frame's positional params
+    if (self.function_manager.currentFrame()) |frame| {
+        if (n > frame.positional_params_count) {
+            try IO.eprint("den: shift: shift count too large\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Free first n params
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            if (frame.positional_params[i]) |param| {
+                self.allocator.free(param);
+                frame.positional_params[i] = null;
+            }
+        }
+
+        // Move remaining parameters down
+        var dest: usize = 0;
+        var src: usize = n;
+        while (src < frame.positional_params.len) : (src += 1) {
+            frame.positional_params[dest] = frame.positional_params[src];
+            if (dest != src) {
+                frame.positional_params[src] = null;
+            }
+            dest += 1;
+        }
+
+        frame.positional_params_count -= n;
+        self.last_exit_code = 0;
+        return;
+    }
+
+    // Not in a function - shift shell's positional params
     if (n > self.positional_params_count) {
         try IO.eprint("den: shift: shift count too large\n", .{});
         self.last_exit_code = 1;

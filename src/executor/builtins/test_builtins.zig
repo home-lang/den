@@ -107,6 +107,12 @@ fn evaluateTestArgs(args: []const []const u8) !i32 {
             const left_num = std.fmt.parseInt(i64, left, 10) catch return 2;
             const right_num = std.fmt.parseInt(i64, right, 10) catch return 2;
             return if (left_num >= right_num) 0 else 1;
+        } else if (std.mem.eql(u8, op, "<")) {
+            // String less than (lexicographic)
+            return if (std.mem.lessThan(u8, left, right)) 0 else 1;
+        } else if (std.mem.eql(u8, op, ">")) {
+            // String greater than (lexicographic)
+            return if (std.mem.lessThan(u8, right, left)) 0 else 1;
         }
     }
 
