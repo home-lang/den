@@ -391,7 +391,7 @@ pub const SyntaxHighlighter = struct {
         }
 
         // Check for trailing operators
-        const trimmed = std.mem.trimRight(u8, line, &std.ascii.whitespace);
+        const trimmed = std.mem.trimEnd(u8, line, &std.ascii.whitespace);
         if (trimmed.len > 0) {
             const last_char = trimmed[trimmed.len - 1];
             if (last_char == '|' or last_char == '&') {

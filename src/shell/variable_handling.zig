@@ -37,10 +37,14 @@ pub fn getVariableValue(self: *Shell, name: []const u8) ?[]const u8 {
 pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void {
     const resolved_name = resolveNameref(self, name);
 
-    // Check if readonly
+    // Check if readonly or immutable
     if (self.var_attributes.get(resolved_name)) |attrs| {
         if (attrs.readonly) {
             try IO.eprint("den: {s}: readonly variable\n", .{resolved_name});
+            return error.ReadonlyVariable;
+        }
+        if (attrs.immutable) {
+            try IO.eprint("den: {s}: immutable variable (declared with let)\n", .{resolved_name});
             return error.ReadonlyVariable;
         }
     }

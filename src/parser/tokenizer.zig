@@ -71,6 +71,12 @@ pub const TokenType = enum {
     kw_esac,
     kw_in,
     kw_function,
+    // Den extended keywords
+    kw_let,
+    kw_mut,
+    kw_try,
+    kw_catch,
+    kw_match,
 };
 
 pub const Token = struct {
@@ -448,6 +454,12 @@ pub const Tokenizer = struct {
         if (std.mem.eql(u8, word, "esac")) return .kw_esac;
         if (std.mem.eql(u8, word, "in")) return .kw_in;
         if (std.mem.eql(u8, word, "function")) return .kw_function;
+        // Den extended keywords
+        if (std.mem.eql(u8, word, "let")) return .kw_let;
+        if (std.mem.eql(u8, word, "mut")) return .kw_mut;
+        if (std.mem.eql(u8, word, "try")) return .kw_try;
+        if (std.mem.eql(u8, word, "catch")) return .kw_catch;
+        if (std.mem.eql(u8, word, "match")) return .kw_match;
         return .word;
     }
 

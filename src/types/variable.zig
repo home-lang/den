@@ -10,6 +10,7 @@ pub const VarAttributes = packed struct {
     nameref: bool = false, // -n: name reference
     indexed_array: bool = false, // -a: indexed array
     assoc_array: bool = false, // -A: associative array
+    immutable: bool = false, // let binding (immutable by default)
 };
 
 /// Variable type - can be a string, indexed array, or associative array

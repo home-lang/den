@@ -340,6 +340,21 @@ pub const Expansion = struct {
                     continue;
                 }
 
+                // Check for $"..." string interpolation
+                if (i + 1 < input.len and input[i + 1] == '"') {
+                    const interp_result = try self.expandStringInterpolation(input[i..]);
+                    defer if (interp_result.owned) self.allocator.free(@constCast(interp_result.value));
+
+                    if (result_len + interp_result.value.len > result_buffer.len) {
+                        return error.ExpansionTooLong;
+                    }
+                    @memcpy(result_buffer[result_len .. result_len + interp_result.value.len], interp_result.value);
+                    result_len += interp_result.value.len;
+
+                    i += interp_result.consumed;
+                    continue;
+                }
+
                 // Try to expand variable
                 const expansion_result = try self.expandVariable(input[i..]);
                 defer if (expansion_result.owned) self.allocator.free(@constCast(expansion_result.value));
@@ -1961,6 +1976,100 @@ pub const Expansion = struct {
         // Format result as string
         const value = try std.fmt.allocPrint(self.allocator, "{d}", .{result_value});
         return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
+    }
+
+    /// Expand $"..." string interpolation
+    /// Supports {$var}, {$(cmd)}, and {expr} blocks within the string
+    fn expandStringInterpolation(self: *Expansion, input: []const u8) !ExpansionResult {
+        if (input.len < 3 or input[0] != '$' or input[1] != '"') {
+            return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
+        }
+
+        // Skip $"
+        var pos: usize = 2;
+        var result_buf: [4096]u8 = undefined;
+        var result_len: usize = 0;
+
+        while (pos < input.len) {
+            const c = input[pos];
+
+            if (c == '"') {
+                // End of interpolated string
+                pos += 1;
+                break;
+            }
+
+            if (c == '\\' and pos + 1 < input.len) {
+                // Escape sequence
+                const next = input[pos + 1];
+                if (next == '{' or next == '}' or next == '"' or next == '\\') {
+                    if (result_len < result_buf.len) {
+                        result_buf[result_len] = next;
+                        result_len += 1;
+                    }
+                    pos += 2;
+                    continue;
+                }
+            }
+
+            if (c == '{') {
+                // Find matching }
+                var depth: usize = 1;
+                var expr_end = pos + 1;
+                while (expr_end < input.len and depth > 0) {
+                    if (input[expr_end] == '{') depth += 1;
+                    if (input[expr_end] == '}') {
+                        depth -= 1;
+                        if (depth == 0) break;
+                    }
+                    expr_end += 1;
+                }
+
+                if (depth == 0) {
+                    const expr = input[pos + 1 .. expr_end];
+                    // Expand the expression using expandVariable for $ expressions
+                    if (expr.len > 0 and expr[0] == '$') {
+                        const var_result = try self.expandVariable(expr);
+                        defer if (var_result.owned) self.allocator.free(@constCast(var_result.value));
+
+                        const copy_len = @min(var_result.value.len, result_buf.len - result_len);
+                        @memcpy(result_buf[result_len .. result_len + copy_len], var_result.value[0..copy_len]);
+                        result_len += copy_len;
+                    } else {
+                        // Copy expression as literal text
+                        const copy_len = @min(expr.len, result_buf.len - result_len);
+                        @memcpy(result_buf[result_len .. result_len + copy_len], expr[0..copy_len]);
+                        result_len += copy_len;
+                    }
+
+                    pos = expr_end + 1; // skip past }
+                    continue;
+                }
+            }
+
+            if (c == '$') {
+                // Expand $var or $(cmd) inline
+                const var_result = try self.expandVariable(input[pos..]);
+                defer if (var_result.owned) self.allocator.free(@constCast(var_result.value));
+
+                const copy_len = @min(var_result.value.len, result_buf.len - result_len);
+                @memcpy(result_buf[result_len .. result_len + copy_len], var_result.value[0..copy_len]);
+                result_len += copy_len;
+
+                pos += var_result.consumed;
+                continue;
+            }
+
+            // Regular character
+            if (result_len < result_buf.len) {
+                result_buf[result_len] = c;
+                result_len += 1;
+            }
+            pos += 1;
+        }
+
+        const value = try self.allocator.dupe(u8, result_buf[0..result_len]);
+        return ExpansionResult{ .value = value, .consumed = pos, .owned = true };
     }
 
     /// Expand tilde (~) to home directory

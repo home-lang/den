@@ -34,4 +34,17 @@ pub const state_builtins = @import("state_builtins.zig");
 pub const exec_builtins = @import("exec_builtins.zig");
 pub const context = @import("context.zig");
 
+// Nushell-inspired structured data builtins
+pub const data_builtins = @import("data_builtins.zig");
+pub const pipeline_builtins = @import("pipeline_builtins.zig");
+pub const str_builtins = @import("str_builtins.zig");
+pub const path_builtins = @import("path_builtins.zig");
+pub const math_builtins = @import("math_builtins.zig");
+pub const date_builtins = @import("date_builtins.zig");
+pub const encode_builtins = @import("encode_builtins.zig");
+pub const convert_builtins = @import("convert_builtins.zig");
+pub const detect_builtins = @import("detect_builtins.zig");
+pub const bench_builtins = @import("bench_builtins.zig");
+pub const help_system = @import("help_system.zig");
+
 pub const BuiltinContext = context.BuiltinContext;

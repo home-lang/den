@@ -530,6 +530,7 @@ pub fn setVarAttributes(shell: *Shell, name: []const u8, attrs: types.VarAttribu
         if (attrs.nameref) gop.value_ptr.*.nameref = false;
         if (attrs.indexed_array) gop.value_ptr.*.indexed_array = false;
         if (attrs.assoc_array) gop.value_ptr.*.assoc_array = false;
+        if (attrs.immutable) gop.value_ptr.*.immutable = false;
     } else {
         // Add specified attributes
         if (attrs.readonly) gop.value_ptr.*.readonly = true;
@@ -540,6 +541,7 @@ pub fn setVarAttributes(shell: *Shell, name: []const u8, attrs: types.VarAttribu
         if (attrs.nameref) gop.value_ptr.*.nameref = true;
         if (attrs.indexed_array) gop.value_ptr.*.indexed_array = true;
         if (attrs.assoc_array) gop.value_ptr.*.assoc_array = true;
+        if (attrs.immutable) gop.value_ptr.*.immutable = true;
     }
 }
 

@@ -320,6 +320,37 @@ pub const ControlFlowExecutor = struct {
                 }
                 continue;
             }
+            // Check for range expression: N..M or N..<M
+            if (std.mem.indexOf(u8, item, "..")) |dot_pos| {
+                // First expand any variables in the range
+                const expanded_item = expander.expand(item) catch item;
+                defer if (expanded_item.ptr != item.ptr) self.allocator.free(expanded_item);
+
+                if (std.mem.indexOf(u8, expanded_item, "..")) |exp_dot_pos| {
+                    const exclusive = exp_dot_pos + 2 < expanded_item.len and expanded_item[exp_dot_pos + 2] == '<';
+                    const end_start = if (exclusive) exp_dot_pos + 3 else exp_dot_pos + 2;
+                    const start_str = std.mem.trim(u8, expanded_item[0..exp_dot_pos], &std.ascii.whitespace);
+                    const end_str = std.mem.trim(u8, expanded_item[end_start..], &std.ascii.whitespace);
+
+                    if (std.fmt.parseInt(i64, start_str, 10)) |range_start| {
+                        if (std.fmt.parseInt(i64, end_str, 10)) |range_end| {
+                            const actual_end = if (exclusive) range_end else range_end + 1;
+                            const step: i64 = if (range_start <= actual_end) 1 else -1;
+                            var val = range_start;
+                            while ((step > 0 and val < actual_end) or (step < 0 and val > actual_end)) {
+                                var buf: [32]u8 = undefined;
+                                const num_str = std.fmt.bufPrint(&buf, "{d}", .{val}) catch continue;
+                                try expanded_items.append(self.allocator, try self.allocator.dupe(u8, num_str));
+                                val += step;
+                            }
+                            continue;
+                        } else |_| {}
+                    } else |_| {}
+                }
+                // Not a valid range, fall through to regular expansion
+                _ = dot_pos;
+            }
+
             // Check if item is an array expansion
             if (std.mem.indexOf(u8, item, "${") != null and
                 (std.mem.indexOf(u8, item, "[@]") != null or std.mem.indexOf(u8, item, "[*]") != null))
@@ -641,7 +672,7 @@ pub const ControlFlowExecutor = struct {
     }
 
     /// Execute a body of commands
-    fn executeBody(self: *ControlFlowExecutor, body: [][]const u8) i32 {
+    pub fn executeBody(self: *ControlFlowExecutor, body: [][]const u8) i32 {
         var last_exit: i32 = 0;
 
         for (body) |line| {
@@ -716,7 +747,7 @@ pub const ControlFlowExecutor = struct {
         return globMatch(value, pattern);
     }
 
-    fn globMatch(str: []const u8, pattern: []const u8) bool {
+    pub fn globMatch(str: []const u8, pattern: []const u8) bool {
         return globMatchImpl(str, 0, pattern, 0);
     }
 

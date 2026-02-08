@@ -814,18 +814,27 @@ pub const Executor = struct {
     /// Check if a command name is a shell builtin.
     fn isBuiltin(self: *Executor, name: []const u8) bool {
         const builtin_names = [_][]const u8{
-            "cd", "pwd", "echo", "exit", "env", "export", "set", "unset",
-            "true", "false", "test", "[", "[[", "alias", "unalias", "which",
-            "type", "help", "read", "printf", "source", ".", "history",
-            "pushd", "popd", "dirs", "eval", "exec", "command", "builtin",
-            "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
-            "umask", "getopts", "clear", "time", "timeout", "hash", "yes", "reload",
-            "watch", "tree", "grep", "find", "calc", "json", "ls",
-            "seq", "date", "parallel", "http", "base64", "uuid",
-            "localip", "shrug", "web", "ip", "return", "local", "copyssh",
-            "reloaddns", "emptytrash", "wip", "bookmark", "code", "pstorm",
-            "show", "hide", "ft", "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor", "log-parse", "dotfiles", "library", "hook",
-            "ifind", "coproc",
+            "cd",           "pwd",         "echo",        "exit",        "env",         "export",     "set",         "unset",
+            "true",         "false",       "test",        "[",           "[[",          "alias",      "unalias",     "which",
+            "type",         "help",        "read",        "printf",      "source",      ".",          "history",
+            "pushd",        "popd",        "dirs",        "eval",        "exec",        "command",    "builtin",
+            "jobs",         "fg",          "bg",          "wait",        "disown",      "kill",       "trap",        "times",
+            "umask",        "getopts",     "clear",       "time",        "timeout",     "hash",       "yes",         "reload",
+            "watch",        "tree",        "grep",        "find",        "calc",        "json",       "ls",
+            "seq",          "date",        "parallel",    "http",        "base64",      "uuid",
+            "localip",      "shrug",       "web",         "ip",          "return",      "local",      "copyssh",
+            "reloaddns",    "emptytrash",  "wip",         "bookmark",    "code",        "pstorm",
+            "show",         "hide",        "ft",          "sys-stats",   "netstats",    "net-check",  "log-tail",    "proc-monitor", "log-parse", "dotfiles", "library", "hook",
+            "ifind",        "coproc",
+            // Nushell-inspired structured data commands
+            "from",         "to",          "table",       "grid",
+            "where",        "select",      "reject",      "get",         "first",       "last",       "skip",        "take",
+            "length",       "flatten",     "uniq",        "sort-by",     "reverse",     "transpose",  "group-by",
+            "enumerate",    "wrap",        "columns",     "values",      "headers",     "compact",    "rename",
+            "append",       "prepend",
+            "str",          "path",        "math",
+            "into",         "encode",      "decode",
+            "detect",       "bench",
         };
         for (builtin_names) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -867,6 +876,15 @@ pub const Executor = struct {
             "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor",
             "log-parse", "dotfiles", "library", "hook", "ifind", "coproc", "exit",
             ":", "declare", "typeset", "let", "shift", "break", "continue",
+            // Nushell-inspired structured data commands
+            "from",  "to",     "table",    "grid",
+            "where", "select", "reject",   "get",       "first",     "last",      "skip",      "take",
+            "length","flatten","uniq",     "sort-by",   "reverse",   "transpose", "group-by",
+            "enumerate","wrap","columns",  "values",    "headers",   "compact",   "rename",
+            "append","prepend",
+            "str",   "path",   "math",
+            "into",  "encode", "decode",
+            "detect","bench",
         };
         for (builtin_names) |b| {
             if (std.mem.eql(u8, name, b)) return true;
@@ -937,7 +955,11 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "type")) {
             return try builtins.command_builtins.typeBuiltin(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "help")) {
-            return try utilities.help(command);
+            // Use enhanced help system for specific topics, fallback to basic help
+            if (command.args.len > 0) {
+                return try builtins.help_system.helpCmd(self.allocator, command);
+            }
+            return try builtins.help_system.helpCmd(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "alias")) {
             return try alias_builtins.alias(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "unalias")) {
@@ -1015,6 +1037,16 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "seq")) {
             return try utilities.seq(command);
         } else if (std.mem.eql(u8, command.name, "date")) {
+            // Use enhanced date builtins for subcommands (now, format, to-record, humanize)
+            if (command.args.len > 0) {
+                const sub = command.args[0];
+                if (std.mem.eql(u8, sub, "now") or std.mem.eql(u8, sub, "format") or
+                    std.mem.eql(u8, sub, "to-record") or std.mem.eql(u8, sub, "humanize") or
+                    std.mem.eql(u8, sub, "to-table"))
+                {
+                    return try builtins.date_builtins.dateCmd(self.allocator, command);
+                }
+            }
             return try utilities.date(command);
         } else if (std.mem.eql(u8, command.name, "parallel")) {
             return try builtins.process_builtins.parallel(command);
@@ -1076,6 +1108,81 @@ pub const Executor = struct {
             return try builtins.interactive_builtins.ifind(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "coproc")) {
             return try builtins.exec_builtins.coproc(&ctx, command);
+        }
+
+        // Nushell-inspired structured data commands
+        if (std.mem.eql(u8, command.name, "from")) {
+            return try builtins.data_builtins.fromCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "to")) {
+            return try builtins.data_builtins.toCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "table")) {
+            return try builtins.data_builtins.tableCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "grid")) {
+            return try builtins.data_builtins.gridCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "where")) {
+            return try builtins.pipeline_builtins.whereCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "select")) {
+            return try builtins.pipeline_builtins.selectCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "reject")) {
+            return try builtins.pipeline_builtins.rejectCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "get")) {
+            return try builtins.pipeline_builtins.getCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "first")) {
+            return try builtins.pipeline_builtins.firstCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "last")) {
+            return try builtins.pipeline_builtins.lastCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "skip")) {
+            return try builtins.pipeline_builtins.skipCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "take")) {
+            return try builtins.pipeline_builtins.takeCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "length")) {
+            return try builtins.pipeline_builtins.lengthCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "flatten")) {
+            return try builtins.pipeline_builtins.flattenCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "uniq")) {
+            return try builtins.pipeline_builtins.uniqCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "sort-by")) {
+            return try builtins.pipeline_builtins.sortByCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "reverse")) {
+            return try builtins.pipeline_builtins.reverseCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "transpose")) {
+            return try builtins.pipeline_builtins.transposeCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "group-by")) {
+            return try builtins.pipeline_builtins.groupByCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "enumerate")) {
+            return try builtins.pipeline_builtins.enumerateCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "wrap")) {
+            return try builtins.pipeline_builtins.wrapCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "columns")) {
+            return try builtins.pipeline_builtins.columnsCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "values")) {
+            return try builtins.pipeline_builtins.valuesCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "headers")) {
+            return try builtins.pipeline_builtins.headersCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "compact")) {
+            return try builtins.pipeline_builtins.compactCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "rename")) {
+            return try builtins.pipeline_builtins.renameCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "append")) {
+            return try builtins.pipeline_builtins.appendCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "prepend")) {
+            return try builtins.pipeline_builtins.prependCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "str")) {
+            return try builtins.str_builtins.strCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "path")) {
+            return try builtins.path_builtins.pathCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "math")) {
+            return try builtins.math_builtins.mathCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "into")) {
+            return try builtins.convert_builtins.intoCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "encode")) {
+            return try builtins.encode_builtins.encodeCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "decode")) {
+            return try builtins.encode_builtins.decodeCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "detect")) {
+            return try builtins.detect_builtins.detectColumns(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "bench")) {
+            return try builtins.bench_builtins.bench(self.allocator, command);
         }
 
         // Check for loadable builtins

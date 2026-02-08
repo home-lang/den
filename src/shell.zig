@@ -1233,10 +1233,15 @@ pub const Shell = struct {
                             }
                         }
                         if (!needs_full_pipeline) {
-                            // Check if readonly before assignment
+                            // Check if readonly or immutable before assignment
                             if (self.var_attributes.get(potential_var)) |attrs| {
                                 if (attrs.readonly) {
                                     try IO.eprint("den: {s}: readonly variable\n", .{potential_var});
+                                    self.last_exit_code = 1;
+                                    return;
+                                }
+                                if (attrs.immutable) {
+                                    try IO.eprint("den: {s}: immutable variable (declared with let)\n", .{potential_var});
                                     self.last_exit_code = 1;
                                     return;
                                 }
@@ -1302,6 +1307,36 @@ pub const Shell = struct {
         // Check for select loop: select VAR in ITEM1 ITEM2; do ... done
         if (std.mem.startsWith(u8, trimmed_input, "select ")) {
             try shell_mod.executeSelectLoop(self, input);
+            return;
+        }
+
+        // Check for let/mut variable bindings: let x = value (immutable), mut y = value (mutable)
+        if (std.mem.startsWith(u8, trimmed_input, "let ") or std.mem.startsWith(u8, trimmed_input, "mut ")) {
+            self.executeLetMut(trimmed_input) catch |err| {
+                if (err == error.Exit) return err;
+                try IO.eprint("den: variable binding error: {}\n", .{err});
+                self.last_exit_code = 1;
+            };
+            return;
+        }
+
+        // Check for try/catch error handling: try { ... } catch err { ... }
+        if (std.mem.startsWith(u8, trimmed_input, "try ") or std.mem.eql(u8, trimmed_input, "try")) {
+            self.executeTryCatch(trimmed_input) catch |err| {
+                if (err == error.Exit) return err;
+                try IO.eprint("den: try/catch error: {}\n", .{err});
+                self.last_exit_code = 1;
+            };
+            return;
+        }
+
+        // Check for match expressions: match $value { pattern => body, ... }
+        if (std.mem.startsWith(u8, trimmed_input, "match ")) {
+            self.executeMatch(trimmed_input) catch |err| {
+                if (err == error.Exit) return err;
+                try IO.eprint("den: match error: {}\n", .{err});
+                self.last_exit_code = 1;
+            };
             return;
         }
 
@@ -1763,6 +1798,482 @@ pub const Shell = struct {
                 cmd_part, heredoc_content,
             }) catch return null;
             return result;
+        }
+    }
+
+    /// Execute a let or mut variable binding.
+    /// Syntax: let x = value (immutable) or mut y = value (mutable)
+    fn executeLetMut(self: *Shell, input: []const u8) !void {
+        const is_let = std.mem.startsWith(u8, input, "let ");
+        const rest = if (is_let) input[4..] else input[4..]; // "let " or "mut " both 4 chars
+        const trimmed = std.mem.trim(u8, rest, &std.ascii.whitespace);
+
+        // Parse: name = value
+        // Find the = sign (with or without spaces)
+        var name_end: usize = 0;
+        for (trimmed, 0..) |c, idx| {
+            if (c == '=' or c == ' ') {
+                name_end = idx;
+                break;
+            }
+            if (!std.ascii.isAlphanumeric(c) and c != '_') {
+                try IO.eprint("den: invalid variable name in {s} binding\n", .{if (is_let) "let" else "mut"});
+                self.last_exit_code = 1;
+                return;
+            }
+        } else {
+            name_end = trimmed.len;
+        }
+
+        const var_name = trimmed[0..name_end];
+        if (var_name.len == 0) {
+            try IO.eprint("den: {s}: missing variable name\n", .{if (is_let) "let" else "mut"});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Check if variable already exists and is immutable (can't rebind let vars)
+        if (is_let) {
+            if (self.var_attributes.get(var_name)) |attrs| {
+                if (attrs.immutable) {
+                    try IO.eprint("den: {s}: immutable variable (declared with let)\n", .{var_name});
+                    self.last_exit_code = 1;
+                    return;
+                }
+            }
+        }
+
+        // Find the value after = (skip optional spaces around =)
+        var value_start = name_end;
+        // Skip spaces
+        while (value_start < trimmed.len and trimmed[value_start] == ' ') value_start += 1;
+        // Skip =
+        if (value_start < trimmed.len and trimmed[value_start] == '=') {
+            value_start += 1;
+        } else {
+            // No value means empty string
+            const empty_val = try self.allocator.dupe(u8, "");
+            const gop = try self.environment.getOrPut(var_name);
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+            } else {
+                gop.key_ptr.* = try self.allocator.dupe(u8, var_name);
+            }
+            gop.value_ptr.* = empty_val;
+
+            // Set immutable attribute for let bindings
+            if (is_let) {
+                const var_builtins = @import("shell/variable_builtins.zig");
+                try var_builtins.setVarAttributes(self, var_name, types.VarAttributes{ .immutable = true }, false);
+            }
+
+            self.last_exit_code = 0;
+            return;
+        }
+        // Skip spaces after =
+        while (value_start < trimmed.len and trimmed[value_start] == ' ') value_start += 1;
+
+        const raw_value = if (value_start < trimmed.len) trimmed[value_start..] else "";
+
+        // Check if value needs expansion (contains $, `)
+        var needs_expansion = false;
+        for (raw_value) |c| {
+            if (c == '$' or c == '`') {
+                needs_expansion = true;
+                break;
+            }
+        }
+
+        if (needs_expansion) {
+            // Use Expansion to resolve variables/command substitutions
+            var expander = Expansion.init(self.allocator, &self.environment, self.last_exit_code);
+            expander.arrays = &self.arrays;
+            expander.assoc_arrays = &self.assoc_arrays;
+            const expanded = expander.expand(raw_value) catch raw_value;
+            const val = if (expanded.ptr != raw_value.ptr) expanded else try self.allocator.dupe(u8, raw_value);
+
+            const gop = try self.environment.getOrPut(var_name);
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+            } else {
+                gop.key_ptr.* = try self.allocator.dupe(u8, var_name);
+            }
+            gop.value_ptr.* = val;
+        } else {
+            // Simple literal value - strip surrounding quotes
+            const stripped = if (raw_value.len >= 2 and
+                ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
+                (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
+                raw_value[1 .. raw_value.len - 1]
+            else
+                raw_value;
+
+            const val = try self.allocator.dupe(u8, stripped);
+            const gop = try self.environment.getOrPut(var_name);
+            if (gop.found_existing) {
+                self.allocator.free(gop.value_ptr.*);
+            } else {
+                gop.key_ptr.* = try self.allocator.dupe(u8, var_name);
+            }
+            gop.value_ptr.* = val;
+        }
+
+        // Set immutable attribute for let bindings
+        if (is_let) {
+            const var_builtins = @import("shell/variable_builtins.zig");
+            try var_builtins.setVarAttributes(self, var_name, types.VarAttributes{ .immutable = true }, false);
+        }
+
+        self.last_exit_code = 0;
+    }
+
+    /// Execute a try/catch block.
+    /// Syntax: try { commands } catch [varname] { commands }
+    /// Or one-liner: try command1; command2 catch err { handle }
+    fn executeTryCatch(self: *Shell, input: []const u8) !void {
+        const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+
+        // Find the try body and catch clause
+        // Syntax: try { body } catch [var] { handler }
+        // Or: try command; catch [var] { handler }
+        var try_body: []const u8 = "";
+        var catch_var: []const u8 = "err";
+        var catch_body: []const u8 = "";
+
+        // Simple brace-based parsing
+        if (std.mem.startsWith(u8, trimmed, "try {") or std.mem.startsWith(u8, trimmed, "try{")) {
+            // Find matching }
+            const body_start = if (trimmed[3] == '{') @as(usize, 4) else @as(usize, 5);
+            var depth: usize = 1;
+            var pos: usize = body_start;
+            while (pos < trimmed.len) : (pos += 1) {
+                if (trimmed[pos] == '{') depth += 1;
+                if (trimmed[pos] == '}') {
+                    depth -= 1;
+                    if (depth == 0) break;
+                }
+            }
+            if (depth != 0) {
+                try IO.eprint("den: try: missing closing }}\n", .{});
+                self.last_exit_code = 1;
+                return;
+            }
+            try_body = std.mem.trim(u8, trimmed[body_start..pos], &std.ascii.whitespace);
+            pos += 1; // skip }
+
+            // Look for catch
+            const after_try = std.mem.trim(u8, trimmed[pos..], &std.ascii.whitespace);
+            if (std.mem.startsWith(u8, after_try, "catch")) {
+                const catch_rest = std.mem.trim(u8, after_try[5..], &std.ascii.whitespace);
+                // Check for catch variable name
+                if (catch_rest.len > 0 and catch_rest[0] != '{') {
+                    // Has a variable name
+                    var var_end: usize = 0;
+                    while (var_end < catch_rest.len and catch_rest[var_end] != ' ' and catch_rest[var_end] != '{') var_end += 1;
+                    catch_var = catch_rest[0..var_end];
+                    const rest_after_var = std.mem.trim(u8, catch_rest[var_end..], &std.ascii.whitespace);
+                    if (rest_after_var.len > 0 and rest_after_var[0] == '{') {
+                        // Find matching } for catch body
+                        depth = 1;
+                        pos = 1;
+                        while (pos < rest_after_var.len) : (pos += 1) {
+                            if (rest_after_var[pos] == '{') depth += 1;
+                            if (rest_after_var[pos] == '}') {
+                                depth -= 1;
+                                if (depth == 0) break;
+                            }
+                        }
+                        catch_body = std.mem.trim(u8, rest_after_var[1..pos], &std.ascii.whitespace);
+                    }
+                } else if (catch_rest.len > 0 and catch_rest[0] == '{') {
+                    // No variable name, directly { body }
+                    depth = 1;
+                    pos = 1;
+                    while (pos < catch_rest.len) : (pos += 1) {
+                        if (catch_rest[pos] == '{') depth += 1;
+                        if (catch_rest[pos] == '}') {
+                            depth -= 1;
+                            if (depth == 0) break;
+                        }
+                    }
+                    catch_body = std.mem.trim(u8, catch_rest[1..pos], &std.ascii.whitespace);
+                }
+            }
+        } else if (std.mem.startsWith(u8, trimmed, "try ")) {
+            // Simple form: try command; catch { handler } or try command
+            const rest = trimmed[4..];
+            // Find " catch " boundary
+            if (std.mem.indexOf(u8, rest, " catch ")) |catch_pos| {
+                try_body = std.mem.trim(u8, rest[0..catch_pos], &std.ascii.whitespace);
+                const catch_rest = std.mem.trim(u8, rest[catch_pos + 7 ..], &std.ascii.whitespace);
+                if (catch_rest.len > 0 and catch_rest[0] == '{') {
+                    var depth: usize = 1;
+                    var pos: usize = 1;
+                    while (pos < catch_rest.len) : (pos += 1) {
+                        if (catch_rest[pos] == '{') depth += 1;
+                        if (catch_rest[pos] == '}') {
+                            depth -= 1;
+                            if (depth == 0) break;
+                        }
+                    }
+                    catch_body = std.mem.trim(u8, catch_rest[1..pos], &std.ascii.whitespace);
+                } else {
+                    // Check for variable name before {
+                    var var_end: usize = 0;
+                    while (var_end < catch_rest.len and catch_rest[var_end] != ' ' and catch_rest[var_end] != '{') var_end += 1;
+                    if (var_end > 0 and var_end < catch_rest.len) {
+                        catch_var = catch_rest[0..var_end];
+                        const rest2 = std.mem.trim(u8, catch_rest[var_end..], &std.ascii.whitespace);
+                        if (rest2.len > 0 and rest2[0] == '{') {
+                            var depth: usize = 1;
+                            var pos: usize = 1;
+                            while (pos < rest2.len) : (pos += 1) {
+                                if (rest2[pos] == '{') depth += 1;
+                                if (rest2[pos] == '}') {
+                                    depth -= 1;
+                                    if (depth == 0) break;
+                                }
+                            }
+                            catch_body = std.mem.trim(u8, rest2[1..pos], &std.ascii.whitespace);
+                        } else {
+                            catch_body = rest2;
+                        }
+                    } else {
+                        catch_body = catch_rest;
+                    }
+                }
+            } else {
+                // No catch clause - just execute with error suppression
+                try_body = std.mem.trim(u8, rest, &std.ascii.whitespace);
+            }
+        }
+
+        if (try_body.len == 0) {
+            try IO.eprint("den: try: missing command body\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        // Split try body into lines for ControlFlowExecutor
+        var try_lines_buf: [64][]const u8 = undefined;
+        var try_line_count: usize = 0;
+        var try_iter = std.mem.splitScalar(u8, try_body, ';');
+        while (try_iter.next()) |cmd| {
+            const cmd_trimmed = std.mem.trim(u8, cmd, &std.ascii.whitespace);
+            if (cmd_trimmed.len == 0) continue;
+            if (try_line_count < try_lines_buf.len) {
+                try_lines_buf[try_line_count] = cmd_trimmed;
+                try_line_count += 1;
+            }
+        }
+
+        // Execute try body via ControlFlowExecutor
+        var cf_executor = ControlFlowExecutor.init(self);
+        const try_result = cf_executor.executeBody(try_lines_buf[0..try_line_count]);
+        self.last_exit_code = try_result;
+        const try_failed = try_result != 0;
+
+        if (try_failed and catch_body.len > 0) {
+            // Set the error variable
+            const err_msg = try std.fmt.allocPrint(self.allocator, "command failed with exit code {d}", .{self.last_exit_code});
+            const err_gop = try self.environment.getOrPut(catch_var);
+            if (err_gop.found_existing) {
+                self.allocator.free(err_gop.value_ptr.*);
+            } else {
+                err_gop.key_ptr.* = try self.allocator.dupe(u8, catch_var);
+            }
+            err_gop.value_ptr.* = err_msg;
+
+            // Also set DEN_ERROR
+            const den_err_gop = try self.environment.getOrPut("DEN_ERROR");
+            if (den_err_gop.found_existing) {
+                self.allocator.free(den_err_gop.value_ptr.*);
+            } else {
+                den_err_gop.key_ptr.* = try self.allocator.dupe(u8, "DEN_ERROR");
+            }
+            den_err_gop.value_ptr.* = try self.allocator.dupe(u8, err_msg);
+
+            // Execute catch body via ControlFlowExecutor
+            var catch_lines_buf: [64][]const u8 = undefined;
+            var catch_line_count: usize = 0;
+            var catch_iter = std.mem.splitScalar(u8, catch_body, ';');
+            while (catch_iter.next()) |cmd| {
+                const cmd_trimmed = std.mem.trim(u8, cmd, &std.ascii.whitespace);
+                if (cmd_trimmed.len == 0) continue;
+                if (catch_line_count < catch_lines_buf.len) {
+                    catch_lines_buf[catch_line_count] = cmd_trimmed;
+                    catch_line_count += 1;
+                }
+            }
+            self.last_exit_code = cf_executor.executeBody(catch_lines_buf[0..catch_line_count]);
+        } else if (!try_failed) {
+            self.last_exit_code = 0;
+        }
+    }
+
+    /// Execute a match expression.
+    /// Syntax: match <value> { <pattern> => <body>, <pattern> => <body>, _ => <default> }
+    fn executeMatch(self: *Shell, input: []const u8) !void {
+        const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+
+        // Parse: match <value> { arms... }
+        if (!std.mem.startsWith(u8, trimmed, "match ")) {
+            try IO.eprint("den: invalid match syntax\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const after_match = trimmed[6..];
+        // Find the opening {
+        const brace_pos = std.mem.indexOfScalar(u8, after_match, '{') orelse {
+            try IO.eprint("den: match: missing opening brace\n", .{});
+            self.last_exit_code = 1;
+            return;
+        };
+
+        // The match value is everything before {
+        var match_value = std.mem.trim(u8, after_match[0..brace_pos], &std.ascii.whitespace);
+
+        // Expand the match value (handle $var, $(cmd), etc.)
+        var expander = Expansion.init(self.allocator, &self.environment, self.last_exit_code);
+        expander.arrays = &self.arrays;
+        expander.assoc_arrays = &self.assoc_arrays;
+        const expanded_value = expander.expand(match_value) catch match_value;
+        defer if (expanded_value.ptr != match_value.ptr) self.allocator.free(expanded_value);
+
+        // Strip quotes from expanded value
+        const value_stripped = if (expanded_value.len >= 2 and
+            ((expanded_value[0] == '"' and expanded_value[expanded_value.len - 1] == '"') or
+            (expanded_value[0] == '\'' and expanded_value[expanded_value.len - 1] == '\'')))
+            expanded_value[1 .. expanded_value.len - 1]
+        else
+            expanded_value;
+
+        // Find the matching closing }
+        const body_start = brace_pos + 1;
+        var depth: usize = 1;
+        var body_end: usize = body_start;
+        while (body_end < after_match.len) : (body_end += 1) {
+            if (after_match[body_end] == '{') depth += 1;
+            if (after_match[body_end] == '}') {
+                depth -= 1;
+                if (depth == 0) break;
+            }
+        }
+        if (depth != 0) {
+            try IO.eprint("den: match: missing closing }}\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+
+        const arms_str = std.mem.trim(u8, after_match[body_start..body_end], &std.ascii.whitespace);
+        if (arms_str.len == 0) {
+            self.last_exit_code = 0;
+            return;
+        }
+
+        // Parse match arms: pattern => body, pattern => body, ...
+        // Split on commas that are not inside braces/quotes
+        var matched = false;
+        var arm_start: usize = 0;
+        var arm_depth: usize = 0;
+        var in_sq = false;
+        var in_dq = false;
+        var ai: usize = 0;
+        while (ai <= arms_str.len) : (ai += 1) {
+            const at_end = ai == arms_str.len;
+            const c = if (at_end) @as(u8, 0) else arms_str[ai];
+
+            if (!at_end) {
+                if (c == '\'' and !in_dq) { in_sq = !in_sq; continue; }
+                if (c == '"' and !in_sq) { in_dq = !in_dq; continue; }
+                if (in_sq or in_dq) continue;
+                if (c == '{') { arm_depth += 1; continue; }
+                if (c == '}') { if (arm_depth > 0) arm_depth -= 1; continue; }
+                if (c != ',' or arm_depth > 0) continue;
+            }
+
+            // We have an arm (either at comma or end)
+            const arm = std.mem.trim(u8, arms_str[arm_start..ai], &std.ascii.whitespace);
+            arm_start = ai + 1;
+
+            if (arm.len == 0) continue;
+            if (matched) continue; // Already matched, skip remaining arms
+
+            // Parse arm: pattern => body
+            const arrow_pos = std.mem.indexOf(u8, arm, "=>") orelse continue;
+            const pattern = std.mem.trim(u8, arm[0..arrow_pos], &std.ascii.whitespace);
+            const body = std.mem.trim(u8, arm[arrow_pos + 2 ..], &std.ascii.whitespace);
+
+            // Strip braces from body if present
+            const actual_body = if (body.len >= 2 and body[0] == '{' and body[body.len - 1] == '}')
+                std.mem.trim(u8, body[1 .. body.len - 1], &std.ascii.whitespace)
+            else
+                body;
+
+            // Check if pattern matches
+            if (std.mem.eql(u8, pattern, "_")) {
+                // Wildcard - always matches
+                matched = true;
+            } else if (std.mem.indexOf(u8, pattern, "..")) |range_sep| {
+                // Range pattern: 1..10 or 1..<10
+                const exclusive = range_sep + 2 < pattern.len and pattern[range_sep + 2] == '<';
+                const range_end_start = if (exclusive) range_sep + 3 else range_sep + 2;
+                const range_start_str = std.mem.trim(u8, pattern[0..range_sep], &std.ascii.whitespace);
+                const range_end_str = std.mem.trim(u8, pattern[range_end_start..], &std.ascii.whitespace);
+                const val_num = std.fmt.parseInt(i64, value_stripped, 10) catch continue;
+                const range_start = std.fmt.parseInt(i64, range_start_str, 10) catch continue;
+                const range_end = std.fmt.parseInt(i64, range_end_str, 10) catch continue;
+                if (exclusive) {
+                    matched = val_num >= range_start and val_num < range_end;
+                } else {
+                    matched = val_num >= range_start and val_num <= range_end;
+                }
+            } else if (pattern.len > 0 and (pattern[0] == '$' or pattern[0] == '"' or pattern[0] == '\'')) {
+                // Variable or quoted string pattern - expand and compare
+                const expanded_pat = expander.expand(pattern) catch pattern;
+                defer if (expanded_pat.ptr != pattern.ptr) self.allocator.free(expanded_pat);
+                const pat_stripped = if (expanded_pat.len >= 2 and
+                    ((expanded_pat[0] == '"' and expanded_pat[expanded_pat.len - 1] == '"') or
+                    (expanded_pat[0] == '\'' and expanded_pat[expanded_pat.len - 1] == '\'')))
+                    expanded_pat[1 .. expanded_pat.len - 1]
+                else
+                    expanded_pat;
+                matched = std.mem.eql(u8, value_stripped, pat_stripped);
+            } else if (std.mem.indexOfAny(u8, pattern, "*?[") != null) {
+                // Glob pattern
+                matched = ControlFlowExecutor.globMatch(value_stripped, pattern);
+            } else {
+                // Literal comparison (strip quotes)
+                const pat_unquoted = if (pattern.len >= 2 and
+                    ((pattern[0] == '"' and pattern[pattern.len - 1] == '"') or
+                    (pattern[0] == '\'' and pattern[pattern.len - 1] == '\'')))
+                    pattern[1 .. pattern.len - 1]
+                else
+                    pattern;
+                matched = std.mem.eql(u8, value_stripped, pat_unquoted);
+            }
+
+            if (matched and actual_body.len > 0) {
+                // Execute the body via ControlFlowExecutor
+                var match_body_buf: [64][]const u8 = undefined;
+                var match_body_count: usize = 0;
+                var body_iter = std.mem.splitScalar(u8, actual_body, ';');
+                while (body_iter.next()) |cmd| {
+                    const cmd_trimmed = std.mem.trim(u8, cmd, &std.ascii.whitespace);
+                    if (cmd_trimmed.len == 0) continue;
+                    if (match_body_count < match_body_buf.len) {
+                        match_body_buf[match_body_count] = cmd_trimmed;
+                        match_body_count += 1;
+                    }
+                }
+                var cf_exec = ControlFlowExecutor.init(self);
+                self.last_exit_code = cf_exec.executeBody(match_body_buf[0..match_body_count]);
+            }
+        }
+
+        if (!matched) {
+            self.last_exit_code = 0;
         }
     }
 

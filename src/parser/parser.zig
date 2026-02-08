@@ -96,7 +96,8 @@ pub const Parser = struct {
                 .word, .process_sub_in, .process_sub_out,
                 .kw_if, .kw_then, .kw_else, .kw_elif, .kw_fi,
                 .kw_for, .kw_while, .kw_do, .kw_done,
-                .kw_case, .kw_esac, .kw_in, .kw_function => {
+                .kw_case, .kw_esac, .kw_in, .kw_function,
+                .kw_let, .kw_mut, .kw_try, .kw_catch, .kw_match => {
                     // Process substitution tokens are treated as word arguments
                     // The value contains the full construct like "<(echo hello)"
                     const value = try self.allocator.dupe(u8, token.value);
