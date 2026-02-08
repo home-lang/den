@@ -471,7 +471,70 @@ pub const Tokenizer = struct {
                 if (self.pos + 1 < self.input.len) {
                     const next_char = self.input[self.pos + 1];
                     if (in_ansi_quote) {
-                        // ANSI-C escape: always interpret
+                        // ANSI-C escape: handle multi-char sequences
+                        if (next_char == 'x' and self.pos + 3 < self.input.len) {
+                            // \xNN - hex escape
+                            const h1 = self.input[self.pos + 2];
+                            const h2 = self.input[self.pos + 3];
+                            if (std.ascii.isHex(h1) and std.ascii.isHex(h2)) {
+                                const hex_str = self.input[self.pos + 2 .. self.pos + 4];
+                                const byte = std.fmt.parseInt(u8, hex_str, 16) catch 0;
+                                self.pos += 4;
+                                self.column += 4;
+                                if (word_len < word_buffer.len) {
+                                    word_buffer[word_len] = byte;
+                                    word_len += 1;
+                                }
+                                continue;
+                            }
+                        }
+                        if (next_char == '0' and self.pos + 2 < self.input.len) {
+                            // \0NNN - octal escape
+                            var oct_end = self.pos + 2;
+                            while (oct_end < self.input.len and oct_end < self.pos + 5 and
+                                self.input[oct_end] >= '0' and self.input[oct_end] <= '7')
+                            {
+                                oct_end += 1;
+                            }
+                            if (oct_end > self.pos + 2) {
+                                const oct_str = self.input[self.pos + 2 .. oct_end];
+                                const byte = std.fmt.parseInt(u8, oct_str, 8) catch 0;
+                                const advance = oct_end - self.pos;
+                                self.pos = oct_end;
+                                self.column += advance;
+                                if (word_len < word_buffer.len) {
+                                    word_buffer[word_len] = byte;
+                                    word_len += 1;
+                                }
+                                continue;
+                            }
+                        }
+                        if (next_char == 'u' and self.pos + 5 < self.input.len) {
+                            // \uNNNN - unicode escape (basic, ASCII range only for now)
+                            var hex_end = self.pos + 2;
+                            while (hex_end < self.input.len and hex_end < self.pos + 6 and
+                                std.ascii.isHex(self.input[hex_end]))
+                            {
+                                hex_end += 1;
+                            }
+                            if (hex_end > self.pos + 2) {
+                                const hex_str = self.input[self.pos + 2 .. hex_end];
+                                const codepoint = std.fmt.parseInt(u21, hex_str, 16) catch 0;
+                                const advance = hex_end - self.pos;
+                                self.pos = hex_end;
+                                self.column += advance;
+                                // Encode as UTF-8
+                                var utf8_buf: [4]u8 = undefined;
+                                const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch 1;
+                                var ui: usize = 0;
+                                while (ui < utf8_len and word_len < word_buffer.len) : (ui += 1) {
+                                    word_buffer[word_len] = utf8_buf[ui];
+                                    word_len += 1;
+                                }
+                                continue;
+                            }
+                        }
+                        // Simple single-char escape
                         self.pos += 2;
                         self.column += 2;
                         const result = self.processAnsiEscape(next_char);

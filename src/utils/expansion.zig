@@ -495,15 +495,28 @@ pub const Expansion = struct {
         }
     }
 
+    /// Helper to expand a value, breaking circular error set inference
+    fn expandNested(self: *Expansion, value: []const u8) []u8 {
+        const expand_fn = @as(*const fn (*Expansion, []const u8) anyerror![]u8, @ptrCast(&Expansion.expand));
+        return expand_fn(self, value) catch self.allocator.dupe(u8, value) catch @constCast("");
+    }
+
     /// Expand ${VAR} or ${VAR:-default} form
     fn expandBracedVariable(self: *Expansion, input: []const u8) !ExpansionResult {
         if (input.len < 3 or input[0] != '$' or input[1] != '{') {
             return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
-        // Find closing brace
+        // Find closing brace (tracking nesting)
         var end: usize = 2;
-        while (end < input.len and input[end] != '}') {
+        var brace_depth: usize = 1;
+        while (end < input.len) {
+            if (input[end] == '{') {
+                brace_depth += 1;
+            } else if (input[end] == '}') {
+                brace_depth -= 1;
+                if (brace_depth == 0) break;
+            }
             end += 1;
         }
 
@@ -1154,15 +1167,15 @@ pub const Expansion = struct {
             const var_name = content[0..sep_pos];
             const default_value = content[sep_pos + 2 ..];
 
-            if (self.environment.get(var_name)) |value| {
+            if (self.getVariableValue(var_name)) |value| {
                 if (value.len > 0) {
                     const result = try self.allocator.dupe(u8, value);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
             }
 
-            // Use default value
-            const result = try self.allocator.dupe(u8, default_value);
+            // Use default value - expand it first (supports nested ${...})
+            const result = self.expandNested(default_value);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
 
@@ -1171,19 +1184,19 @@ pub const Expansion = struct {
             const var_name = content[0..sep_pos];
             const default_value = content[sep_pos + 2 ..];
 
-            if (self.environment.get(var_name)) |value| {
+            if (self.getVariableValue(var_name)) |value| {
                 if (value.len > 0) {
                     const result = try self.allocator.dupe(u8, value);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
             }
 
-            // Assign and use default value
-            const value_copy = try self.allocator.dupe(u8, default_value);
+            // Assign and use default value - expand first
+            const expanded = self.expandNested(default_value);
             const name_copy = try self.allocator.dupe(u8, var_name);
+            const value_copy = try self.allocator.dupe(u8, expanded);
             self.environment.put(name_copy, value_copy) catch {};
-            const result = try self.allocator.dupe(u8, default_value);
-            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+            return ExpansionResult{ .value = expanded, .consumed = end + 1, .owned = true };
         }
 
         // Check for error if unset syntax: ${VAR:?message}
@@ -1191,7 +1204,7 @@ pub const Expansion = struct {
             const var_name = content[0..sep_pos];
             const error_msg = content[sep_pos + 2 ..];
 
-            if (self.environment.get(var_name)) |value| {
+            if (self.getVariableValue(var_name)) |value| {
                 if (value.len > 0) {
                     const result = try self.allocator.dupe(u8, value);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
@@ -1214,10 +1227,10 @@ pub const Expansion = struct {
             const var_name = content[0..sep_pos];
             const alt_value = content[sep_pos + 2 ..];
 
-            if (self.environment.get(var_name)) |value| {
+            if (self.getVariableValue(var_name)) |value| {
                 if (value.len > 0) {
                     // Variable is set and non-empty, use alternative value
-                    const result = try self.allocator.dupe(u8, alt_value);
+                    const result = self.expandNested(alt_value);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
             }
