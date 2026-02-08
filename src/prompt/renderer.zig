@@ -44,6 +44,16 @@ pub const PromptRenderer = struct {
         self.transient_mode = enabled;
     }
 
+    /// Render a minimal transient prompt (used to replace the full prompt after command execution)
+    /// If a transient_format is configured, it renders that template; otherwise returns a simple "❯ ".
+    pub fn renderTransient(self: *PromptRenderer, ctx: *const PromptContext) ![]const u8 {
+        if (self.template.transient_format) |transient_fmt| {
+            return try self.expandTemplate(transient_fmt, ctx);
+        }
+        // Default minimal transient prompt
+        return try self.allocator.dupe(u8, "\x1b[32m❯\x1b[0m ");
+    }
+
     /// Render the complete prompt
     pub fn render(self: *PromptRenderer, ctx: *const PromptContext, terminal_width: usize) ![]const u8 {
         // Choose format based on mode

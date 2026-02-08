@@ -819,3 +819,219 @@ pub fn prependCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     }
     return 0;
 }
+
+/// generate - Produce a sequence from a stateful generator function.
+/// Usage: generate <initial> <count> <expression>
+/// The expression can use $prev for the previous value and $index for current index.
+/// Example: generate 1 10 "expr $prev * 2" -> 1 2 4 8 16 32 64 128 256 512
+pub fn generateCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
+    _ = allocator;
+    if (command.args.len < 3) {
+        try IO.eprint("Usage: generate <initial> <count> <expression>\n", .{});
+        try IO.eprint("  Generates a sequence by applying <expression> iteratively\n", .{});
+        try IO.eprint("  $prev = previous value, $index = current index\n", .{});
+        try IO.eprint("  Example: generate 1 10 'expr $prev \\* 2'\n", .{});
+        return 1;
+    }
+
+    const initial = command.args[0];
+    const count = std.fmt.parseInt(usize, command.args[1], 10) catch {
+        try IO.eprint("generate: invalid count: {s}\n", .{command.args[1]});
+        return 1;
+    };
+
+    // Build the expression from remaining args
+    var expr_buf: [2048]u8 = undefined;
+    var expr_len: usize = 0;
+    for (command.args[2..], 0..) |arg, idx| {
+        if (idx > 0) {
+            if (expr_len >= expr_buf.len) break;
+            expr_buf[expr_len] = ' ';
+            expr_len += 1;
+        }
+        if (expr_len + arg.len > expr_buf.len) break;
+        @memcpy(expr_buf[expr_len..][0..arg.len], arg);
+        expr_len += arg.len;
+    }
+    const expr_template = expr_buf[0..expr_len];
+
+    const c_exec_gen = struct {
+        extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+    };
+
+    var prev_buf: [256]u8 = undefined;
+    @memcpy(prev_buf[0..initial.len], initial);
+    var prev_len: usize = initial.len;
+
+    for (0..count) |i| {
+        // Output current value
+        try IO.print("{s}\n", .{prev_buf[0..prev_len]});
+
+        if (i + 1 >= count) break;
+
+        // Substitute $prev and $index in expression
+        var sub_buf: [2048]u8 = undefined;
+        var sub_len: usize = 0;
+        var j: usize = 0;
+        while (j < expr_template.len) {
+            if (j + 5 <= expr_template.len and std.mem.eql(u8, expr_template[j .. j + 5], "$prev")) {
+                if (sub_len + prev_len > sub_buf.len) break;
+                @memcpy(sub_buf[sub_len..][0..prev_len], prev_buf[0..prev_len]);
+                sub_len += prev_len;
+                j += 5;
+            } else if (j + 6 <= expr_template.len and std.mem.eql(u8, expr_template[j .. j + 6], "$index")) {
+                const idx_str = std.fmt.bufPrint(sub_buf[sub_len..], "{d}", .{i}) catch break;
+                sub_len += idx_str.len;
+                j += 6;
+            } else {
+                if (sub_len >= sub_buf.len) break;
+                sub_buf[sub_len] = expr_template[j];
+                sub_len += 1;
+                j += 1;
+            }
+        }
+
+        // Execute via fork/exec to get next value
+        const cmd_z = std.posix.toPosixPath(sub_buf[0..sub_len]) catch continue;
+        var pipe_fds: [2]c_int = undefined;
+        if (std.c.pipe(&pipe_fds) < 0) continue;
+
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) {
+            std.posix.close(@intCast(pipe_fds[0]));
+            std.posix.close(@intCast(pipe_fds[1]));
+            continue;
+        }
+        if (fork_ret == 0) {
+            std.posix.close(@intCast(pipe_fds[0]));
+            _ = std.c.dup2(pipe_fds[1], 1);
+            std.posix.close(@intCast(pipe_fds[1]));
+            const argv_gen = [_]?[*:0]const u8{ "/bin/sh", "-c", &cmd_z, null };
+            _ = c_exec_gen.execvp("/bin/sh", @ptrCast(&argv_gen));
+            std.c._exit(127);
+        }
+        std.posix.close(@intCast(pipe_fds[1]));
+        var output_buf: [256]u8 = undefined;
+        var output_len: usize = 0;
+        while (output_len < output_buf.len) {
+            const n = std.posix.read(@intCast(pipe_fds[0]), output_buf[output_len..]) catch break;
+            if (n == 0) break;
+            output_len += n;
+        }
+        std.posix.close(@intCast(pipe_fds[0]));
+        var wait_status: c_int = 0;
+        _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
+
+        const trimmed = std.mem.trimEnd(u8, output_buf[0..output_len], "\n\r");
+        @memcpy(prev_buf[0..trimmed.len], trimmed);
+        prev_len = trimmed.len;
+    }
+    return 0;
+}
+
+/// par-each - Execute a command for each input line in parallel.
+/// Usage: <input> | par-each <command...>
+/// Use {} as a placeholder for the input line, or it gets appended.
+pub fn parEachCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
+    if (command.args.len == 0) {
+        try IO.eprint("Usage: par-each <command...>\n", .{});
+        try IO.eprint("  Execute <command> for each stdin line in parallel\n", .{});
+        try IO.eprint("  Use {{}} as placeholder for the line value\n", .{});
+        return 1;
+    }
+
+    const input = readAllStdin(allocator) catch |err| {
+        try IO.eprint("par-each: failed to read stdin: {}\n", .{err});
+        return 1;
+    };
+    defer allocator.free(input);
+
+    // Collect lines
+    var lines = std.ArrayList([]const u8){};
+    defer lines.deinit(allocator);
+    var line_iter = std.mem.splitScalar(u8, input, '\n');
+    while (line_iter.next()) |line| {
+        if (line.len > 0) try lines.append(allocator, line);
+    }
+    if (lines.items.len == 0) return 0;
+
+    // Build command template
+    var cmd_buf: [2048]u8 = undefined;
+    var cmd_len: usize = 0;
+    for (command.args, 0..) |arg, idx| {
+        if (idx > 0) {
+            if (cmd_len >= cmd_buf.len) break;
+            cmd_buf[cmd_len] = ' ';
+            cmd_len += 1;
+        }
+        if (cmd_len + arg.len > cmd_buf.len) break;
+        @memcpy(cmd_buf[cmd_len..][0..arg.len], arg);
+        cmd_len += arg.len;
+    }
+    const cmd_template = cmd_buf[0..cmd_len];
+
+    const c_exec_par = struct {
+        extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
+    };
+
+    const max_parallel: usize = @min(lines.items.len, 16);
+    var active: usize = 0;
+
+    for (lines.items) |line| {
+        var full_cmd: [4096]u8 = undefined;
+        var full_len: usize = 0;
+
+        if (std.mem.indexOf(u8, cmd_template, "{}")) |_| {
+            var k: usize = 0;
+            while (k < cmd_template.len) {
+                if (k + 1 < cmd_template.len and cmd_template[k] == '{' and cmd_template[k + 1] == '}') {
+                    if (full_len + line.len > full_cmd.len) break;
+                    @memcpy(full_cmd[full_len..][0..line.len], line);
+                    full_len += line.len;
+                    k += 2;
+                } else {
+                    if (full_len >= full_cmd.len) break;
+                    full_cmd[full_len] = cmd_template[k];
+                    full_len += 1;
+                    k += 1;
+                }
+            }
+        } else {
+            @memcpy(full_cmd[0..cmd_template.len], cmd_template);
+            full_len = cmd_template.len;
+            if (full_len < full_cmd.len) {
+                full_cmd[full_len] = ' ';
+                full_len += 1;
+            }
+            if (full_len + line.len <= full_cmd.len) {
+                @memcpy(full_cmd[full_len..][0..line.len], line);
+                full_len += line.len;
+            }
+        }
+
+        const cmd_z = std.posix.toPosixPath(full_cmd[0..full_len]) catch continue;
+
+        if (active >= max_parallel) {
+            var wait_status: c_int = 0;
+            _ = std.c.waitpid(-1, &wait_status, 0);
+            active -= 1;
+        }
+
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) continue;
+        if (fork_ret == 0) {
+            const argv_par = [_]?[*:0]const u8{ "/bin/sh", "-c", &cmd_z, null };
+            _ = c_exec_par.execvp("/bin/sh", @ptrCast(&argv_par));
+            std.c._exit(127);
+        }
+        active += 1;
+    }
+
+    while (active > 0) {
+        var wait_status: c_int = 0;
+        _ = std.c.waitpid(-1, &wait_status, 0);
+        active -= 1;
+    }
+
+    return 0;
+}

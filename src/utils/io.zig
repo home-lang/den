@@ -265,8 +265,8 @@ pub const IO = struct {
     /// Read exactly N bytes from stdin
     pub fn readBytes(buffer: []u8) !usize {
         if (builtin.os.tag == .windows) {
-            var stdin = std.io.getStdIn();
-            const reader = stdin.reader();
+            const stdin_file = std.Io.File{ .handle = std.os.windows.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) catch return error.StdinUnavailable, .flags = .{ .nonblocking = false } };
+            const reader = stdin_file.reader(std.Options.debug_io);
             return try reader.read(buffer);
         }
         return try posix.read(posix.STDIN_FILENO, buffer);

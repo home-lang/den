@@ -12,6 +12,7 @@
 /// - monitoring_builtins: System monitoring (sys-stats, netstats, net-check, log-tail, proc-monitor, log-parse)
 /// - process_builtins: Process-related builtins (times, umask, timeout)
 /// - macos_builtins: macOS/system utilities (copyssh, reloaddns, emptytrash, show, hide, dotfiles, library)
+/// - http_builtins: HTTP client (http get/post/put/delete/head via curl)
 /// - context: BuiltinContext interface for state-dependent builtins
 
 pub const utilities = @import("utilities.zig");
@@ -45,6 +46,10 @@ pub const encode_builtins = @import("encode_builtins.zig");
 pub const convert_builtins = @import("convert_builtins.zig");
 pub const detect_builtins = @import("detect_builtins.zig");
 pub const bench_builtins = @import("bench_builtins.zig");
+pub const http_builtins = @import("http_builtins.zig");
+pub const seq_builtins = @import("seq_builtins.zig");
+pub const watch_builtins = @import("watch_builtins.zig");
 pub const help_system = @import("help_system.zig");
+pub const explore_builtins = @import("explore_builtins.zig");
 
 pub const BuiltinContext = context.BuiltinContext;

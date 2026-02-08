@@ -1,0 +1,101 @@
+# Den Standard Library: Assertions for testing
+# Usage: use std/assert
+
+# Assert equality
+def assert-eq [actual, expected, msg] {
+    if [ "$actual" != "$expected" ]; then
+        echo "FAIL: ${msg:-assertion failed}" >&2
+        echo "  expected: $expected" >&2
+        echo "  actual:   $actual" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Assert not equal
+def assert-ne [actual, expected, msg] {
+    if [ "$actual" = "$expected" ]; then
+        echo "FAIL: ${msg:-values should not be equal}" >&2
+        echo "  value: $actual" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Assert command succeeds
+def assert-ok [cmd, msg] {
+    if ! eval "$cmd" > /dev/null 2>&1; then
+        echo "FAIL: ${msg:-command should succeed}: $cmd" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Assert command fails
+def assert-fail [cmd, msg] {
+    if eval "$cmd" > /dev/null 2>&1; then
+        echo "FAIL: ${msg:-command should fail}: $cmd" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Assert string contains substring
+def assert-contains [haystack, needle, msg] {
+    if ! echo "$haystack" | grep -q "$needle"; then
+        echo "FAIL: ${msg:-string should contain substring}" >&2
+        echo "  string:    $haystack" >&2
+        echo "  substring: $needle" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Assert file exists
+def assert-file-exists [path, msg] {
+    if [ ! -f "$path" ]; then
+        echo "FAIL: ${msg:-file should exist}: $path" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Assert directory exists
+def assert-dir-exists [path, msg] {
+    if [ ! -d "$path" ]; then
+        echo "FAIL: ${msg:-directory should exist}: $path" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Assert value is true
+def assert-true [value, msg] {
+    if [ "$value" != "true" ] && [ "$value" != "1" ] && [ "$value" != "yes" ]; then
+        echo "FAIL: ${msg:-value should be true}" >&2
+        echo "  actual: $value" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Assert value is empty
+def assert-empty [value, msg] {
+    if [ -n "$value" ]; then
+        echo "FAIL: ${msg:-value should be empty}" >&2
+        echo "  actual: $value" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Run a test function and report result
+def run-test [name, cmd] {
+    if eval "$cmd"; then
+        echo "  PASS: $name"
+        return 0
+    else
+        echo "  FAIL: $name" >&2
+        return 1
+    fi
+}

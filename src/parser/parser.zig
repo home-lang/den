@@ -286,7 +286,7 @@ test "parser basic command" {
 
     var t = Tokenizer.init(allocator, "echo hello world");
     const tokens = try t.tokenize();
-    defer allocator.free(tokens);
+    defer t.deinitTokens(tokens);
 
     var p = Parser.init(allocator, tokens);
     var chain = try p.parse();
@@ -303,7 +303,7 @@ test "parser pipeline" {
 
     var t = Tokenizer.init(allocator, "ls | grep foo");
     const tokens = try t.tokenize();
-    defer allocator.free(tokens);
+    defer t.deinitTokens(tokens);
 
     var p = Parser.init(allocator, tokens);
     var chain = try p.parse();

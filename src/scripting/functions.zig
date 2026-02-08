@@ -18,12 +18,27 @@ fn containsWord(input: []const u8, word: []const u8) bool {
     return false;
 }
 
+/// Typed parameter for custom commands (Phase 5.2)
+pub const TypedParam = struct {
+    name: []const u8,
+    type_hint: ?[]const u8 = null, // "string", "int", "float", "bool", "list", "record", "any"
+    default_value: ?[]const u8 = null,
+    is_flag: bool = false, // --flag(-f) style parameter
+    short_flag: ?u8 = null, // Short flag character (e.g. 'f' for -f)
+    is_rest: bool = false, // ...rest parameter (collects remaining args)
+    is_optional: bool = false, // ? suffix makes param optional
+};
+
 /// Function definition
 pub const Function = struct {
     name: []const u8,
     body: [][]const u8, // Lines of the function body
     is_exported: bool,
     allocator: std.mem.Allocator,
+    /// Typed parameters from `def name [param: type]` syntax (Phase 5.2)
+    typed_params: ?[]TypedParam = null,
+    /// Return type annotation from `-> type` syntax
+    return_type: ?[]const u8 = null,
 
     pub fn deinit(self: *Function) void {
         self.allocator.free(self.name);
@@ -31,6 +46,15 @@ pub const Function = struct {
             self.allocator.free(line);
         }
         self.allocator.free(self.body);
+        if (self.typed_params) |params| {
+            for (params) |p| {
+                self.allocator.free(p.name);
+                if (p.type_hint) |t| self.allocator.free(t);
+                if (p.default_value) |d| self.allocator.free(d);
+            }
+            self.allocator.free(params);
+        }
+        if (self.return_type) |rt| self.allocator.free(rt);
     }
 };
 
@@ -478,3 +502,180 @@ pub const FunctionParser = struct {
         return error.UnmatchedBraces;
     }
 };
+
+/// Parse a typed parameter list from a `def` command.
+///
+/// Syntax: `def name [param1: type, param2: type, --flag(-f): bool] -> return_type { ... }`
+///
+/// Supported parameter forms:
+///   `name`            -- untyped positional param
+///   `name: type`      -- typed positional param
+///   `name = default`  -- param with default value
+///   `name?: type`     -- optional param
+///   `--flag(-f): bool` -- flag param (bool by default)
+///   `...rest`          -- rest param (collects remaining args)
+pub fn parseTypedParams(allocator: std.mem.Allocator, input: []const u8) ![]TypedParam {
+    const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
+
+    // Must start with '[' and end with ']'
+    if (trimmed.len < 2 or trimmed[0] != '[' or trimmed[trimmed.len - 1] != ']') {
+        return error.InvalidParameterSyntax;
+    }
+
+    const inner = trimmed[1 .. trimmed.len - 1];
+
+    var params_buf: [32]TypedParam = undefined;
+    var param_count: usize = 0;
+
+    var parts = std.mem.splitScalar(u8, inner, ',');
+    while (parts.next()) |part| {
+        const p = std.mem.trim(u8, part, &std.ascii.whitespace);
+        if (p.len == 0) continue;
+
+        if (param_count >= params_buf.len) return error.TooManyParameters;
+
+        var param = TypedParam{
+            .name = undefined,
+        };
+
+        // Check for rest param: ...name
+        if (std.mem.startsWith(u8, p, "...")) {
+            param.is_rest = true;
+            const rest_name = std.mem.trim(u8, p[3..], &std.ascii.whitespace);
+            param.name = try allocator.dupe(u8, rest_name);
+            param.type_hint = try allocator.dupe(u8, "list");
+            params_buf[param_count] = param;
+            param_count += 1;
+            continue;
+        }
+
+        // Check for flag param: --flag(-f): type
+        if (std.mem.startsWith(u8, p, "--")) {
+            param.is_flag = true;
+
+            // Find the flag name (before optional short form or colon)
+            const flag_part = p[2..];
+            const paren_pos = std.mem.indexOfScalar(u8, flag_part, '(');
+            const colon_pos = std.mem.indexOfScalar(u8, flag_part, ':');
+
+            const name_end = paren_pos orelse colon_pos orelse flag_part.len;
+            param.name = try allocator.dupe(u8, flag_part[0..name_end]);
+
+            // Parse short flag: (-f)
+            if (paren_pos) |pp| {
+                if (pp + 2 < flag_part.len and flag_part[pp + 1] == '-' and flag_part[pp + 3] == ')') {
+                    param.short_flag = flag_part[pp + 2];
+                }
+            }
+
+            // Parse type after colon
+            if (colon_pos) |cp| {
+                const type_str = std.mem.trim(u8, flag_part[cp + 1 ..], &std.ascii.whitespace);
+                param.type_hint = try allocator.dupe(u8, type_str);
+            } else {
+                param.type_hint = try allocator.dupe(u8, "bool");
+            }
+
+            params_buf[param_count] = param;
+            param_count += 1;
+            continue;
+        }
+
+        // Positional param: name[?][: type][ = default]
+        var remaining = p;
+
+        // Check for default value: name = default
+        const eq_pos = std.mem.indexOf(u8, remaining, " = ");
+        if (eq_pos) |ep| {
+            param.default_value = try allocator.dupe(u8, std.mem.trim(u8, remaining[ep + 3 ..], &std.ascii.whitespace));
+            remaining = remaining[0..ep];
+        }
+
+        // Check for type annotation: name: type
+        const colon_pos = std.mem.indexOfScalar(u8, remaining, ':');
+        if (colon_pos) |cp| {
+            param.type_hint = try allocator.dupe(u8, std.mem.trim(u8, remaining[cp + 1 ..], &std.ascii.whitespace));
+            remaining = remaining[0..cp];
+        }
+
+        // Check for optional marker: name?
+        const name_str = std.mem.trim(u8, remaining, &std.ascii.whitespace);
+        if (name_str.len > 0 and name_str[name_str.len - 1] == '?') {
+            param.is_optional = true;
+            param.name = try allocator.dupe(u8, name_str[0 .. name_str.len - 1]);
+        } else {
+            param.name = try allocator.dupe(u8, name_str);
+        }
+
+        params_buf[param_count] = param;
+        param_count += 1;
+    }
+
+    const result = try allocator.alloc(TypedParam, param_count);
+    @memcpy(result, params_buf[0..param_count]);
+    return result;
+}
+
+/// Parse a return type annotation from ` -> type` in a def line.
+/// Returns the type string if found, null otherwise.
+pub fn parseReturnType(allocator: std.mem.Allocator, line: []const u8) !?[]const u8 {
+    // Look for ` -> ` before the opening `{`
+    const brace_pos = std.mem.indexOfScalar(u8, line, '{') orelse line.len;
+    const before_brace = line[0..brace_pos];
+
+    if (std.mem.indexOf(u8, before_brace, " -> ")) |arrow_pos| {
+        const type_str = std.mem.trim(u8, before_brace[arrow_pos + 4 ..], &std.ascii.whitespace);
+        if (type_str.len > 0) {
+            return try allocator.dupe(u8, type_str);
+        }
+    }
+    return null;
+}
+
+/// Validate arguments against typed parameters at call time.
+/// Returns an error message if validation fails, null if OK.
+pub fn validateTypedArgs(
+    allocator: std.mem.Allocator,
+    params: []const TypedParam,
+    args: []const []const u8,
+) !?[]const u8 {
+    // Count required positional params
+    var required_count: usize = 0;
+    for (params) |p| {
+        if (!p.is_flag and !p.is_rest and !p.is_optional and p.default_value == null) {
+            required_count += 1;
+        }
+    }
+
+    // Count provided positional args (excluding flags)
+    var provided_positional: usize = 0;
+    for (args) |arg| {
+        if (!std.mem.startsWith(u8, arg, "--") and !std.mem.startsWith(u8, arg, "-")) {
+            provided_positional += 1;
+        } else {
+            // Check if it's a known flag
+            var is_flag = false;
+            for (params) |p| {
+                if (p.is_flag) {
+                    if (std.mem.startsWith(u8, arg, "--")) {
+                        const flag_name = arg[2..];
+                        if (std.mem.eql(u8, flag_name, p.name)) {
+                            is_flag = true;
+                            break;
+                        }
+                    } else if (arg.len == 2 and arg[0] == '-' and p.short_flag != null and arg[1] == p.short_flag.?) {
+                        is_flag = true;
+                        break;
+                    }
+                }
+            }
+            if (!is_flag) provided_positional += 1;
+        }
+    }
+
+    if (provided_positional < required_count) {
+        return try std.fmt.allocPrint(allocator, "missing required argument: expected at least {d} positional arguments, got {d}", .{ required_count, provided_positional });
+    }
+
+    return null;
+}

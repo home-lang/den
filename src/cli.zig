@@ -4,6 +4,7 @@ const Completion = @import("utils/completion.zig").Completion;
 const ShellCompletion = @import("shell_completion.zig").ShellCompletion;
 const env_utils = @import("utils/env.zig");
 const IO = @import("utils/io.zig").IO;
+const LspServer = @import("lsp/server.zig").LspServer;
 
 /// Den Shell CLI
 /// Provides command-line interface and subcommand handling
@@ -24,6 +25,7 @@ pub const Command = enum {
     help, // Show help
     script, // Execute script file (implicit)
     command_string, // -c "command" - run command string
+    lsp, // Start LSP server for IDE integration
 };
 
 pub const CliArgs = struct {
@@ -195,6 +197,14 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
             .config_path = config_path,
             ._owned_argv = remaining_argv,
         };
+    } else if (std.mem.eql(u8, first_arg, "--lsp")) {
+        return CliArgs{
+            .command = .lsp,
+            .args = &[_][]const u8{},
+            .allocator = allocator,
+            .config_path = config_path,
+            ._owned_argv = remaining_argv,
+        };
     } else if (std.mem.eql(u8, first_arg, "-c")) {
         // -c "command" - run command string
         return CliArgs{
@@ -232,7 +242,15 @@ pub fn execute(cli_args: CliArgs) !void {
         .help => try showHelp(),
         .script => try runScript(cli_args.allocator, cli_args.args, cli_args.config_path),
         .command_string => try runCommandString(cli_args.allocator, cli_args.args, cli_args.config_path, cli_args.json_output),
+        .lsp => try runLspServer(cli_args.allocator),
     }
+}
+
+/// Start LSP server for IDE integration
+fn runLspServer(allocator: std.mem.Allocator) !void {
+    var server = LspServer.init(allocator);
+    defer server.deinit();
+    try server.run();
 }
 
 /// Start interactive shell
@@ -527,6 +545,7 @@ fn showHelp() !void {
         \\  -c <command>              Execute command string
         \\  --config <path>           Use custom config file
         \\  --json                    Output results in JSON format (with -c)
+        \\  --lsp                     Start Language Server Protocol server
         \\
         \\Completion:
         \\  den completion bash       Generate Bash completion script

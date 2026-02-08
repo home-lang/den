@@ -26,6 +26,10 @@ const BuiltinContext = builtins.BuiltinContext;
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
 
+// Plugin hook types for command_not_found hook
+const HookType = @import("../plugins/interface.zig").HookType;
+const HookContext = @import("../plugins/interface.zig").HookContext;
+
 // Re-export networking functions for use in this module
 const openDevNet = networking.openDevNet;
 const parseDevNetPath = networking.parseDevNetPath;
@@ -834,7 +838,8 @@ pub const Executor = struct {
             "append",       "prepend",
             "str",          "path",        "math",
             "into",         "encode",      "decode",
-            "detect",       "bench",
+            "detect",       "bench",       "seq-char",    "generate",    "par-each",
+            "explore",      "use",
         };
         for (builtin_names) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -884,7 +889,8 @@ pub const Executor = struct {
             "append","prepend",
             "str",   "path",   "math",
             "into",  "encode", "decode",
-            "detect","bench",
+            "detect","bench","seq-char","generate","par-each",
+            "explore",      "use",
         };
         for (builtin_names) |b| {
             if (std.mem.eql(u8, name, b)) return true;
@@ -1019,7 +1025,7 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "reload")) {
             return try builtins.state_builtins.reload(&ctx, command);
         } else if (std.mem.eql(u8, command.name, "watch")) {
-            return try builtins.process_builtins.watch(&ctx, command);
+            return try builtins.watch_builtins.watchCmd(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "tree")) {
             return try file_ops.tree(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "grep")) {
@@ -1035,7 +1041,9 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "ls")) {
             return try file_ops.ls(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "seq")) {
-            return try utilities.seq(command);
+            return try builtins.seq_builtins.seqCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "seq-char")) {
+            return try builtins.seq_builtins.seqCharCmd(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "date")) {
             // Use enhanced date builtins for subcommands (now, format, to-record, humanize)
             if (command.args.len > 0) {
@@ -1051,7 +1059,7 @@ pub const Executor = struct {
         } else if (std.mem.eql(u8, command.name, "parallel")) {
             return try builtins.process_builtins.parallel(command);
         } else if (std.mem.eql(u8, command.name, "http")) {
-            return try utilities.http(command);
+            return try builtins.http_builtins.httpCmd(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "base64")) {
             return try utilities.base64(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "uuid")) {
@@ -1183,6 +1191,14 @@ pub const Executor = struct {
             return try builtins.detect_builtins.detectColumns(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "bench")) {
             return try builtins.bench_builtins.bench(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "generate")) {
+            return try builtins.pipeline_builtins.generateCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "par-each")) {
+            return try builtins.pipeline_builtins.parEachCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "explore")) {
+            return try builtins.explore_builtins.exploreCmd(self.allocator, command);
+        } else if (std.mem.eql(u8, command.name, "use")) {
+            return try shell_builtins.useModule(&ctx, command);
         }
 
         // Check for loadable builtins
@@ -1206,6 +1222,20 @@ pub const Executor = struct {
     fn executeExternal(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Check if command exists before forking to provide better error messages
         if (!self.commandExistsInPath(command.name)) {
+            // Fire command_not_found hook - if a plugin handles it, skip the error
+            if (self.shell) |shell| {
+                var cmd_name_copy = @as([]const u8, command.name);
+                var hook_ctx = HookContext{
+                    .hook_type = .command_not_found,
+                    .data = @ptrCast(@alignCast(&cmd_name_copy)),
+                    .user_data = null,
+                    .allocator = self.allocator,
+                };
+                if (shell.plugin_registry.executeHooksHandled(.command_not_found, &hook_ctx)) {
+                    return 0; // Hook handled the missing command
+                }
+            }
+
             try IO.eprint("den: {s}: command not found\n", .{command.name});
 
             // Try to provide typo correction suggestions

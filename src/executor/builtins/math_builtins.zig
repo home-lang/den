@@ -42,6 +42,23 @@ fn readStdinNumbers(allocator: std.mem.Allocator) ![]f64 {
     return try nums.toOwnedSlice(allocator);
 }
 
+/// Parse numbers from command-line args, or fall back to reading stdin
+fn getNumbers(allocator: std.mem.Allocator, args: []const []const u8) ![]f64 {
+    if (args.len > 0) {
+        var nums = std.ArrayList(f64){};
+        errdefer nums.deinit(allocator);
+        for (args) |arg| {
+            if (std.fmt.parseFloat(f64, arg)) |n| {
+                try nums.append(allocator, n);
+            } else |_| {
+                try IO.eprint("math: not a number: {s}\n", .{arg});
+            }
+        }
+        return try nums.toOwnedSlice(allocator);
+    }
+    return readStdinNumbers(allocator);
+}
+
 /// Main math subcommand dispatcher
 pub fn mathCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     if (command.args.len == 0) {
@@ -51,16 +68,16 @@ pub fn mathCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
     const subcmd = command.args[0];
     const rest_args = if (command.args.len > 1) command.args[1..] else &[_][]const u8{};
 
-    // Aggregation commands (read from stdin)
-    if (std.mem.eql(u8, subcmd, "sum")) return mathSum(allocator);
-    if (std.mem.eql(u8, subcmd, "avg")) return mathAvg(allocator);
-    if (std.mem.eql(u8, subcmd, "min")) return mathMin(allocator);
-    if (std.mem.eql(u8, subcmd, "max")) return mathMax(allocator);
-    if (std.mem.eql(u8, subcmd, "product")) return mathProduct(allocator);
-    if (std.mem.eql(u8, subcmd, "median")) return mathMedian(allocator);
-    if (std.mem.eql(u8, subcmd, "mode")) return mathMode(allocator);
-    if (std.mem.eql(u8, subcmd, "stddev")) return mathStddev(allocator);
-    if (std.mem.eql(u8, subcmd, "variance")) return mathVariance(allocator);
+    // Aggregation commands (use args if provided, otherwise read from stdin)
+    if (std.mem.eql(u8, subcmd, "sum")) return mathSum(allocator, rest_args);
+    if (std.mem.eql(u8, subcmd, "avg")) return mathAvg(allocator, rest_args);
+    if (std.mem.eql(u8, subcmd, "min")) return mathMin(allocator, rest_args);
+    if (std.mem.eql(u8, subcmd, "max")) return mathMax(allocator, rest_args);
+    if (std.mem.eql(u8, subcmd, "product")) return mathProduct(allocator, rest_args);
+    if (std.mem.eql(u8, subcmd, "median")) return mathMedian(allocator, rest_args);
+    if (std.mem.eql(u8, subcmd, "mode")) return mathMode(allocator, rest_args);
+    if (std.mem.eql(u8, subcmd, "stddev")) return mathStddev(allocator, rest_args);
+    if (std.mem.eql(u8, subcmd, "variance")) return mathVariance(allocator, rest_args);
 
     // Operation commands (take argument)
     if (std.mem.eql(u8, subcmd, "abs")) return mathAbs(rest_args);
@@ -74,8 +91,8 @@ pub fn mathCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
     return 1;
 }
 
-fn mathSum(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathSum(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     var sum: f64 = 0;
     for (nums) |n| sum += n;
@@ -83,8 +100,8 @@ fn mathSum(allocator: std.mem.Allocator) !i32 {
     return 0;
 }
 
-fn mathAvg(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathAvg(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) {
         try IO.print("0\n", .{});
@@ -96,8 +113,8 @@ fn mathAvg(allocator: std.mem.Allocator) !i32 {
     return 0;
 }
 
-fn mathMin(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathMin(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) return 0;
     var min_val = nums[0];
@@ -108,8 +125,8 @@ fn mathMin(allocator: std.mem.Allocator) !i32 {
     return 0;
 }
 
-fn mathMax(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathMax(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) return 0;
     var max_val = nums[0];
@@ -120,8 +137,8 @@ fn mathMax(allocator: std.mem.Allocator) !i32 {
     return 0;
 }
 
-fn mathProduct(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathProduct(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) {
         try IO.print("0\n", .{});
@@ -133,8 +150,8 @@ fn mathProduct(allocator: std.mem.Allocator) !i32 {
     return 0;
 }
 
-fn mathMedian(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathMedian(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) return 0;
     std.mem.sort(f64, nums, {}, std.sort.asc(f64));
@@ -146,8 +163,8 @@ fn mathMedian(allocator: std.mem.Allocator) !i32 {
     return 0;
 }
 
-fn mathMode(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathMode(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) return 0;
 
@@ -184,8 +201,8 @@ fn mathMode(allocator: std.mem.Allocator) !i32 {
     return 0;
 }
 
-fn mathStddev(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathStddev(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) return 0;
     const v = variance(nums);
@@ -193,8 +210,8 @@ fn mathStddev(allocator: std.mem.Allocator) !i32 {
     return 0;
 }
 
-fn mathVariance(allocator: std.mem.Allocator) !i32 {
-    const nums = try readStdinNumbers(allocator);
+fn mathVariance(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
+    const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) return 0;
     try printNumber(variance(nums));

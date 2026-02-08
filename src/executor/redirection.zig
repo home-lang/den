@@ -213,7 +213,8 @@ fn applyFdDuplicate(redir: types.Redirection) !void {
 fn applyFdClose(redir: types.Redirection) void {
     // Close the specified file descriptor
     // Format: N>&- or N<&- (close fd N)
-    std.posix.close(@intCast(redir.fd));
+    // Use raw syscall to avoid panic on EBADF (closing an already-closed fd is harmless)
+    _ = std.c.close(@intCast(redir.fd));
 }
 
 /// Save current stdout and stderr file descriptors (for Windows builtin redirections)

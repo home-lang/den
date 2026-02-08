@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
+const stdlib_loader = @import("../../stdlib/loader.zig");
 
 /// Shell builtins that require shell state access
 /// Includes: cd, pwd, read, source, history
@@ -404,4 +405,40 @@ pub fn history(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     return 0;
+}
+
+/// use - Import a module or stdlib library
+/// Usage: use <module_name>
+///        use <module_name> [item1, item2]
+pub fn useModule(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
+    if (command.args.len == 0) {
+        try IO.eprint("den: use: missing module name\n", .{});
+        try IO.eprint("Usage: use <module>\n", .{});
+        try IO.eprint("Available stdlib modules: ", .{});
+        const modules = stdlib_loader.listModules();
+        for (modules, 0..) |name, i| {
+            if (i > 0) try IO.eprint(", ", .{});
+            try IO.eprint("{s}", .{name});
+        }
+        try IO.eprint("\n", .{});
+        return 1;
+    }
+
+    const module_name = command.args[0];
+
+    // Check stdlib for the module
+    if (stdlib_loader.getScript(module_name)) |script_content| {
+        // Execute each line of the stdlib script in the shell
+        var lines = std.mem.splitScalar(u8, script_content, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+            if (trimmed.len == 0) continue;
+            if (std.mem.startsWith(u8, trimmed, "#")) continue;
+            ctx.executeShellCommand(trimmed);
+        }
+        return 0;
+    }
+
+    try IO.eprint("den: use: module not found: {s}\n", .{module_name});
+    return 1;
 }

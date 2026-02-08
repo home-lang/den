@@ -6,6 +6,8 @@ pub const variable = @import("variable.zig");
 pub const shell_options = @import("shell_options.zig");
 pub const value = @import("value.zig");
 pub const value_format = @import("value_format.zig");
+pub const closure = @import("closure.zig");
+pub const metadata = @import("metadata.zig");
 
 // Re-export commonly used types
 pub const DenConfig = config.DenConfig;
@@ -26,9 +28,14 @@ pub const VarAttributes = variable.VarAttributes;
 
 pub const Value = value.Value;
 
+pub const Closure = closure.Closure;
+
 pub const ShellOptions = shell_options.ShellOptions;
 pub const SetOptions = shell_options.SetOptions;
 pub const ShoptOptions = shell_options.ShoptOptions;
+
+pub const PipelineMetadata = metadata.PipelineMetadata;
+pub const ContentType = metadata.ContentType;
 
 test {
     std.testing.refAllDecls(@This());

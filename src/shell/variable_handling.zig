@@ -4,6 +4,7 @@
 const std = @import("std");
 const IO = @import("../utils/io.zig").IO;
 const Shell = @import("../shell.zig").Shell;
+const HookContext = @import("../plugins/interface.zig").HookContext;
 
 /// Resolve nameref chain to get the actual variable name
 pub fn resolveNameref(self: *Shell, name: []const u8) []const u8 {
@@ -92,6 +93,21 @@ pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void
         gop.key_ptr.* = try self.allocator.dupe(u8, resolved_name);
     }
     gop.value_ptr.* = if (case_buf) |buf| buf else try self.allocator.dupe(u8, final_value);
+
+    // Fire env_change hook for environment variable changes (especially PWD, OLDPWD, PATH, etc.)
+    fireEnvChangeHook(self, resolved_name);
+}
+
+/// Fire the env_change hook when an environment variable is modified
+fn fireEnvChangeHook(self: *Shell, var_name: []const u8) void {
+    var name_copy = @as([]const u8, var_name);
+    var hook_ctx = HookContext{
+        .hook_type = .env_change,
+        .data = @ptrCast(@alignCast(&name_copy)),
+        .user_data = null,
+        .allocator = self.allocator,
+    };
+    self.plugin_registry.executeHooks(.env_change, &hook_ctx) catch {};
 }
 
 /// Check if input is an array element assignment: name[index]=value

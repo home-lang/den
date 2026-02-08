@@ -21,8 +21,8 @@ fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
 }
 
 fn getTimestamp() !i64 {
-    const instant = std.time.Instant.now() catch return error.TimeUnavailable;
-    return @intCast(instant.timestamp.sec);
+    const ts = posix.clock_gettime(.REALTIME) catch return error.TimeUnavailable;
+    return ts.sec;
 }
 
 /// Main date subcommand dispatcher (enhanced version)

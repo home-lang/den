@@ -1,0 +1,90 @@
+# Den Standard Library: Iterator utilities
+# Usage: use std/iter
+
+# Apply a command to each line of input
+def map [cmd] {
+    while IFS= read -r line; do
+        echo "$line" | eval "$cmd"
+    done
+}
+
+# Filter lines matching a condition
+def filter [cmd] {
+    while IFS= read -r line; do
+        if echo "$line" | eval "$cmd" > /dev/null 2>&1; then
+            echo "$line"
+        fi
+    done
+}
+
+# Take first N items from stdin
+def take [n] {
+    first $n
+}
+
+# Drop first N items from stdin
+def drop [n] {
+    skip $n
+}
+
+# Find first matching line
+def find-first [pattern] {
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "$pattern"; then
+            echo "$line"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Count lines from stdin
+def count [] {
+    wc -l | str trim
+}
+
+# Check if any line matches
+def any [pattern] {
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "$pattern"; then
+            echo true
+            return 0
+        fi
+    done
+    echo false
+    return 1
+}
+
+# Check if all lines match
+def all [pattern] {
+    while IFS= read -r line; do
+        if ! echo "$line" | grep -q "$pattern"; then
+            echo false
+            return 1
+        fi
+    done
+    echo true
+    return 0
+}
+
+# Intersperse a separator between lines
+def intersperse [sep] {
+    let first = true
+    while IFS= read -r line; do
+        if [ "$first" = true ]; then
+            first=false
+        else
+            echo "$sep"
+        fi
+        echo "$line"
+    done
+}
+
+# Accumulate values (fold/reduce from stdin)
+def accumulate [init, cmd] {
+    let acc = "$init"
+    while IFS= read -r line; do
+        acc=$(echo "$acc $line" | eval "$cmd")
+        echo "$acc"
+    done
+}

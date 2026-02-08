@@ -11,12 +11,14 @@ fn getenvFromSlice(key: []const u8) ?[]const u8 {
 
 /// Hook types that plugins can register
 pub const HookType = enum {
-    pre_command,   // Before command execution
-    post_command,  // After command execution
-    pre_prompt,    // Before showing prompt
-    post_prompt,   // After prompt input
-    shell_init,    // Shell initialization
-    shell_exit,    // Shell exit
+    pre_command,       // Before command execution
+    post_command,      // After command execution
+    pre_prompt,        // Before showing prompt
+    post_prompt,       // After prompt input
+    shell_init,        // Shell initialization
+    shell_exit,        // Shell exit
+    command_not_found, // When a command is not found (return success from hook to suppress error)
+    env_change,        // When an environment variable changes (especially PWD)
 };
 
 /// Custom command hook - triggers on specific command patterns
@@ -294,15 +296,15 @@ pub const PluginErrorStats = struct {
 
 pub const PluginRegistry = struct {
     allocator: std.mem.Allocator,
-    hooks: [6]std.ArrayList(Hook), // One list per HookType
+    hooks: [8]std.ArrayList(Hook), // One list per HookType
     commands: std.StringHashMap(PluginCommand),
     completions: std.ArrayList(CompletionProvider),
     error_stats: std.StringHashMap(PluginErrorStats), // Error tracking per plugin
     verbose_errors: bool = true, // Whether to print errors to stderr
 
     pub fn init(allocator: std.mem.Allocator) PluginRegistry {
-        var hooks: [6]std.ArrayList(Hook) = undefined;
-        inline for (0..6) |i| {
+        var hooks: [8]std.ArrayList(Hook) = undefined;
+        inline for (0..8) |i| {
             hooks[i] = .{
                 .items = &[_]Hook{},
                 .capacity = 0,
@@ -439,6 +441,38 @@ pub const PluginRegistry = struct {
                 };
             }
         }
+    }
+
+    /// Execute hooks of a specific type, returning true if any hook handled the event
+    /// (i.e., completed without error). Used for command_not_found to allow hooks to
+    /// handle missing commands before the shell prints an error.
+    pub fn executeHooksHandled(self: *PluginRegistry, hook_type: HookType, context: *HookContext) bool {
+        const index = @intFromEnum(hook_type);
+        var handled = false;
+        for (self.hooks[index].items) |hook| {
+            if (hook.enabled) {
+                hook.function(context) catch |err| {
+                    // Record the error
+                    self.recordError(hook.plugin_name, "hook", err) catch {};
+
+                    if (self.verbose_errors) {
+                        var buf: [512]u8 = undefined;
+                        const msg = std.fmt.bufPrint(&buf, "[Plugin Error] {s} hook '{s}' failed: {}\n", .{
+                            hook.plugin_name,
+                            @tagName(hook_type),
+                            err,
+                        }) catch "[Plugin Error] Failed to format error message\n";
+
+                        const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+                        stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
+                    }
+                    continue;
+                };
+                // Hook succeeded without error - it handled the event
+                handled = true;
+            }
+        }
+        return handled;
     }
 
     /// Register a command

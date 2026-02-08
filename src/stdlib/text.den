@@ -1,0 +1,84 @@
+# Den Standard Library: Text processing
+# Usage: use std/text
+
+# Repeat a string N times
+def repeat [s, n] {
+    let i = 0
+    let result = ""
+    while [ $i -lt $n ]; do
+        result="${result}${s}"
+        let i = $(expr $i + 1)
+    done
+    echo "$result"
+}
+
+# Center text in a given width
+def center [text, width] {
+    let len = $(echo -n "$text" | wc -c | str trim)
+    if [ $len -ge $width ]; then
+        echo "$text"
+        return
+    fi
+    let padding = $(expr \( $width - $len \) / 2)
+    let right_padding = $(expr $width - $len - $padding)
+    echo "$(repeat ' ' $padding)${text}$(repeat ' ' $right_padding)"
+}
+
+# Truncate text with ellipsis
+def truncate [text, max_len] {
+    let len = $(echo -n "$text" | wc -c | str trim)
+    if [ $len -le $max_len ]; then
+        echo "$text"
+    else
+        let cut_len = $(expr $max_len - 3)
+        echo "${text:0:$cut_len}..."
+    fi
+}
+
+# Wrap text at a given width
+def wrap [width] {
+    fold -w $width -s
+}
+
+# Remove blank lines from input
+def squeeze [] {
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            echo "$line"
+        fi
+    done
+}
+
+# Number lines from stdin
+def number-lines [] {
+    let n = 1
+    while IFS= read -r line; do
+        printf "%4d  %s\n" $n "$line"
+        let n = $(expr $n + 1)
+    done
+}
+
+# Dedent text (remove common leading whitespace)
+def dedent [] {
+    # Find minimum indentation
+    let min_indent = 999
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            let spaces = $(echo "$line" | sed 's/[^ ].*//' | wc -c | str trim)
+            let spaces = $(expr $spaces - 1)
+            if [ $spaces -lt $min_indent ]; then
+                min_indent=$spaces
+            fi
+        fi
+        lines="$lines
+$line"
+    done
+    # Remove common indentation
+    echo "$lines" | while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            echo "${line:$min_indent}"
+        else
+            echo ""
+        fi
+    done
+}

@@ -132,6 +132,14 @@ const help_entries = [_]HelpEntry{
         .related = &.{"time"},
     },
     .{
+        .name = "http",
+        .category = "utility",
+        .usage = "http <method> <url> [--body <data>] [--header <key:value>] [--content-type <type>]",
+        .description = "HTTP client supporting GET, POST, PUT, DELETE, and HEAD requests (via curl)",
+        .examples = &.{ "http get https://api.example.com/users", "http post https://api.example.com/data --body 'payload' --content-type application/json" },
+        .related = &.{"bench"},
+    },
+    .{
         .name = "table",
         .category = "display",
         .usage = "table",

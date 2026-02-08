@@ -993,7 +993,6 @@ test "mid-word path expansion - relative path" {
     var tmp_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const tmp_path_len = try tmp.dir.realPathFile(std.Options.debug_io, ".", &tmp_path_buf);
     const tmp_path = tmp_path_buf[0..tmp_path_len];
-    try std.Io.Dir.cwd().setAsCwd(std.Options.debug_io);
     {
         var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
         @memcpy(chdir_buf[0..tmp_path.len], tmp_path);

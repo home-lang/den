@@ -398,9 +398,10 @@ pub const ValidationResult = struct {
 
     /// Print to stderr with color auto-detection
     pub fn printToStderr(self: *const ValidationResult) void {
-        const stderr = std.io.getStdErr().writer();
+        const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
         // Check if stderr is a TTY for color support
-        const use_color = (std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } }).isTty(std.Options.debug_io) catch false;
+        const use_color = stderr_file.isTty(std.Options.debug_io) catch false;
+        const stderr = stderr_file.writer(std.Options.debug_io);
         if (use_color) {
             self.formatColored(stderr) catch {};
         } else {

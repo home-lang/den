@@ -5,9 +5,15 @@ const std = @import("std");
 const IO = @import("../utils/io.zig").IO;
 const Shell = @import("../shell.zig").Shell;
 const FunctionParser = @import("../scripting/functions.zig").FunctionParser;
+const functions = @import("../scripting/functions.zig");
 
 /// Check if input starts a function definition
 pub fn checkFunctionDefinitionStart(self: *Shell, trimmed: []const u8) !bool {
+    // Check for "def name [params] -> type { ... }" syntax (Phase 5.2)
+    if (std.mem.startsWith(u8, trimmed, "def ")) {
+        return try handleDefSyntax(self, trimmed);
+    }
+
     // Check for "function name" or "name()" syntax
     const is_function_keyword = std.mem.startsWith(u8, trimmed, "function ");
 
@@ -269,4 +275,153 @@ pub fn resetMultilineState(self: *Shell) void {
     self.multiline_count = 0;
     self.multiline_brace_count = 0;
     self.multiline_mode = .none;
+}
+
+/// Handle `def name [params] -> type { body }` syntax (Phase 5.2 typed commands).
+///
+/// This provides Nushell-style function definitions with typed parameters:
+///   def greet [name: string, --formal(-f): bool] -> string { echo "Hello $name" }
+fn handleDefSyntax(self: *Shell, trimmed: []const u8) !bool {
+    const after_def = std.mem.trim(u8, trimmed[4..], &std.ascii.whitespace);
+
+    // Extract function name (first word after "def")
+    const name_end = std.mem.indexOfAny(u8, after_def, " \t[{") orelse after_def.len;
+    if (name_end == 0) {
+        try IO.eprint("def: missing function name\n", .{});
+        return true;
+    }
+    const func_name = after_def[0..name_end];
+
+    // Parse typed parameters if present: [param: type, ...]
+    var typed_params: ?[]functions.TypedParam = null;
+    var after_params = after_def[name_end..];
+    after_params = std.mem.trim(u8, after_params, &std.ascii.whitespace);
+
+    if (after_params.len > 0 and after_params[0] == '[') {
+        // Find matching ']'
+        var bracket_depth: i32 = 0;
+        var bracket_end: usize = 0;
+        for (after_params, 0..) |c, idx| {
+            if (c == '[') bracket_depth += 1;
+            if (c == ']') {
+                bracket_depth -= 1;
+                if (bracket_depth == 0) {
+                    bracket_end = idx + 1;
+                    break;
+                }
+            }
+        }
+
+        if (bracket_end > 0) {
+            typed_params = functions.parseTypedParams(self.allocator, after_params[0..bracket_end]) catch null;
+            after_params = std.mem.trim(u8, after_params[bracket_end..], &std.ascii.whitespace);
+        }
+    }
+
+    // Parse return type: -> type
+    var return_type: ?[]const u8 = null;
+    if (std.mem.startsWith(u8, after_params, "->")) {
+        const after_arrow = std.mem.trim(u8, after_params[2..], &std.ascii.whitespace);
+        const type_end = std.mem.indexOfAny(u8, after_arrow, " \t{") orelse after_arrow.len;
+        if (type_end > 0) {
+            return_type = try self.allocator.dupe(u8, after_arrow[0..type_end]);
+            after_params = std.mem.trim(u8, after_arrow[type_end..], &std.ascii.whitespace);
+        }
+    }
+
+    // Count braces
+    var brace_count: i32 = 0;
+    for (trimmed) |c| {
+        if (c == '{') brace_count += 1;
+        if (c == '}') brace_count -= 1;
+    }
+
+    // Store the first line
+    if (self.multiline_count >= self.multiline_buffer.len) {
+        try IO.eprint("Function definition too long\n", .{});
+        return true;
+    }
+    self.multiline_buffer[self.multiline_count] = try self.allocator.dupe(u8, trimmed);
+    self.multiline_count += 1;
+    self.multiline_brace_count = brace_count;
+
+    if (brace_count > 0) {
+        // Incomplete - need more lines
+        self.multiline_mode = .function_def;
+        return true;
+    } else if (brace_count == 0) {
+        // Check if we have an opening brace at all
+        if (std.mem.indexOf(u8, trimmed, "{")) |open_brace| {
+            const close_brace = std.mem.lastIndexOf(u8, trimmed, "}") orelse {
+                try IO.eprint("def: syntax error: missing closing brace\n", .{});
+                resetMultilineState(self);
+                return true;
+            };
+
+            // Extract body between { and }
+            const body_content = std.mem.trim(u8, trimmed[open_brace + 1 .. close_brace], &std.ascii.whitespace);
+
+            // Split body by semicolons
+            var body_lines: [32][]const u8 = undefined;
+            var body_count: usize = 0;
+            var seg_start: usize = 0;
+            var si: usize = 0;
+            var in_sq = false;
+            var in_dq = false;
+
+            while (si < body_content.len) : (si += 1) {
+                const bc = body_content[si];
+                if (bc == '\\' and !in_sq and si + 1 < body_content.len) {
+                    si += 1;
+                    continue;
+                }
+                if (bc == '\'' and !in_dq) in_sq = !in_sq;
+                if (bc == '"' and !in_sq) in_dq = !in_dq;
+                if (!in_sq and !in_dq and bc == ';') {
+                    const part_trimmed = std.mem.trim(u8, body_content[seg_start..si], &std.ascii.whitespace);
+                    if (part_trimmed.len > 0 and body_count < body_lines.len) {
+                        body_lines[body_count] = try self.allocator.dupe(u8, part_trimmed);
+                        body_count += 1;
+                    }
+                    seg_start = si + 1;
+                }
+            }
+            // Last segment
+            const last_seg = std.mem.trim(u8, body_content[seg_start..], &std.ascii.whitespace);
+            if (last_seg.len > 0 and body_count < body_lines.len) {
+                body_lines[body_count] = try self.allocator.dupe(u8, last_seg);
+                body_count += 1;
+            }
+
+            // Define the function with typed params
+            self.function_manager.defineFunction(func_name, body_lines[0..body_count], false) catch |err| {
+                try IO.eprint("def: function definition error: {}\n", .{err});
+                for (body_lines[0..body_count]) |line_content| {
+                    self.allocator.free(line_content);
+                }
+                resetMultilineState(self);
+                return true;
+            };
+
+            // Set typed params and return type on the function
+            if (self.function_manager.getFunction(func_name)) |func| {
+                func.typed_params = typed_params;
+                func.return_type = return_type;
+            }
+
+            // Free body lines (function_manager made its own copy)
+            for (body_lines[0..body_count]) |line_content| {
+                self.allocator.free(line_content);
+            }
+
+            resetMultilineState(self);
+            return true;
+        } else {
+            // No brace yet - might be multiline
+            self.multiline_mode = .function_def;
+            return true;
+        }
+    }
+
+    return true;
 }

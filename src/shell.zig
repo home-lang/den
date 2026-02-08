@@ -28,6 +28,7 @@ const AutoSuggestPlugin = @import("plugins/builtin_plugins_advanced.zig").AutoSu
 const HighlightPlugin = @import("plugins/builtin_plugins_advanced.zig").HighlightPlugin;
 const ScriptSuggesterPlugin = @import("plugins/builtin_plugins_advanced.zig").ScriptSuggesterPlugin;
 const concurrency = @import("utils/concurrency.zig");
+const diagnostic = @import("utils/diagnostic.zig");
 const config_loader = @import("config_loader.zig");
 const builtin = @import("builtin");
 const env_utils = @import("utils/env.zig");
@@ -45,6 +46,7 @@ const CompletionRegistry = @import("utils/completion_registry.zig").CompletionRe
 const CompletionSpec = @import("utils/completion_registry.zig").CompletionSpec;
 const LoadableBuiltins = @import("utils/loadable.zig").LoadableBuiltins;
 const History = @import("history/history.zig").History;
+const StructuredHistory = @import("history/sqlite_history.zig").StructuredHistory;
 const jobs_mod = @import("jobs/mod.zig");
 const JobManager = jobs_mod.JobManager;
 const JobStatus = jobs_mod.JobStatus;
@@ -117,6 +119,7 @@ pub const Shell = struct {
     history_count: usize,
     history_max: usize, // Effective max from config (capped at HISTORY_HARD_LIMIT)
     history_file_path: []const u8,
+    structured_history: ?StructuredHistory,
     history_expander: HistoryExpansion,
     dir_stack: [32]?[]const u8,
     dir_stack_count: usize,
@@ -324,6 +327,7 @@ pub const Shell = struct {
             .history_count = 0,
             .history_max = @min(config.history.max_entries, HISTORY_HARD_LIMIT),
             .history_file_path = history_path_owned,
+            .structured_history = null,
             .history_expander = HistoryExpansion.init(allocator),
             .dir_stack = [_]?[]const u8{null} ** 32,
             .dir_stack_count = 0,
@@ -510,6 +514,9 @@ pub const Shell = struct {
 
         // Clean up history (only clean up entries that were actually used)
         History.deinit(self.allocator, self.history[0..self.history_max], self.history_file_path);
+        if (self.structured_history) |*sh| {
+            sh.deinit();
+        }
 
         // Clean up directory stack
         for (self.dir_stack) |maybe_dir| {
@@ -669,6 +676,15 @@ pub const Shell = struct {
                         editor.setHistory(&self.history, &self.history_count);
                         editor.setCompletionFn(shell_mod.tabCompletionFn);
                         editor.setPromptRefreshFn(refreshPromptCallback);
+                        // Set transient prompt if enabled in config
+                        if (self.config.prompt.transient) {
+                            if (self.prompt_renderer) |*renderer| {
+                                const transient_str = renderer.renderTransient(&self.prompt_context) catch null;
+                                if (transient_str) |ts| {
+                                    editor.setTransientPrompt(ts);
+                                }
+                            }
+                        }
                         self.line_editor = editor;
                         // Don't free prompt_str here - LineEditor needs it!
                     } else {
@@ -678,6 +694,21 @@ pub const Shell = struct {
                         self.line_editor.?.prompt = prompt_str;
                         // Free the old prompt to avoid memory leak
                         self.allocator.free(old_prompt);
+
+                        // Update transient prompt if enabled
+                        if (self.config.prompt.transient) {
+                            // Free old transient prompt if it was allocated
+                            if (self.line_editor.?.transient_prompt) |old_transient| {
+                                self.allocator.free(old_transient);
+                                self.line_editor.?.transient_prompt = null;
+                            }
+                            if (self.prompt_renderer) |*renderer| {
+                                const transient_str = renderer.renderTransient(&self.prompt_context) catch null;
+                                if (transient_str) |ts| {
+                                    self.line_editor.?.setTransientPrompt(ts);
+                                }
+                            }
+                        }
                     }
 
                     // Use line editor for interactive input
@@ -1402,6 +1433,13 @@ pub const Shell = struct {
         // Tokenize
         var tokenizer = parser_mod.Tokenizer.init(self.allocator, input);
         const tokens = tokenizer.tokenize() catch |err| {
+            const diag = diagnostic.errWithSource(
+                "tokenization failed",
+                input,
+                1,
+                1,
+            );
+            _ = diag;
             try IO.eprint("den: parse error: {}\n", .{err});
             self.last_exit_code = 1;
             return;
@@ -1413,7 +1451,19 @@ pub const Shell = struct {
         // Parse
         var parser = parser_mod.Parser.init(self.allocator, tokens);
         var chain = parser.parse() catch |err| {
-            try IO.eprint("den: {s}\n", .{formatParseError(err)});
+            // Use diagnostic system for rich error display
+            var diag = diagnostic.Diagnostic{
+                .severity = .@"error",
+                .message = formatParseError(err),
+                .source_line = input,
+                .line = 1,
+                .column = 1,
+            };
+            // Add typo correction hints
+            if (err == error.UnexpectedToken or err == error.InvalidSyntax) {
+                diag.help = "check for missing quotes, brackets, or semicolons";
+            }
+            diag.emit();
             self.last_exit_code = 2;
             return;
         };

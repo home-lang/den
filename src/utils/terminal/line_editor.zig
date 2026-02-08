@@ -96,6 +96,8 @@ pub const LineEditor = struct {
     macro_len: usize = 0,
     macro_stored: [1024]u8 = undefined,
     macro_stored_len: usize = 0,
+    // Transient prompt support
+    transient_prompt: ?[]const u8 = null, // Minimal prompt to replace full prompt after Enter
 
     const UndoState = struct {
         buffer: [4096]u8,
@@ -125,6 +127,11 @@ pub const LineEditor = struct {
 
     pub fn setPs2Prompt(self: *LineEditor, ps2: []const u8) void {
         self.ps2_prompt = ps2;
+    }
+
+    /// Set the transient prompt (minimal prompt shown after command execution)
+    pub fn setTransientPrompt(self: *LineEditor, transient: []const u8) void {
+        self.transient_prompt = transient;
     }
 
     /// Set the editing mode (Emacs or Vi)
@@ -627,7 +634,26 @@ pub const LineEditor = struct {
                         continue;
                     }
 
-                    // Input is complete - return it
+                    // Input is complete - redraw with transient prompt if enabled
+                    if (self.transient_prompt) |transient| {
+                        // Count newlines in the original prompt to handle multi-line prompts
+                        var newline_count: usize = 0;
+                        for (self.prompt) |ch| {
+                            if (ch == '\n') newline_count += 1;
+                        }
+                        // Move cursor up for each newline in the prompt
+                        if (newline_count > 0) {
+                            var move_buf: [32]u8 = undefined;
+                            const move_seq = std.fmt.bufPrint(&move_buf, "\x1b[{d}A", .{newline_count}) catch "\x1b[1A";
+                            try self.writeBytes(move_seq);
+                        }
+                        // Move to start of line and clear from here to end of screen
+                        try self.writeBytes("\r\x1b[J");
+                        // Write the transient (minimal) prompt + the typed command
+                        try self.writeBytes(transient);
+                        try self.writeBytes(self.buffer[0..self.length]);
+                    }
+
                     try self.writeBytes("\r\n");
                     try self.terminal.disableRawMode();
 

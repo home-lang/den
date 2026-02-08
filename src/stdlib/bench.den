@@ -1,0 +1,64 @@
+# Den Standard Library: Benchmarking utilities
+# Usage: use std/bench
+
+# Benchmark a command with N iterations
+def benchmark [cmd, rounds] {
+    let n = "${rounds:-10}"
+    let total = 0
+    let min = 999999
+    let max = 0
+
+    echo "Benchmarking: $cmd"
+    echo "Rounds: $n"
+    echo "---"
+
+    let i = 0
+    while [ $i -lt $n ]; do
+        let start = $(date +%s%N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1e9))')
+        eval "$cmd" > /dev/null 2>&1
+        let end = $(date +%s%N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1e9))')
+        let elapsed = $(expr $end - $start)
+        let total = $(expr $total + $elapsed)
+
+        if [ $elapsed -lt $min ]; then
+            min=$elapsed
+        fi
+        if [ $elapsed -gt $max ]; then
+            max=$elapsed
+        fi
+
+        let i = $(expr $i + 1)
+    done
+
+    let avg = $(expr $total / $n)
+
+    echo "Total:   $(expr $total / 1000000)ms"
+    echo "Average: $(expr $avg / 1000000)ms"
+    echo "Min:     $(expr $min / 1000000)ms"
+    echo "Max:     $(expr $max / 1000000)ms"
+}
+
+# Compare two commands
+def compare [cmd1, cmd2, rounds] {
+    let n = "${rounds:-10}"
+
+    echo "=== Comparison ==="
+    echo ""
+    echo "Command 1: $cmd1"
+    benchmark "$cmd1" "$n"
+    echo ""
+    echo "Command 2: $cmd2"
+    benchmark "$cmd2" "$n"
+}
+
+# Measure single command with detailed output
+def measure [cmd] {
+    let start = $(date +%s%N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1e9))')
+    eval "$cmd"
+    let status = $?
+    let end = $(date +%s%N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1e9))')
+    let elapsed_ns = $(expr $end - $start)
+    let elapsed_ms = $(expr $elapsed_ns / 1000000)
+    echo "Time: ${elapsed_ms}ms (exit: $status)" >&2
+    return $status
+}

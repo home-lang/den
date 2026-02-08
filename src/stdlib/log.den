@@ -1,0 +1,41 @@
+# Den Standard Library: Logging framework
+# Usage: use std/log
+
+# Log levels
+export LOG_LEVEL="${LOG_LEVEL:-info}"
+
+# Check if a level should be logged
+def _log_level_num [level] {
+    match "$level" {
+        "trace" => echo 0,
+        "debug" => echo 1,
+        "info" => echo 2,
+        "warn" => echo 3,
+        "error" => echo 4,
+        "fatal" => echo 5,
+        _ => echo 2
+    }
+}
+
+# Core log function
+def _log [level, msg] {
+    let current = $(_log_level_num "$LOG_LEVEL")
+    let target = $(_log_level_num "$level")
+    if [ "$target" -ge "$current" ]; then
+        let ts = $(date +%H:%M:%S)
+        let level_upper = $(echo "$level" | str upcase)
+        printf "[%s] %-5s %s\n" "$ts" "$level_upper" "$msg" >&2
+    fi
+}
+
+def log-trace [msg] { _log trace "$msg"; }
+def log-debug [msg] { _log debug "$msg"; }
+def log-info [msg] { _log info "$msg"; }
+def log-warn [msg] { _log warn "$msg"; }
+def log-error [msg] { _log error "$msg"; }
+def log-fatal [msg] { _log fatal "$msg"; exit 1; }
+
+# Set log level
+def set-log-level [level] {
+    export LOG_LEVEL="$level"
+}

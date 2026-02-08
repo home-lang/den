@@ -860,7 +860,7 @@ test "tokenizer basic" {
 
     var tokenizer = Tokenizer.init(allocator, "echo hello");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(@as(usize, 2), tokens.len);
     try std.testing.expectEqual(TokenType.word, tokens[0].type);
@@ -874,7 +874,7 @@ test "tokenizer pipe" {
 
     var tokenizer = Tokenizer.init(allocator, "ls | grep foo");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(@as(usize, 4), tokens.len);
     try std.testing.expectEqual(TokenType.word, tokens[0].type);
@@ -888,7 +888,7 @@ test "tokenizer operators" {
 
     var tokenizer = Tokenizer.init(allocator, "cmd1 && cmd2 || cmd3");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(@as(usize, 5), tokens.len);
     try std.testing.expectEqual(TokenType.and_op, tokens[1].type);

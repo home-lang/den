@@ -72,12 +72,26 @@ pub const Repl = struct {
 
         // Fallback to simple stdin reading
         var buf: [4096]u8 = undefined;
-        const stdin = std.io.getStdIn().reader();
-        const line = stdin.readUntilDelimiter(&buf, '\n') catch |err| {
-            if (err == error.EndOfStream) return null;
-            return err;
-        };
-        return try self.allocator.dupe(u8, line);
+        var total: usize = 0;
+        while (total < buf.len) {
+            const n = std.posix.read(std.posix.STDIN_FILENO, buf[total..]) catch |err| {
+                if (total > 0) return try self.allocator.dupe(u8, buf[0..total]);
+                return err;
+            };
+            if (n == 0) {
+                if (total > 0) return try self.allocator.dupe(u8, buf[0..total]);
+                return null;
+            }
+            // Check for newline in what we just read
+            for (buf[total .. total + n]) |c| {
+                if (c == '\n') {
+                    const end = total + (std.mem.indexOfScalar(u8, buf[total .. total + n], '\n') orelse 0);
+                    return try self.allocator.dupe(u8, buf[0..end]);
+                }
+            }
+            total += n;
+        }
+        return try self.allocator.dupe(u8, buf[0..total]);
     }
 
     /// Stop the REPL

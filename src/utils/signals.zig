@@ -241,9 +241,14 @@ test "signal handling basic" {
 test "window size" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
 
-    const size = try getWindowSize();
+    const size = getWindowSize() catch |err| {
+        // TIOCGWINSZ fails when not attached to a real terminal (CI, test runners).
+        // This is expected behavior - verify the error is the right one.
+        try std.testing.expect(err == error.IoctlFailed);
+        return;
+    };
 
-    // Basic sanity checks
+    // If we do have a terminal, verify sanity
     const testing = std.testing;
     try testing.expect(size.rows > 0);
     try testing.expect(size.cols > 0);

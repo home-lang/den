@@ -420,10 +420,12 @@ pub const Word = struct {
         tilde: ?[]const u8,
         /// Glob pattern
         glob: []const u8,
+        /// Spread operator: ...$var (expands variable as multiple arguments)
+        spread: []const u8,
 
         pub fn deinit(self: *Part, allocator: std.mem.Allocator) void {
             switch (self.*) {
-                .literal, .single_quoted, .arithmetic, .glob => |str| allocator.free(str),
+                .literal, .single_quoted, .arithmetic, .glob, .spread => |str| allocator.free(str),
                 .double_quoted => |parts| {
                     for (parts) |*p| p.deinit(allocator);
                     allocator.free(parts);
@@ -589,6 +591,7 @@ fn deinitPart(part: *Word.Part, allocator: std.mem.Allocator) void {
         },
         .tilde => |t| if (t) |s| allocator.free(s),
         .glob => |s| allocator.free(s),
+        .spread => |s| allocator.free(s),
     }
 }
 

@@ -283,6 +283,7 @@ pub const Expansion = struct {
 
                 if (should_expand) {
                     const expansion_result = try self.expandTilde(input[i..]);
+                    defer if (expansion_result.owned) self.allocator.free(@constCast(expansion_result.value));
 
                     // Copy expansion result to buffer
                     if (result_len + expansion_result.value.len > result_buffer.len) {
@@ -300,6 +301,7 @@ pub const Expansion = struct {
                 // Check for process substitution: <(cmd) or >(cmd)
                 if (i + 1 < input.len and input[i + 1] == '(') {
                     const expansion_result = try self.expandProcessSubstitution(input[i..], char == '<');
+                    defer if (expansion_result.owned) self.allocator.free(@constCast(expansion_result.value));
 
                     // Copy expansion result to buffer
                     if (result_len + expansion_result.value.len > result_buffer.len) {
@@ -319,6 +321,7 @@ pub const Expansion = struct {
             } else if (char == '`') {
                 // Backtick command substitution
                 const expansion_result = try self.expandBacktick(input[i..]);
+                defer if (expansion_result.owned) self.allocator.free(@constCast(expansion_result.value));
 
                 // Copy expansion result to buffer
                 if (result_len + expansion_result.value.len > result_buffer.len) {
@@ -2354,8 +2357,10 @@ pub const WordSplitter = struct {
         errdefer words.deinit(self.allocator);
 
         var i: usize = 0;
+        var after_word = false; // Track if we just finished a word
+
         while (i < input.len) {
-            // Skip leading IFS whitespace characters (space, tab, newline)
+            // Skip IFS whitespace characters (space, tab, newline)
             while (i < input.len and self.isIfsWhitespace(input[i])) {
                 i += 1;
             }
@@ -2364,9 +2369,26 @@ pub const WordSplitter = struct {
 
             // Check for non-whitespace IFS character (acts as delimiter)
             if (self.isIfsNonWhitespace(input[i])) {
-                // Non-whitespace IFS chars create empty fields
-                try words.append(self.allocator, "");
+                if (!after_word) {
+                    // Leading non-ws IFS delimiter produces an empty field
+                    try words.append(self.allocator, "");
+                }
                 i += 1;
+                after_word = false;
+
+                // Skip trailing IFS whitespace after the delimiter
+                while (i < input.len and self.isIfsWhitespace(input[i])) {
+                    i += 1;
+                }
+
+                // Check for consecutive non-ws IFS delimiters or end of input
+                if (i >= input.len or self.isIfsNonWhitespace(input[i])) {
+                    // Another delimiter or end of input: empty field
+                    if (i >= input.len) {
+                        try words.append(self.allocator, "");
+                    }
+                    // If another delimiter, the next iteration will handle it
+                }
                 continue;
             }
 
@@ -2403,6 +2425,7 @@ pub const WordSplitter = struct {
             // Add the word if non-empty
             if (i > word_start) {
                 try words.append(self.allocator, input[word_start..i]);
+                after_word = true;
             }
         }
 

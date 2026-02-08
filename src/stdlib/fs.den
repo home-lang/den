@@ -1,0 +1,69 @@
+# Den Standard Library: Filesystem helpers
+# Usage: use std/fs
+
+# Get file size in human-readable format
+def file-size [path] {
+    ls -lh "$path" | awk '{print $5}'
+}
+
+# Get file extension
+def file-ext [path] {
+    path extension "$path"
+}
+
+# Check if path is a directory
+def is-dir [path] {
+    if [ -d "$path" ]; then
+        echo true
+    else
+        echo false
+    fi
+}
+
+# Check if path is a file
+def is-file [path] {
+    if [ -f "$path" ]; then
+        echo true
+    else
+        echo false
+    fi
+}
+
+# Find files by extension recursively
+def find-by-ext [dir, ext] {
+    find "$dir" -name "*.$ext" -type f
+}
+
+# Get total size of directory
+def dir-size [path] {
+    du -sh "$path" 2>/dev/null | awk '{print $1}'
+}
+
+# Create directory and cd into it
+def mkcd [dir] {
+    mkdir -p "$dir" && cd "$dir"
+}
+
+# Backup a file (creates .bak copy)
+def backup [path] {
+    cp "$path" "${path}.bak"
+    echo "Backed up to ${path}.bak"
+}
+
+# Count files in directory
+def count-files [dir] {
+    find "${dir:-.}" -type f | wc -l | str trim
+}
+
+# List recent files (modified in last N minutes)
+def recent [dir, minutes] {
+    find "${dir:-.}" -type f -mmin "-${minutes:-60}" -print
+}
+
+# Safe remove (move to trash instead of delete)
+def trash [path] {
+    let trash_dir = "${HOME}/.local/share/Trash/files"
+    mkdir -p "$trash_dir"
+    mv "$path" "$trash_dir/"
+    echo "Moved to trash: $path"
+}

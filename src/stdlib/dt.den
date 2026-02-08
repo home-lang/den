@@ -1,0 +1,61 @@
+# Den Standard Library: Date/Time helpers
+# Usage: use std/dt
+
+# Get current timestamp (epoch seconds)
+def timestamp [] {
+    date +%s
+}
+
+# Get current date in ISO format
+def today [] {
+    date +%Y-%m-%d
+}
+
+# Get current time
+def now [] {
+    date +%H:%M:%S
+}
+
+# Get current datetime in ISO format
+def datetime [] {
+    date +%Y-%m-%dT%H:%M:%S
+}
+
+# Days between two dates
+def days-between [date1, date2] {
+    let d1 = $(date -j -f "%Y-%m-%d" "$date1" +%s 2>/dev/null || date -d "$date1" +%s)
+    let d2 = $(date -j -f "%Y-%m-%d" "$date2" +%s 2>/dev/null || date -d "$date2" +%s)
+    let diff = $(expr $d2 - $d1)
+    if [ $diff -lt 0 ]; then
+        diff=$(expr 0 - $diff)
+    fi
+    expr $diff / 86400
+}
+
+# Format seconds into human readable duration
+def humanize-duration [seconds] {
+    if [ "$seconds" -lt 60 ]; then
+        echo "${seconds}s"
+    elif [ "$seconds" -lt 3600 ]; then
+        let m = $(expr $seconds / 60)
+        let s = $(expr $seconds % 60)
+        echo "${m}m ${s}s"
+    elif [ "$seconds" -lt 86400 ]; then
+        let h = $(expr $seconds / 3600)
+        let m = $(expr \( $seconds % 3600 \) / 60)
+        echo "${h}h ${m}m"
+    else
+        let d = $(expr $seconds / 86400)
+        let h = $(expr \( $seconds % 86400 \) / 3600)
+        echo "${d}d ${h}h"
+    fi
+}
+
+# Timer: measure command execution time
+def timer [cmd] {
+    let start = $(date +%s)
+    eval "$cmd"
+    let end = $(date +%s)
+    let elapsed = $(expr $end - $start)
+    humanize-duration $elapsed
+}

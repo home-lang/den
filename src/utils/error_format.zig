@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const diagnostic = @import("diagnostic.zig");
 
 /// ANSI color codes
 const Color = struct {
@@ -269,4 +270,31 @@ pub fn tryWithContext(
         printError(err, context, true);
         return err;
     };
+}
+
+/// Emit a rich diagnostic error for shell input errors
+pub fn emitShellError(message: []const u8, source_line: ?[]const u8, help_text: ?[]const u8) void {
+    var diag = diagnostic.Diagnostic{
+        .severity = .@"error",
+        .message = message,
+        .source_line = source_line,
+        .line = 1,
+        .column = 1,
+    };
+    if (help_text) |h| {
+        diag.help = h;
+    }
+    diag.emit();
+}
+
+/// Emit a rich diagnostic warning
+pub fn emitShellWarning(message: []const u8, source_line: ?[]const u8) void {
+    const diag = diagnostic.Diagnostic{
+        .severity = .warning,
+        .message = message,
+        .source_line = source_line,
+        .line = 1,
+        .column = 1,
+    };
+    diag.emit();
 }

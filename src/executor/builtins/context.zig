@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const Shell = @import("../../shell.zig").Shell;
 const ScriptResult = @import("../../scripting/script_manager.zig").ScriptResult;
+const HookContext = @import("../../plugins/interface.zig").HookContext;
 
 /// Callback type for checking if a command is a builtin
 pub const IsBuiltinFn = *const fn (name: []const u8) bool;
@@ -91,6 +92,18 @@ pub const BuiltinContext = struct {
         } else {
             gop.key_ptr.* = try self.allocator.dupe(u8, name);
             gop.value_ptr.* = try self.allocator.dupe(u8, value);
+        }
+
+        // Fire env_change hook when environment variable changes
+        if (self.shell) |shell| {
+            var name_copy = @as([]const u8, name);
+            var hook_ctx = HookContext{
+                .hook_type = .env_change,
+                .data = @ptrCast(@alignCast(&name_copy)),
+                .user_data = null,
+                .allocator = self.allocator,
+            };
+            shell.plugin_registry.executeHooks(.env_change, &hook_ctx) catch {};
         }
     }
 

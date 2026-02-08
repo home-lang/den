@@ -90,6 +90,30 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
                 prev_arg_is_v = std.mem.eql(u8, arg, "-v");
             }
 
+            // Handle spread operator: ...$var expands variable into multiple args
+            if (std.mem.startsWith(u8, arg, "...")) {
+                const spread_expr = arg[3..];
+                if (spread_expr.len > 0) {
+                    const spread_expanded = try expander.expand(spread_expr);
+                    defer self.allocator.free(spread_expanded);
+
+                    // Split the expanded value by whitespace into multiple arguments
+                    var split_iter = std.mem.splitAny(u8, spread_expanded, " \t\n");
+                    while (split_iter.next()) |part| {
+                        if (part.len > 0) {
+                            if (expanded_args_count >= expanded_args_buffer.len) {
+                                self.allocator.free(arg);
+                                return error.TooManyArguments;
+                            }
+                            expanded_args_buffer[expanded_args_count] = try self.allocator.dupe(u8, part);
+                            expanded_args_count += 1;
+                        }
+                    }
+                    self.allocator.free(arg);
+                    continue;
+                }
+            }
+
             // First expand variables (unless this is a -v operand in [[ ]])
             const var_expanded = if (skip_expansion)
                 try self.allocator.dupe(u8, arg)
@@ -170,6 +194,11 @@ pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
         var current_name = cmd.name;
         var expanded = false;
 
+        // Don't expand aliases that shadow den-specific structured data builtins.
+        // These are new builtins (str, path, math, date, into, from, to, etc.) that
+        // may collide with pre-existing aliases from zsh/bash configs.
+        if (isDenBuiltin(current_name)) continue;
+
         // Expand aliases iteratively with circular detection
         while (self.aliases.get(current_name)) |alias_value| {
             // Check for circular reference
@@ -244,4 +273,18 @@ pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
             current_name = first_word;
         }
     }
+}
+
+/// Check if a command name is a den-specific structured data builtin.
+/// These builtins should not be overridden by aliases inherited from zsh/bash configs.
+fn isDenBuiltin(name: []const u8) bool {
+    const den_builtins = [_][]const u8{
+        "str", "path", "math", "date", "into", "from", "to",
+        "encode", "decode", "detect", "explore", "generate",
+        "par-each", "seq-char", "bench", "watch", "use",
+    };
+    for (&den_builtins) |b| {
+        if (std.mem.eql(u8, name, b)) return true;
+    }
+    return false;
 }

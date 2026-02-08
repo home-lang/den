@@ -1,0 +1,79 @@
+# Den Standard Library: Math utilities
+# Usage: use std/math
+
+# Calculate factorial
+def factorial [n] {
+    if [ "$n" -le 1 ]; then
+        echo 1
+    else
+        let prev = $(factorial $(expr $n - 1))
+        expr $n \* $prev
+    fi
+}
+
+# Calculate fibonacci number
+def fib [n] {
+    if [ "$n" -le 0 ]; then
+        echo 0
+    elif [ "$n" -eq 1 ]; then
+        echo 1
+    else
+        let a = $(fib $(expr $n - 1))
+        let b = $(fib $(expr $n - 2))
+        expr $a + $b
+    fi
+}
+
+# Greatest common divisor
+def gcd [a, b] {
+    if [ "$b" -eq 0 ]; then
+        echo $a
+    else
+        gcd $b $(expr $a % $b)
+    fi
+}
+
+# Least common multiple
+def lcm [a, b] {
+    let g = $(gcd $a $b)
+    expr $a \* $b / $g
+}
+
+# Power function
+def pow [base, exp] {
+    if [ "$exp" -eq 0 ]; then
+        echo 1
+    else
+        let prev = $(pow $base $(expr $exp - 1))
+        expr $base \* $prev
+    fi
+}
+
+# Check if number is prime
+def is-prime [n] {
+    if [ "$n" -lt 2 ]; then
+        echo false
+        return 1
+    fi
+    let i = 2
+    while [ $(expr $i \* $i) -le $n ]; do
+        if [ $(expr $n % $i) -eq 0 ]; then
+            echo false
+            return 1
+        fi
+        let i = $(expr $i + 1)
+    done
+    echo true
+    return 0
+}
+
+# Clamp a number between min and max
+def clamp [value, min_val, max_val] {
+    if [ "$value" -lt "$min_val" ]; then
+        echo $min_val
+    elif [ "$value" -gt "$max_val" ]; then
+        echo $max_val
+    else
+        echo $value
+    fi
+}
