@@ -467,6 +467,7 @@ pub const Tokenizer = struct {
         var in_single_quote = false;
         var in_double_quote = false;
         var in_ansi_quote = false; // $'...' ANSI-C quoting
+        var in_interp_quote = false; // $"..." string interpolation
         var subst_depth: u32 = 0; // Track $(...) / $((...)) nesting depth
         var brace_depth: u32 = 0; // Track ${...} parameter expansion depth
         var in_backtick = false; // Track `...` command substitution
@@ -606,10 +607,25 @@ pub const Tokenizer = struct {
             }
 
             // Check for $' ANSI-C quoting start
-            if (char == '$' and !in_single_quote and !in_double_quote and !in_ansi_quote) {
+            if (char == '$' and !in_single_quote and !in_double_quote and !in_ansi_quote and !in_interp_quote) {
                 if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '\'') {
                     in_ansi_quote = true;
                     self.pos += 2; // Skip $'
+                    self.column += 2;
+                    continue;
+                }
+                // Check for $" string interpolation start
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '"') {
+                    in_interp_quote = true;
+                    in_double_quote = true;
+                    // Preserve $" in buffer so expansion phase can detect it
+                    if (word_len + 1 < word_buffer.len) {
+                        word_buffer[word_len] = '$';
+                        word_len += 1;
+                        word_buffer[word_len] = '"';
+                        word_len += 1;
+                    }
+                    self.pos += 2; // Skip $"
                     self.column += 2;
                     continue;
                 }
@@ -635,6 +651,18 @@ pub const Tokenizer = struct {
             }
 
             if (char == '"' and !in_single_quote and !in_ansi_quote) {
+                if (in_interp_quote and in_double_quote) {
+                    // Closing " of $"..." - preserve in buffer for expansion phase
+                    in_double_quote = false;
+                    in_interp_quote = false;
+                    if (word_len < word_buffer.len) {
+                        word_buffer[word_len] = '"';
+                        word_len += 1;
+                    }
+                    self.pos += 1;
+                    self.column += 1;
+                    continue;
+                }
                 in_double_quote = !in_double_quote;
                 // When inside $() or backticks, preserve quote chars in the buffer
                 if (subst_depth > 0 or in_backtick) {

@@ -152,6 +152,21 @@ fn strSplit(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
 
 fn strJoin(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
     const delim = if (args.len > 0) args[0] else "";
+
+    // If extra args provided, join them; otherwise read lines from stdin
+    if (args.len > 1) {
+        var result = std.ArrayList(u8){};
+        defer result.deinit(allocator);
+        for (args[1..], 0..) |arg, i| {
+            if (i > 0) try result.appendSlice(allocator, delim);
+            try result.appendSlice(allocator, arg);
+        }
+        const output = try result.toOwnedSlice(allocator);
+        defer allocator.free(output);
+        try IO.print("{s}\n", .{output});
+        return 0;
+    }
+
     const input = try readAllStdin(allocator);
     defer allocator.free(input);
 

@@ -1733,6 +1733,7 @@ pub const Expansion = struct {
             // On error, return empty string
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         };
+        defer self.allocator.free(output);
 
         // Trim trailing newlines (bash behavior)
         var trimmed_len = output.len;
@@ -1789,6 +1790,7 @@ pub const Expansion = struct {
             // On error, return empty string
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         };
+        defer self.allocator.free(output);
 
         // Trim trailing newlines (bash behavior)
         var trimmed_len = output.len;
@@ -1839,14 +1841,26 @@ pub const Expansion = struct {
                 std.posix.close(@intCast(dev_null_fd));
             }
 
-            // Null-terminate the command for execl
+            // Null-terminate the command for execve
             var cmd_buf: [8192]u8 = undefined;
             if (command.len >= cmd_buf.len) std.c._exit(1);
             @memcpy(cmd_buf[0..command.len], command);
             cmd_buf[command.len] = 0;
             const cmd_z: [*:0]const u8 = @ptrCast(&cmd_buf);
 
-            // Execute via /bin/sh -c
+            // Try to use den itself for command substitution (supports den builtins)
+            var exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const exe_path_len = std.process.executablePath(std.Options.debug_io, &exe_path_buf) catch 0;
+            if (exe_path_len > 0 and exe_path_len < exe_path_buf.len) {
+                exe_path_buf[exe_path_len] = 0;
+                const den_path: [*:0]const u8 = @ptrCast(&exe_path_buf);
+                const flag_c: [*:0]const u8 = "-c";
+                const den_argv = [_:null]?[*:0]const u8{ den_path, flag_c, cmd_z, null };
+                _ = std.c.execve(den_path, &den_argv, @extern(*[*:null]?[*:0]u8, .{ .name = "environ" }).*);
+                // If den exec fails, fall through to /bin/sh
+            }
+
+            // Fallback: execute via /bin/sh -c
             const sh_path: [*:0]const u8 = "/bin/sh";
             const sh_c: [*:0]const u8 = "-c";
             const argv_arr = [_:null]?[*:0]const u8{ sh_path, sh_c, cmd_z, null };

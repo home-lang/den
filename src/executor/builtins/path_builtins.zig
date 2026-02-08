@@ -32,9 +32,13 @@ fn getPath(args: []const []const u8) []const u8 {
 }
 
 fn pathJoin(_: std.mem.Allocator, args: []const []const u8) !i32 {
-    if (args.len < 2) {
-        try IO.eprint("Usage: path join <part1> <part2> [...]\n", .{});
+    if (args.len == 0) {
+        try IO.eprint("Usage: path join <part1> [part2] [...]\n", .{});
         return 1;
+    }
+    if (args.len == 1) {
+        try IO.print("{s}\n", .{args[0]});
+        return 0;
     }
     // Simple join with separator
     var first = true;
