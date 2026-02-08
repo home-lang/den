@@ -265,8 +265,11 @@ fn strPadLeft(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
         return 1;
     }
     const width = std.fmt.parseInt(usize, args[0], 10) catch 0;
-    const pad_char: u8 = if (args.len > 1 and args[1].len > 0) args[1][0] else ' ';
-    const input = try getInput(allocator, args, if (args.len > 2) 2 else 1);
+    const pad_char: u8 = if (args.len > 1 and args[1].len == 1) args[1][0] else ' ';
+    // With 3+ args: width, pad_char, input. With 2 args and single-char second arg: width, pad_char (read stdin).
+    // With 2 args and multi-char second arg: width, input (default pad char).
+    const input_idx: usize = if (args.len > 2) 2 else if (args.len == 2 and args[1].len > 1) 1 else args.len;
+    const input = try getInput(allocator, args, input_idx);
     defer allocator.free(input);
     if (input.len >= width) {
         try IO.print("{s}\n", .{input});
@@ -287,8 +290,9 @@ fn strPadRight(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
         return 1;
     }
     const width = std.fmt.parseInt(usize, args[0], 10) catch 0;
-    const pad_char: u8 = if (args.len > 1 and args[1].len > 0) args[1][0] else ' ';
-    const input = try getInput(allocator, args, if (args.len > 2) 2 else 1);
+    const pad_char: u8 = if (args.len > 1 and args[1].len == 1) args[1][0] else ' ';
+    const input_idx: usize = if (args.len > 2) 2 else if (args.len == 2 and args[1].len > 1) 1 else args.len;
+    const input = try getInput(allocator, args, input_idx);
     defer allocator.free(input);
     if (input.len >= width) {
         try IO.print("{s}\n", .{input});

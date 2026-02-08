@@ -774,8 +774,6 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
 }
 
 pub fn logParse(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
-    _ = allocator;
-
     var format: enum { auto, json, kv, csv } = .auto;
     var fields: ?[]const u8 = null;
     var filter_field: ?[]const u8 = null;
@@ -833,11 +831,12 @@ pub fn logParse(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         return 0;
     }
 
-    var content_buf: [1024 * 1024]u8 = undefined;
+    const content_buf = try allocator.alloc(u8, 1024 * 1024);
+    defer allocator.free(content_buf);
     var content_len: usize = 0;
 
     if (file_path) |path| {
-        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,path, .{}) catch |err| {
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch |err| {
             try IO.eprint("den: log-parse: cannot open '{s}': {}\n", .{ path, err });
             return 1;
         };

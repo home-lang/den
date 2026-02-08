@@ -64,6 +64,10 @@ fn intoInt(input: []const u8) !i32 {
     } else |_| {}
     // Try float -> int
     if (std.fmt.parseFloat(f64, input)) |f| {
+        if (std.math.isNan(f) or std.math.isInf(f) or f > @as(f64, @floatFromInt(std.math.maxInt(i64))) or f < @as(f64, @floatFromInt(std.math.minInt(i64)))) {
+            try IO.eprint("Error: cannot convert '{s}' to int (out of range)\n", .{input});
+            return 1;
+        }
         try IO.print("{d}\n", .{@as(i64, @intFromFloat(f))});
         return 0;
     } else |_| {}
@@ -129,6 +133,10 @@ fn intoBool(input: []const u8) !i32 {
 fn intoDatetime(allocator: std.mem.Allocator, input: []const u8) !i32 {
     // Try parsing as unix timestamp
     if (std.fmt.parseInt(i64, input, 10)) |ts| {
+        if (ts < 0) {
+            try IO.eprint("Error: negative timestamps (before 1970) not supported\n", .{});
+            return 1;
+        }
         const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(ts) };
         const day = epoch.getDaySeconds();
         const yd = epoch.getEpochDay().calculateYearDay();

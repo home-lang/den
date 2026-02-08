@@ -45,12 +45,12 @@ const NOTE_EXTEND: u32 = 0x00000004;
 const NOTE_ATTRIB: u32 = 0x00000008;
 const NOTE_RENAME: u32 = 0x00000020;
 
-/// Global flag for graceful Ctrl+C handling.
-var watch_interrupted: bool = false;
+/// Global flag for graceful Ctrl+C handling (atomic for signal safety).
+var watch_interrupted: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
 
 /// Signal handler for SIGINT during watch.
 fn sigintHandler(_: std.posix.SIG) callconv(.c) void {
-    watch_interrupted = true;
+    watch_interrupted.store(true, .release);
 }
 
 /// watch <path> <command> - Watch a file or directory and run a command on changes.
@@ -119,7 +119,7 @@ pub fn watchCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     defer allocator.free(shell_cmd);
 
     // Install SIGINT handler for graceful shutdown
-    watch_interrupted = false;
+    watch_interrupted.store(false, .release);
     var old_action: std.posix.Sigaction = undefined;
     const new_action = std.posix.Sigaction{
         .handler = .{ .handler = sigintHandler },
@@ -209,7 +209,7 @@ fn watchWithKqueue(allocator: std.mem.Allocator, watch_path: []const u8, shell_c
     var last_event_time: u64 = 0;
 
     // Main event loop
-    while (!watch_interrupted) {
+    while (!watch_interrupted.load(.acquire)) {
         var eventlist: [1]Kevent = undefined;
 
         // Use a short timeout so we can check the interrupt flag periodically
@@ -220,7 +220,7 @@ fn watchWithKqueue(allocator: std.mem.Allocator, watch_path: []const u8, shell_c
 
         const nevents = c_kqueue.kevent(kq, &changelist, 0, &eventlist, 1, &timeout);
 
-        if (watch_interrupted) break;
+        if (watch_interrupted.load(.acquire)) break;
 
         if (nevents < 0) {
             // EINTR is expected when a signal is received
@@ -273,11 +273,11 @@ fn watchWithPolling(allocator: std.mem.Allocator, watch_path: []const u8, shell_
     const sleep_ns: u64 = interval_ms * 1_000_000;
 
     // Main polling loop
-    while (!watch_interrupted) {
+    while (!watch_interrupted.load(.acquire)) {
         // Sleep for the polling interval
         std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(sleep_ns), .awake) catch {};
 
-        if (watch_interrupted) break;
+        if (watch_interrupted.load(.acquire)) break;
 
         // Check for changes
         const current_mtime = getFileMtime(watch_path) catch {
@@ -288,7 +288,7 @@ fn watchWithPolling(allocator: std.mem.Allocator, watch_path: []const u8, shell_
                 try IO.eprint("\x1b[1;31mcommand exited with code {d}\x1b[0m\n", .{exit_code});
             }
             // Wait for the file to reappear
-            while (!watch_interrupted) {
+            while (!watch_interrupted.load(.acquire)) {
                 std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(sleep_ns), .awake) catch {};
                 last_mtime = getFileMtime(watch_path) catch continue;
                 last_size = getFileSize(watch_path) catch 0;

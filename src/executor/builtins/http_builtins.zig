@@ -240,7 +240,13 @@ pub fn httpCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
     // Wait for child to complete
     var wait_status: c_int = 0;
     _ = std.c.waitpid(pid, &wait_status, 0);
-    const exit_code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
+    const wait_u: u32 = @bitCast(wait_status);
+    const exit_code: i32 = if (std.posix.W.IFEXITED(wait_u))
+        @intCast(std.posix.W.EXITSTATUS(wait_u))
+    else if (std.posix.W.IFSIGNALED(wait_u))
+        128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(wait_u))))
+    else
+        1;
 
     // Print output
     if (output_buf.items.len > 0) {

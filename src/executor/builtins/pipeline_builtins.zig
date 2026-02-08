@@ -200,13 +200,18 @@ pub fn firstCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         }
     } else if (val == .table) {
         const count = @min(n, val.table.rows.len);
-        var new_rows = try allocator.alloc([]Value, count);
-        for (0..count) |i| {
-            new_rows[i] = val.table.rows[i];
+        // Output table rows directly to avoid shallow-copy aliasing with val
+        for (val.table.rows[0..count]) |row| {
+            var first = true;
+            for (row) |cell| {
+                if (!first) try IO.print("\t", .{});
+                first = false;
+                const s = try cell.asString(allocator);
+                defer allocator.free(s);
+                try IO.print("{s}", .{s});
+            }
+            try IO.print("\n", .{});
         }
-        const result = Value{ .table = .{ .columns = val.table.columns, .rows = new_rows } };
-        try outputValue(result, allocator);
-        allocator.free(new_rows);
     } else {
         try outputValue(val, allocator);
     }
