@@ -1306,6 +1306,12 @@ pub const Expansion = struct {
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
+        if (std.mem.eql(u8, content, "HOSTNAME")) {
+            var name_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
+            const hostname = std.posix.gethostname(&name_buf) catch "unknown";
+            const result = try self.allocator.dupe(u8, hostname);
+            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+        }
 
         // Handle ${var@operator} transform operators
         if (content.len > 2 and content[content.len - 2] == '@') {
@@ -1628,6 +1634,12 @@ pub const Expansion = struct {
             const uid = std.c.getuid();
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
+            return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+        }
+        if (std.mem.eql(u8, var_name, "HOSTNAME")) {
+            var name_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
+            const hostname = std.posix.gethostname(&name_buf) catch "unknown";
+            const result = try self.allocator.dupe(u8, hostname);
             return ExpansionResult{ .value = result, .consumed = end, .owned = true };
         }
 

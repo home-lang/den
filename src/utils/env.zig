@@ -317,17 +317,12 @@ pub const PathList = struct {
                     }
                 }
             } else {
-                // On Unix, check if executable via mode bits
+                // On Unix, check if executable via stat (no open/close needed)
                 const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path_dir, name });
                 defer allocator.free(full_path);
 
-                // Check if file exists and is accessible
-                std.Io.Dir.accessAbsolute(std.Options.debug_io, full_path, .{}) catch continue;
-
-                const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, full_path, .{}) catch continue;
-                defer file.close(std.Options.debug_io);
-
-                const stat = file.stat(std.Options.debug_io) catch continue;
+                const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, full_path, .{}) catch continue;
+                if (stat.kind != .file) continue;
                 if (stat.permissions.toMode() & 0o111 == 0) continue; // Not executable
 
                 return try allocator.dupe(u8, full_path);

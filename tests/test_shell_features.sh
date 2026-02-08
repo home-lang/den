@@ -794,6 +794,26 @@ check ">&2 redirect" "hello" "$(timeout 3 $DEN -c 'echo hello >&2' 2>&1)"
 check "[[ paren group ]]" "yes" "$(timeout 3 $DEN -c '[[ ( 1 -eq 1 ) && ( 2 -eq 2 ) ]] && echo yes || echo no')"
 
 # ===========================================================================
+# 116. Case glob patterns
+# ===========================================================================
+check "case h*o glob" "matched" "$(timeout 3 $DEN -c 'x=hello; case $x in h*o) echo matched;; *) echo no;; esac')"
+check "case h?llo glob" "matched" "$(timeout 3 $DEN -c 'x=hello; case $x in h?llo) echo matched;; *) echo no;; esac')"
+check "case [a-z]* glob" "matched" "$(timeout 3 $DEN -c 'x=hello; case $x in [a-z]*) echo matched;; *) echo no;; esac')"
+check "case or pattern" "matched" "$(timeout 3 $DEN -c 'x=b; case $x in a|b) echo matched;; *) echo no;; esac')"
+
+# ===========================================================================
+# 117. (( )) arithmetic command with && / ||
+# ===========================================================================
+check "(( )) && true" "yes" "$(timeout 3 $DEN -c '(( 5 > 3 )) && echo yes || echo no')"
+check "(( )) && false" "no" "$(timeout 3 $DEN -c '(( 3 > 5 )) && echo yes || echo no')"
+check "(( )) exit code" "0" "$(timeout 3 $DEN -c '(( 5 > 3 )); echo $?')"
+
+# ===========================================================================
+# 118. HOSTNAME variable
+# ===========================================================================
+check "HOSTNAME not empty" "yes" "$(timeout 3 $DEN -c '[[ -n $HOSTNAME ]] && echo yes || echo no')"
+
+# ===========================================================================
 # Results
 # ===========================================================================
 echo ""

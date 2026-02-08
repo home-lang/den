@@ -710,29 +710,67 @@ pub const ControlFlowExecutor = struct {
         return expanded;
     }
 
-    /// Match a pattern (supports literals and simple globs)
+    /// Match a pattern (supports full glob: *, ?, [abc], [a-z])
     fn matchPattern(self: *ControlFlowExecutor, value: []const u8, pattern: []const u8) !bool {
         _ = self;
+        return globMatch(value, pattern);
+    }
 
-        // Exact match
-        if (std.mem.eql(u8, value, pattern)) return true;
+    fn globMatch(str: []const u8, pattern: []const u8) bool {
+        return globMatchImpl(str, 0, pattern, 0);
+    }
 
-        // Simple wildcard support: * matches anything
-        if (std.mem.eql(u8, pattern, "*")) return true;
+    fn globMatchImpl(str: []const u8, si: usize, pattern: []const u8, pi: usize) bool {
+        var s = si;
+        var p = pi;
 
-        // Pattern with * at end: prefix match
-        if (pattern.len > 0 and pattern[pattern.len - 1] == '*') {
-            const prefix = pattern[0 .. pattern.len - 1];
-            if (std.mem.startsWith(u8, value, prefix)) return true;
+        while (p < pattern.len) {
+            if (pattern[p] == '*') {
+                // Skip consecutive stars
+                while (p < pattern.len and pattern[p] == '*') p += 1;
+                // Trailing * matches everything
+                if (p >= pattern.len) return true;
+                // Try matching * with 0..n characters
+                while (s <= str.len) {
+                    if (globMatchImpl(str, s, pattern, p)) return true;
+                    s += 1;
+                }
+                return false;
+            } else if (pattern[p] == '?') {
+                if (s >= str.len) return false;
+                s += 1;
+                p += 1;
+            } else if (pattern[p] == '[') {
+                if (s >= str.len) return false;
+                p += 1;
+                var negate = false;
+                if (p < pattern.len and (pattern[p] == '!' or pattern[p] == '^')) {
+                    negate = true;
+                    p += 1;
+                }
+                var matched_class = false;
+                var first = true;
+                while (p < pattern.len and (first or pattern[p] != ']')) {
+                    first = false;
+                    if (p + 2 < pattern.len and pattern[p + 1] == '-') {
+                        if (str[s] >= pattern[p] and str[s] <= pattern[p + 2]) matched_class = true;
+                        p += 3;
+                    } else {
+                        if (str[s] == pattern[p]) matched_class = true;
+                        p += 1;
+                    }
+                }
+                if (p < pattern.len) p += 1; // skip ]
+                if (negate) matched_class = !matched_class;
+                if (!matched_class) return false;
+                s += 1;
+            } else {
+                if (s >= str.len or str[s] != pattern[p]) return false;
+                s += 1;
+                p += 1;
+            }
         }
-
-        // Pattern with * at start: suffix match
-        if (pattern.len > 0 and pattern[0] == '*') {
-            const suffix = pattern[1..];
-            if (std.mem.endsWith(u8, value, suffix)) return true;
-        }
-
-        return false;
+        return s >= str.len;
     }
 
     /// Execute a statement (for init/update in C-style for loops)

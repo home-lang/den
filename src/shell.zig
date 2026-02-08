@@ -970,6 +970,41 @@ pub const Shell = struct {
             }
         }
 
+        // Handle (( expr )) followed by && or || by evaluating and reconstructing
+        if (fn_trimmed.len > 4 and std.mem.startsWith(u8, fn_trimmed, "((")) {
+            // Find matching ))
+            var depth: usize = 0;
+            var close_pos: ?usize = null;
+            var ci: usize = 0;
+            while (ci < fn_trimmed.len) : (ci += 1) {
+                if (ci + 1 < fn_trimmed.len and fn_trimmed[ci] == '(' and fn_trimmed[ci + 1] == '(') {
+                    depth += 1;
+                    ci += 1;
+                } else if (ci + 1 < fn_trimmed.len and fn_trimmed[ci] == ')' and fn_trimmed[ci + 1] == ')') {
+                    depth -= 1;
+                    if (depth == 0) {
+                        close_pos = ci + 2;
+                        break;
+                    }
+                    ci += 1;
+                }
+            }
+            if (close_pos) |cp| {
+                const rest = std.mem.trim(u8, fn_trimmed[cp..], &std.ascii.whitespace);
+                if (rest.len > 0 and (std.mem.startsWith(u8, rest, "&&") or std.mem.startsWith(u8, rest, "||") or rest[0] == ';')) {
+                    // Execute (( expr )) first to set exit code
+                    const arith_part = fn_trimmed[0..cp];
+                    self.executeCommand(arith_part) catch {};
+                    // Reconstruct: replace (( expr )) with true/false, pass rest through normal flow
+                    const replacement: []const u8 = if (self.last_exit_code == 0) "true" else "false";
+                    const new_cmd = try std.fmt.allocPrint(self.allocator, "{s} {s}", .{ replacement, rest });
+                    defer self.allocator.free(new_cmd);
+                    self.executeCommand(new_cmd) catch {};
+                    return;
+                }
+            }
+        }
+
         // Check for compound command group: { command; }
         if (fn_trimmed.len > 2 and fn_trimmed[0] == '{' and fn_trimmed[fn_trimmed.len - 1] == '}') {
             // Must have space after { (bash requirement)
