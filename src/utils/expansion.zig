@@ -264,8 +264,8 @@ pub const Expansion = struct {
     /// Expand all variables in a string
     /// Returns a newly allocated string with variables expanded
     pub fn expand(self: *Expansion, input: []const u8) ![]u8 {
-        // Use fixed buffer approach for Zig 0.15
-        var result_buffer: [4096]u8 = undefined;
+        // Use fixed buffer approach (16KB for large expansions)
+        var result_buffer: [16384]u8 = undefined;
         var result_len: usize = 0;
 
         var i: usize = 0;
@@ -2004,7 +2004,7 @@ pub const Expansion = struct {
 
         // Skip $"
         var pos: usize = 2;
-        var result_buf: [4096]u8 = undefined;
+        var result_buf: [16384]u8 = undefined;
         var result_len: usize = 0;
 
         while (pos < input.len) {

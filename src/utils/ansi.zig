@@ -142,7 +142,7 @@ pub const Builder = struct {
 
     pub fn init(allocator: std.mem.Allocator) Builder {
         return .{
-            .buffer = std.ArrayList(u8){},
+            .buffer = std.ArrayList(u8).empty,
             .allocator = allocator,
         };
     }

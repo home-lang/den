@@ -2,23 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-const c_exec = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
+const common = @import("common.zig");
 
 /// Developer helper builtins: wip, code, pstorm
 /// Note: bookmark remains in executor/mod.zig as it requires shell named_dirs state
-
-/// Get C environment pointer (platform-specific)
-fn getCEnviron() [*:null]const ?[*:0]const u8 {
-    if (builtin.os.tag == .macos) {
-        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
-        return @ptrCast(NSGetEnviron().*);
-    } else {
-        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
-        return @ptrCast(c_environ.*);
-    }
-}
 
 /// wip - Quick git add and commit with WIP message
 pub fn wip(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
@@ -94,7 +81,7 @@ pub fn code(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     if (fork_ret < 0) return error.Unexpected;
     const pid: std.posix.pid_t = @intCast(fork_ret);
     if (pid == 0) {
-        _ = c_exec.execvp("open", @ptrCast(&argv));
+        _ = common.c_exec.execvp("open", @ptrCast(&argv));
         std.c._exit(127);
     } else {
         var wait_status: c_int = 0;
@@ -129,7 +116,7 @@ pub fn pstorm(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
     if (fork_ret2 < 0) return error.Unexpected;
     const pid2: std.posix.pid_t = @intCast(fork_ret2);
     if (pid2 == 0) {
-        _ = c_exec.execvp("open", @ptrCast(&argv));
+        _ = common.c_exec.execvp("open", @ptrCast(&argv));
         std.c._exit(127);
     } else {
         var wait_status2: c_int = 0;

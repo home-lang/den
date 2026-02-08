@@ -1,17 +1,9 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const utils = @import("../../utils.zig");
-const c_exec = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
-
-fn getenv(key: [*:0]const u8) ?[]const u8 {
-    const value = std.c.getenv(key) orelse return null;
-    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
-}
+const common = @import("common.zig");
 
 /// Execution builtins: eval, exec, command, builtin, coproc
 
@@ -22,7 +14,7 @@ pub fn eval(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     }
 
     // Concatenate all args into a single command string
-    var eval_str = std.ArrayList(u8){};
+    var eval_str: std.ArrayList(u8) = .empty;
     defer eval_str.deinit(ctx.allocator);
 
     for (cmd.args, 0..) |arg, i| {
@@ -48,7 +40,7 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     const cmd_name = cmd.args[0];
 
     // Find the executable in PATH
-    const path_var = getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
+    const path_var = common.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
     var path_iter = std.mem.splitScalar(u8, path_var, ':');
 
     var exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
@@ -178,7 +170,7 @@ pub fn command(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     if (use_default_path) {
         path_to_use = default_path;
     } else {
-        path_to_use = getenv("PATH") orelse default_path;
+        path_to_use = common.getenv("PATH") orelse default_path;
     }
 
     if (verbose or short_output) {
@@ -353,7 +345,7 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         argv[argv_idx] = null;
 
         // Execute
-        _ = c_exec.execvp(&cmd_z, @ptrCast(argv[0..argv_idx :null]));
+        _ = common.c_exec.execvp(&cmd_z, @ptrCast(argv[0..argv_idx :null]));
 
         // If exec failed
         std.process.exit(127);
@@ -423,15 +415,4 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
 
     try IO.print("[coproc] {d}\n", .{pid});
     return 0;
-}
-
-/// Get C environment pointer (platform-specific)
-fn getCEnviron() [*:null]const ?[*:0]const u8 {
-    if (builtin.os.tag == .macos) {
-        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
-        return @ptrCast(NSGetEnviron().*);
-    } else {
-        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
-        return @ptrCast(c_environ.*);
-    }
 }

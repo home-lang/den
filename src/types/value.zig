@@ -304,7 +304,7 @@ pub const Value = union(enum) {
             .closure => try allocator.dupe(u8, "<closure>"),
             .error_val => |e| try std.fmt.allocPrint(allocator, "Error: {s}", .{e.message}),
             .list => |l| blk: {
-                var buf = std.ArrayList(u8){};
+                var buf = std.ArrayList(u8).empty;
                 errdefer buf.deinit(allocator);
                 try buf.append(allocator, '[');
                 for (l.items, 0..) |item, idx| {
@@ -317,7 +317,7 @@ pub const Value = union(enum) {
                 break :blk try buf.toOwnedSlice(allocator);
             },
             .record => |r| blk: {
-                var buf = std.ArrayList(u8){};
+                var buf = std.ArrayList(u8).empty;
                 errdefer buf.deinit(allocator);
                 try buf.append(allocator, '{');
                 for (r.keys, 0..) |key, idx| {
@@ -332,7 +332,7 @@ pub const Value = union(enum) {
                 break :blk try buf.toOwnedSlice(allocator);
             },
             .table => |t| blk: {
-                var buf = std.ArrayList(u8){};
+                var buf = std.ArrayList(u8).empty;
                 errdefer buf.deinit(allocator);
                 try buf.appendSlice(allocator, "<table ");
                 const rows_str = try std.fmt.allocPrint(allocator, "{d}", .{t.rows.len});

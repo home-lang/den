@@ -4,9 +4,7 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const utils = @import("../../utils.zig");
-const c_exec = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
+const common = @import("common.zig");
 
 /// Process-related builtins: times, umask, timeout, time, watch
 
@@ -282,7 +280,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         }
         argv_buf[argv_idx] = null;
 
-        _ = c_exec.execvp(cmd_z.ptr, @ptrCast(argv_buf[0..argv_idx :null]));
+        _ = common.c_exec.execvp(cmd_z.ptr, @ptrCast(argv_buf[0..argv_idx :null]));
         // If we get here, exec failed
         std.c._exit(127);
     }
@@ -426,17 +424,6 @@ pub fn parseSignalName(name: []const u8) std.posix.SIG {
     if (std.mem.eql(u8, sig_name, "TSTP")) return .TSTP;
 
     return .TERM; // Default to SIGTERM
-}
-
-/// Get C environment pointer (platform-specific)
-fn getCEnviron() [*:null]const ?[*:0]const u8 {
-    if (builtin.os.tag == .macos) {
-        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
-        return @ptrCast(NSGetEnviron().*);
-    } else {
-        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
-        return @ptrCast(c_environ.*);
-    }
 }
 
 /// time - measure command execution time

@@ -2,10 +2,7 @@ const std = @import("std");
 const posix = std.posix;
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-
-const c = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
+const common = @import("common.zig");
 
 /// Benchmark a command: bench <rounds> <command...>
 pub fn bench(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
@@ -38,7 +35,7 @@ pub fn bench(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     }
 
     // Build the command string
-    var cmd_buf = std.ArrayList(u8){};
+    var cmd_buf = std.ArrayList(u8).empty;
     defer cmd_buf.deinit(allocator);
     for (command.args[cmd_start..], 0..) |arg, idx| {
         if (idx > 0) try cmd_buf.append(allocator, ' ');
@@ -88,7 +85,7 @@ pub fn bench(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
                 cmd_z.ptr,
                 null,
             };
-            _ = c.execvp("/bin/sh", &argv);
+            _ = common.c_exec.execvp("/bin/sh", &argv);
             // If execvp returns, it failed
             std.c._exit(127);
             unreachable;

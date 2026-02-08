@@ -1,24 +1,9 @@
 const std = @import("std");
 const posix = std.posix;
+const common = @import("common.zig");
 const types = @import("../../types/mod.zig");
 const Value = types.Value;
 const IO = @import("../../utils/io.zig").IO;
-
-/// Read all stdin into a string
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-    return try result.toOwnedSlice(allocator);
-}
 
 fn getTimestamp() !i64 {
     const ts = posix.clock_gettime(.REALTIME) catch return error.TimeUnavailable;
@@ -85,7 +70,7 @@ fn dateFormat(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
     const month = yd.calculateMonthDay().month;
     const day_of_month = yd.calculateMonthDay().day_index + 1;
 
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
 
     var i: usize = 0;
@@ -177,7 +162,7 @@ fn dateToRecord(allocator: std.mem.Allocator) !i32 {
 
 fn dateHumanize(allocator: std.mem.Allocator) !i32 {
     // Read a timestamp from stdin and humanize it
-    const input = readAllStdin(allocator) catch {
+    const input = common.readAllStdin(allocator) catch {
         try IO.print("now\n", .{});
         return 0;
     };

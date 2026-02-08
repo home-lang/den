@@ -1,15 +1,7 @@
 const std = @import("std");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-
-/// Print a number, formatting integers without decimal places
-fn printNumber(n: f64) !void {
-    if (n == @floor(n) and @abs(n) < 1e15) {
-        try IO.print("{d}\n", .{@as(i64, @intFromFloat(n))});
-    } else {
-        try IO.print("{d}\n", .{n});
-    }
-}
+const common = @import("common.zig");
 
 /// Generate a sequence of numbers.
 ///
@@ -133,7 +125,7 @@ pub fn seqCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
                     try IO.print("{d}", .{current});
                 }
             } else {
-                try printNumber(current);
+                try common.printNumber(current);
             }
             first = false;
             current += step;
@@ -150,7 +142,7 @@ pub fn seqCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
                     try IO.print("{d}", .{current});
                 }
             } else {
-                try printNumber(current);
+                try common.printNumber(current);
             }
             first = false;
             current += step;

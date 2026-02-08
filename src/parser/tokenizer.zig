@@ -472,8 +472,8 @@ pub const Tokenizer = struct {
         var brace_depth: u32 = 0; // Track ${...} parameter expansion depth
         var in_backtick = false; // Track `...` command substitution
 
-        // Build the word with escape processing
-        var word_buffer: [4096]u8 = undefined;
+        // Build the word with escape processing (16KB buffer for large tokens)
+        var word_buffer: [16384]u8 = undefined;
         var word_len: usize = 0;
 
         while (self.pos < self.input.len) {

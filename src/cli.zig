@@ -55,7 +55,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
     _ = args.next();
 
     // Collect all arguments into a heap-allocated list so they survive this function
-    var argv_list = std.ArrayList([]const u8){};
+    var argv_list = std.ArrayList([]const u8).empty;
     defer argv_list.deinit(allocator);
 
     while (args.next()) |arg| {
@@ -67,7 +67,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
     // Parse global flags first (--config, --json)
     var config_path: ?[]const u8 = null;
     var json_output: bool = false;
-    var remaining_list = std.ArrayList([]const u8){};
+    var remaining_list = std.ArrayList([]const u8).empty;
     errdefer remaining_list.deinit(allocator);
     var i: usize = 0;
 

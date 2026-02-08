@@ -2,35 +2,17 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-const c_exec = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
-
-fn getenv(key: [*:0]const u8) ?[]const u8 {
-    const value = std.c.getenv(key) orelse return null;
-    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
-}
+const common = @import("common.zig");
 
 /// macOS-specific and system utility builtins
 /// Includes: copyssh, reloaddns, emptytrash, show, hide, dotfiles, library
-
-/// Get C environment pointer (platform-specific)
-fn getCEnviron() [*:null]const ?[*:0]const u8 {
-    if (builtin.os.tag == .macos) {
-        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
-        return @ptrCast(NSGetEnviron().*);
-    } else {
-        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
-        return @ptrCast(c_environ.*);
-    }
-}
 
 /// copyssh - Copy SSH public key to clipboard
 pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
 
     // Get home directory
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: copyssh: HOME environment variable not set\n", .{});
         return 1;
     };
@@ -252,7 +234,7 @@ pub fn show(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         if (fork_ret < 0) return error.Unexpected;
         const pid: std.posix.pid_t = @intCast(fork_ret);
         if (pid == 0) {
-            _ = c_exec.execvp("chflags", @ptrCast(&argv));
+            _ = common.c_exec.execvp("chflags", @ptrCast(&argv));
             std.c._exit(127);
         } else {
             var wait_status: c_int = 0;
@@ -296,7 +278,7 @@ pub fn hide(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         if (fork_ret2 < 0) return error.Unexpected;
         const pid: std.posix.pid_t = @intCast(fork_ret2);
         if (pid == 0) {
-            _ = c_exec.execvp("chflags", @ptrCast(&argv));
+            _ = common.c_exec.execvp("chflags", @ptrCast(&argv));
             std.c._exit(127);
         } else {
             var wait_status: c_int = 0;
@@ -441,7 +423,7 @@ pub fn library(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 // ============ Library Helper Functions ============
 
 fn libraryList() !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
@@ -501,7 +483,7 @@ fn libraryList() !i32 {
 }
 
 fn libraryPath() !i32 {
-    const home = getenv("HOME") orelse "";
+    const home = common.getenv("HOME") orelse "";
 
     try IO.print("\x1b[1;36m=== Library Search Paths ===\x1b[0m\n\n", .{});
 
@@ -524,7 +506,7 @@ fn libraryPath() !i32 {
 }
 
 fn libraryInfo(name: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
@@ -614,7 +596,7 @@ fn libraryInfo(name: []const u8) !i32 {
 }
 
 fn libraryLoad(name: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
@@ -662,7 +644,7 @@ fn libraryLoad(name: []const u8) !i32 {
 }
 
 fn libraryCreate(name: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: library: HOME not set\n", .{});
         return 1;
     };
@@ -728,7 +710,7 @@ fn libraryCreate(name: []const u8) !i32 {
 // ============ Dotfiles Helper Functions ============
 
 fn dotfilesList() !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -801,7 +783,7 @@ fn dotfilesList() !i32 {
 }
 
 fn dotfilesStatus() !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -847,7 +829,7 @@ fn dotfilesStatus() !i32 {
 }
 
 fn dotfilesLink(file: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -898,7 +880,7 @@ fn dotfilesLink(file: []const u8) !i32 {
 }
 
 fn dotfilesUnlink(file: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -929,7 +911,7 @@ fn dotfilesUnlink(file: []const u8) !i32 {
 }
 
 fn dotfilesBackup(file: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -969,7 +951,7 @@ fn dotfilesBackup(file: []const u8) !i32 {
 }
 
 fn dotfilesRestore(file: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -1009,7 +991,7 @@ fn dotfilesRestore(file: []const u8) !i32 {
 }
 
 fn dotfilesEdit(file: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -1026,7 +1008,7 @@ fn dotfilesEdit(file: []const u8) !i32 {
     };
 
     // Get editor
-    const editor = getenv("EDITOR") orelse getenv("VISUAL") orelse "vim";
+    const editor = common.getenv("EDITOR") orelse common.getenv("VISUAL") orelse "vim";
 
     try IO.print("Opening {s} with {s}...\n", .{ path, editor });
 
@@ -1047,7 +1029,7 @@ fn dotfilesEdit(file: []const u8) !i32 {
         const path_z = std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path}) catch std.c._exit(127);
 
         const argv = [_]?[*:0]const u8{ editor_z, path_z, null };
-        _ = c_exec.execvp(editor_z, @ptrCast(&argv));
+        _ = common.c_exec.execvp(editor_z, @ptrCast(&argv));
         std.c._exit(127);
     } else {
         // Parent process - wait for editor
@@ -1058,7 +1040,7 @@ fn dotfilesEdit(file: []const u8) !i32 {
 }
 
 fn dotfilesDiff(file: []const u8) !i32 {
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: dotfiles: HOME not set\n", .{});
         return 1;
     };
@@ -1109,7 +1091,7 @@ fn dotfilesDiff(file: []const u8) !i32 {
         const current_z = std.fmt.bufPrintZ(&current_z_buf, "{s}", .{current}) catch std.c._exit(127);
 
         const argv = [_]?[*:0]const u8{ "diff", "-u", "--color=auto", backup_z, current_z, null };
-        _ = c_exec.execvp("diff", @ptrCast(&argv));
+        _ = common.c_exec.execvp("diff", @ptrCast(&argv));
         std.c._exit(127);
     } else {
         // Parent process - wait for diff

@@ -240,7 +240,7 @@ pub const PathList = struct {
     pub fn fromEnv(allocator: std.mem.Allocator) !PathList {
         const path_str = getEnv("PATH") orelse return PathList{
             .allocator = allocator,
-            .paths = std.ArrayList([]const u8){},
+            .paths = std.ArrayList([]const u8).empty,
         };
 
         return try parse(allocator, path_str);
@@ -248,7 +248,7 @@ pub const PathList = struct {
 
     /// Parse PATH string
     pub fn parse(allocator: std.mem.Allocator, path_str: []const u8) !PathList {
-        var paths = std.ArrayList([]const u8){};
+        var paths = std.ArrayList([]const u8).empty;
         errdefer paths.deinit(allocator);
 
         const separator = if (builtin.os.tag == .windows) ';' else ':';
@@ -424,7 +424,7 @@ pub const PathList = struct {
         if (self.paths.items.len == 0) return try allocator.dupe(u8, "");
 
         const separator = if (builtin.os.tag == .windows) ";" else ":";
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         errdefer result.deinit(allocator);
 
         for (self.paths.items, 0..) |path, i| {

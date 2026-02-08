@@ -1,23 +1,7 @@
 const std = @import("std");
-const posix = std.posix;
+const common = @import("common.zig");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-
-/// Read all stdin into a string
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-    return try result.toOwnedSlice(allocator);
-}
 
 /// Main str subcommand dispatcher
 pub fn strCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
@@ -53,7 +37,7 @@ fn getInput(allocator: std.mem.Allocator, args: []const []const u8, arg_offset: 
     if (args.len > arg_offset) {
         return try allocator.dupe(u8, args[arg_offset]);
     }
-    const raw = try readAllStdin(allocator);
+    const raw = try common.readAllStdin(allocator);
     // Trim trailing newline from stdin
     const trimmed = std.mem.trimEnd(u8, raw, "\n");
     if (trimmed.len < raw.len) {
@@ -155,7 +139,7 @@ fn strJoin(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
 
     // If extra args provided, join them; otherwise read lines from stdin
     if (args.len > 1) {
-        var result = std.ArrayList(u8){};
+        var result = std.ArrayList(u8).empty;
         defer result.deinit(allocator);
         for (args[1..], 0..) |arg, i| {
             if (i > 0) try result.appendSlice(allocator, delim);
@@ -167,10 +151,10 @@ fn strJoin(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
         return 0;
     }
 
-    const input = try readAllStdin(allocator);
+    const input = try common.readAllStdin(allocator);
     defer allocator.free(input);
 
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
     var lines = std.mem.splitScalar(u8, input, '\n');
     var first = true;
@@ -321,7 +305,7 @@ fn strDistance(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
 /// Replace all occurrences of `needle` with `replacement` in `haystack`, returning a new allocation.
 fn replaceAlloc(allocator: std.mem.Allocator, haystack: []const u8, needle: []const u8, replacement: []const u8) ![]const u8 {
     if (needle.len == 0) return try allocator.dupe(u8, haystack);
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     errdefer result.deinit(allocator);
     var i: usize = 0;
     while (i <= haystack.len) {

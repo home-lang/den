@@ -2,11 +2,7 @@ const std = @import("std");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const builtin = @import("builtin");
-
-fn getenv(key: [*:0]const u8) ?[]const u8 {
-    const value = std.c.getenv(key) orelse return null;
-    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
-}
+const common = @import("common.zig");
 
 /// Standalone utility builtins that don't require shell state.
 /// These can operate with just an allocator.
@@ -386,7 +382,7 @@ pub fn clear(command: *types.ParsedCommand) !i32 {
 pub fn copyssh(command: *types.ParsedCommand) !i32 {
     _ = command;
 
-    const home = getenv("HOME") orelse {
+    const home = common.getenv("HOME") orelse {
         try IO.eprint("den: copyssh: HOME environment variable not set\n", .{});
         return 1;
     };
@@ -429,7 +425,7 @@ pub fn copyssh(command: *types.ParsedCommand) !i32 {
 /// whoami - print current username
 pub fn whoami(command: *types.ParsedCommand) !i32 {
     _ = command;
-    const user = getenv("USER") orelse getenv("USERNAME") orelse "unknown";
+    const user = common.getenv("USER") orelse common.getenv("USERNAME") orelse "unknown";
     try IO.print("{s}\n", .{user});
     return 0;
 }

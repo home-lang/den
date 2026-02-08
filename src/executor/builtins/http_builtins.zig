@@ -1,8 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
-const c = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
+const common = @import("common.zig");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 
@@ -203,7 +201,7 @@ pub fn httpCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
         _ = std.c.close(stderr_fds[1]);
 
         const c_argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(&c_argv_buf);
-        _ = c.execvp(c_argv_buf[0].?, c_argv_ptr);
+        _ = common.c_exec.execvp(c_argv_buf[0].?, c_argv_ptr);
         std.c._exit(127);
     }
 

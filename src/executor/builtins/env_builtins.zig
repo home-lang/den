@@ -2,11 +2,7 @@ const std = @import("std");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
-
-fn getenv(key: [*:0]const u8) ?[]const u8 {
-    const value = std.c.getenv(key) orelse return null;
-    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
-}
+const common = @import("common.zig");
 
 fn getenvFromSlice(key: []const u8) ?[]const u8 {
     var env_buf: [512]u8 = undefined;
@@ -397,9 +393,9 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 
     // Parse flags and VAR=value assignments
     var ignore_env = false;
-    var unset_vars = std.ArrayList([]const u8){};
+    var unset_vars: std.ArrayList([]const u8) = .empty;
     defer unset_vars.deinit(ctx.allocator);
-    var env_overrides = std.ArrayList(struct { key: []const u8, value: []const u8 }){};
+    var env_overrides: std.ArrayList(struct { key: []const u8, value: []const u8 }) = .empty;
     defer env_overrides.deinit(ctx.allocator);
 
     var cmd_start: ?usize = null;
@@ -545,7 +541,7 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     const start = cmd_start.?; // We know it's set if we got here
 
     // Reconstruct the full command string
-    var cmd_buf = std.ArrayList(u8){};
+    var cmd_buf: std.ArrayList(u8) = .empty;
     defer cmd_buf.deinit(ctx.allocator);
 
     for (command.args[start..]) |arg| {

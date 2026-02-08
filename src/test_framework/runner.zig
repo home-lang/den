@@ -68,7 +68,7 @@ pub const TestRunner = struct {
         const start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
 
         // Build test command
-        var cmd_args = std.ArrayList([]const u8){};
+        var cmd_args = std.ArrayList([]const u8).empty;
         defer cmd_args.deinit(self.allocator);
 
         try cmd_args.append(self.allocator, "zig");
@@ -94,7 +94,7 @@ pub const TestRunner = struct {
         };
 
         // Read stdout manually
-        var stdout_buf = std.ArrayList(u8){};
+        var stdout_buf = std.ArrayList(u8).empty;
         defer stdout_buf.deinit(self.allocator);
         if (child.stdout) |stdout_pipe| {
             var read_buf: [4096]u8 = undefined;
@@ -108,7 +108,7 @@ pub const TestRunner = struct {
         const stdout = stdout_buf.items;
 
         // Read stderr manually
-        var stderr_buf = std.ArrayList(u8){};
+        var stderr_buf = std.ArrayList(u8).empty;
         defer stderr_buf.deinit(self.allocator);
         if (child.stderr) |stderr_pipe| {
             var read_buf: [4096]u8 = undefined;

@@ -1,25 +1,9 @@
 const std = @import("std");
-const posix = std.posix;
 const types = @import("../../types/mod.zig");
 const Value = types.Value;
 const IO = @import("../../utils/io.zig").IO;
 const value_format = @import("../../types/value_format.zig");
-
-/// Read all stdin into a string
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-    return try result.toOwnedSlice(allocator);
-}
+const common = @import("common.zig");
 
 // ============================================================================
 // JSON: from json / to json
@@ -29,7 +13,7 @@ pub fn fromJson(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     const input = if (command.args.len > 0)
         try allocator.dupe(u8, command.args[0])
     else
-        try readAllStdin(allocator);
+        try common.readAllStdin(allocator);
     defer allocator.free(input);
 
     var val = jsonToValue(input, allocator) catch {
@@ -46,7 +30,7 @@ pub fn fromJson(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
 
 pub fn toJson(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
-    const input = try readAllStdin(allocator);
+    const input = try common.readAllStdin(allocator);
     defer allocator.free(input);
     // Pass through - stdin is already text, just format nicely
     try IO.print("{s}", .{input});
@@ -163,7 +147,7 @@ pub fn fromCsv(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
     const input = if (command.args.len > 0)
         try allocator.dupe(u8, command.args[0])
     else
-        try readAllStdin(allocator);
+        try common.readAllStdin(allocator);
     defer allocator.free(input);
 
     var val = csvToValue(input, allocator) catch {
@@ -180,7 +164,7 @@ pub fn fromCsv(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
 
 pub fn toCsv(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
-    const input = try readAllStdin(allocator);
+    const input = try common.readAllStdin(allocator);
     defer allocator.free(input);
     try IO.print("{s}", .{input});
     return 0;
@@ -191,7 +175,7 @@ fn csvToValue(input: []const u8, allocator: std.mem.Allocator) !Value {
 
     // Parse header
     const header_line = lines_iter.first();
-    var header_fields = std.ArrayList([]const u8){};
+    var header_fields = std.ArrayList([]const u8).empty;
     defer header_fields.deinit(allocator);
     try parseCsvLine(allocator, header_line, &header_fields);
 
@@ -203,12 +187,12 @@ fn csvToValue(input: []const u8, allocator: std.mem.Allocator) !Value {
     }
 
     // Parse data rows
-    var rows_list = std.ArrayList([]Value){};
+    var rows_list = std.ArrayList([]Value).empty;
     defer rows_list.deinit(allocator);
 
     while (lines_iter.next()) |line| {
         if (std.mem.trim(u8, line, &std.ascii.whitespace).len == 0) continue;
-        var fields = std.ArrayList([]const u8){};
+        var fields = std.ArrayList([]const u8).empty;
         defer fields.deinit(allocator);
         try parseCsvLine(allocator, line, &fields);
 
@@ -234,7 +218,7 @@ fn parseCsvLine(allocator: std.mem.Allocator, line: []const u8, fields: *std.Arr
         if (line[i] == '"') {
             // Quoted field
             i += 1;
-            var field = std.ArrayList(u8){};
+            var field = std.ArrayList(u8).empty;
             errdefer field.deinit(allocator);
             while (i < line.len) {
                 if (line[i] == '"') {
@@ -270,7 +254,7 @@ pub fn fromToml(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     const input = if (command.args.len > 0)
         try allocator.dupe(u8, command.args[0])
     else
-        try readAllStdin(allocator);
+        try common.readAllStdin(allocator);
     defer allocator.free(input);
 
     var val = tomlToValue(input, allocator) catch {
@@ -287,7 +271,7 @@ pub fn fromToml(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
 
 pub fn toToml(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
-    const input = try readAllStdin(allocator);
+    const input = try common.readAllStdin(allocator);
     defer allocator.free(input);
     try IO.print("{s}", .{input});
     return 0;
@@ -295,9 +279,9 @@ pub fn toToml(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
 
 fn tomlToValue(input: []const u8, allocator: std.mem.Allocator) !Value {
     // Simple TOML parser: key = value, [section], arrays, basic types
-    var keys = std.ArrayList([]const u8){};
+    var keys = std.ArrayList([]const u8).empty;
     defer keys.deinit(allocator);
-    var values = std.ArrayList(Value){};
+    var values = std.ArrayList(Value).empty;
     defer values.deinit(allocator);
 
     var current_section: ?[]const u8 = null;
@@ -348,7 +332,7 @@ fn parseTomlValue(raw: []const u8, allocator: std.mem.Allocator) !Value {
     // Array
     if (raw[0] == '[' and raw[raw.len - 1] == ']') {
         const inner = raw[1 .. raw.len - 1];
-        var items = std.ArrayList(Value){};
+        var items = std.ArrayList(Value).empty;
         defer items.deinit(allocator);
         var it = std.mem.splitScalar(u8, inner, ',');
         while (it.next()) |item| {
@@ -371,7 +355,7 @@ pub fn fromYaml(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     const input = if (command.args.len > 0)
         try allocator.dupe(u8, command.args[0])
     else
-        try readAllStdin(allocator);
+        try common.readAllStdin(allocator);
     defer allocator.free(input);
 
     var val = yamlToValue(input, allocator) catch {
@@ -388,7 +372,7 @@ pub fn fromYaml(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
 
 pub fn toYaml(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
-    const input = try readAllStdin(allocator);
+    const input = try common.readAllStdin(allocator);
     defer allocator.free(input);
     try IO.print("{s}", .{input});
     return 0;
@@ -396,14 +380,14 @@ pub fn toYaml(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
 
 fn yamlToValue(input: []const u8, allocator: std.mem.Allocator) !Value {
     // Simple YAML subset: key: value, - list items
-    var keys = std.ArrayList([]const u8){};
+    var keys = std.ArrayList([]const u8).empty;
     defer keys.deinit(allocator);
-    var values = std.ArrayList(Value){};
+    var values = std.ArrayList(Value).empty;
     defer values.deinit(allocator);
 
     var in_list = false;
     var list_key: ?[]const u8 = null;
-    var list_items = std.ArrayList(Value){};
+    var list_items = std.ArrayList(Value).empty;
     defer list_items.deinit(allocator);
 
     var lines_iter = std.mem.splitScalar(u8, input, '\n');
@@ -425,7 +409,7 @@ fn yamlToValue(input: []const u8, allocator: std.mem.Allocator) !Value {
         if (in_list and list_key != null) {
             try keys.append(allocator, list_key.?);
             try values.append(allocator, .{ .list = .{ .items = try list_items.toOwnedSlice(allocator) } });
-            list_items = std.ArrayList(Value){};
+            list_items = std.ArrayList(Value).empty;
             in_list = false;
             list_key = null;
         }
@@ -478,7 +462,7 @@ fn parseYamlScalar(raw: []const u8, allocator: std.mem.Allocator) !Value {
 
 pub fn tableCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
-    const input = try readAllStdin(allocator);
+    const input = try common.readAllStdin(allocator);
     defer allocator.free(input);
     // Try JSON first, then CSV
     if (jsonToValue(input, allocator)) |val_result| {
@@ -496,10 +480,10 @@ pub fn tableCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
 
 pub fn gridCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
-    const input = try readAllStdin(allocator);
+    const input = try common.readAllStdin(allocator);
     defer allocator.free(input);
     // Split input into lines as list items
-    var items = std.ArrayList(Value){};
+    var items = std.ArrayList(Value).empty;
     defer {
         for (items.items) |*item| item.deinit(allocator);
         items.deinit(allocator);

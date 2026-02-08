@@ -2,10 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-
-const c_exec = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
+const common = @import("common.zig");
 
 const c_kq = struct {
     extern "c" fn kqueue() c_int;
@@ -335,7 +332,7 @@ fn executeShellCommand(cmd_z: [*:0]const u8) i32 {
 
     if (pid == 0) {
         // Child process: exec /bin/sh -c "<command>"
-        _ = c_exec.execvp("/bin/sh", @ptrCast(&argv));
+        _ = common.c_exec.execvp("/bin/sh", @ptrCast(&argv));
         std.c._exit(127);
     }
 

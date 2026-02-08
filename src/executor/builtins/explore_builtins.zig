@@ -4,6 +4,7 @@ const posix = std.posix;
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BufferedStdoutWriter = @import("../../utils/io.zig").BufferedStdoutWriter;
+const common = @import("common.zig");
 
 /// Phase 4.2: Interactive TUI data explorer
 ///
@@ -88,6 +89,34 @@ const ExploreData = struct {
         };
     }
 
+    fn deinit(self: *ExploreData, allocator: std.mem.Allocator) void {
+        switch (self.kind) {
+            .json_array_of_objects => {
+                for (self.rows) |row| {
+                    for (row) |cell| {
+                        if (cell.text.len > 0) allocator.free(cell.text);
+                    }
+                    allocator.free(row);
+                }
+                if (self.rows.len > 0) allocator.free(self.rows);
+                if (self.col_widths.len > 0) allocator.free(self.col_widths);
+                for (self.columns) |col| allocator.free(col);
+                if (self.columns.len > 0) allocator.free(self.columns);
+            },
+            .json_object => {
+                for (self.keys) |k| allocator.free(k);
+                if (self.keys.len > 0) allocator.free(self.keys);
+                for (self.values) |v| {
+                    if (v.text.len > 0) allocator.free(v.text);
+                }
+                if (self.values.len > 0) allocator.free(self.values);
+            },
+            .json_other, .plain_text => {
+                for (self.lines) |line| allocator.free(line);
+                if (self.lines.len > 0) allocator.free(self.lines);
+            },
+        }
+    }
 };
 
 const CellKind = enum {
@@ -440,7 +469,7 @@ fn buildJsonLinesData(allocator: std.mem.Allocator, items: []const std.json.Valu
 
 fn makeTextData(allocator: std.mem.Allocator, raw: []const u8) !ExploreData {
     // Split raw text into lines
-    var line_list = std.ArrayList([]const u8){};
+    var line_list = std.ArrayList([]const u8).empty;
     defer line_list.deinit(allocator);
 
     var start: usize = 0;
@@ -965,26 +994,6 @@ fn writeRepeat(writer: *BufferedStdoutWriter, ch: u8, count: usize) !void {
 }
 
 // ---------------------------------------------------------------------------
-// Read all stdin
-// ---------------------------------------------------------------------------
-
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [8192]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-        if (result.items.len > MAX_STDIN_SIZE) break;
-    }
-    return try result.toOwnedSlice(allocator);
-}
-
-// ---------------------------------------------------------------------------
 // Raw terminal mode (self-contained, no external dependency)
 // ---------------------------------------------------------------------------
 
@@ -1076,7 +1085,7 @@ pub fn exploreCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     }
 
     // Read all stdin
-    const input = readAllStdin(allocator) catch |err| {
+    const input = common.readAllStdin(allocator) catch |err| {
         try IO.eprint("explore: failed to read stdin: {any}\n", .{err});
         return 1;
     };
@@ -1088,10 +1097,11 @@ pub fn exploreCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     }
 
     // Parse input data
-    const data = parseInputData(allocator, input) catch |err| {
+    var data = parseInputData(allocator, input) catch |err| {
         try IO.eprint("explore: failed to parse data: {any}\n", .{err});
         return 1;
     };
+    defer data.deinit(allocator);
 
     // Determine initial view mode
     const view = switch (data.kind) {

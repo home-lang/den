@@ -54,7 +54,7 @@ pub const Diagnostic = struct {
 
     /// Render the diagnostic to a colored string
     pub fn render(self: Diagnostic, allocator: std.mem.Allocator) ![]const u8 {
-        var buf = std.ArrayList(u8){};
+        var buf = std.ArrayList(u8).empty;
         errdefer buf.deinit(allocator);
         const reset = "\x1b[0m";
         const dim = "\x1b[2m";

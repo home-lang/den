@@ -3,22 +3,7 @@ const posix = std.posix;
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const value_mod = @import("../../types/value.zig");
-
-/// Read all stdin into a string
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-    return try result.toOwnedSlice(allocator);
-}
+const common = @import("common.zig");
 
 /// Main into subcommand dispatcher
 pub fn intoCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
@@ -32,7 +17,7 @@ pub fn intoCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
     const input = if (input_arg) |arg|
         try allocator.dupe(u8, arg)
     else blk: {
-        const raw = try readAllStdin(allocator);
+        const raw = try common.readAllStdin(allocator);
         const trimmed = std.mem.trimEnd(u8, raw, "\n");
         if (trimmed.len < raw.len) {
             const result = try allocator.dupe(u8, trimmed);

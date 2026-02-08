@@ -4,27 +4,12 @@ const types = @import("../../types/mod.zig");
 const Value = types.Value;
 const IO = @import("../../utils/io.zig").IO;
 const value_format = @import("../../types/value_format.zig");
-
-/// Read all stdin into a string
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-    return try result.toOwnedSlice(allocator);
-}
+const common = @import("common.zig");
 
 /// Detect columns from whitespace-aligned text output (like ps aux, df, etc.)
 pub fn detectColumns(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
-    const input = readAllStdin(allocator) catch return 1;
+    const input = common.readAllStdin(allocator) catch return 1;
     defer allocator.free(input);
 
     var lines = std.mem.splitScalar(u8, input, '\n');
@@ -34,9 +19,9 @@ pub fn detectColumns(allocator: std.mem.Allocator, command: *types.ParsedCommand
     if (header_line.len == 0) return 0;
 
     // Detect column boundaries from header
-    var col_starts = std.ArrayList(usize){};
+    var col_starts = std.ArrayList(usize).empty;
     defer col_starts.deinit(allocator);
-    var col_names = std.ArrayList([]const u8){};
+    var col_names = std.ArrayList([]const u8).empty;
     defer col_names.deinit(allocator);
 
     var in_word = false;
@@ -68,7 +53,7 @@ pub fn detectColumns(allocator: std.mem.Allocator, command: *types.ParsedCommand
     }
 
     // Parse data rows
-    var rows = std.ArrayList([]Value){};
+    var rows = std.ArrayList([]Value).empty;
     defer rows.deinit(allocator);
 
     while (lines.next()) |line| {

@@ -155,7 +155,7 @@ pub fn renderTable(
     }
 
     const bc = getBorderChars(config.border_style);
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     errdefer buf.deinit(allocator);
 
     // Top border

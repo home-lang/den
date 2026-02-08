@@ -2,22 +2,7 @@ const std = @import("std");
 const posix = std.posix;
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-
-/// Read all stdin into a string
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-    return try result.toOwnedSlice(allocator);
-}
+const common = @import("common.zig");
 
 /// Main encode subcommand dispatcher
 pub fn encodeCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
@@ -31,7 +16,7 @@ pub fn encodeCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
     const input = if (input_arg) |arg|
         try allocator.dupe(u8, arg)
     else
-        try readAllStdin(allocator);
+        try common.readAllStdin(allocator);
     defer allocator.free(input);
     const trimmed = std.mem.trimEnd(u8, input, "\n");
 
@@ -55,7 +40,7 @@ pub fn decodeCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
     const input = if (input_arg) |arg|
         try allocator.dupe(u8, arg)
     else
-        try readAllStdin(allocator);
+        try common.readAllStdin(allocator);
     defer allocator.free(input);
     const trimmed = std.mem.trimEnd(u8, input, "\n");
 
@@ -136,7 +121,7 @@ fn hexDigit(c: u8) ?u8 {
 }
 
 fn encodeUrl(allocator: std.mem.Allocator, input: []const u8) !i32 {
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
     for (input) |c| {
         if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c == '~') {
@@ -155,7 +140,7 @@ fn encodeUrl(allocator: std.mem.Allocator, input: []const u8) !i32 {
 }
 
 fn decodeUrl(allocator: std.mem.Allocator, input: []const u8) !i32 {
-    var result = std.ArrayList(u8){};
+    var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
     var i: usize = 0;
     while (i < input.len) {

@@ -4,11 +4,7 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const utils = @import("../../utils.zig");
-
-fn getenv(key: [*:0]const u8) ?[]const u8 {
-    const value = std.c.getenv(key) orelse return null;
-    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
-}
+const common = @import("common.zig");
 
 /// Command lookup and hash builtins: which, type, hash
 
@@ -300,7 +296,7 @@ pub fn hash(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     // hash command [command...] - add commands to hash table
-    const path_var = getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
+    const path_var = common.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
     var path_list = utils.env.PathList.parse(ctx.allocator, path_var) catch {
         return 1;
     };

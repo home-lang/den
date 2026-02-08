@@ -44,7 +44,7 @@ pub fn formatError(
     context: ?ErrorContext,
     use_color: bool,
 ) ![]const u8 {
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
 
     // Error header
     if (use_color) {
@@ -110,7 +110,7 @@ pub fn formatErrorChain(
     contexts: []const ?ErrorContext,
     use_color: bool,
 ) ![]const u8 {
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
 
     if (use_color) {
         const header = try std.fmt.allocPrint(allocator, "{s}{s}error chain:{s}\n", .{ Color.bold, Color.red, Color.reset });

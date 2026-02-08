@@ -118,7 +118,7 @@ pub const TimingStats = struct {
     pub fn init(allocator: std.mem.Allocator, name: []const u8) TimingStats {
         return .{
             .name = name,
-            .samples = std.ArrayList(u64){},
+            .samples = std.ArrayList(u64).empty,
             .allocator = allocator,
         };
     }

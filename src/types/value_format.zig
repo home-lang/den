@@ -44,7 +44,7 @@ fn formatGridMode(value: Value, allocator: std.mem.Allocator) ![]const u8 {
         .list => |l| {
             // Get terminal width (default 80)
             const term_width: usize = 80;
-            var items_strs = std.ArrayList([]const u8){};
+            var items_strs = std.ArrayList([]const u8).empty;
             defer {
                 for (items_strs.items) |s| allocator.free(s);
                 items_strs.deinit(allocator);
@@ -57,7 +57,7 @@ fn formatGridMode(value: Value, allocator: std.mem.Allocator) ![]const u8 {
             }
             const col_width = max_width + 2;
             const num_cols = @max(1, term_width / col_width);
-            var buf = std.ArrayList(u8){};
+            var buf = std.ArrayList(u8).empty;
             errdefer buf.deinit(allocator);
             for (items_strs.items, 0..) |s, i| {
                 try buf.appendSlice(allocator, s);
@@ -74,7 +74,7 @@ fn formatGridMode(value: Value, allocator: std.mem.Allocator) ![]const u8 {
 }
 
 fn formatList(items: []const Value, allocator: std.mem.Allocator) ![]const u8 {
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     errdefer buf.deinit(allocator);
     for (items, 0..) |item, i| {
         const s = try item.asString(allocator);
@@ -86,7 +86,7 @@ fn formatList(items: []const Value, allocator: std.mem.Allocator) ![]const u8 {
 }
 
 fn formatRecord(r: Value.Record, allocator: std.mem.Allocator) ![]const u8 {
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     errdefer buf.deinit(allocator);
 
     // Find max key length for alignment

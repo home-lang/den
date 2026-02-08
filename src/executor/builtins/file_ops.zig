@@ -1,11 +1,7 @@
 const std = @import("std");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-
-fn getenv(key: [*:0]const u8) ?[]const u8 {
-    const value = std.c.getenv(key) orelse return null;
-    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
-}
+const common = @import("common.zig");
 
 /// File operations builtins: tree, grep, find, ft, ls, json, calc
 /// Extracted from executor/mod.zig for better modularity
@@ -849,7 +845,7 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
             const nlink: u64 = if (maybe_st) |st| @intCast(st.nlink) else 1;
 
-            const username = getenv("USER") orelse "user";
+            const username = common.getenv("USER") orelse "user";
             const groupname = "staff";
 
             const size_str = if (human_readable) blk: {

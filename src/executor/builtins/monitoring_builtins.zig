@@ -2,22 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
-const c_exec = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
+const common = @import("common.zig");
 
 /// Monitoring builtins: sys-stats, netstats, net-check, log-tail, proc-monitor, log-parse
-
-// Get environ from C - returns the current environment pointer
-fn getCEnviron() [*:null]const ?[*:0]const u8 {
-    if (builtin.os.tag == .macos) {
-        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
-        return @ptrCast(NSGetEnviron().*);
-    } else {
-        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
-        return @ptrCast(c_environ.*);
-    }
-}
 
 pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = allocator;
@@ -321,7 +308,7 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
             const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
             _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
             _ = std.c.dup2(dev_null.handle, std.posix.STDOUT_FILENO);
-            _ = c_exec.execvp("nc", @ptrCast(&argv));
+            _ = common.c_exec.execvp("nc", @ptrCast(&argv));
             std.c._exit(127);
         } else {
             var wait_status: c_int = 0;
@@ -365,7 +352,7 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
             const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
             _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
             _ = std.c.dup2(dev_null.handle, std.posix.STDOUT_FILENO);
-            _ = c_exec.execvp("ping", @ptrCast(&argv));
+            _ = common.c_exec.execvp("ping", @ptrCast(&argv));
             std.c._exit(127);
         } else {
             var wait_status2: c_int = 0;
@@ -675,7 +662,7 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
             std.posix.close(pipe_fds[1]);
             const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
             _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
-            _ = c_exec.execvp("ps", @ptrCast(&ps_args));
+            _ = common.c_exec.execvp("ps", @ptrCast(&ps_args));
             std.c._exit(127);
         } else {
             std.posix.close(pipe_fds[1]);

@@ -1,29 +1,13 @@
 const std = @import("std");
-const posix = std.posix;
 const types = @import("../../types/mod.zig");
 const Value = types.Value;
 const IO = @import("../../utils/io.zig").IO;
 const value_format = @import("../../types/value_format.zig");
-
-/// Read all stdin into a string
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-    return try result.toOwnedSlice(allocator);
-}
+const common = @import("common.zig");
 
 /// Read stdin and try to parse as structured data (JSON), or split into lines
 fn readStdinAsValue(allocator: std.mem.Allocator) !Value {
-    const input = readAllStdin(allocator) catch return .nothing;
+    const input = common.readAllStdin(allocator) catch return .nothing;
     defer allocator.free(input);
     const trimmed = std.mem.trim(u8, input, &std.ascii.whitespace);
     if (trimmed.len == 0) return .nothing;
@@ -35,7 +19,7 @@ fn readStdinAsValue(allocator: std.mem.Allocator) !Value {
     } else |_| {}
 
     // Fallback: split by newlines into a list of strings
-    var items = std.ArrayList(Value){};
+    var items = std.ArrayList(Value).empty;
     errdefer {
         for (items.items) |*item| item.deinit(allocator);
         items.deinit(allocator);
@@ -108,9 +92,9 @@ pub fn selectCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
     defer val.deinit(allocator);
 
     if (val == .table) {
-        var new_cols = std.ArrayList([]const u8){};
+        var new_cols = std.ArrayList([]const u8).empty;
         defer new_cols.deinit(allocator);
-        var col_indices = std.ArrayList(usize){};
+        var col_indices = std.ArrayList(usize).empty;
         defer col_indices.deinit(allocator);
 
         for (command.args) |wanted| {
@@ -123,7 +107,7 @@ pub fn selectCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
             }
         }
 
-        var new_rows = std.ArrayList([]Value){};
+        var new_rows = std.ArrayList([]Value).empty;
         defer new_rows.deinit(allocator);
         for (val.table.rows) |row| {
             const new_row = try allocator.alloc(Value, col_indices.items.len);
@@ -290,7 +274,7 @@ pub fn flattenCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     defer val.deinit(allocator);
 
     if (val == .list) {
-        var flat = std.ArrayList(Value){};
+        var flat = std.ArrayList(Value).empty;
         defer flat.deinit(allocator);
         for (val.list.items) |item| {
             if (item == .list) {
@@ -317,8 +301,12 @@ pub fn uniqCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
 
     if (val == .list) {
         var seen = std.StringHashMap(void).init(allocator);
-        defer seen.deinit();
-        var result = std.ArrayList(Value){};
+        defer {
+            var kit = seen.keyIterator();
+            while (kit.next()) |key| allocator.free(key.*);
+            seen.deinit();
+        }
+        var result = std.ArrayList(Value).empty;
         defer result.deinit(allocator);
         for (val.list.items) |item| {
             const s = try item.asString(allocator);
@@ -407,7 +395,7 @@ pub fn enumerateCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand)
     defer val.deinit(allocator);
 
     if (val == .list) {
-        var result = std.ArrayList(Value){};
+        var result = std.ArrayList(Value).empty;
         defer result.deinit(allocator);
         for (val.list.items, 0..) |item, i| {
             const keys = try allocator.alloc([]const u8, 2);
@@ -484,7 +472,7 @@ pub fn compactCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     defer val.deinit(allocator);
 
     if (val == .list) {
-        var result = std.ArrayList(Value){};
+        var result = std.ArrayList(Value).empty;
         defer result.deinit(allocator);
         for (val.list.items) |item| {
             if (item != .nothing) {
@@ -514,7 +502,7 @@ pub fn whereCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     const expected = command.args[2];
 
     if (val == .list) {
-        var result = std.ArrayList(Value){};
+        var result = std.ArrayList(Value).empty;
         defer result.deinit(allocator);
         for (val.list.items) |item| {
             if (item == .record) {
@@ -549,7 +537,7 @@ pub fn whereCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
             try IO.eprint("Column not found: {s}\n", .{field});
             return 1;
         }
-        var new_rows = std.ArrayList([]Value){};
+        var new_rows = std.ArrayList([]Value).empty;
         defer new_rows.deinit(allocator);
         for (val.table.rows) |row| {
             if (col_idx.? < row.len) {
@@ -614,7 +602,7 @@ pub fn findCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
     const pattern = command.args[0];
 
     if (val == .list) {
-        var result = std.ArrayList(Value){};
+        var result = std.ArrayList(Value).empty;
         defer result.deinit(allocator);
         for (val.list.items) |item| {
             const s = try item.asString(allocator);
@@ -639,9 +627,9 @@ pub fn rejectCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
     defer val.deinit(allocator);
 
     if (val == .table) {
-        var keep_indices = std.ArrayList(usize){};
+        var keep_indices = std.ArrayList(usize).empty;
         defer keep_indices.deinit(allocator);
-        var new_cols = std.ArrayList([]const u8){};
+        var new_cols = std.ArrayList([]const u8).empty;
         defer new_cols.deinit(allocator);
 
         for (val.table.columns, 0..) |col, ci| {
@@ -658,7 +646,7 @@ pub fn rejectCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
             }
         }
 
-        var new_rows = std.ArrayList([]Value){};
+        var new_rows = std.ArrayList([]Value).empty;
         defer new_rows.deinit(allocator);
         for (val.table.rows) |row| {
             const new_row = try allocator.alloc(Value, keep_indices.items.len);
@@ -732,6 +720,7 @@ pub fn groupByCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
         defer {
             var it = groups.iterator();
             while (it.next()) |entry| {
+                if (entry.key_ptr.*.len > 0) allocator.free(entry.key_ptr.*);
                 entry.value_ptr.deinit(allocator);
             }
             groups.deinit();
@@ -739,23 +728,27 @@ pub fn groupByCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
 
         for (val.list.items) |item| {
             var key: []const u8 = "";
+            var key_allocated = false;
             if (item == .record) {
                 if (item.record.get(group_col)) |fv| {
-                    const s = try fv.asString(allocator);
-                    key = s;
+                    key = try fv.asString(allocator);
+                    key_allocated = true;
                 }
             }
             const gop = try groups.getOrPut(key);
             if (!gop.found_existing) {
-                gop.value_ptr.* = std.ArrayList(Value){};
+                gop.value_ptr.* = std.ArrayList(Value).empty;
+            } else if (key_allocated) {
+                // Key already exists in map; free the duplicate
+                allocator.free(key);
             }
             try gop.value_ptr.append(allocator, try item.clone(allocator));
         }
 
         // Build result record
-        var keys = std.ArrayList([]const u8){};
+        var keys = std.ArrayList([]const u8).empty;
         defer keys.deinit(allocator);
-        var values_list = std.ArrayList(Value){};
+        var values_list = std.ArrayList(Value).empty;
         defer values_list.deinit(allocator);
         var it = groups.iterator();
         while (it.next()) |entry| {
@@ -782,7 +775,7 @@ pub fn appendCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
     defer val.deinit(allocator);
 
     if (val == .list) {
-        var items = std.ArrayList(Value){};
+        var items = std.ArrayList(Value).empty;
         defer items.deinit(allocator);
         for (val.list.items) |item| {
             try items.append(allocator, try item.clone(allocator));
@@ -808,7 +801,7 @@ pub fn prependCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     defer val.deinit(allocator);
 
     if (val == .list) {
-        var items = std.ArrayList(Value){};
+        var items = std.ArrayList(Value).empty;
         defer items.deinit(allocator);
         for (command.args) |arg| {
             try items.append(allocator, .{ .string = try allocator.dupe(u8, arg) });
@@ -860,10 +853,6 @@ pub fn generateCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
     }
     const expr_template = expr_buf[0..expr_len];
 
-    const c_exec_gen = struct {
-        extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-    };
-
     var prev_buf: [256]u8 = undefined;
     @memcpy(prev_buf[0..initial.len], initial);
     var prev_len: usize = initial.len;
@@ -912,7 +901,7 @@ pub fn generateCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
             _ = std.c.dup2(pipe_fds[1], 1);
             std.posix.close(@intCast(pipe_fds[1]));
             const argv_gen = [_]?[*:0]const u8{ "/bin/sh", "-c", &cmd_z, null };
-            _ = c_exec_gen.execvp("/bin/sh", @ptrCast(&argv_gen));
+            _ = common.c_exec.execvp("/bin/sh", @ptrCast(&argv_gen));
             std.c._exit(127);
         }
         std.posix.close(@intCast(pipe_fds[1]));
@@ -945,14 +934,14 @@ pub fn parEachCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
         return 1;
     }
 
-    const input = readAllStdin(allocator) catch |err| {
+    const input = common.readAllStdin(allocator) catch |err| {
         try IO.eprint("par-each: failed to read stdin: {}\n", .{err});
         return 1;
     };
     defer allocator.free(input);
 
     // Collect lines
-    var lines = std.ArrayList([]const u8){};
+    var lines = std.ArrayList([]const u8).empty;
     defer lines.deinit(allocator);
     var line_iter = std.mem.splitScalar(u8, input, '\n');
     while (line_iter.next()) |line| {
@@ -974,10 +963,6 @@ pub fn parEachCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
         cmd_len += arg.len;
     }
     const cmd_template = cmd_buf[0..cmd_len];
-
-    const c_exec_par = struct {
-        extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-    };
 
     const max_parallel: usize = @min(lines.items.len, 16);
     var active: usize = 0;
@@ -1026,7 +1011,7 @@ pub fn parEachCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
         if (fork_ret < 0) continue;
         if (fork_ret == 0) {
             const argv_par = [_]?[*:0]const u8{ "/bin/sh", "-c", &cmd_z, null };
-            _ = c_exec_par.execvp("/bin/sh", @ptrCast(&argv_par));
+            _ = common.c_exec.execvp("/bin/sh", @ptrCast(&argv_par));
             std.c._exit(127);
         }
         active += 1;

@@ -2,14 +2,10 @@ const std = @import("std");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
-
-fn getenv(key: [*:0]const u8) ?[]const u8 {
-    const value = std.c.getenv(key) orelse return null;
-    return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
-}
+const common = @import("common.zig");
 
 fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
-    const value = getenv(key) orelse return null;
+    const value = common.getenv(key) orelse return null;
     return allocator.dupe(u8, value) catch null;
 }
 

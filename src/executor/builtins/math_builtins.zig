@@ -1,31 +1,15 @@
 const std = @import("std");
-const posix = std.posix;
+const common = @import("common.zig");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 
-/// Read all stdin into a string
-fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8){};
-    errdefer result.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-    return try result.toOwnedSlice(allocator);
-}
-
 /// Read stdin as list of numbers
 fn readStdinNumbers(allocator: std.mem.Allocator) ![]f64 {
-    const input = readAllStdin(allocator) catch
+    const input = common.readAllStdin(allocator) catch
         return try allocator.alloc(f64, 0);
     defer allocator.free(input);
 
-    var nums = std.ArrayList(f64){};
+    var nums = std.ArrayList(f64).empty;
     errdefer nums.deinit(allocator);
     var lines = std.mem.splitScalar(u8, input, '\n');
     while (lines.next()) |line| {
@@ -45,7 +29,7 @@ fn readStdinNumbers(allocator: std.mem.Allocator) ![]f64 {
 /// Parse numbers from command-line args, or fall back to reading stdin
 fn getNumbers(allocator: std.mem.Allocator, args: []const []const u8) ![]f64 {
     if (args.len > 0) {
-        var nums = std.ArrayList(f64){};
+        var nums = std.ArrayList(f64).empty;
         errdefer nums.deinit(allocator);
         for (args) |arg| {
             if (std.fmt.parseFloat(f64, arg)) |n| {
@@ -96,7 +80,7 @@ fn mathSum(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
     defer allocator.free(nums);
     var sum: f64 = 0;
     for (nums) |n| sum += n;
-    try printNumber(sum);
+    try common.printNumber(sum);
     return 0;
 }
 
@@ -109,7 +93,7 @@ fn mathAvg(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
     }
     var sum: f64 = 0;
     for (nums) |n| sum += n;
-    try printNumber(sum / @as(f64, @floatFromInt(nums.len)));
+    try common.printNumber(sum / @as(f64, @floatFromInt(nums.len)));
     return 0;
 }
 
@@ -121,7 +105,7 @@ fn mathMin(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
     for (nums[1..]) |n| if (n < min_val) {
         min_val = n;
     };
-    try printNumber(min_val);
+    try common.printNumber(min_val);
     return 0;
 }
 
@@ -133,7 +117,7 @@ fn mathMax(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
     for (nums[1..]) |n| if (n > max_val) {
         max_val = n;
     };
-    try printNumber(max_val);
+    try common.printNumber(max_val);
     return 0;
 }
 
@@ -146,7 +130,7 @@ fn mathProduct(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
     }
     var prod: f64 = 1;
     for (nums) |n| prod *= n;
-    try printNumber(prod);
+    try common.printNumber(prod);
     return 0;
 }
 
@@ -159,7 +143,7 @@ fn mathMedian(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
         (nums[nums.len / 2 - 1] + nums[nums.len / 2]) / 2.0
     else
         nums[nums.len / 2];
-    try printNumber(median);
+    try common.printNumber(median);
     return 0;
 }
 
@@ -206,7 +190,7 @@ fn mathStddev(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
     defer allocator.free(nums);
     if (nums.len == 0) return 0;
     const v = variance(nums);
-    try printNumber(@sqrt(v));
+    try common.printNumber(@sqrt(v));
     return 0;
 }
 
@@ -214,7 +198,7 @@ fn mathVariance(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
     const nums = try getNumbers(allocator, args);
     defer allocator.free(nums);
     if (nums.len == 0) return 0;
-    try printNumber(variance(nums));
+    try common.printNumber(variance(nums));
     return 0;
 }
 
@@ -240,7 +224,7 @@ fn mathAbs(args: []const []const u8) !i32 {
         try IO.eprint("Invalid number: {s}\n", .{args[0]});
         return 1;
     };
-    try printNumber(@abs(n));
+    try common.printNumber(@abs(n));
     return 0;
 }
 
@@ -253,7 +237,7 @@ fn mathCeil(args: []const []const u8) !i32 {
         try IO.eprint("Invalid number: {s}\n", .{args[0]});
         return 1;
     };
-    try printNumber(@ceil(n));
+    try common.printNumber(@ceil(n));
     return 0;
 }
 
@@ -266,7 +250,7 @@ fn mathFloor(args: []const []const u8) !i32 {
         try IO.eprint("Invalid number: {s}\n", .{args[0]});
         return 1;
     };
-    try printNumber(@floor(n));
+    try common.printNumber(@floor(n));
     return 0;
 }
 
@@ -279,7 +263,7 @@ fn mathRound(args: []const []const u8) !i32 {
         try IO.eprint("Invalid number: {s}\n", .{args[0]});
         return 1;
     };
-    try printNumber(@round(n));
+    try common.printNumber(@round(n));
     return 0;
 }
 
@@ -296,7 +280,7 @@ fn mathSqrt(args: []const []const u8) !i32 {
         try IO.eprint("Error: cannot take square root of negative number\n", .{});
         return 1;
     }
-    try printNumber(@sqrt(n));
+    try common.printNumber(@sqrt(n));
     return 0;
 }
 
@@ -315,18 +299,10 @@ fn mathLog(args: []const []const u8) !i32 {
     }
     if (args.len > 1) {
         const base = std.fmt.parseFloat(f64, args[1]) catch 10.0;
-        try printNumber(@log(n) / @log(base));
+        try common.printNumber(@log(n) / @log(base));
     } else {
-        try printNumber(@log(n));
+        try common.printNumber(@log(n));
     }
     return 0;
 }
 
-fn printNumber(n: f64) !void {
-    // Print as integer if it's a whole number
-    if (n == @floor(n) and @abs(n) < 1e15) {
-        try IO.print("{d}\n", .{@as(i64, @intFromFloat(n))});
-    } else {
-        try IO.print("{d}\n", .{n});
-    }
-}
