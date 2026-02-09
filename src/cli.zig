@@ -632,21 +632,9 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
         const control_flow = @import("scripting/control_flow.zig");
         const functions = @import("scripting/functions.zig");
 
-        // Preprocess heredocs before splitting into lines
-        // This converts heredocs to herestrings so they become single-line
-        var effective_cmd: []const u8 = command;
-        var heredoc_buf: ?[]const u8 = null;
-        defer if (heredoc_buf) |hb| allocator.free(hb);
-        if (std.mem.indexOf(u8, command, "<<") != null) {
-            if (den_shell.preprocessHeredoc(command)) |rewritten| {
-                heredoc_buf = rewritten;
-                effective_cmd = rewritten;
-            }
-        }
-
         var lines_buffer: [10000][]const u8 = undefined;
         var lines_count: usize = 0;
-        var line_iter = std.mem.splitScalar(u8, effective_cmd, '\n');
+        var line_iter = std.mem.splitScalar(u8, command, '\n');
         while (line_iter.next()) |line| {
             if (lines_count >= lines_buffer.len) break;
             lines_buffer[lines_count] = line;
@@ -677,6 +665,11 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
             }
             if (is_func_kw or is_paren_syntax) {
                 const result = func_parser.parseFunction(lines, line_num) catch break;
+                defer {
+                    allocator.free(result.name);
+                    for (result.body) |line| allocator.free(line);
+                    allocator.free(result.body);
+                }
                 den_shell.function_manager.defineFunction(result.name, result.body, false) catch break;
                 line_num = result.end;
                 continue;
@@ -717,6 +710,89 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
                 den_shell.last_exit_code = executor.executeCase(&result.stmt) catch 1;
                 line_num = result.end;
                 continue;
+            }
+
+            // Heredoc: accumulate body lines and pass entire block to shell
+            if (std.mem.indexOf(u8, trimmed, "<<") != null and
+                std.mem.indexOf(u8, trimmed, "<<<") == null)
+            {
+                // Find the delimiter after <<
+                var hd_search: usize = 0;
+                const hd_pos = blk: {
+                    while (hd_search < trimmed.len) {
+                        const p = std.mem.indexOf(u8, trimmed[hd_search..], "<<") orelse break;
+                        const ap = hd_search + p;
+                        if (ap + 2 < trimmed.len and trimmed[ap + 2] == '<') {
+                            hd_search = ap + 3;
+                            continue;
+                        }
+                        break :blk ap;
+                    }
+                    break :blk @as(?usize, null);
+                };
+
+                if (hd_pos) |hp| {
+                    var after = hp + 2;
+                    if (after < trimmed.len and trimmed[after] == '-') after += 1;
+                    while (after < trimmed.len and (trimmed[after] == ' ' or trimmed[after] == '\t')) after += 1;
+
+                    // Extract delimiter (handle quotes)
+                    var ds = after;
+                    var de = after;
+                    if (ds < trimmed.len and (trimmed[ds] == '\'' or trimmed[ds] == '"')) {
+                        const q = trimmed[ds];
+                        ds += 1;
+                        de = ds;
+                        while (de < trimmed.len and trimmed[de] != q) de += 1;
+                    } else {
+                        while (de < trimmed.len and trimmed[de] != ' ' and trimmed[de] != '\t') de += 1;
+                    }
+                    const delimiter = trimmed[ds..de];
+
+                    if (delimiter.len > 0) {
+                        // Accumulate lines until we find the delimiter
+                        var heredoc_lines_buf: [4096]u8 = undefined;
+                        var heredoc_len: usize = 0;
+
+                        // Start with the command line itself
+                        if (trimmed.len <= heredoc_lines_buf.len) {
+                            @memcpy(heredoc_lines_buf[0..trimmed.len], trimmed);
+                            heredoc_len = trimmed.len;
+                        }
+
+                        // Collect body lines
+                        while (line_num + 1 < lines.len) {
+                            line_num += 1;
+                            const body_line = lines[line_num];
+                            const body_trimmed = std.mem.trim(u8, body_line, &std.ascii.whitespace);
+
+                            // Add newline + line
+                            if (heredoc_len + 1 + body_line.len <= heredoc_lines_buf.len) {
+                                heredoc_lines_buf[heredoc_len] = '\n';
+                                heredoc_len += 1;
+                                @memcpy(heredoc_lines_buf[heredoc_len .. heredoc_len + body_line.len], body_line);
+                                heredoc_len += body_line.len;
+                            }
+
+                            if (std.mem.eql(u8, body_trimmed, delimiter)) break;
+                        }
+
+                        // Pass the full heredoc block (command + body + delimiter) to the shell
+                        const full_heredoc = heredoc_lines_buf[0..heredoc_len];
+                        if (den_shell.preprocessHeredoc(full_heredoc)) |rewritten| {
+                            if (rewritten.len > 0) {
+                                // Rewritten as herestring — execute it
+                                den_shell.executeCommand(rewritten) catch {};
+                                allocator.free(rewritten);
+                            }
+                            // else: empty string means preprocessHeredoc already executed via pipe
+                        } else {
+                            den_shell.executeCommand(trimmed) catch {};
+                        }
+                        if (den_shell.option_errexit and den_shell.last_exit_code != 0) break;
+                        continue;
+                    }
+                }
             }
 
             // Regular command

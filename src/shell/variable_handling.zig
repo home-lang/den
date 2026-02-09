@@ -389,15 +389,13 @@ pub fn executeAssocArrayAssignment(self: *Shell, input: []const u8) !void {
                     while (i < content.len and content[i] != ' ' and content[i] != '\t') i += 1;
                     val_end = i;
                 }
-                const dup_key = try self.allocator.dupe(u8, akey);
-                const dup_val = try self.allocator.dupe(u8, content[val_start..val_end]);
-                const inner_gop = try gop.value_ptr.getOrPut(dup_key);
+                const inner_gop = try gop.value_ptr.getOrPut(akey);
                 if (inner_gop.found_existing) {
-                    self.allocator.free(inner_gop.key_ptr.*);
                     self.allocator.free(inner_gop.value_ptr.*);
+                } else {
+                    inner_gop.key_ptr.* = try self.allocator.dupe(u8, akey);
                 }
-                inner_gop.key_ptr.* = dup_key;
-                inner_gop.value_ptr.* = dup_val;
+                inner_gop.value_ptr.* = try self.allocator.dupe(u8, content[val_start..val_end]);
             }
         } else {
             while (i < content.len and content[i] != ' ' and content[i] != '\t') i += 1;
@@ -447,14 +445,12 @@ pub fn executeAssocArrayElementAssignment(self: *Shell, input: []const u8) !void
         gop.value_ptr.* = std.StringHashMap([]const u8).init(self.allocator);
     }
 
-    const dup_key = try self.allocator.dupe(u8, key);
-    const dup_val = try self.allocator.dupe(u8, raw_value);
-    const inner_gop = try gop.value_ptr.getOrPut(dup_key);
+    const inner_gop = try gop.value_ptr.getOrPut(key);
     if (inner_gop.found_existing) {
-        self.allocator.free(inner_gop.key_ptr.*);
         self.allocator.free(inner_gop.value_ptr.*);
+    } else {
+        inner_gop.key_ptr.* = try self.allocator.dupe(u8, key);
     }
-    inner_gop.key_ptr.* = dup_key;
-    inner_gop.value_ptr.* = dup_val;
+    inner_gop.value_ptr.* = try self.allocator.dupe(u8, raw_value);
     self.last_exit_code = 0;
 }

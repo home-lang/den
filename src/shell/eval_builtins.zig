@@ -118,6 +118,7 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
             self.allocator.free(buf);
             break :blk @as(?[]u8, null);
         }
+        defer self.allocator.free(buf);
         break :blk @as(?[]u8, try self.allocator.dupe(u8, buf[0..count]));
     } else if (delimiter) |d| blk: {
         // Read until delimiter character

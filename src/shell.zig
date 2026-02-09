@@ -506,6 +506,26 @@ pub const Shell = struct {
         }
         self.arrays.deinit();
 
+        // Clean up associative arrays
+        var assoc_iter = self.assoc_arrays.iterator();
+        while (assoc_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            var inner_iter = entry.value_ptr.iterator();
+            while (inner_iter.next()) |inner_entry| {
+                self.allocator.free(inner_entry.key_ptr.*);
+                self.allocator.free(inner_entry.value_ptr.*);
+            }
+            entry.value_ptr.deinit();
+        }
+        self.assoc_arrays.deinit();
+
+        // Clean up variable attributes
+        var attr_iter = self.var_attributes.iterator();
+        while (attr_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
+        self.var_attributes.deinit();
+
         // Clean up completion registry
         self.completion_registry.deinit();
 
@@ -1322,6 +1342,7 @@ pub const Shell = struct {
                                     self.last_exit_code = 0;
                                     return;
                                 };
+                                defer self.allocator.free(combined);
                                 @memcpy(combined[0..existing.len], existing);
                                 @memcpy(combined[existing.len..], stripped);
                                 shell_mod.setArithVariable(self, potential_var, combined);

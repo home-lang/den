@@ -356,6 +356,11 @@ pub const ScriptManager = struct {
                     shell.executeErrTrap();
                     break;
                 };
+                defer {
+                    shell.allocator.free(result.name);
+                    for (result.body) |line| shell.allocator.free(line);
+                    shell.allocator.free(result.body);
+                }
                 // Define the function
                 shell.function_manager.defineFunction(result.name, result.body, false) catch {
                     shell.last_exit_code = 1;

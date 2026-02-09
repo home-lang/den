@@ -115,11 +115,13 @@ pub const FunctionManager = struct {
     }
 
     pub fn deinit(self: *FunctionManager) void {
-        // Free all functions
+        // Free all functions and their keys
         var iter = self.functions.iterator();
         while (iter.next()) |entry| {
+            const key = entry.key_ptr.*;
             var func = entry.value_ptr;
             func.deinit();
+            self.allocator.free(key);
         }
         self.functions.deinit();
 
@@ -132,14 +134,6 @@ pub const FunctionManager = struct {
 
     /// Define a new function
     pub fn defineFunction(self: *FunctionManager, name: []const u8, body: [][]const u8, is_exported: bool) !void {
-        // Check if function already exists
-        if (self.functions.get(name)) |existing| {
-            // Remove old function
-            var func = existing;
-            func.deinit();
-            _ = self.functions.remove(name);
-        }
-
         // Create new function
         const func = Function{
             .name = try self.allocator.dupe(u8, name),
@@ -148,9 +142,17 @@ pub const FunctionManager = struct {
             .allocator = self.allocator,
         };
 
-        // Store function
-        const key = try self.allocator.dupe(u8, name);
-        try self.functions.put(key, func);
+        // Store function, freeing old one if it exists
+        const gop = try self.functions.getOrPut(name);
+        if (gop.found_existing) {
+            // Free old function (including its name and body)
+            gop.value_ptr.deinit();
+            // Key already exists in map, no need to dupe
+        } else {
+            // New entry, need to own the key
+            gop.key_ptr.* = try self.allocator.dupe(u8, name);
+        }
+        gop.value_ptr.* = func;
     }
 
     /// Get a function by name
@@ -352,14 +354,13 @@ pub const FunctionManager = struct {
     pub fn setLocal(self: *FunctionManager, name: []const u8, value: []const u8) !void {
         const frame = self.currentFrame() orelse return error.NotInFunction;
 
-        // Remove old value if exists
-        if (frame.local_vars.get(name)) |old_value| {
-            self.allocator.free(old_value);
+        const gop = try frame.local_vars.getOrPut(name);
+        if (gop.found_existing) {
+            self.allocator.free(gop.value_ptr.*);
+        } else {
+            gop.key_ptr.* = try self.allocator.dupe(u8, name);
         }
-
-        const key = try self.allocator.dupe(u8, name);
-        const val = try self.allocator.dupe(u8, value);
-        try frame.local_vars.put(key, val);
+        gop.value_ptr.* = try self.allocator.dupe(u8, value);
     }
 
     /// Get a local variable from the current function

@@ -287,15 +287,13 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
             if (assoc_key) |key| {
                 if (var_value) |value| {
-                    const dup_key = try shell.allocator.dupe(u8, key);
-                    const dup_value = try shell.allocator.dupe(u8, value);
-                    const inner_gop = try gop.value_ptr.getOrPut(dup_key);
+                    const inner_gop = try gop.value_ptr.getOrPut(key);
                     if (inner_gop.found_existing) {
-                        shell.allocator.free(inner_gop.key_ptr.*);
                         shell.allocator.free(inner_gop.value_ptr.*);
+                    } else {
+                        inner_gop.key_ptr.* = try shell.allocator.dupe(u8, key);
                     }
-                    inner_gop.key_ptr.* = dup_key;
-                    inner_gop.value_ptr.* = dup_value;
+                    inner_gop.value_ptr.* = try shell.allocator.dupe(u8, value);
                 }
             }
 
