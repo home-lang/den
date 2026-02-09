@@ -41,19 +41,24 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     const cmd_name = cmd.args[0];
 
     // Find the executable in PATH
-    const path_var = common.getenv("PATH") orelse "/usr/local/bin:/usr/bin:/bin";
-    var path_iter = std.mem.splitScalar(u8, path_var, ':');
+    const default_exec_path = if (comptime builtin.os.tag == .windows) "/Windows/System32" else "/usr/local/bin:/usr/bin:/bin";
+    const path_var = common.getenv("PATH") orelse default_exec_path;
+    const path_sep = if (comptime builtin.os.tag == .windows) ';' else ':';
+    var path_iter = std.mem.splitScalar(u8, path_var, path_sep);
 
     var exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     var exe_path: ?[]const u8 = null;
 
     // Check if cmd contains a slash (is a path)
-    if (std.mem.indexOf(u8, cmd_name, "/") != null) {
+    const path_sep_str = if (comptime builtin.os.tag == .windows) "\\" else "/";
+    const has_path_sep = std.mem.indexOf(u8, cmd_name, "/") != null or
+        if (comptime builtin.os.tag == .windows) std.mem.indexOf(u8, cmd_name, "\\") != null else false;
+    if (has_path_sep) {
         exe_path = cmd_name;
     } else {
         // Search in PATH
         while (path_iter.next()) |dir| {
-            const full_path = std.fmt.bufPrint(&exe_path_buf, "{s}/{s}", .{ dir, cmd_name }) catch continue;
+            const full_path = std.fmt.bufPrint(&exe_path_buf, "{s}" ++ path_sep_str ++ "{s}", .{ dir, cmd_name }) catch continue;
             std.Io.Dir.accessAbsolute(std.Options.debug_io,full_path, .{}) catch continue;
             exe_path = full_path;
             break;
@@ -118,11 +123,30 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     defer ctx.allocator.free(exe_path_z);
 
     // Replace the current process with the new program
-    _ = std.c.execve(exe_path_z.ptr, @ptrCast(argv.ptr), @ptrCast(envp.ptr));
+    if (comptime builtin.os.tag == .windows) {
+        // On Windows, we can't replace the process. Spawn and exit instead.
+        const spawn = @import("../../utils/spawn.zig");
+        // Build argv with exe_path as first element followed by remaining args
+        var win_argv_buf: [128][]const u8 = undefined;
+        win_argv_buf[0] = exe_path.?;
+        const remaining = if (cmd.args.len > 1) cmd.args[1..] else &[_][]const u8{};
+        for (remaining, 0..) |arg, idx| {
+            if (idx + 1 >= win_argv_buf.len) break;
+            win_argv_buf[idx + 1] = arg;
+        }
+        const win_argv_len = @min(1 + remaining.len, win_argv_buf.len);
+        const exit_code = spawn.spawnAndWait(ctx.allocator, .{ .argv = win_argv_buf[0..win_argv_len] }) catch {
+            try IO.eprint("den: exec: failed to execute\n", .{});
+            return 1;
+        };
+        return exit_code;
+    } else {
+        _ = std.c.execve(exe_path_z.ptr, @ptrCast(argv.ptr), @ptrCast(envp.ptr));
 
-    // If execve returns, it failed
-    try IO.eprint("den: exec: execve failed\n", .{});
-    return 126;
+        // If execve returns, it failed
+        try IO.eprint("den: exec: execve failed\n", .{});
+        return 126;
+    }
 }
 
 /// command - execute command bypassing functions/aliases
@@ -165,7 +189,7 @@ pub fn command(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     const cmd_name = cmd.args[start_idx];
 
     // -p flag: use default PATH instead of current PATH
-    const default_path = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+    const default_path = if (comptime builtin.os.tag == .windows) "/Windows/System32" else "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     var path_to_use: []const u8 = undefined;
 
     if (use_default_path) {
@@ -186,22 +210,36 @@ pub fn command(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         }
 
         // Search PATH manually
-        var iter = std.mem.splitScalar(u8, path_to_use, ':');
+        const cmd_path_sep = if (comptime builtin.os.tag == .windows) ';' else ':';
+        const cmd_dir_sep = if (comptime builtin.os.tag == .windows) "\\" else "/";
+        var iter = std.mem.splitScalar(u8, path_to_use, cmd_path_sep);
         while (iter.next()) |dir| {
             if (dir.len == 0) continue;
-            const full_path = try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ dir, cmd_name });
+            const full_path = try std.fmt.allocPrint(ctx.allocator, "{s}" ++ cmd_dir_sep ++ "{s}", .{ dir, cmd_name });
             defer ctx.allocator.free(full_path);
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-            @memcpy(path_buf[0..full_path.len], full_path);
-            path_buf[full_path.len] = 0;
-            const c_path: [*:0]const u8 = path_buf[0..full_path.len :0];
-            if (std.c.access(c_path, std.posix.X_OK) == 0) {
-                if (verbose) {
-                    try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
-                } else {
-                    try IO.print("{s}\n", .{full_path});
+            if (comptime builtin.os.tag == .windows) {
+                // On Windows, check if file exists (no X_OK equivalent)
+                if (std.Io.Dir.cwd().access(std.Options.debug_io, full_path, .{})) {
+                    if (verbose) {
+                        try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
+                    } else {
+                        try IO.print("{s}\n", .{full_path});
+                    }
+                    return 0;
+                } else |_| {}
+            } else {
+                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                @memcpy(path_buf[0..full_path.len], full_path);
+                path_buf[full_path.len] = 0;
+                const c_path: [*:0]const u8 = path_buf[0..full_path.len :0];
+                if (std.c.access(c_path, std.posix.X_OK) == 0) {
+                    if (verbose) {
+                        try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
+                    } else {
+                        try IO.print("{s}\n", .{full_path});
+                    }
+                    return 0;
                 }
-                return 0;
             }
         }
 

@@ -395,7 +395,7 @@ pub const Shell = struct {
         };
 
         // Detect if stdin is a TTY
-        if (@import("builtin").os.tag != .windows) {
+        if (comptime builtin.os.tag != .windows) {
             shell.is_interactive = (std.Io.File{ .handle = std.posix.STDIN_FILENO, .flags = .{ .nonblocking = false } }).isTty(std.Options.debug_io) catch false;
         }
 
@@ -1071,43 +1071,114 @@ pub const Shell = struct {
             }
         }
 
-        // Check for subshell: (command)
-        if (fn_trimmed.len > 2 and fn_trimmed[0] == '(' and fn_trimmed[fn_trimmed.len - 1] == ')') {
-            // Execute the inner command in a subshell (fork to isolate env changes)
-            const inner = std.mem.trim(u8, fn_trimmed[1 .. fn_trimmed.len - 1], &std.ascii.whitespace);
-            if (inner.len > 0) {
-                if (builtin.os.tag == .windows) {
-                    // Windows: no fork, execute in current process (limited isolation)
-                    self.executeCommand(inner) catch {
-                        self.last_exit_code = 1;
-                    };
-                } else {
-                    const fork_ret = std.c.fork();
-                    if (fork_ret < 0) {
-                        try IO.eprint("den: fork failed\n", .{});
-                        self.last_exit_code = 1;
-                        return;
-                    }
-                    if (fork_ret == 0) {
-                        // Child: execute command and exit
-                        self.executeCommand(inner) catch {
-                            std.c._exit(1);
-                        };
-                        std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
-                    }
-                    // Parent: wait for child
-                    var wait_status: c_int = 0;
-                    if (comptime builtin.os.tag != .windows) {
-                        _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
-                    }
-                    if (wait_status & 0x7f == 0) {
-                        // Exited normally
-                        self.last_exit_code = @as(i32, @intCast((wait_status >> 8) & 0xff));
-                    } else {
-                        self.last_exit_code = 128 + @as(i32, @intCast(wait_status & 0x7f));
+        // Check for subshell: (command) or (command) | pipeline
+        if (fn_trimmed.len > 2 and fn_trimmed[0] == '(') {
+            // Find the matching closing paren
+            var paren_depth: i32 = 0;
+            var in_sq = false;
+            var in_dq = false;
+            var close_pos: ?usize = null;
+            for (fn_trimmed, 0..) |ch, ci| {
+                if (ch == '\\' and ci + 1 < fn_trimmed.len) continue;
+                if (!in_dq and ch == '\'') { in_sq = !in_sq; continue; }
+                if (!in_sq and ch == '"') { in_dq = !in_dq; continue; }
+                if (in_sq or in_dq) continue;
+                if (ch == '(') paren_depth += 1;
+                if (ch == ')') {
+                    paren_depth -= 1;
+                    if (paren_depth == 0) {
+                        close_pos = ci;
+                        break;
                     }
                 }
-                return;
+            }
+
+            if (close_pos) |cp| {
+                const inner = std.mem.trim(u8, fn_trimmed[1..cp], &std.ascii.whitespace);
+                // Check for pipe suffix after the closing paren
+                const after_paren = std.mem.trim(u8, fn_trimmed[cp + 1 ..], &std.ascii.whitespace);
+                const subshell_pipe_cmd = if (after_paren.len > 0 and after_paren[0] == '|')
+                    std.mem.trim(u8, after_paren[1..], &std.ascii.whitespace)
+                else
+                    null;
+
+                if (inner.len > 0) {
+                    if (comptime builtin.os.tag == .windows) {
+                        // Windows: no fork, execute in current process (limited isolation)
+                        self.executeCommand(inner) catch {
+                            self.last_exit_code = 1;
+                        };
+                        if (subshell_pipe_cmd) |pipe_cmd| {
+                            self.executeCommand(pipe_cmd) catch {};
+                        }
+                    } else {
+                        if (subshell_pipe_cmd) |pipe_cmd| {
+                            // Subshell piped to another command: fork with stdout redirect
+                            var pipe_fds: [2]std.posix.fd_t = undefined;
+                            if (std.c.pipe(&pipe_fds) != 0) return error.Unexpected;
+                            const read_fd = pipe_fds[0];
+                            const write_fd = pipe_fds[1];
+
+                            const fork_ret = std.c.fork();
+                            if (fork_ret < 0) {
+                                std.posix.close(read_fd);
+                                std.posix.close(write_fd);
+                                return error.Unexpected;
+                            }
+                            if (fork_ret == 0) {
+                                // Child: redirect stdout to pipe, execute subshell
+                                std.posix.close(read_fd);
+                                _ = std.c.dup2(write_fd, std.posix.STDOUT_FILENO);
+                                std.posix.close(write_fd);
+                                self.executeCommand(inner) catch {
+                                    std.c._exit(1);
+                                };
+                                std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
+                                unreachable;
+                            }
+                            // Parent: pipe child stdout to the pipe command
+                            std.posix.close(write_fd);
+                            const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
+                            _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
+                            std.posix.close(read_fd);
+
+                            var wait_status_sub: c_int = 0;
+                            _ = std.c.waitpid(@intCast(fork_ret), &wait_status_sub, 0);
+
+                            const execFn: *const fn (*Shell, []const u8) anyerror!void = &Shell.executeCommand;
+                            execFn(self, pipe_cmd) catch {};
+
+                            if (saved_stdin >= 0) {
+                                _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
+                                std.posix.close(@intCast(saved_stdin));
+                            }
+                        } else {
+                            const fork_ret = std.c.fork();
+                            if (fork_ret < 0) {
+                                try IO.eprint("den: fork failed\n", .{});
+                                self.last_exit_code = 1;
+                                return;
+                            }
+                            if (fork_ret == 0) {
+                                // Child: execute command and exit
+                                self.executeCommand(inner) catch {
+                                    std.c._exit(1);
+                                };
+                                std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
+                                unreachable;
+                            }
+                            // Parent: wait for child
+                            var wait_status: c_int = 0;
+                            _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
+                            if (wait_status & 0x7f == 0) {
+                                self.last_exit_code = @as(i32, @intCast((wait_status >> 8) & 0xff));
+                            } else {
+                                self.last_exit_code = 128 + @as(i32, @intCast(wait_status & 0x7f));
+                            }
+                        }
+                    }
+                    return;
+                }
             }
         }
 
@@ -1557,7 +1628,7 @@ pub const Shell = struct {
             } else if (shell_mod.isShellBuiltin(cmd.name)) {
                 // Shell-level builtin with redirections: apply redirections manually
                 // Skip on Windows (fd-level redirections not supported)
-                if (builtin.os.tag != .windows) {
+                if (comptime builtin.os.tag != .windows) {
                 var saved_fds: [3]c_int = .{ -1, -1, -1 };
                 var applied = false;
                 for (cmd.redirections) |redir| {
@@ -1651,7 +1722,9 @@ pub const Shell = struct {
             // Execute normally
             var executor = executor_mod.Executor.initWithShell(self.allocator, &self.environment, self);
             const exit_code = executor.executeChain(&chain) catch |err| {
-                try IO.eprint("den: execution error: {}\n", .{err});
+                // BrokenPipe is expected when a downstream pipe consumer closes early
+                if (err != error.BrokenPipe)
+                    try IO.eprint("den: execution error: {}\n", .{err});
                 self.last_exit_code = 1;
                 // Execute post_command hooks even on error
                 var post_context = HookContext{
@@ -1825,67 +1898,65 @@ pub const Shell = struct {
 
         if (quoted) {
             // Quoted heredoc: no expansion. Directly pipe the content.
-            if (builtin.os.tag == .windows) {
+            if (comptime builtin.os.tag == .windows) {
                 // Windows: use spawn module for heredoc piping
                 // For now, convert to herestring as a fallback
                 const result = std.fmt.allocPrint(self.allocator, "{s} <<< \"{s}\"", .{
                     cmd_part, heredoc_content,
                 }) catch return null;
                 return result;
-            }
+            } else {
+                // POSIX: Create pipe, fork writer, redirect stdin, then execute command.
+                var pipe_fds: [2]std.posix.fd_t = undefined;
+                if (std.c.pipe(&pipe_fds) != 0) return null;
+                const read_fd = pipe_fds[0];
+                const write_fd = pipe_fds[1];
 
-            // POSIX: Create pipe, fork writer, redirect stdin, then execute command.
-            var pipe_fds: [2]std.posix.fd_t = undefined;
-            if (std.c.pipe(&pipe_fds) != 0) return null;
-            const read_fd = pipe_fds[0];
-            const write_fd = pipe_fds[1];
-
-            const fork_ret = std.c.fork();
-            if (fork_ret < 0) {
-                std.posix.close(read_fd);
-                std.posix.close(write_fd);
-                return null;
-            }
-            if (fork_ret == 0) {
-                // Child: write content and exit
-                std.posix.close(read_fd);
-                const content_with_nl = std.fmt.allocPrint(self.allocator, "{s}\n", .{heredoc_content}) catch {
-                    std.c._exit(1);
+                const fork_ret = std.c.fork();
+                if (fork_ret < 0) {
+                    std.posix.close(read_fd);
+                    std.posix.close(write_fd);
+                    return null;
+                }
+                if (fork_ret == 0) {
+                    // Child: write content and exit
+                    std.posix.close(read_fd);
+                    const content_with_nl = std.fmt.allocPrint(self.allocator, "{s}\n", .{heredoc_content}) catch {
+                        std.c._exit(1);
+                        unreachable;
+                    };
+                    (std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } }).writeStreamingAll(std.Options.debug_io, content_with_nl) catch {};
+                    std.posix.close(write_fd);
+                    std.c._exit(0);
                     unreachable;
-                };
-                (std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } }).writeStreamingAll(std.Options.debug_io, content_with_nl) catch {};
+                }
+
+                // Parent: redirect stdin to read end of pipe
                 std.posix.close(write_fd);
-                std.c._exit(0);
-                unreachable;
-            }
-
-            // Parent: redirect stdin to read end of pipe
-            std.posix.close(write_fd);
-            const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
-            if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) {
+                const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
+                if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) {
+                    std.posix.close(read_fd);
+                    if (saved_stdin >= 0) std.posix.close(@intCast(saved_stdin));
+                    return null;
+                }
                 std.posix.close(read_fd);
-                if (saved_stdin >= 0) std.posix.close(@intCast(saved_stdin));
-                return null;
-            }
-            std.posix.close(read_fd);
 
-            // Wait for writer to finish
-            var wait_status_heredoc: c_int = 0;
-            if (comptime builtin.os.tag != .windows) {
+                // Wait for writer to finish
+                var wait_status_heredoc: c_int = 0;
                 _ = std.c.waitpid(@intCast(fork_ret), &wait_status_heredoc, 0);
+
+                // Execute the command with stdin redirected
+                self.executeCommand(cmd_part) catch {};
+
+                // Restore stdin
+                if (saved_stdin >= 0) {
+                    _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
+                    std.posix.close(@intCast(saved_stdin));
+                }
+
+                // Return empty string to signal we handled it (caller will free and return)
+                return self.allocator.dupe(u8, "") catch null;
             }
-
-            // Execute the command with stdin redirected
-            self.executeCommand(cmd_part) catch {};
-
-            // Restore stdin
-            if (saved_stdin >= 0) {
-                _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                std.posix.close(@intCast(saved_stdin));
-            }
-
-            // Return empty string to signal we handled it (caller will free and return)
-            return self.allocator.dupe(u8, "") catch null;
         } else {
             // Unquoted heredoc: allow expansion via herestring with double quotes
             const result = std.fmt.allocPrint(self.allocator, "{s} <<< \"{s}\"", .{
@@ -2544,9 +2615,7 @@ pub const Shell = struct {
 
                 // Wait for control flow child to finish writing
                 var wait_status_cf: c_int = 0;
-                if (comptime builtin.os.tag != .windows) {
-                    _ = std.c.waitpid(@intCast(fork_ret), &wait_status_cf, 0);
-                }
+                _ = std.c.waitpid(@intCast(fork_ret), &wait_status_cf, 0);
 
                 // Execute the pipe command(s) — use function pointer to
                 // break the inferred error set cycle (executeCommand →
@@ -2559,6 +2628,14 @@ pub const Shell = struct {
                     _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
                     std.posix.close(@intCast(saved_stdin));
                 }
+                return;
+            } else {
+                // Windows: execute control flow then pipe command sequentially
+                var cf_parser = ControlFlowParser.init(self.allocator);
+                var cf_executor = ControlFlowExecutor.init(self);
+                self.executeCfBlock(lines, &cf_parser, &cf_executor) catch {};
+                const execFn: *const fn (*Shell, []const u8) anyerror!void = &Shell.executeCommand;
+                execFn(self, pipe_cmd) catch {};
                 return;
             }
         }
@@ -2655,56 +2732,54 @@ pub const Shell = struct {
         const left = std.mem.trim(u8, input[0..pp], &std.ascii.whitespace);
         if (left.len == 0) return false;
 
-        if (builtin.os.tag == .windows) {
+        if (comptime builtin.os.tag == .windows) {
             // Windows: execute sequentially without pipe isolation
             self.executeCommand(left) catch {};
             self.executeCommand(right) catch {};
             return true;
-        }
+        } else {
+            // Set up a pipe, fork for the left side, execute right side with piped stdin
+            var fds: [2]std.posix.fd_t = undefined;
+            if (std.c.pipe(&fds) != 0) return false;
 
-        // Set up a pipe, fork for the left side, execute right side with piped stdin
-        var fds: [2]std.posix.fd_t = undefined;
-        if (std.c.pipe(&fds) != 0) return false;
+            const fork_ret = std.c.fork();
+            if (fork_ret < 0) {
+                std.posix.close(fds[0]);
+                std.posix.close(fds[1]);
+                return false;
+            }
+            const pid: std.posix.pid_t = @intCast(fork_ret);
 
-        const fork_ret = std.c.fork();
-        if (fork_ret < 0) {
-            std.posix.close(fds[0]);
+            if (pid == 0) {
+                // Child: execute left side, stdout -> pipe write end
+                std.posix.close(fds[0]);
+                _ = std.c.dup2(fds[1], std.posix.STDOUT_FILENO);
+                std.posix.close(fds[1]);
+                self.executeCommand(left) catch {};
+                std.c._exit(@intCast(if (self.last_exit_code >= 0) @as(u32, @intCast(self.last_exit_code)) else 1));
+            }
+
+            // Parent: execute right side (control flow) with stdin <- pipe read end
             std.posix.close(fds[1]);
-            return false;
-        }
-        const pid: std.posix.pid_t = @intCast(fork_ret);
-
-        if (pid == 0) {
-            // Child: execute left side, stdout -> pipe write end
+            const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
+            _ = std.c.dup2(fds[0], std.posix.STDIN_FILENO);
             std.posix.close(fds[0]);
-            _ = std.c.dup2(fds[1], std.posix.STDOUT_FILENO);
-            std.posix.close(fds[1]);
-            self.executeCommand(left) catch {};
-            std.c._exit(@intCast(if (self.last_exit_code >= 0) @as(u32, @intCast(self.last_exit_code)) else 1));
-        }
 
-        // Parent: execute right side (control flow) with stdin <- pipe read end
-        std.posix.close(fds[1]);
-        const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
-        _ = std.c.dup2(fds[0], std.posix.STDIN_FILENO);
-        std.posix.close(fds[0]);
+            // Execute the control flow command
+            self.executeCommand(right) catch {};
 
-        // Execute the control flow command
-        self.executeCommand(right) catch {};
+            // Restore stdin
+            if (saved_stdin >= 0) {
+                _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
+                std.posix.close(saved_stdin);
+            }
 
-        // Restore stdin
-        if (saved_stdin >= 0) {
-            _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-            std.posix.close(saved_stdin);
-        }
-
-        // Wait for child
-        var wait_status_pipe: c_int = 0;
-        if (comptime builtin.os.tag != .windows) {
+            // Wait for child
+            var wait_status_pipe: c_int = 0;
             _ = std.c.waitpid(pid, &wait_status_pipe, 0);
-        }
 
-        return true;
+            return true;
+        }
     }
 
     /// Check if a word at position is a control flow opener keyword.

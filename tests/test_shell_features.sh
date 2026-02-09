@@ -814,6 +814,71 @@ check "(( )) exit code" "0" "$(timeout 3 $DEN -c '(( 5 > 3 )); echo $?')"
 check "HOSTNAME not empty" "yes" "$(timeout 3 $DEN -c '[[ -n $HOSTNAME ]] && echo yes || echo no')"
 
 # ===========================================================================
+# 119. Control flow piping (for/while/if/case ... | cmd)
+# ===========================================================================
+check "for pipe" "A
+B
+C" "$(timeout 3 $DEN -c 'for f in a b c; do echo "$f"; done | tr a-z A-Z')"
+check "for pipe wc" "3" "$(timeout 3 $DEN -c 'for i in 1 2 3; do echo "$i"; done | wc -l | tr -d " "')"
+check "for pipe sort" "a
+b
+c" "$(timeout 3 $DEN -c 'for f in c a b; do echo "$f"; done | sort')"
+check "for pipe chain" "A
+B
+C" "$(timeout 3 $DEN -c 'for f in c a b; do echo "$f"; done | sort | tr a-z A-Z')"
+check "if pipe" "HELLO" "$(timeout 3 $DEN -c 'if true; then echo hello; fi | tr a-z A-Z')"
+check "if else pipe" "YES" "$(timeout 3 $DEN -c 'if false; then echo no; else echo yes; fi | tr a-z A-Z')"
+check "if multi pipe" "3" "$(timeout 3 $DEN -c 'if true; then echo a; echo b; echo c; fi | wc -l | tr -d " "')"
+check "case pipe" "MATCHED" "$(timeout 3 $DEN -c 'x=hello; case $x in hello) echo "matched";; esac | tr a-z A-Z')"
+check "for pipe grep" "b" "$(timeout 3 $DEN -c 'for f in a b c; do echo "$f"; done | grep b')"
+
+# ===========================================================================
+# 120. Subshell piping ((cmd1; cmd2) | cmd)
+# ===========================================================================
+check "subshell pipe wc" "2" "$(timeout 3 $DEN -c '(echo hello; echo world) | wc -l | tr -d " "')"
+check "subshell pipe tr" "HELLO
+WORLD" "$(timeout 3 $DEN -c '(echo hello; echo world) | tr a-z A-Z')"
+check "subshell pipe sort" "a
+b
+c" "$(timeout 3 $DEN -c '(echo c; echo a; echo b) | sort')"
+check "subshell pipe chain" "A
+B
+C" "$(timeout 3 $DEN -c '(echo c; echo a; echo b) | sort | tr a-z A-Z')"
+check "simple subshell" "hello
+world" "$(timeout 3 $DEN -c '(echo hello; echo world)')"
+check "subshell var isolation" "outer" "$(timeout 3 $DEN -c 'x=outer; (x=inner); echo "$x"')"
+check "nested subshell pipe" "2" "$(timeout 3 $DEN -c '(echo a; (echo b)) | wc -l | tr -d " "')"
+
+# ===========================================================================
+# 121. Let arithmetic evaluation
+# ===========================================================================
+check "let add" "10" "$(timeout 3 $DEN -c 'let x=5+5; echo $x')"
+check "let mult" "20" "$(timeout 3 $DEN -c 'let x=4*5; echo $x')"
+check "let sub" "3" "$(timeout 3 $DEN -c 'let x=8-5; echo $x')"
+check "let div" "4" "$(timeout 3 $DEN -c 'let x=20/5; echo $x')"
+check "let literal" "42" "$(timeout 3 $DEN -c 'let x=42; echo $x')"
+
+# ===========================================================================
+# 122. Control flow keyword with suffix (done|, fi;, etc.)
+# ===========================================================================
+check "done semicolon" "a
+b" "$(timeout 3 $DEN -c 'for f in a b; do echo "$f"; done; echo ""' | head -2)"
+check "done pipe inline" "2" "$(timeout 3 $DEN -c 'for f in a b; do echo "$f"; done | wc -l | tr -d " "')"
+
+# ===========================================================================
+# 123. Heredoc in -c mode
+# ===========================================================================
+check "herestring basic" "hello world" "$(timeout 3 $DEN -c 'cat <<< "hello world"')"
+check "herestring var" "hello world" "$(timeout 3 $DEN -c 'x="hello world"; cat <<< "$x"')"
+
+# ===========================================================================
+# 124. Command substitution with control flow pipe
+# ===========================================================================
+check "subst for pipe" "X
+Y
+Z" "$(timeout 3 $DEN -c 'result=$(for f in x y z; do echo "$f"; done | tr a-z A-Z); echo "$result"')"
+
+# ===========================================================================
 # Results
 # ===========================================================================
 echo ""

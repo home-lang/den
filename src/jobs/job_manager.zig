@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const IO = @import("../utils/io.zig").IO;
 const types = @import("../types/mod.zig");
+const process = @import("../utils/process.zig");
 
 /// Job status enum representing the current state of a background job.
 pub const JobStatus = enum {
@@ -56,7 +57,7 @@ pub const JobManager = struct {
             .jobs = [_]?BackgroundJob{null} ** MAX_JOBS,
             .job_count = 0,
             .next_job_id = 1,
-            .last_background_pid = if (builtin.os.tag == .windows) undefined else 0,
+            .last_background_pid = if (builtin.os.tag == .windows) std.os.windows.INVALID_HANDLE_VALUE else 0,
         };
     }
 
@@ -349,11 +350,18 @@ pub const JobManager = struct {
         try IO.print("{s}\n", .{job.command});
 
         // Wait for the job to complete
-        var fg_wait_status: c_int = 0;
-        if (comptime builtin.os.tag != .windows) {
+        var exit_status: i32 = 0;
+        if (comptime builtin.os.tag == .windows) {
+            const result = process.waitProcess(job.pid, .{}) catch {
+                self.remove(job_slot.?);
+                return 1;
+            };
+            exit_status = result.status.code;
+        } else {
+            var fg_wait_status: c_int = 0;
             _ = std.c.waitpid(job.pid, &fg_wait_status, 0);
+            exit_status = getExitStatus(@as(u32, @bitCast(fg_wait_status)));
         }
-        const exit_status = getExitStatus(@as(u32, @bitCast(fg_wait_status)));
 
         // Remove from background jobs
         self.remove(job_slot.?);
@@ -390,9 +398,10 @@ pub const JobManager = struct {
         }
 
         // Send SIGCONT to continue the job (Unix only)
-        if (builtin.os.tag != .windows) {
+        if (comptime builtin.os.tag != .windows) {
             _ = std.posix.kill(job.pid, std.posix.SIG.CONT) catch {};
         }
+        // On Windows, we can't resume stopped processes
 
         // Mark as running
         self.jobs[job_slot.?].?.status = .running;

@@ -1,5 +1,4 @@
 const std = @import("std");
-const posix = std.posix;
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const common = @import("common.zig");

@@ -47,7 +47,7 @@ pub fn builtinExec(self: *Shell, cmd: *types.ParsedCommand) !void {
 
 /// Builtin: kill - send signal to job or process
 pub fn builtinKill(self: *Shell, cmd: *types.ParsedCommand) !void {
-    if (builtin.os.tag == .windows) {
+    if (comptime builtin.os.tag == .windows) {
         // Windows: kill command not yet fully implemented
         try IO.print("kill: not fully implemented on Windows\n", .{});
         self.last_exit_code = 0;

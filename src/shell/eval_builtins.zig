@@ -104,7 +104,7 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         var count: usize = 0;
         while (count < n) {
             var byte: [1]u8 = undefined;
-            const bytes_read: isize = if (builtin.os.tag == .windows) win_blk: {
+            const bytes_read: isize = if (comptime builtin.os.tag == .windows) win_blk: {
                 const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse break :win_blk @as(isize, -1);
                 var br: u32 = 0;
                 const ok = std.os.windows.kernel32.ReadFile(handle, &byte, 1, &br, null);
@@ -126,7 +126,7 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         var count: usize = 0;
         while (count < buf.len) {
             var byte: [1]u8 = undefined;
-            const bytes_read: isize = if (builtin.os.tag == .windows) win_blk: {
+            const bytes_read: isize = if (comptime builtin.os.tag == .windows) win_blk: {
                 const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse break :win_blk @as(isize, -1);
                 var br: u32 = 0;
                 const ok = std.os.windows.kernel32.ReadFile(handle, &byte, 1, &br, null);
@@ -399,24 +399,39 @@ pub fn builtinCommand(self: *Shell, cmd: *types.ParsedCommand) !void {
 
         // Search PATH
         if (self.environment.get("PATH")) |path_val| {
-            var iter = std.mem.splitScalar(u8, path_val, ':');
+            const eval_path_sep = if (comptime builtin.os.tag == .windows) ';' else ':';
+            const eval_dir_sep = if (comptime builtin.os.tag == .windows) "\\" else "/";
+            var iter = std.mem.splitScalar(u8, path_val, eval_path_sep);
             while (iter.next()) |dir| {
                 if (dir.len == 0) continue;
-                const full_path = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ dir, cmd_name }) catch continue;
+                const full_path = std.fmt.allocPrint(self.allocator, "{s}" ++ eval_dir_sep ++ "{s}", .{ dir, cmd_name }) catch continue;
                 defer self.allocator.free(full_path);
-                // Check if file exists and is executable
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                @memcpy(path_buf[0..full_path.len], full_path);
-                path_buf[full_path.len] = 0;
-                const c_path: [*:0]const u8 = path_buf[0..full_path.len :0];
-                if (std.c.access(c_path, std.posix.X_OK) == 0) {
-                    if (verbose) {
-                        try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
-                    } else {
-                        try IO.print("{s}\n", .{full_path});
+                if (comptime builtin.os.tag == .windows) {
+                    // On Windows, check if file exists (no X_OK equivalent)
+                    if (std.Io.Dir.cwd().access(std.Options.debug_io, full_path, .{})) {
+                        if (verbose) {
+                            try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
+                        } else {
+                            try IO.print("{s}\n", .{full_path});
+                        }
+                        self.last_exit_code = 0;
+                        return;
+                    } else |_| {}
+                } else {
+                    // Check if file exists and is executable
+                    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                    @memcpy(path_buf[0..full_path.len], full_path);
+                    path_buf[full_path.len] = 0;
+                    const c_path: [*:0]const u8 = path_buf[0..full_path.len :0];
+                    if (std.c.access(c_path, std.posix.X_OK) == 0) {
+                        if (verbose) {
+                            try IO.print("{s} is {s}\n", .{ cmd_name, full_path });
+                        } else {
+                            try IO.print("{s}\n", .{full_path});
+                        }
+                        self.last_exit_code = 0;
+                        return;
                     }
-                    self.last_exit_code = 0;
-                    return;
                 }
             }
         }

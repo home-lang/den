@@ -69,8 +69,15 @@ pub const TerminalSize = struct {
 
 /// Check if stdout is a TTY
 pub fn isTTY() bool {
-    const posix = std.posix;
-    return posix.isatty(posix.STDOUT_FILENO);
+    if (comptime @import("builtin").os.tag == .windows) {
+        const win = std.os.windows;
+        const handle = win.kernel32.GetStdHandle(win.STD_OUTPUT_HANDLE) orelse return false;
+        var mode: win.DWORD = 0;
+        return win.kernel32.GetConsoleMode(handle, &mode) != 0;
+    } else {
+        const posix = std.posix;
+        return posix.isatty(posix.STDOUT_FILENO);
+    }
 }
 
 /// Detect color support level

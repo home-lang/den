@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Shell = @import("../shell.zig").Shell;
 const Expansion = @import("../utils/expansion.zig").Expansion;
 const BraceExpander = @import("../utils/brace.zig").BraceExpander;
@@ -503,8 +504,10 @@ pub const ControlFlowExecutor = struct {
     /// Execute select menu for interactive selection
     pub fn executeSelect(self: *ControlFlowExecutor, menu: *SelectMenu) !i32 {
         var last_exit: i32 = 0;
-        const stdin_file = std.Io.File{ .handle = std.posix.STDIN_FILENO, .flags = .{ .nonblocking = false } };
-        const stdout_file = std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+        const stdin_handle = if (comptime builtin.os.tag == .windows) std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.Unexpected else std.posix.STDIN_FILENO;
+        const stdout_handle = if (comptime builtin.os.tag == .windows) std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.Unexpected else std.posix.STDOUT_FILENO;
+        const stdin_file = std.Io.File{ .handle = stdin_handle, .flags = .{ .nonblocking = false } };
+        const stdout_file = std.Io.File{ .handle = stdout_handle, .flags = .{ .nonblocking = false } };
         var stdin_buf: [4096]u8 = undefined;
         var stdin_reader = stdin_file.reader(std.Options.debug_io, &stdin_buf);
         var reader = stdin_reader.interface;

@@ -110,7 +110,7 @@ pub fn kill(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         start_idx = 2;
     }
 
-    if (builtin.os.tag == .windows) {
+    if (comptime builtin.os.tag == .windows) {
         // Windows: parse optional signal flag but only support TERM/KILL (both terminate)
         if (command.args[0].len > 0 and command.args[0][0] == '-') {
             const sig_str = command.args[0][1..];
@@ -173,7 +173,8 @@ pub fn kill(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     }
 
     // POSIX implementation
-    var signal: u8 = explicit_signal orelse @intFromEnum(std.posix.SIG.TERM);
+    const default_sig: u8 = if (comptime builtin.os.tag == .windows) 15 else @intFromEnum(std.posix.SIG.TERM);
+    var signal: u8 = explicit_signal orelse default_sig;
 
     // Parse signal if provided (and not already set via -s)
     if (explicit_signal == null and start_idx < command.args.len and

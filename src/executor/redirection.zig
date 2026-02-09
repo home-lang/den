@@ -13,6 +13,7 @@ pub fn applyRedirections(
     environment: *std.StringHashMap([]const u8),
     expansion_context: ?ExpansionContext,
 ) !void {
+    if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     for (redirections) |redir| {
         switch (redir.kind) {
             .output_truncate => try applyOutputTruncate(allocator, redir),
@@ -35,6 +36,7 @@ pub const ExpansionContext = struct {
 };
 
 fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection) !void {
+    if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
@@ -60,6 +62,7 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection) !
 }
 
 fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !void {
+    if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
@@ -85,6 +88,7 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
 }
 
 fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
+    if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
@@ -110,6 +114,7 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
 }
 
 fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
+    if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // <> opens file for both reading and writing
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
@@ -140,6 +145,7 @@ fn applyHeredocOrHerestring(
     environment: *std.StringHashMap([]const u8),
     expansion_context: ?ExpansionContext,
 ) !void {
+    if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Create a pipe for the content
     var pipe_fds: [2]std.posix.fd_t = undefined;
     if (std.c.pipe(&pipe_fds) != 0) return error.Unexpected;
@@ -202,6 +208,7 @@ fn applyHeredocOrHerestring(
 }
 
 fn applyFdDuplicate(redir: types.Redirection) !void {
+    if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Parse target as file descriptor number
     // Format: N>&M or N<&M (duplicate fd M to fd N)
     const target_fd = std.fmt.parseInt(u32, redir.target, 10) catch {
@@ -214,6 +221,7 @@ fn applyFdDuplicate(redir: types.Redirection) !void {
 }
 
 fn applyFdClose(redir: types.Redirection) void {
+    if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Close the specified file descriptor
     // Format: N>&- or N<&- (close fd N)
     // Use raw syscall to avoid panic on EBADF (closing an already-closed fd is harmless)
@@ -226,6 +234,7 @@ pub const SavedFds = struct {
     stderr_save: ?std.posix.fd_t = null,
 
     pub fn save() SavedFds {
+        if (comptime builtin.os.tag == .windows) return SavedFds{};
         var saved = SavedFds{};
 
         // Duplicate stdout and stderr
@@ -236,6 +245,7 @@ pub const SavedFds = struct {
     }
 
     pub fn restore(self: *SavedFds) void {
+        if (comptime builtin.os.tag == .windows) return;
         // Restore stdout
         if (self.stdout_save) |fd| {
             _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);

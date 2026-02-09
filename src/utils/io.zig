@@ -33,11 +33,13 @@ pub fn cwdMakePath(sub_path: []const u8) std.Io.Dir.CreateDirPathError!void {
 }
 
 /// Write bytes directly to a file descriptor (low-level, no Io needed)
-pub fn rawWrite(fd: posix.fd_t, bytes: []const u8) void {
-    if (builtin.link_libc) {
+pub fn rawWrite(fd: if (builtin.os.tag == .windows) std.os.windows.HANDLE else posix.fd_t, bytes: []const u8) void {
+    if (builtin.os.tag == .windows) {
+        var written: u32 = 0;
+        _ = std.os.windows.kernel32.WriteFile(fd, bytes.ptr, @intCast(bytes.len), &written, null);
+    } else if (builtin.link_libc) {
         _ = std.c.write(fd, bytes.ptr, bytes.len);
     } else {
-        // Fallback: use inline assembly or OS-specific syscall
         _ = std.os.linux.write(fd, bytes.ptr, bytes.len);
     }
 }

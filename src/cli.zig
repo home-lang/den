@@ -332,12 +332,12 @@ fn getCompletions(allocator: std.mem.Allocator, args: []const []const u8) !void 
     }
 
     // Output as JSON array
-    std.debug.print("[", .{});
-    for (completions, 0..) |completion, i| {
-        if (i > 0) std.debug.print(",", .{});
-        std.debug.print("\"{s}\"", .{completion});
+    IO.print("[", .{}) catch {};
+    for (completions, 0..) |completion, ci| {
+        if (ci > 0) IO.print(",", .{}) catch {};
+        IO.print("\"{s}\"", .{completion}) catch {};
     }
-    std.debug.print("]\n", .{});
+    IO.print("]\n", .{}) catch {};
 }
 
 /// Generate shell completion script
@@ -367,7 +367,7 @@ fn generateCompletion(allocator: std.mem.Allocator, args: []const []const u8) !v
     var comp = ShellCompletion.init(allocator);
     const script = try comp.generate(shell_type);
 
-    std.debug.print("{s}", .{script});
+    IO.print("{s}", .{script}) catch {};
 }
 
 /// Create development shim
@@ -521,13 +521,12 @@ fn uninstall(_: std.mem.Allocator) !void {
 
 /// Show version
 fn showVersion() !void {
-    // Using std.debug.print instead
-    std.debug.print("Den Shell v{s}\n", .{VERSION});
+    IO.print("Den Shell v{s}\n", .{VERSION}) catch {};
 }
 
 /// Show help
 fn showHelp() !void {
-    std.debug.print(
+    IO.print(
         \\Den Shell - A modern shell written in Zig
         \\
         \\Usage:
@@ -567,7 +566,7 @@ fn showHelp() !void {
         \\
         \\For more information, visit: https://github.com/stackblitz/den
         \\
-    , .{});
+    , .{}) catch {};
 }
 
 /// Run script file

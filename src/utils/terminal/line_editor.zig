@@ -872,7 +872,7 @@ pub const LineEditor = struct {
     fn displayPrompt(self: *LineEditor) !void {
         try self.writeBytes(self.prompt);
         // Flush stdout to ensure prompt is displayed before entering raw mode
-        if (builtin.os.tag != .windows) {
+        if (comptime builtin.os.tag != .windows) {
             // Force flush by calling fsync on stdout
             _ = std.c.fsync(posix.STDOUT_FILENO);
         }

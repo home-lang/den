@@ -46,9 +46,11 @@ const NOTE_RENAME: u32 = 0x00000020;
 var watch_interrupted: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
 
 /// Signal handler for SIGINT during watch.
-fn sigintHandler(_: std.posix.SIG) callconv(.c) void {
-    watch_interrupted.store(true, .release);
-}
+const sigintHandler = if (builtin.os.tag == .windows) null else struct {
+    fn handler(_: std.posix.SIG) callconv(.c) void {
+        watch_interrupted.store(true, .release);
+    }
+}.handler;
 
 /// watch <path> <command> - Watch a file or directory and run a command on changes.
 ///

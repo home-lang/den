@@ -138,7 +138,10 @@ pub const LeakDetector = struct {
     /// Print leak report to stderr
     pub fn printLeakReport(self: *LeakDetector) void {
         const report = self.checkLeaks();
-        const stderr = (std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } }).writer(std.Options.debug_io);
+        const stderr = (std.Io.File{ .handle = if (builtin.os.tag == .windows)
+            (std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return)
+        else
+            std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } }).writer(std.Options.debug_io);
 
         stderr.print("\n=== Memory Leak Report ===\n", .{}) catch {};
         stderr.print("Total allocated: {} bytes ({} allocations)\n", .{ report.total_allocated, report.allocation_count }) catch {};

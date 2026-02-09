@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 const builtin = @import("builtin");
+const spawn = @import("../utils/spawn.zig");
 
 /// Pipeline execution for connecting multiple commands with pipes.
 /// Handles both POSIX (fork/pipe) and Windows (CreateProcess) implementations.
@@ -113,26 +114,48 @@ pub fn executePosix(
     };
 }
 
-/// Execute a pipeline on Windows using CreateProcess.
-/// Note: Windows pipeline support is limited compared to POSIX.
+/// Execute a pipeline on Windows by building a combined command string
+/// and delegating to the system shell (cmd.exe) which handles pipes natively.
 pub fn executeWindows(
     allocator: std.mem.Allocator,
     commands: []types.ParsedCommand,
 ) !PipelineResult {
-    _ = allocator;
-
-    // Windows implementation would use CreateProcess with pipes
-    // For now, execute commands sequentially (simplified)
-    var last_status: i32 = 0;
-
-    for (commands) |_| {
-        // TODO: Implement proper Windows pipeline with CreateProcess
-        last_status = 0;
+    // Calculate total length for the combined command string
+    var total_len: usize = 0;
+    for (commands, 0..) |cmd, i| {
+        if (i > 0) total_len += 3; // " | "
+        total_len += cmd.name.len;
+        for (cmd.args) |arg| {
+            total_len += 1 + arg.len; // " " + arg
+        }
     }
 
+    var cmd_buf = try allocator.alloc(u8, total_len + 1);
+    defer allocator.free(cmd_buf);
+    var pos: usize = 0;
+
+    for (commands, 0..) |cmd, i| {
+        if (i > 0) {
+            @memcpy(cmd_buf[pos..][0..3], " | ");
+            pos += 3;
+        }
+        @memcpy(cmd_buf[pos..][0..cmd.name.len], cmd.name);
+        pos += cmd.name.len;
+        for (cmd.args) |arg| {
+            cmd_buf[pos] = ' ';
+            pos += 1;
+            @memcpy(cmd_buf[pos..][0..arg.len], arg);
+            pos += arg.len;
+        }
+    }
+
+    const exit_code = spawn.shellExec(allocator, cmd_buf[0..pos]) catch {
+        return PipelineResult{ .exit_code = 1, .pipefail_code = 1 };
+    };
+
     return PipelineResult{
-        .exit_code = last_status,
-        .pipefail_code = last_status,
+        .exit_code = exit_code,
+        .pipefail_code = exit_code,
     };
 }
 
