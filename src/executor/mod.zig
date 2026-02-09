@@ -3,9 +3,8 @@ const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 const Expansion = @import("../utils/expansion.zig").Expansion;
 const builtin = @import("builtin");
-const c = struct {
-    extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
-};
+const common = @import("builtins/common.zig");
+const c = common.c_exec;
 const process = @import("../utils/process.zig");
 const TypoCorrection = @import("../utils/typo_correction.zig").TypoCorrection;
 const env_utils = @import("../utils/env.zig");
@@ -41,21 +40,6 @@ const libc_env = struct {
     extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
     extern "c" fn unsetenv(name: [*:0]const u8) c_int;
 };
-
-// Get environ from C - returns the current environment pointer (updated by setenv/unsetenv)
-fn getCEnviron() [*:null]const ?[*:0]const u8 {
-    // On Darwin/macOS, environ is available via _NSGetEnviron()
-    // On other platforms, we can directly access extern environ
-    if (builtin.os.tag == .macos) {
-        // macOS uses _NSGetEnviron() function which returns ***char (pointer to environ)
-        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
-        return @ptrCast(NSGetEnviron().*);
-    } else {
-        // Linux and other POSIX systems - environ is a global variable
-        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
-        return @ptrCast(c_environ.*);
-    }
-}
 
 // Windows process access rights (for job control)
 const PROCESS_TERMINATE: u32 = 0x0001;

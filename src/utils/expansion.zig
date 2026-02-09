@@ -2294,15 +2294,11 @@ pub const Expansion = struct {
     }
 };
 
+const common = @import("../executor/builtins/common.zig");
+
 /// Get C environment pointer (platform-specific)
 fn getCEnviron() [*:null]const ?[*:0]const u8 {
-    if (builtin.os.tag == .macos) {
-        const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
-        return @ptrCast(NSGetEnviron().*);
-    } else {
-        const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
-        return @ptrCast(c_environ.*);
-    }
+    return common.getCEnviron();
 }
 
 /// Get user's home directory from passwd database
