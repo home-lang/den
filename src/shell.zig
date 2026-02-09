@@ -1981,7 +1981,15 @@ pub const Shell = struct {
             else
                 raw_value;
 
-            const val = try self.allocator.dupe(u8, stripped);
+            // Evaluate as arithmetic expression (let/mut support arithmetic like bash's let)
+            const loops = @import("shell/loops.zig");
+            const arith_result = loops.evaluateArithmeticExpression(self, stripped);
+            // Use arithmetic result if the expression contained operators, otherwise use literal
+            const val = if (std.fmt.parseInt(i64, stripped, 10) == error.InvalidCharacter)
+                try std.fmt.allocPrint(self.allocator, "{d}", .{arith_result})
+            else
+                try self.allocator.dupe(u8, stripped);
+
             const gop = try self.environment.getOrPut(var_name);
             if (gop.found_existing) {
                 self.allocator.free(gop.value_ptr.*);
