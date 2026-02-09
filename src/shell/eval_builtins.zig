@@ -8,6 +8,7 @@
 //! - builtin: execute builtin command
 
 const std = @import("std");
+const builtin = @import("builtin");
 const IO = @import("../utils/io.zig").IO;
 const types = @import("../types/mod.zig");
 const parser_mod = @import("../parser/mod.zig");
@@ -101,10 +102,14 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         // Read exactly N characters
         const buf = try self.allocator.alloc(u8, n);
         var count: usize = 0;
-        const stdin_fd = std.posix.STDIN_FILENO;
         while (count < n) {
             var byte: [1]u8 = undefined;
-            const bytes_read = std.c.read(stdin_fd, &byte, 1);
+            const bytes_read: isize = if (builtin.os.tag == .windows) win_blk: {
+                const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse break :win_blk @as(isize, -1);
+                var br: u32 = 0;
+                const ok = std.os.windows.kernel32.ReadFile(handle, &byte, 1, &br, null);
+                break :win_blk if (ok != 0) @as(isize, @intCast(br)) else @as(isize, -1);
+            } else std.c.read(std.posix.STDIN_FILENO, &byte, 1);
             if (bytes_read <= 0) break;
             buf[count] = byte[0];
             count += 1;
@@ -118,10 +123,14 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         // Read until delimiter character
         var buf: [4096]u8 = undefined;
         var count: usize = 0;
-        const stdin_fd = std.posix.STDIN_FILENO;
         while (count < buf.len) {
             var byte: [1]u8 = undefined;
-            const bytes_read = std.c.read(stdin_fd, &byte, 1);
+            const bytes_read: isize = if (builtin.os.tag == .windows) win_blk: {
+                const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse break :win_blk @as(isize, -1);
+                var br: u32 = 0;
+                const ok = std.os.windows.kernel32.ReadFile(handle, &byte, 1, &br, null);
+                break :win_blk if (ok != 0) @as(isize, @intCast(br)) else @as(isize, -1);
+            } else std.c.read(std.posix.STDIN_FILENO, &byte, 1);
             if (bytes_read <= 0) break;
             if (byte[0] == d) break;
             buf[count] = byte[0];

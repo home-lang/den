@@ -64,36 +64,12 @@ pub fn bench(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             return 1;
         };
 
-        // Run the command using fork/exec via /bin/sh
-        const fork_ret = std.c.fork();
-        if (fork_ret < 0) {
-            try IO.eprint("bench: failed to fork\n", .{});
+        // Run the command using shell exec
+        const spawn = common.spawn;
+        _ = spawn.shellExec(allocator, cmd_str) catch {
+            try IO.eprint("bench: failed to run command\n", .{});
             return 1;
-        }
-        const pid: posix.pid_t = @intCast(fork_ret);
-
-        if (pid == 0) {
-            // Child process
-            // Redirect stdout and stderr to /dev/null
-            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io, "/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
-            _ = std.c.dup2(dev_null.handle, posix.STDOUT_FILENO);
-            _ = std.c.dup2(dev_null.handle, posix.STDERR_FILENO);
-
-            const argv = [_:null]?[*:0]const u8{
-                "/bin/sh",
-                "-c",
-                cmd_z.ptr,
-                null,
-            };
-            _ = common.c_exec.execvp("/bin/sh", &argv);
-            // If execvp returns, it failed
-            std.c._exit(127);
-            unreachable;
-        } else {
-            // Parent process - wait for child
-            var wait_status: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status, 0);
-        }
+        };
 
         const end = std.time.Instant.now() catch {
             try IO.eprint("bench: timer not available\n", .{});

@@ -1,8 +1,23 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const stdlib_loader = @import("../../stdlib/loader.zig");
+
+const is_windows = builtin.os.tag == .windows;
+
+fn readStdinByte(buf: []u8) !usize {
+    if (is_windows) {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.Unexpected;
+        var bytes_read: u32 = 0;
+        const success = std.os.windows.kernel32.ReadFile(handle, buf.ptr, @intCast(buf.len), &bytes_read, null);
+        if (success == 0) return error.Unexpected;
+        return @intCast(bytes_read);
+    } else {
+        return std.posix.read(std.posix.STDIN_FILENO, buf) catch return error.Unexpected;
+    }
+}
 
 /// Shell builtins that require shell state access
 /// Includes: cd, pwd, read, source, history
@@ -262,7 +277,7 @@ pub fn read(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         var chars_read: usize = 0;
         while (chars_read < n and chars_read < line_buf.len) {
             var byte_buf: [1]u8 = undefined;
-            const bytes_read = std.posix.read(std.posix.STDIN_FILENO, &byte_buf) catch break;
+            const bytes_read = readStdinByte(&byte_buf) catch break;
             if (bytes_read == 0) break;
             line_buf[chars_read] = byte_buf[0];
             chars_read += 1;
@@ -271,7 +286,7 @@ pub fn read(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     } else if (delimiter != '\n') {
         while (line_len < line_buf.len) {
             var byte_buf: [1]u8 = undefined;
-            const bytes_read = std.posix.read(std.posix.STDIN_FILENO, &byte_buf) catch break;
+            const bytes_read = readStdinByte(&byte_buf) catch break;
             if (bytes_read == 0) break;
             if (byte_buf[0] == delimiter) break;
             line_buf[line_len] = byte_buf[0];

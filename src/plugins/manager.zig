@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const plugin_mod = @import("plugin.zig");
 const Plugin = plugin_mod.Plugin;
 const PluginInfo = plugin_mod.PluginInfo;
@@ -37,8 +38,14 @@ pub const PluginManager = struct {
                     err,
                 }) catch "[Plugin Manager] Warning: Shutdown failed\n";
 
-                const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
-                stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
+                if (builtin.os.tag == .windows) {
+                    const stderr_handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse continue;
+                    const stderr_file = std.Io.File{ .handle = stderr_handle, .flags = .{ .nonblocking = false } };
+                    stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
+                } else {
+                    const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+                    stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
+                }
             };
             plugin.deinit();
             // Free the key

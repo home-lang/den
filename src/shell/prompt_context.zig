@@ -158,7 +158,12 @@ pub fn updatePromptContext(self: *Shell) !void {
     }
     self.prompt_context.zig_version = shell_mod.detectZigVersion(self.allocator) catch null;
 
-    self.prompt_context.current_time = if (std.time.Instant.now()) |instant| @intCast(instant.timestamp.sec) else |_| 0;
+    self.prompt_context.current_time = if (std.time.Instant.now()) |instant| blk: {
+        break :blk if (@import("builtin").os.tag == .windows)
+            @as(i64, @intCast(instant.timestamp / 10_000_000))
+        else
+            @as(i64, @intCast(instant.timestamp.sec));
+    } else |_| 0;
 }
 
 /// Check if the current directory has a bun.lock or bun.lockb file

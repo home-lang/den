@@ -237,7 +237,7 @@ pub const Shell = struct {
         var env = std.StringHashMap([]const u8).init(allocator);
 
         // Inherit all environment variables from parent process
-        {
+        if (builtin.os.tag != .windows) {
             const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
             var i: usize = 0;
             while (c_environ.*[i]) |entry| : (i += 1) {
@@ -1056,27 +1056,36 @@ pub const Shell = struct {
             // Execute the inner command in a subshell (fork to isolate env changes)
             const inner = std.mem.trim(u8, fn_trimmed[1 .. fn_trimmed.len - 1], &std.ascii.whitespace);
             if (inner.len > 0) {
-                const fork_ret = std.c.fork();
-                if (fork_ret < 0) {
-                    try IO.eprint("den: fork failed\n", .{});
-                    self.last_exit_code = 1;
-                    return;
-                }
-                if (fork_ret == 0) {
-                    // Child: execute command and exit
+                if (builtin.os.tag == .windows) {
+                    // Windows: no fork, execute in current process (limited isolation)
                     self.executeCommand(inner) catch {
-                        std.c._exit(1);
+                        self.last_exit_code = 1;
                     };
-                    std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
-                }
-                // Parent: wait for child
-                var wait_status: c_int = 0;
-                _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
-                if (wait_status & 0x7f == 0) {
-                    // Exited normally
-                    self.last_exit_code = @as(i32, @intCast((wait_status >> 8) & 0xff));
                 } else {
-                    self.last_exit_code = 128 + @as(i32, @intCast(wait_status & 0x7f));
+                    const fork_ret = std.c.fork();
+                    if (fork_ret < 0) {
+                        try IO.eprint("den: fork failed\n", .{});
+                        self.last_exit_code = 1;
+                        return;
+                    }
+                    if (fork_ret == 0) {
+                        // Child: execute command and exit
+                        self.executeCommand(inner) catch {
+                            std.c._exit(1);
+                        };
+                        std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
+                    }
+                    // Parent: wait for child
+                    var wait_status: c_int = 0;
+                    if (comptime builtin.os.tag != .windows) {
+                        _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
+                    }
+                    if (wait_status & 0x7f == 0) {
+                        // Exited normally
+                        self.last_exit_code = @as(i32, @intCast((wait_status >> 8) & 0xff));
+                    } else {
+                        self.last_exit_code = 128 + @as(i32, @intCast(wait_status & 0x7f));
+                    }
                 }
                 return;
             }
@@ -1526,6 +1535,8 @@ pub const Shell = struct {
                 }
             } else if (shell_mod.isShellBuiltin(cmd.name)) {
                 // Shell-level builtin with redirections: apply redirections manually
+                // Skip on Windows (fd-level redirections not supported)
+                if (builtin.os.tag != .windows) {
                 var saved_fds: [3]c_int = .{ -1, -1, -1 };
                 var applied = false;
                 for (cmd.redirections) |redir| {
@@ -1603,6 +1614,7 @@ pub const Shell = struct {
                         return;
                     }
                 }
+            } // end !windows
             }
         }
 
@@ -1792,7 +1804,16 @@ pub const Shell = struct {
 
         if (quoted) {
             // Quoted heredoc: no expansion. Directly pipe the content.
-            // Create pipe, fork writer, redirect stdin, then execute command.
+            if (builtin.os.tag == .windows) {
+                // Windows: use spawn module for heredoc piping
+                // For now, convert to herestring as a fallback
+                const result = std.fmt.allocPrint(self.allocator, "{s} <<< \"{s}\"", .{
+                    cmd_part, heredoc_content,
+                }) catch return null;
+                return result;
+            }
+
+            // POSIX: Create pipe, fork writer, redirect stdin, then execute command.
             var pipe_fds: [2]std.posix.fd_t = undefined;
             if (std.c.pipe(&pipe_fds) != 0) return null;
             const read_fd = pipe_fds[0];
@@ -1828,8 +1849,10 @@ pub const Shell = struct {
             std.posix.close(read_fd);
 
             // Wait for writer to finish
-            var wait_status: c_int = 0;
-            _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
+            var wait_status_heredoc: c_int = 0;
+            if (comptime builtin.os.tag != .windows) {
+                _ = std.c.waitpid(@intCast(fork_ret), &wait_status_heredoc, 0);
+            }
 
             // Execute the command with stdin redirected
             self.executeCommand(cmd_part) catch {};
@@ -2522,6 +2545,13 @@ pub const Shell = struct {
         const left = std.mem.trim(u8, input[0..pp], &std.ascii.whitespace);
         if (left.len == 0) return false;
 
+        if (builtin.os.tag == .windows) {
+            // Windows: execute sequentially without pipe isolation
+            self.executeCommand(left) catch {};
+            self.executeCommand(right) catch {};
+            return true;
+        }
+
         // Set up a pipe, fork for the left side, execute right side with piped stdin
         var fds: [2]std.posix.fd_t = undefined;
         if (std.c.pipe(&fds) != 0) return false;
@@ -2559,8 +2589,10 @@ pub const Shell = struct {
         }
 
         // Wait for child
-        var wait_status: c_int = 0;
-        _ = std.c.waitpid(pid, &wait_status, 0);
+        var wait_status_pipe: c_int = 0;
+        if (comptime builtin.os.tag != .windows) {
+            _ = std.c.waitpid(pid, &wait_status_pipe, 0);
+        }
 
         return true;
     }

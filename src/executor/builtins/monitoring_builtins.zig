@@ -291,84 +291,58 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         const port_z = try allocator.dupeZ(u8, p);
         defer allocator.free(port_z);
 
-        const argv = [_]?[*:0]const u8{
-            "nc", "-z", "-w", "3", host_z, port_z, null,
-        };
-
-        const fork_ret = std.c.fork();
-        if (fork_ret < 0) {
+        const spawn = common.spawn;
+        const nc_argv = [_][]const u8{ "nc", "-z", "-w", "3", host, p };
+        const code = spawn.spawnAndWait(allocator, .{
+            .argv = &nc_argv,
+        }) catch {
             if (!quiet) {
-                try IO.print("  \x1b[1;31m✗\x1b[0m Failed to fork process\n", .{});
+                try IO.print("  \x1b[1;31m✗\x1b[0m Failed to spawn process\n", .{});
             }
             return 1;
-        }
-        const pid: std.posix.pid_t = @intCast(fork_ret);
+        };
 
-        if (pid == 0) {
-            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
-            _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
-            _ = std.c.dup2(dev_null.handle, std.posix.STDOUT_FILENO);
-            _ = common.c_exec.execvp("nc", @ptrCast(&argv));
-            std.c._exit(127);
-        } else {
-            var wait_status: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status, 0);
-            const code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
-
-            if (code == 0) {
-                if (!quiet) {
-                    try IO.print("  \x1b[1;32m✓\x1b[0m Port {s} is open\n", .{p});
-                }
-            } else {
-                if (!quiet) {
-                    try IO.print("  \x1b[1;31m✗\x1b[0m Port {s} is closed or unreachable\n", .{p});
-                }
-                return 1;
+        if (code == 0) {
+            if (!quiet) {
+                try IO.print("  \x1b[1;32m✓\x1b[0m Port {s} is open\n", .{p});
             }
+        } else {
+            if (!quiet) {
+                try IO.print("  \x1b[1;31m✗\x1b[0m Port {s} is closed or unreachable\n", .{p});
+            }
+            return 1;
         }
     } else {
         if (!quiet) {
             try IO.print("\x1b[1;33mConnectivity Check:\x1b[0m {s}\n", .{host});
         }
 
-        const host_z = try allocator.dupeZ(u8, host);
-        defer allocator.free(host_z);
-
-        const argv = if (builtin.os.tag == .macos)
-            [_]?[*:0]const u8{ "ping", "-c", "1", "-t", "3", host_z, null }
+        const spawn = common.spawn;
+        const ping_argv = if (builtin.os.tag == .macos)
+            [_][]const u8{ "ping", "-c", "1", "-t", "3", host }
+        else if (builtin.os.tag == .windows)
+            [_][]const u8{ "ping", "-n", "1", "-w", "3000", host }
         else
-            [_]?[*:0]const u8{ "ping", "-c", "1", "-W", "3", host_z, null };
+            [_][]const u8{ "ping", "-c", "1", "-W", "3", host };
 
-        const fork_ret2 = std.c.fork();
-        if (fork_ret2 < 0) {
+        const code = spawn.spawnAndWait(allocator, .{
+            .argv = &ping_argv,
+        }) catch {
             if (!quiet) {
-                try IO.print("  \x1b[1;31m✗\x1b[0m Failed to fork process\n", .{});
+                try IO.print("  \x1b[1;31m✗\x1b[0m Failed to spawn process\n", .{});
             }
             return 1;
-        }
-        const pid: std.posix.pid_t = @intCast(fork_ret2);
+        };
 
-        if (pid == 0) {
-            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
-            _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
-            _ = std.c.dup2(dev_null.handle, std.posix.STDOUT_FILENO);
-            _ = common.c_exec.execvp("ping", @ptrCast(&argv));
-            std.c._exit(127);
-        } else {
-            var wait_status2: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status2, 0);
-            const code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status2))));
-
-            if (code == 0) {
-                if (!quiet) {
-                    try IO.print("  \x1b[1;32m✓\x1b[0m Host is reachable\n", .{});
-                }
-            } else {
-                if (!quiet) {
-                    try IO.print("  \x1b[1;31m✗\x1b[0m Host is unreachable\n", .{});
-                }
-                return 1;
+        if (code == 0) {
+            if (!quiet) {
+                try IO.print("  \x1b[1;32m✓\x1b[0m Host is reachable\n", .{});
             }
+        } else {
+            if (!quiet) {
+                try IO.print("  \x1b[1;31m✗\x1b[0m Host is unreachable\n", .{});
+            }
+            return 1;
         }
     }
 
@@ -573,7 +547,6 @@ pub fn logTail(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
 }
 
 pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
-    _ = allocator;
 
     var pattern: ?[]const u8 = null;
     var pid_filter: ?i32 = null;
@@ -638,49 +611,24 @@ pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
         }
         try IO.print("\n\n", .{});
 
-        const ps_args = if (builtin.os.tag == .macos)
-            [_]?[*:0]const u8{ "ps", "-axo", "pid,pcpu,pmem,rss,comm", null }
+        const spawn = common.spawn;
+        const ps_argv = if (builtin.os.tag == .macos)
+            [_][]const u8{ "ps", "-axo", "pid,pcpu,pmem,rss,comm" }
+        else if (builtin.os.tag == .windows)
+            [_][]const u8{ "tasklist", "/FO", "CSV", "/NH" }
         else
-            [_]?[*:0]const u8{ "ps", "-eo", "pid,pcpu,pmem,rss,comm", null };
+            [_][]const u8{ "ps", "-eo", "pid,pcpu,pmem,rss,comm" };
 
-        var pipe_fds: [2]std.posix.fd_t = undefined;
-        if (std.c.pipe(&pipe_fds) != 0) {
-            try IO.eprint("den: proc-monitor: failed to create pipe\n", .{});
+        const ps_result = spawn.captureOutput(allocator, .{
+            .argv = &ps_argv,
+        }) catch {
+            try IO.eprint("den: proc-monitor: failed to run ps\n", .{});
             return 1;
-        }
-
-        const fork_ret3 = std.c.fork();
-        if (fork_ret3 < 0) {
-            try IO.eprint("den: proc-monitor: failed to fork\n", .{});
-            return 1;
-        }
-        const pid: std.posix.pid_t = @intCast(fork_ret3);
-
-        if (pid == 0) {
-            std.posix.close(pipe_fds[0]);
-            _ = std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO);
-            std.posix.close(pipe_fds[1]);
-            const dev_null = std.Io.Dir.openFileAbsolute(std.Options.debug_io,"/dev/null", .{ .mode = .write_only }) catch std.c._exit(127);
-            _ = std.c.dup2(dev_null.handle, std.posix.STDERR_FILENO);
-            _ = common.c_exec.execvp("ps", @ptrCast(&ps_args));
-            std.c._exit(127);
-        } else {
-            std.posix.close(pipe_fds[1]);
-
-            var buf: [8192]u8 = undefined;
-            var total_read: usize = 0;
-
-            while (total_read < buf.len) {
-                const n = (std.Io.File{ .handle = pipe_fds[0], .flags = .{ .nonblocking = false } }).readStreaming(std.Options.debug_io, &.{buf[total_read..]}) catch break;
-                if (n == 0) break;
-                total_read += n;
-            }
-
-            std.posix.close(pipe_fds[0]);
-            {
-                var reap_status: c_int = 0;
-                _ = std.c.waitpid(pid, &reap_status, 0);
-            }
+        };
+        defer ps_result.deinit(allocator);
+        {
+            const total_read = ps_result.stdout.len;
+            const buf = ps_result.stdout;
 
             var line_num: usize = 0;
             var proc_count: usize = 0;

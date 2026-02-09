@@ -223,9 +223,21 @@ const KeyResult = struct {
     ch: u8 = 0,
 };
 
+fn readStdin(buf: []u8) !usize {
+    if (builtin.os.tag == .windows) {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.Unexpected;
+        var bytes_read: u32 = 0;
+        const success = std.os.windows.kernel32.ReadFile(handle, buf.ptr, @intCast(buf.len), &bytes_read, null);
+        if (success == 0) return error.Unexpected;
+        return @intCast(bytes_read);
+    } else {
+        return readStdin(buf);
+    }
+}
+
 fn readKey() !KeyResult {
     var buf: [1]u8 = undefined;
-    const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
+    const n = readStdin(&buf) catch |err| {
         if (err == error.WouldBlock) return .{ .key = .none };
         return err;
     };
@@ -236,16 +248,16 @@ fn readKey() !KeyResult {
     if (c == 0x1b) {
         // Possible escape sequence
         var seq: [5]u8 = undefined;
-        const n2 = posix.read(posix.STDIN_FILENO, seq[0..1]) catch return .{ .key = .escape };
+        const n2 = readStdin(seq[0..1]) catch return .{ .key = .escape };
         if (n2 == 0) return .{ .key = .escape };
 
         if (seq[0] == '[') {
-            const n3 = posix.read(posix.STDIN_FILENO, seq[1..2]) catch return .{ .key = .escape };
+            const n3 = readStdin(seq[1..2]) catch return .{ .key = .escape };
             if (n3 == 0) return .{ .key = .escape };
 
             // Check for extended sequences like [1;5A, [H, [F, [5~, [6~
             if (seq[1] >= '0' and seq[1] <= '9') {
-                const n4 = posix.read(posix.STDIN_FILENO, seq[2..3]) catch return .{ .key = .escape };
+                const n4 = readStdin(seq[2..3]) catch return .{ .key = .escape };
                 if (n4 > 0 and seq[2] == '~') {
                     return switch (seq[1]) {
                         '1' => .{ .key = .home },
@@ -271,7 +283,7 @@ fn readKey() !KeyResult {
                 else => .{ .key = .none },
             };
         } else if (seq[0] == 'O') {
-            const n3 = posix.read(posix.STDIN_FILENO, seq[1..2]) catch return .{ .key = .escape };
+            const n3 = readStdin(seq[1..2]) catch return .{ .key = .escape };
             if (n3 == 0) return .{ .key = .escape };
             return switch (seq[1]) {
                 'H' => .{ .key = .home },

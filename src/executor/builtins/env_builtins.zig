@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
@@ -13,11 +14,11 @@ fn getenvFromSlice(key: []const u8) ?[]const u8 {
     return std.mem.span(@as([*:0]const u8, @ptrCast(value)));
 }
 
-// C library extern declarations for environment manipulation
-const libc_env = struct {
+// C library extern declarations for environment manipulation (POSIX only)
+const libc_env = if (builtin.os.tag != .windows) struct {
     extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
     extern "c" fn unsetenv(name: [*:0]const u8) c_int;
-};
+} else struct {};
 
 /// Environment builtins: env, export, set, unset, envCmd
 
@@ -513,9 +514,11 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             try saved_os_env.put(unset_var, null);
         }
         // Unset in OS environment
-        const unset_var_z = try ctx.allocator.dupeZ(u8, unset_var);
-        defer ctx.allocator.free(unset_var_z);
-        _ = libc_env.unsetenv(unset_var_z.ptr);
+        if (builtin.os.tag != .windows) {
+            const unset_var_z = try ctx.allocator.dupeZ(u8, unset_var);
+            defer ctx.allocator.free(unset_var_z);
+            _ = libc_env.unsetenv(unset_var_z.ptr);
+        }
     }
 
     // Apply overrides to OS environment
@@ -530,11 +533,13 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             }
         }
         // Set in OS environment
-        const key_z = try ctx.allocator.dupeZ(u8, override.key);
-        defer ctx.allocator.free(key_z);
-        const value_z = try ctx.allocator.dupeZ(u8, override.value);
-        defer ctx.allocator.free(value_z);
-        _ = libc_env.setenv(key_z.ptr, value_z.ptr, 1);
+        if (builtin.os.tag != .windows) {
+            const key_z = try ctx.allocator.dupeZ(u8, override.key);
+            defer ctx.allocator.free(key_z);
+            const value_z = try ctx.allocator.dupeZ(u8, override.value);
+            defer ctx.allocator.free(value_z);
+            _ = libc_env.setenv(key_z.ptr, value_z.ptr, 1);
+        }
     }
 
     // Build new command from remaining args
@@ -569,6 +574,7 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 }
 
 fn restoreOsEnv(allocator: std.mem.Allocator, saved_os_env: *std.StringHashMap(?[]const u8)) void {
+    if (builtin.os.tag == .windows) return;
     var iter = saved_os_env.iterator();
     while (iter.next()) |entry| {
         const key = entry.key_ptr.*;

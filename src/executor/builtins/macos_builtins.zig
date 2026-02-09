@@ -77,7 +77,6 @@ pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
                 return 1;
             };
             stdin.close(std.Options.debug_io);
-            child.stdin = null;
         }
 
         _ = child.wait(std.Options.debug_io) catch {
@@ -93,13 +92,13 @@ pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             .stdin = .pipe,
             .stdout = .ignore,
             .stderr = .ignore,
-        })) |*child| {
-            if (child.stdin) |stdin| {
+        })) |child_val| {
+            var child2 = child_val;
+            if (child2.stdin) |stdin| {
                 stdin.writeStreamingAll(std.Options.debug_io, trimmed_key) catch {};
                 stdin.close(std.Options.debug_io);
-                child.stdin = null;
             }
-            _ = child.wait(std.Options.debug_io) catch {};
+            _ = child2.wait(std.Options.debug_io) catch {};
             try IO.print("SSH public key (~{s}) copied to clipboard\n", .{found_path.?});
         } else |_| {
             // Fallback: just print the key
@@ -223,27 +222,12 @@ pub fn show(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         const file_z = try allocator.dupeZ(u8, file);
         defer allocator.free(file_z);
 
-        const argv = [_]?[*:0]const u8{
-            "chflags",
-            "nohidden",
-            file_z,
-            null,
-        };
-
-        const fork_ret = std.c.fork();
-        if (fork_ret < 0) return error.Unexpected;
-        const pid: std.posix.pid_t = @intCast(fork_ret);
-        if (pid == 0) {
-            _ = common.c_exec.execvp("chflags", @ptrCast(&argv));
-            std.c._exit(127);
-        } else {
-            var wait_status: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status, 0);
-            const code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
-            if (code != 0) {
-                try IO.eprint("den: show: failed to show {s}\n", .{file});
-                exit_code = code;
-            }
+        const spawn = common.spawn;
+        const spawn_argv = [_][]const u8{ "chflags", "nohidden", file };
+        const code = spawn.spawnAndWait(allocator, .{ .argv = &spawn_argv }) catch return error.Unexpected;
+        if (code != 0) {
+            try IO.eprint("den: show: failed to show {s}\n", .{file});
+            exit_code = code;
         }
     }
     return exit_code;
@@ -267,27 +251,12 @@ pub fn hide(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         const file_z = try allocator.dupeZ(u8, file);
         defer allocator.free(file_z);
 
-        const argv = [_]?[*:0]const u8{
-            "chflags",
-            "hidden",
-            file_z,
-            null,
-        };
-
-        const fork_ret2 = std.c.fork();
-        if (fork_ret2 < 0) return error.Unexpected;
-        const pid: std.posix.pid_t = @intCast(fork_ret2);
-        if (pid == 0) {
-            _ = common.c_exec.execvp("chflags", @ptrCast(&argv));
-            std.c._exit(127);
-        } else {
-            var wait_status: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status, 0);
-            const code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
-            if (code != 0) {
-                try IO.eprint("den: hide: failed to hide {s}\n", .{file});
-                exit_code = code;
-            }
+        const spawn = common.spawn;
+        const spawn_argv = [_][]const u8{ "chflags", "hidden", file };
+        const code = spawn.spawnAndWait(allocator, .{ .argv = &spawn_argv }) catch return error.Unexpected;
+        if (code != 0) {
+            try IO.eprint("den: hide: failed to hide {s}\n", .{file});
+            exit_code = code;
         }
     }
     return exit_code;
@@ -1012,31 +981,12 @@ fn dotfilesEdit(file: []const u8) !i32 {
 
     try IO.print("Opening {s} with {s}...\n", .{ path, editor });
 
-    // Fork and exec editor
-    const fork_ret3 = std.c.fork();
-    if (fork_ret3 < 0) {
-        try IO.eprint("dotfiles edit: failed to fork\n", .{});
+    const spawn = common.spawn;
+    const spawn_argv = [_][]const u8{ editor, path };
+    return spawn.spawnAndWait(std.heap.page_allocator, .{ .argv = &spawn_argv }) catch {
+        try IO.eprint("dotfiles edit: failed to exec editor\n", .{});
         return 1;
-    }
-    const pid3: std.posix.pid_t = @intCast(fork_ret3);
-
-    if (pid3 == 0) {
-        // Child process
-        var editor_buf: [256]u8 = undefined;
-        const editor_z = std.fmt.bufPrintZ(&editor_buf, "{s}", .{editor}) catch std.c._exit(127);
-
-        var path_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const path_z = std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path}) catch std.c._exit(127);
-
-        const argv = [_]?[*:0]const u8{ editor_z, path_z, null };
-        _ = common.c_exec.execvp(editor_z, @ptrCast(&argv));
-        std.c._exit(127);
-    } else {
-        // Parent process - wait for editor
-        var wait_status3: c_int = 0;
-        _ = std.c.waitpid(pid3, &wait_status3, 0);
-        return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status3))));
-    }
+    };
 }
 
 fn dotfilesDiff(file: []const u8) !i32 {
@@ -1074,34 +1024,15 @@ fn dotfilesDiff(file: []const u8) !i32 {
         return 1;
     };
 
-    // Fork and exec diff
-    const fork_ret4 = std.c.fork();
-    if (fork_ret4 < 0) {
-        try IO.eprint("dotfiles diff: failed to fork\n", .{});
+    const spawn = common.spawn;
+    const diff_argv = [_][]const u8{ "diff", "-u", "--color=auto", backup, current };
+    const code = spawn.spawnAndWait(std.heap.page_allocator, .{ .argv = &diff_argv }) catch {
+        try IO.eprint("dotfiles diff: failed to exec diff\n", .{});
         return 1;
+    };
+    // diff returns 0 if same, 1 if different, 2 if error
+    if (code == 0) {
+        try IO.print("\x1b[1;32m+\x1b[0m No differences\n", .{});
     }
-    const pid4: std.posix.pid_t = @intCast(fork_ret4);
-
-    if (pid4 == 0) {
-        // Child process
-        var backup_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const backup_z = std.fmt.bufPrintZ(&backup_z_buf, "{s}", .{backup}) catch std.c._exit(127);
-
-        var current_z_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const current_z = std.fmt.bufPrintZ(&current_z_buf, "{s}", .{current}) catch std.c._exit(127);
-
-        const argv = [_]?[*:0]const u8{ "diff", "-u", "--color=auto", backup_z, current_z, null };
-        _ = common.c_exec.execvp("diff", @ptrCast(&argv));
-        std.c._exit(127);
-    } else {
-        // Parent process - wait for diff
-        var wait_status4: c_int = 0;
-        _ = std.c.waitpid(pid4, &wait_status4, 0);
-        const code = std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status4)));
-        // diff returns 0 if same, 1 if different, 2 if error
-        if (code == 0) {
-            try IO.print("\x1b[1;32m+\x1b[0m No differences\n", .{});
-        }
-        return @intCast(code);
-    }
+    return code;
 }

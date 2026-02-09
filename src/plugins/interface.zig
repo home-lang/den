@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 fn getenvFromSlice(key: []const u8) ?[]const u8 {
     var env_buf: [512]u8 = undefined;
@@ -435,7 +436,10 @@ pub const PluginRegistry = struct {
                             err,
                         }) catch "[Plugin Error] Failed to format error message\n";
 
-                        const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+                        const stderr_file = if (builtin.os.tag == .windows)
+                            std.Io.File{ .handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse unreachable, .flags = .{ .nonblocking = false } }
+                        else
+                            std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
                         stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
                     }
                 };
@@ -463,7 +467,10 @@ pub const PluginRegistry = struct {
                             err,
                         }) catch "[Plugin Error] Failed to format error message\n";
 
-                        const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+                        const stderr_file = if (builtin.os.tag == .windows)
+                            std.Io.File{ .handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse unreachable, .flags = .{ .nonblocking = false } }
+                        else
+                            std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
                         stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
                     }
                     continue;

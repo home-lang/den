@@ -10,6 +10,10 @@ const process = @import("../../utils/process.zig");
 // Windows constants
 const PROCESS_TERMINATE: u32 = 0x0001;
 
+const OpenProcess = if (builtin.os.tag == .windows) struct {
+    extern "kernel32" fn OpenProcess(dwDesiredAccess: u32, bInheritHandles: std.os.windows.BOOL, dwProcessId: u32) callconv(std.builtin.CallingConvention.winapi) ?std.os.windows.HANDLE;
+}.OpenProcess else undefined;
+
 /// kill builtin - send signals to processes
 pub fn kill(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     if (command.args.len == 0) {
@@ -147,7 +151,7 @@ pub fn kill(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             };
 
             // Open process with TERMINATE permission
-            const handle = std.os.windows.kernel32.OpenProcess(
+            const handle = OpenProcess(
                 PROCESS_TERMINATE,
                 std.os.windows.FALSE,
                 pid,

@@ -77,17 +77,20 @@ pub fn code(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         null,
     };
 
-    const fork_ret = std.c.fork();
-    if (fork_ret < 0) return error.Unexpected;
-    const pid: std.posix.pid_t = @intCast(fork_ret);
-    if (pid == 0) {
-        _ = common.c_exec.execvp("open", @ptrCast(&argv));
-        std.c._exit(127);
-    } else {
-        var wait_status: c_int = 0;
-        _ = std.c.waitpid(pid, &wait_status, 0);
-        return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
+    if (comptime builtin.os.tag != .windows) {
+        const fork_ret = std.c.fork();
+        if (fork_ret < 0) return error.Unexpected;
+        const pid: std.posix.pid_t = @intCast(fork_ret);
+        if (pid == 0) {
+            _ = common.c_exec.execvp("open", @ptrCast(&argv));
+            std.c._exit(127);
+        } else {
+            var wait_status: c_int = 0;
+            _ = std.c.waitpid(pid, &wait_status, 0);
+            return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
+        }
     }
+    return 1;
 }
 
 /// pstorm - Open file or directory in PhpStorm (macOS)
@@ -112,15 +115,18 @@ pub fn pstorm(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
         null,
     };
 
-    const fork_ret2 = std.c.fork();
-    if (fork_ret2 < 0) return error.Unexpected;
-    const pid2: std.posix.pid_t = @intCast(fork_ret2);
-    if (pid2 == 0) {
-        _ = common.c_exec.execvp("open", @ptrCast(&argv));
-        std.c._exit(127);
-    } else {
-        var wait_status2: c_int = 0;
-        _ = std.c.waitpid(pid2, &wait_status2, 0);
-        return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status2))));
+    if (comptime builtin.os.tag != .windows) {
+        const fork_ret2 = std.c.fork();
+        if (fork_ret2 < 0) return error.Unexpected;
+        const pid2: std.posix.pid_t = @intCast(fork_ret2);
+        if (pid2 == 0) {
+            _ = common.c_exec.execvp("open", @ptrCast(&argv));
+            std.c._exit(127);
+        } else {
+            var wait_status2: c_int = 0;
+            _ = std.c.waitpid(pid2, &wait_status2, 0);
+            return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status2))));
+        }
     }
+    return 1;
 }

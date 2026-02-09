@@ -117,28 +117,34 @@ pub fn watchCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
 
     // Install SIGINT handler for graceful shutdown
     watch_interrupted.store(false, .release);
-    var old_action: std.posix.Sigaction = undefined;
-    const new_action = std.posix.Sigaction{
-        .handler = .{ .handler = sigintHandler },
-        .mask = std.posix.sigemptyset(),
-        .flags = 0,
-    };
-    std.posix.sigaction(std.posix.SIG.INT, &new_action, &old_action);
+    var old_action: if (builtin.os.tag == .windows) u0 else std.posix.Sigaction = if (builtin.os.tag == .windows) 0 else undefined;
+    if (builtin.os.tag != .windows) {
+        const new_action = std.posix.Sigaction{
+            .handler = .{ .handler = sigintHandler },
+            .mask = std.posix.sigemptyset(),
+            .flags = 0,
+        };
+        std.posix.sigaction(std.posix.SIG.INT, &new_action, &old_action);
+    }
 
-    // Attempt kqueue-based watching on macOS, fall back to polling otherwise
-    const result = if (builtin.os.tag == .macos)
+    const has_kqueue = builtin.os.tag == .macos or builtin.os.tag == .freebsd or builtin.os.tag == .openbsd or builtin.os.tag == .netbsd;
+
+    // Attempt kqueue-based watching on supported platforms, fall back to polling otherwise
+    const result = if (has_kqueue)
         watchWithKqueue(allocator, watch_path, shell_cmd, interval_ms)
     else
         watchWithPolling(allocator, watch_path, shell_cmd, interval_ms);
 
     // Restore original SIGINT handler
-    std.posix.sigaction(std.posix.SIG.INT, &old_action, null);
+    if (builtin.os.tag != .windows) {
+        std.posix.sigaction(std.posix.SIG.INT, &old_action, null);
+    }
 
     if (result) |exit_code| {
         return exit_code;
     } else |err| {
-        // If kqueue failed on macOS, try polling as fallback
-        if (builtin.os.tag == .macos) {
+        // If kqueue failed, try polling as fallback
+        if (has_kqueue) {
             const poll_result = watchWithPolling(allocator, watch_path, shell_cmd, interval_ms);
             if (poll_result) |exit_code| {
                 return exit_code;
@@ -317,35 +323,9 @@ fn watchWithPolling(allocator: std.mem.Allocator, watch_path: []const u8, shell_
 /// The cmd_z parameter must be a null-terminated command string.
 /// Returns the exit code of the child process.
 fn executeShellCommand(cmd_z: [*:0]const u8) i32 {
-    const argv = [_]?[*:0]const u8{
-        "/bin/sh",
-        "-c",
-        cmd_z,
-        null,
-    };
-
-    const fork_ret = std.c.fork();
-    if (fork_ret < 0) {
-        return 127;
-    }
-    const pid: std.posix.pid_t = @intCast(fork_ret);
-
-    if (pid == 0) {
-        // Child process: exec /bin/sh -c "<command>"
-        _ = common.c_exec.execvp("/bin/sh", @ptrCast(&argv));
-        std.c._exit(127);
-    }
-
-    // Parent: wait for child to finish
-    var wait_status: c_int = 0;
-    _ = std.c.waitpid(pid, &wait_status, 0);
-    const status_u32: u32 = @bitCast(wait_status);
-    if (std.posix.W.IFEXITED(status_u32)) {
-        return @intCast(std.posix.W.EXITSTATUS(status_u32));
-    } else if (std.posix.W.IFSIGNALED(status_u32)) {
-        return 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(status_u32))));
-    }
-    return 1;
+    const spawn = common.spawn;
+    const cmd_slice = std.mem.span(cmd_z);
+    return spawn.shellExec(std.heap.page_allocator, cmd_slice) catch return 127;
 }
 
 /// Build a single shell command string from argument slices.

@@ -329,7 +329,7 @@ pub const Glob = struct {
                 // Check if executable (Unix permissions)
                 if (stat.kind != .file) break :blk false;
                 // On Unix, check execute bits
-                break :blk (stat.permissions.toMode() & 0o111) != 0;
+                break :blk if (builtin.os.tag == .windows) true else (stat.permissions.toMode() & 0o111) != 0;
             },
             else => true, // Unknown qualifier - match everything
         };

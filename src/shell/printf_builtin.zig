@@ -3,8 +3,11 @@
 //! This module implements the printf builtin command with full format string support.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const IO = @import("../utils/io.zig").IO;
 const types = @import("../types/mod.zig");
+
+const is_windows = builtin.os.tag == .windows;
 
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
@@ -29,12 +32,14 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
     // For -v flag: redirect stdout to a pipe to capture output
     var saved_stdout: c_int = -1;
     var pipe_fds: [2]c_int = .{ -1, -1 };
-    if (var_name != null) {
-        if (std.c.pipe(&pipe_fds) == 0) {
-            saved_stdout = std.c.dup(std.posix.STDOUT_FILENO);
-            _ = std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO);
-            std.posix.close(@intCast(pipe_fds[1]));
-            pipe_fds[1] = -1;
+    if (!is_windows) {
+        if (var_name != null) {
+            if (std.c.pipe(&pipe_fds) == 0) {
+                saved_stdout = std.c.dup(std.posix.STDOUT_FILENO);
+                _ = std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO);
+                std.posix.close(@intCast(pipe_fds[1]));
+                pipe_fds[1] = -1;
+            }
         }
     }
 
@@ -269,7 +274,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
     // For -v flag: read captured output and store in variable
     if (var_name) |vname| {
-        if (saved_stdout >= 0) {
+        if (!is_windows and saved_stdout >= 0) {
             // Restore stdout
             _ = std.c.dup2(saved_stdout, std.posix.STDOUT_FILENO);
             std.posix.close(@intCast(saved_stdout));

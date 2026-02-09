@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const env_utils = @import("env.zig");
 
 /// Typo correction utilities using fuzzy matching (Levenshtein distance)
@@ -97,7 +98,7 @@ pub const TypoCorrection = struct {
 
                 // Check if executable
                 const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch continue;
-                const is_executable = (stat.permissions.toMode() & 0o111) != 0;
+                const is_executable = if (builtin.os.tag == .windows) true else (stat.permissions.toMode() & 0o111) != 0;
                 if (!is_executable) continue;
 
                 // Calculate distance

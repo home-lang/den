@@ -2,12 +2,16 @@
 /// Eliminates duplication of common helpers across builtin files.
 const std = @import("std");
 const builtin = @import("builtin");
-const posix = std.posix;
+pub const spawn = @import("../../utils/spawn.zig");
 
 pub const IO = @import("../../utils/io.zig").IO;
 
-/// C exec functions for fork/exec patterns.
-pub const c_exec = struct {
+/// C exec functions for fork/exec patterns (POSIX only).
+pub const c_exec = if (builtin.os.tag == .windows) struct {
+    pub fn execvp(_: [*:0]const u8, _: [*:null]const ?[*:0]const u8) c_int {
+        return -1;
+    }
+} else struct {
     pub extern "c" fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]const u8) c_int;
 };
 
@@ -17,13 +21,23 @@ pub fn readAllStdin(allocator: std.mem.Allocator) ![]const u8 {
     var result = std.ArrayList(u8).empty;
     errdefer result.deinit(allocator);
     var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = posix.read(posix.STDIN_FILENO, &buf) catch |err| {
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
+    if (builtin.os.tag == .windows) {
+        const stdin_handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.Unexpected;
+        while (true) {
+            var bytes_read: u32 = 0;
+            const success = std.os.windows.kernel32.ReadFile(stdin_handle, &buf, @intCast(buf.len), &bytes_read, null);
+            if (success == 0 or bytes_read == 0) break;
+            try result.appendSlice(allocator, buf[0..bytes_read]);
+        }
+    } else {
+        while (true) {
+            const n = std.posix.read(std.posix.STDIN_FILENO, &buf) catch |err| {
+                if (err == error.WouldBlock) break;
+                return err;
+            };
+            if (n == 0) break;
+            try result.appendSlice(allocator, buf[0..n]);
+        }
     }
     return try result.toOwnedSlice(allocator);
 }
@@ -36,7 +50,12 @@ pub fn getenv(key: [*:0]const u8) ?[]const u8 {
 
 /// Get the C environ pointer (platform-specific).
 pub fn getCEnviron() [*:null]const ?[*:0]const u8 {
-    if (builtin.os.tag == .macos) {
+    if (builtin.os.tag == .windows) {
+        // Windows: environ not available via C extern in the same way.
+        // Return an empty sentinel-terminated list.
+        const empty: [*:null]const ?[*:0]const u8 = @ptrCast(&[_:null]?[*:0]const u8{null});
+        return empty;
+    } else if (builtin.os.tag == .macos) {
         const NSGetEnviron = @extern(*const fn () callconv(.c) *[*:null]?[*:0]u8, .{ .name = "_NSGetEnviron" });
         return @ptrCast(NSGetEnviron().*);
     } else {

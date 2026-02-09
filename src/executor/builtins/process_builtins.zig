@@ -244,6 +244,21 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         // Foreground mode - acknowledged but not changing behavior
     }
 
+    if (builtin.os.tag == .windows) {
+        // Windows: simple spawn-and-wait (no signal-based timeout)
+        const spawn = common.spawn;
+        var argv_list: [258][]const u8 = undefined;
+        argv_list[0] = cmd_name;
+        const copy_len = @min(cmd_args.len, argv_list.len - 1);
+        for (cmd_args[0..copy_len], 0..) |arg, i| {
+            argv_list[1 + i] = arg;
+        }
+        const exit_code = spawn.spawnAndWait(std.heap.page_allocator, .{
+            .argv = argv_list[0 .. 1 + copy_len],
+        }) catch return 1;
+        return exit_code;
+    }
+
     // Get signal number from name
     const sig = parseSignalName(signal_name);
 
@@ -291,7 +306,9 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     const start_time = std.time.Instant.now() catch {
         // Can't get time, just wait normally
         var wait_status_fallback: c_int = 0;
-        _ = std.c.waitpid(child_pid, &wait_status_fallback, 0);
+        if (comptime builtin.os.tag != .windows) {
+            _ = std.c.waitpid(child_pid, &wait_status_fallback, 0);
+        }
         return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status_fallback))));
     };
 
@@ -299,7 +316,10 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     while (true) {
         // Check if child has exited (non-blocking)
         var poll_wait_status: c_int = 0;
-        const poll_wait_pid = std.c.waitpid(child_pid, &poll_wait_status, std.posix.W.NOHANG);
+        const poll_wait_pid = if (comptime builtin.os.tag != .windows)
+            std.c.waitpid(child_pid, &poll_wait_status, std.posix.W.NOHANG)
+        else
+            unreachable;
         if (poll_wait_pid != 0) {
             const poll_status_u32: u32 = @bitCast(poll_wait_status);
             // Child exited
@@ -324,7 +344,10 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
                 std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(ka_secs * 1_000_000_000 + ka_nanos), .awake) catch {};
                 // Check if still running
                 var check_status: c_int = 0;
-                const check_pid = std.c.waitpid(child_pid, &check_status, std.posix.W.NOHANG);
+                const check_pid = if (comptime builtin.os.tag != .windows)
+                    std.c.waitpid(child_pid, &check_status, std.posix.W.NOHANG)
+                else
+                    unreachable;
                 if (check_pid == 0) {
                     // Still running, send KILL
                     std.posix.kill(child_pid, std.posix.SIG.KILL) catch {};
@@ -333,7 +356,9 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
             // Wait for child to actually exit
             var final_wait_status: c_int = 0;
-            _ = std.c.waitpid(child_pid, &final_wait_status, 0);
+            if (comptime builtin.os.tag != .windows) {
+                _ = std.c.waitpid(child_pid, &final_wait_status, 0);
+            }
             const final_status_u32: u32 = @bitCast(final_wait_status);
             if (preserve_status) {
                 if (std.posix.W.IFEXITED(final_status_u32)) {
@@ -383,8 +408,10 @@ pub fn parseDuration(str: []const u8) !f64 {
     return num * multiplier;
 }
 
-/// Convert signal name to signal enum for timeout
-pub fn parseSignalName(name: []const u8) std.posix.SIG {
+/// Convert signal name to signal enum for timeout (POSIX only)
+pub fn parseSignalName(name: []const u8) if (builtin.os.tag == .windows) u0 else std.posix.SIG {
+    if (builtin.os.tag == .windows) return 0;
+
     const upper = blk: {
         var buf: [16]u8 = undefined;
         const len = @min(name.len, buf.len);

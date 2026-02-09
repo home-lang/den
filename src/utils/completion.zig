@@ -1,6 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const env_utils = @import("env.zig");
 const cpu_opt = @import("cpu_opt.zig");
+
+const is_windows = builtin.os.tag == .windows;
 
 /// Completion cache with TTL support
 pub const CompletionCache = struct {
@@ -41,6 +44,9 @@ pub const CompletionCache = struct {
         // Use Instant for timestamp since milliTimestamp was removed in Zig 0.16
         const instant = std.time.Instant.now() catch return 0;
         // Convert seconds to milliseconds
+        if (is_windows) {
+            return @as(i64, @intCast(instant.timestamp / 10_000_000)) * 1000;
+        }
         return @as(i64, instant.timestamp.sec) * 1000;
     }
 
@@ -254,7 +260,7 @@ pub const Completion = struct {
                 if (entry.kind == .file and std.mem.startsWith(u8, entry.name, prefix)) {
                     // Check if executable
                     const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch continue;
-                    const is_executable = (stat.permissions.toMode() & 0o111) != 0;
+                    const is_executable = if (is_windows) true else (stat.permissions.toMode() & 0o111) != 0;
                     
                     if (is_executable) {
                         if (match_count >= matches_buffer.len) break;

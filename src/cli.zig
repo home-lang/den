@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const shell = @import("shell.zig");
 const Completion = @import("utils/completion.zig").Completion;
 const ShellCompletion = @import("shell_completion.zig").ShellCompletion;
@@ -408,7 +409,9 @@ fn devSetup(_: std.mem.Allocator) !void {
     try shim_file.writeStreamingAll(std.Options.debug_io, shim_content);
 
     // Make executable
-    try shim_file.setPermissions(std.Options.debug_io, std.Io.File.Permissions.fromMode(0o755));
+    if (builtin.os.tag != .windows) {
+        try shim_file.setPermissions(std.Options.debug_io, std.Io.File.Permissions.fromMode(0o755));
+    }
 
     std.debug.print("Development shim created at: {s}\n", .{shim_path});
     std.debug.print("Make sure ~/.local/bin is in your PATH\n", .{});
@@ -452,7 +455,9 @@ fn setup(_: std.mem.Allocator) !void {
     defer std.heap.page_allocator.free(wrapper_content);
 
     try wrapper_file.writeStreamingAll(std.Options.debug_io, wrapper_content);
-    try wrapper_file.setPermissions(std.Options.debug_io, std.Io.File.Permissions.fromMode(0o755));
+    if (builtin.os.tag != .windows) {
+        try wrapper_file.setPermissions(std.Options.debug_io, std.Io.File.Permissions.fromMode(0o755));
+    }
 
     std.debug.print("Wrapper installed at: {s}\n", .{wrapper_path});
     std.debug.print("\nTo use Den shell:\n", .{});

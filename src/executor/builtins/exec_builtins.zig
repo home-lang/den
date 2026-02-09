@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
@@ -274,6 +275,11 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
 
     if (cmd_start >= cmd.args.len) {
         try IO.eprint("coproc: command required after name\n", .{});
+        return 1;
+    }
+
+    if (builtin.os.tag == .windows) {
+        try IO.eprint("coproc: not supported on Windows\n", .{});
         return 1;
     }
 

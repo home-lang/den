@@ -35,11 +35,11 @@ const parseDevNetPath = networking.parseDevNetPath;
 const parseIPv4 = networking.parseIPv4;
 const parseIPv6 = networking.parseIPv6;
 
-// C library extern declarations for environment manipulation
-const libc_env = struct {
+// C library extern declarations for environment manipulation (POSIX only)
+const libc_env = if (builtin.os.tag != .windows) struct {
     extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
     extern "c" fn unsetenv(name: [*:0]const u8) c_int;
-};
+} else struct {};
 
 // Windows process access rights (for job control)
 const PROCESS_TERMINATE: u32 = 0x0001;
@@ -465,7 +465,9 @@ pub const Executor = struct {
         var pipestatus_buf: [17]i32 = undefined;
         for (pids_buffer[0..commands.len], 0..) |pid, pi| {
             var wait_status: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status, 0);
+            if (comptime builtin.os.tag != .windows) {
+                _ = std.c.waitpid(pid, &wait_status, 0);
+            }
             const status: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
             last_status = status;
             pipestatus_buf[pi] = status;
@@ -642,12 +644,14 @@ pub const Executor = struct {
                         // Also set in the C environment for child processes
                         var name_buf: [512]u8 = undefined;
                         var val_buf: [4096]u8 = undefined;
-                        if (var_name.len < name_buf.len and value.len < val_buf.len) {
-                            @memcpy(name_buf[0..var_name.len], var_name);
-                            name_buf[var_name.len] = 0;
-                            @memcpy(val_buf[0..value.len], value);
-                            val_buf[value.len] = 0;
-                            _ = libc_env.setenv(name_buf[0..var_name.len :0], val_buf[0..value.len :0], 1);
+                        if (builtin.os.tag != .windows) {
+                            if (var_name.len < name_buf.len and value.len < val_buf.len) {
+                                @memcpy(name_buf[0..var_name.len], var_name);
+                                name_buf[var_name.len] = 0;
+                                @memcpy(val_buf[0..value.len], value);
+                                val_buf[value.len] = 0;
+                                _ = libc_env.setenv(name_buf[0..var_name.len :0], val_buf[0..value.len :0], 1);
+                            }
                         }
                     }
                     return 0;
@@ -677,7 +681,9 @@ pub const Executor = struct {
                 } else {
                     // Parent - wait for child
                     var wait_status_builtin: c_int = 0;
-                    _ = std.c.waitpid(pid, &wait_status_builtin, 0);
+                    if (comptime builtin.os.tag != .windows) {
+                        _ = std.c.waitpid(pid, &wait_status_builtin, 0);
+                    }
                     return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status_builtin))));
                 }
             }
@@ -1434,7 +1440,9 @@ pub const Executor = struct {
         } else {
             // Parent process - wait for child
             var wait_status_exec: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status_exec, 0);
+            if (comptime builtin.os.tag != .windows) {
+                _ = std.c.waitpid(pid, &wait_status_exec, 0);
+            }
             return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status_exec))));
         }
     }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const IO = @import("../utils/io.zig").IO;
 const types = @import("../types/mod.zig");
 const cpu_opt = @import("../utils/cpu_opt.zig");
@@ -100,7 +101,12 @@ pub const History = struct {
         defer allocator.free(buffer);
         var total_read: usize = 0;
         while (total_read < read_size) {
-            const bytes_read = try std.posix.read(file.handle, buffer[total_read..]);
+            const bytes_read = if (builtin.os.tag == .windows) blk: {
+                var n: u32 = 0;
+                const remaining = buffer[total_read..];
+                const success = std.os.windows.kernel32.ReadFile(file.handle, remaining.ptr, @intCast(remaining.len), &n, null);
+                break :blk if (success == 0) @as(usize, 0) else @as(usize, n);
+            } else try std.posix.read(file.handle, buffer[total_read..]);
             if (bytes_read == 0) break;
             total_read += bytes_read;
         }

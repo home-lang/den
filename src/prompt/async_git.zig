@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const git_mod = @import("git.zig");
 const GitInfo = git_mod.GitInfo;
 const GitModule = git_mod.GitModule;
@@ -6,7 +7,11 @@ const GitModule = git_mod.GitModule;
 /// Helper to get milliseconds since some reference point
 fn getMilliTimestamp() i64 {
     const now = std.time.Instant.now() catch return 0;
-    return @intCast(now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000));
+    if (builtin.os.tag == .windows) {
+        return @intCast(now.timestamp / 10_000); // Windows: 100ns ticks to ms
+    } else {
+        return @intCast(now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000));
+    }
 }
 
 /// Async git status fetcher with caching and timeout support

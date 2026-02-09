@@ -66,7 +66,7 @@ pub fn uuid(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
     const seed: u64 = blk: {
         const instant = std.time.Instant.now() catch break :blk 0;
-        break :blk @intCast(instant.timestamp.sec);
+        break :blk if (builtin.os.tag == .windows) @intCast(instant.timestamp / 10_000_000) else @intCast(instant.timestamp.sec);
     };
     var rng = std.Random.DefaultPrng.init(seed);
     var random = rng.random();
@@ -277,7 +277,7 @@ pub fn date(command: *types.ParsedCommand) !i32 {
         try IO.eprint("den: date: unable to get current time\n", .{});
         return 1;
     };
-    const timestamp: i64 = @intCast(instant.timestamp.sec);
+    const timestamp: i64 = if (builtin.os.tag == .windows) @intCast(instant.timestamp / 10_000_000) else @intCast(instant.timestamp.sec);
     const seconds_per_day: i64 = 86400;
     const seconds_per_hour: i64 = 3600;
     const seconds_per_minute: i64 = 60;

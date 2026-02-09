@@ -3,6 +3,8 @@ const builtin = @import("builtin");
 const Arithmetic = @import("arithmetic.zig").Arithmetic;
 const env_utils = @import("env.zig");
 
+const is_windows = builtin.os.tag == .windows;
+
 /// LRU cache for variable expansion results
 pub const ExpansionCache = struct {
     const CacheEntry = struct {
@@ -142,7 +144,7 @@ pub const Expansion = struct {
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
-            .shell_start_time = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0,
+            .shell_start_time = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| 0,
         };
     }
 
@@ -200,7 +202,7 @@ pub const Expansion = struct {
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
-            .shell_start_time = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0,
+            .shell_start_time = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| 0,
         };
     }
 
@@ -404,7 +406,10 @@ pub const Expansion = struct {
             },
             '$' => {
                 // $$ - current process ID
-                const pid = std.c.getpid();
+                const pid: i64 = if (@import("builtin").os.tag == .windows)
+                    @intCast(std.os.windows.GetCurrentProcessId())
+                else
+                    @intCast(std.c.getpid());
                 const value = try std.fmt.allocPrint(self.allocator, "{d}", .{pid});
                 return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
@@ -1230,13 +1235,13 @@ pub const Expansion = struct {
             }
 
             // Print error message and return empty (shell should exit)
-            const posix = std.posix;
             var buf: [512]u8 = undefined;
             const msg = if (error_msg.len > 0)
                 std.fmt.bufPrint(&buf, "den: {s}: {s}\n", .{ var_name, error_msg }) catch "den: parameter null or not set\n"
             else
                 std.fmt.bufPrint(&buf, "den: {s}: parameter null or not set\n", .{var_name}) catch "den: parameter null or not set\n";
-            _ = std.c.write(posix.STDERR_FILENO, msg.ptr, msg.len);
+            const IO = @import("../utils/io.zig").IO;
+            IO.eprint("{s}", .{msg}) catch {};
             return error.ParameterNullOrNotSet;
         }
 
@@ -1288,7 +1293,7 @@ pub const Expansion = struct {
         // Handle special dynamic variables in braced form
         if (std.mem.eql(u8, content, "RANDOM")) {
             var buf: [16]u8 = undefined;
-            const seed: u64 = if (std.time.Instant.now()) |inst| @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec)) else |_| @as(u64, @intCast(std.c.getpid()));
+            const seed: u64 = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) inst.timestamp else @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec))) else |_| 42;
             var prng = std.Random.DefaultPrng.init(seed);
             const val = prng.random().intRangeAtMost(u16, 0, 32767);
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{val}) catch "0";
@@ -1303,7 +1308,7 @@ pub const Expansion = struct {
         }
         if (std.mem.eql(u8, content, "SECONDS")) {
             var buf: [16]u8 = undefined;
-            const now = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0;
+            const now = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| @as(i64, 0);
             const elapsed = now - self.shell_start_time;
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{elapsed}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
@@ -1311,33 +1316,37 @@ pub const Expansion = struct {
         }
         if (std.mem.eql(u8, content, "PPID")) {
             var buf: [16]u8 = undefined;
-            const ppid = std.c.getppid();
+            const ppid: i64 = if (@import("builtin").os.tag == .windows) 0 else @intCast(std.c.getppid());
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{ppid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
         if (std.mem.eql(u8, content, "BASHPID")) {
             var buf: [16]u8 = undefined;
-            const pid = std.c.getpid();
+            const pid: i64 = if (@import("builtin").os.tag == .windows) @intCast(std.os.windows.GetCurrentProcessId()) else @intCast(std.c.getpid());
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{pid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
         if (std.mem.eql(u8, content, "EUID")) {
             var buf: [16]u8 = undefined;
-            const uid = std.c.geteuid();
+            const uid: u32 = if (@import("builtin").os.tag == .windows) 0 else std.c.geteuid();
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
         if (std.mem.eql(u8, content, "UID")) {
             var buf: [16]u8 = undefined;
-            const uid = std.c.getuid();
+            const uid: u32 = if (@import("builtin").os.tag == .windows) 0 else std.c.getuid();
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
         if (std.mem.eql(u8, content, "HOSTNAME")) {
+            if (@import("builtin").os.tag == .windows) {
+                const result = try self.allocator.dupe(u8, "localhost");
+                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+            }
             var name_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
             const hostname = std.posix.gethostname(&name_buf) catch "unknown";
             const result = try self.allocator.dupe(u8, hostname);
@@ -1618,7 +1627,7 @@ pub const Expansion = struct {
         // Handle special dynamic variables
         if (std.mem.eql(u8, var_name, "RANDOM")) {
             var buf: [16]u8 = undefined;
-            const seed: u64 = if (std.time.Instant.now()) |inst| @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec)) else |_| @as(u64, @intCast(std.c.getpid()));
+            const seed: u64 = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) inst.timestamp else @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec))) else |_| 42;
             var prng = std.Random.DefaultPrng.init(seed);
             const val = prng.random().intRangeAtMost(u16, 0, 32767);
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{val}) catch "0";
@@ -1633,7 +1642,7 @@ pub const Expansion = struct {
         }
         if (std.mem.eql(u8, var_name, "SECONDS")) {
             var buf: [16]u8 = undefined;
-            const now = if (std.time.Instant.now()) |inst| @as(i64, @intCast(inst.timestamp.sec)) else |_| 0;
+            const now = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| @as(i64, 0);
             const elapsed = now - self.shell_start_time;
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{elapsed}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
@@ -1641,33 +1650,37 @@ pub const Expansion = struct {
         }
         if (std.mem.eql(u8, var_name, "PPID")) {
             var buf: [16]u8 = undefined;
-            const ppid = std.c.getppid();
+            const ppid: i64 = if (is_windows) 0 else @intCast(std.c.getppid());
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{ppid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end, .owned = true };
         }
         if (std.mem.eql(u8, var_name, "BASHPID")) {
             var buf: [16]u8 = undefined;
-            const pid = std.c.getpid();
+            const pid: u32 = if (is_windows) std.os.windows.GetCurrentProcessId() else @intCast(std.c.getpid());
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{pid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end, .owned = true };
         }
         if (std.mem.eql(u8, var_name, "EUID")) {
             var buf: [16]u8 = undefined;
-            const uid = std.c.geteuid();
+            const uid: u32 = if (is_windows) 0 else @intCast(std.c.geteuid());
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end, .owned = true };
         }
         if (std.mem.eql(u8, var_name, "UID")) {
             var buf: [16]u8 = undefined;
-            const uid = std.c.getuid();
+            const uid: u32 = if (is_windows) 0 else @intCast(std.c.getuid());
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{uid}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end, .owned = true };
         }
         if (std.mem.eql(u8, var_name, "HOSTNAME")) {
+            if (is_windows) {
+                const result = try self.allocator.dupe(u8, "localhost");
+                return ExpansionResult{ .value = result, .consumed = end, .owned = true };
+            }
             var name_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
             const hostname = std.posix.gethostname(&name_buf) catch "unknown";
             const result = try self.allocator.dupe(u8, hostname);
@@ -1683,11 +1696,16 @@ pub const Expansion = struct {
         // Variable not found
         // If nounset is enabled, return an error
         if (self.option_nounset) {
-            // Print error message to stderr using posix write
-            const posix = std.posix;
             var buf: [256]u8 = undefined;
             const msg = std.fmt.bufPrint(&buf, "den: {s}: unbound variable\n", .{var_name}) catch "den: unbound variable\n";
-            _ = std.c.write(posix.STDERR_FILENO, msg.ptr, msg.len);
+            if (is_windows) {
+                if (std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE)) |stderr_h| {
+                    var written: u32 = 0;
+                    _ = std.os.windows.kernel32.WriteFile(stderr_h, msg.ptr, @intCast(msg.len), &written, null);
+                }
+            } else {
+                _ = std.c.write(std.posix.STDERR_FILENO, msg.ptr, msg.len);
+            }
             return error.UnboundVariable;
         }
 
@@ -1812,7 +1830,15 @@ pub const Expansion = struct {
 
     /// Execute a command and return its output using fork/exec/pipe
     fn executeCommandForSubstitution(self: *Expansion, command: []const u8) ![]const u8 {
-        // Create a pipe for stdout capture
+        const spawn = @import("spawn.zig");
+
+        if (@import("builtin").os.tag == .windows) {
+            // Windows: use spawn module for command substitution
+            const result = try spawn.shellCapture(self.allocator, command);
+            return result.stdout;
+        }
+
+        // POSIX: Create a pipe for stdout capture
         var pipe_fds: [2]std.posix.fd_t = undefined;
         if (std.c.pipe(&pipe_fds) != 0) return error.Unexpected;
         const read_end = pipe_fds[0];
@@ -1886,7 +1912,9 @@ pub const Expansion = struct {
 
         // Wait for child to finish
         var wait_status: c_int = 0;
-        _ = std.c.waitpid(pid, &wait_status, 0);
+        if (comptime builtin.os.tag != .windows) {
+            _ = std.c.waitpid(pid, &wait_status, 0);
+        }
 
         return try output_buffer.toOwnedSlice(self.allocator);
     }

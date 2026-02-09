@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const common = @import("common.zig");
@@ -819,7 +820,7 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
             var perms_buf: [9]u8 = undefined;
             if (maybe_st) |st| {
-                const mode = st.permissions.toMode();
+                const mode = if (builtin.os.tag == .windows) @as(u32, 0o644) else st.permissions.toMode();
                 perms_buf[0] = if (mode & 0o400 != 0) 'r' else '-';
                 perms_buf[1] = if (mode & 0o200 != 0) 'w' else '-';
                 perms_buf[2] = if (mode & 0o100 != 0) 'x' else '-';
@@ -835,11 +836,17 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             const perms = perms_buf[0..];
 
             var has_xattr = false;
-            {
+            if (builtin.os.tag == .macos) {
                 const listxattr = struct {
                     extern "c" fn listxattr(path: [*:0]const u8, namebuf: ?[*]u8, size: usize, options: c_int) isize;
                 }.listxattr;
                 const xattr_list_size = listxattr(&path_z, null, 0, 0);
+                has_xattr = xattr_list_size > 0;
+            } else if (builtin.os.tag == .linux) {
+                const linux_listxattr = struct {
+                    extern "c" fn listxattr(path: [*:0]const u8, namebuf: ?[*]u8, size: usize) isize;
+                }.listxattr;
+                const xattr_list_size = linux_listxattr(&path_z, null, 0);
                 has_xattr = xattr_list_size > 0;
             }
 

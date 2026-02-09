@@ -21,6 +21,7 @@
 //! - Advanced: mapfile, caller, enable, hash
 
 const std = @import("std");
+const builtin = @import("builtin");
 const IO = @import("../utils/io.zig").IO;
 const types = @import("../types/mod.zig");
 const History = @import("../history/history.zig").History;
@@ -483,8 +484,10 @@ pub fn builtinUname(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
     if (show_all) {
         // Get hostname
-        var hostname_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
-        const hostname = std.posix.gethostname(&hostname_buf) catch "unknown";
+        const hostname = if (builtin.os.tag == .windows) "localhost" else blk: {
+            var hostname_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
+            break :blk std.posix.gethostname(&hostname_buf) catch "unknown";
+        };
 
         const arch = switch (@import("builtin").cpu.arch) {
             .aarch64 => "arm64",

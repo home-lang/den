@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const posix = std.posix;
 const common = @import("common.zig");
 const types = @import("../../types/mod.zig");
@@ -6,6 +7,10 @@ const Value = types.Value;
 const IO = @import("../../utils/io.zig").IO;
 
 fn getTimestamp() !i64 {
+    if (builtin.os.tag == .windows) {
+        const instant = std.time.Instant.now() catch return error.TimeUnavailable;
+        return @intCast(instant.timestamp / 10_000_000);
+    }
     const ts = posix.clock_gettime(.REALTIME) catch return error.TimeUnavailable;
     return ts.sec;
 }

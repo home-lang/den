@@ -56,7 +56,7 @@ pub const WindowSize = struct {
 };
 
 /// Windows console control handler
-fn windowsCtrlHandler(ctrl_type: u32) callconv(std.os.windows.WINAPI) std.os.windows.BOOL {
+fn windowsCtrlHandler(ctrl_type: u32) callconv(std.builtin.CallingConvention.winapi) std.os.windows.BOOL {
     const signal = Signal.fromWindowsEvent(ctrl_type);
     switch (signal) {
         .interrupt => {

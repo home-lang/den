@@ -1,5 +1,4 @@
 const std = @import("std");
-const posix = std.posix;
 const common = @import("common.zig");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
@@ -151,120 +150,29 @@ pub fn httpCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
     // Add URL (must be last)
     try argv.append(allocator, url);
 
-    // Create pipes for stdout and stderr capture
-    var stdout_fds: [2]std.c.fd_t = undefined;
-    if (std.c.pipe(&stdout_fds) != 0) {
-        try IO.eprint("http: failed to create pipe\n", .{});
+    // Use spawn.captureOutput for cross-platform process execution
+    const spawn = common.spawn;
+    const result = spawn.captureOutput(allocator, .{
+        .argv = argv.items,
+    }) catch {
+        try IO.eprint("http: failed to execute curl\n", .{});
         return 1;
-    }
-    var stderr_fds: [2]std.c.fd_t = undefined;
-    if (std.c.pipe(&stderr_fds) != 0) {
-        _ = std.c.close(stdout_fds[0]);
-        _ = std.c.close(stdout_fds[1]);
-        try IO.eprint("http: failed to create pipe\n", .{});
-        return 1;
-    }
-
-    // Build null-terminated argv for execvp
-    // Each arg string needs to be null-terminated
-    var c_argv_buf: [64]?[*:0]const u8 = .{null} ** 64;
-    var z_strs: [64][]u8 = undefined;
-    var z_count: usize = 0;
-    for (argv.items, 0..) |arg, idx| {
-        if (idx >= 63) break;
-        const z = try allocator.allocSentinel(u8, arg.len, 0);
-        @memcpy(z[0..arg.len], arg);
-        c_argv_buf[idx] = z.ptr;
-        z_strs[idx] = z;
-        z_count = idx + 1;
-    }
-    defer for (z_strs[0..z_count]) |z| allocator.free(z[0 .. z.len + 1]);
-
-    const fork_ret = std.c.fork();
-    if (fork_ret < 0) {
-        _ = std.c.close(stdout_fds[0]);
-        _ = std.c.close(stdout_fds[1]);
-        _ = std.c.close(stderr_fds[0]);
-        _ = std.c.close(stderr_fds[1]);
-        try IO.eprint("http: failed to fork\n", .{});
-        return 1;
-    }
-
-    const pid: std.c.pid_t = @intCast(fork_ret);
-    if (pid == 0) {
-        // Child process
-        _ = std.c.close(stdout_fds[0]);
-        _ = std.c.close(stderr_fds[0]);
-        _ = std.c.dup2(stdout_fds[1], posix.STDOUT_FILENO);
-        _ = std.c.dup2(stderr_fds[1], posix.STDERR_FILENO);
-        _ = std.c.close(stdout_fds[1]);
-        _ = std.c.close(stderr_fds[1]);
-
-        const c_argv_ptr: [*:null]const ?[*:0]const u8 = @ptrCast(&c_argv_buf);
-        _ = common.c_exec.execvp(c_argv_buf[0].?, c_argv_ptr);
-        std.c._exit(127);
-    }
-
-    // Parent process
-    _ = std.c.close(stdout_fds[1]);
-    _ = std.c.close(stderr_fds[1]);
-
-    // Read stdout
-    var output_buf = std.ArrayList(u8).empty;
-    defer output_buf.deinit(allocator);
-    {
-        var read_buf: [8192]u8 = undefined;
-        while (true) {
-            const n = posix.read(@intCast(stdout_fds[0]), &read_buf) catch break;
-            if (n == 0) break;
-            try output_buf.appendSlice(allocator, read_buf[0..n]);
-        }
-    }
-    _ = std.c.close(stdout_fds[0]);
-
-    // Read stderr
-    var stderr_buf = std.ArrayList(u8).empty;
-    defer stderr_buf.deinit(allocator);
-    {
-        var read_buf: [4096]u8 = undefined;
-        while (true) {
-            const n = posix.read(@intCast(stderr_fds[0]), &read_buf) catch break;
-            if (n == 0) break;
-            try stderr_buf.appendSlice(allocator, read_buf[0..n]);
-        }
-    }
-    _ = std.c.close(stderr_fds[0]);
-
-    // Wait for child to complete
-    var wait_status: c_int = 0;
-    _ = std.c.waitpid(pid, &wait_status, 0);
-    const wait_u: u32 = @bitCast(wait_status);
-    const exit_code: i32 = if (std.posix.W.IFEXITED(wait_u))
-        @intCast(std.posix.W.EXITSTATUS(wait_u))
-    else if (std.posix.W.IFSIGNALED(wait_u))
-        128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(wait_u))))
-    else
-        1;
+    };
+    defer result.deinit(allocator);
 
     // Print output
-    if (output_buf.items.len > 0) {
-        try IO.writeBytes(output_buf.items);
-        if (output_buf.items[output_buf.items.len - 1] != '\n') {
+    if (result.stdout.len > 0) {
+        try IO.writeBytes(result.stdout);
+        if (result.stdout[result.stdout.len - 1] != '\n') {
             try IO.print("\n", .{});
         }
     }
 
-    // Print stderr if curl reported an error
-    if (exit_code != 0) {
-        if (stderr_buf.items.len > 0) {
-            const trimmed = std.mem.trim(u8, stderr_buf.items, &std.ascii.whitespace);
-            if (trimmed.len > 0) {
-                try IO.eprint("http: curl error: {s}\n", .{trimmed});
-            }
-        }
+    if (result.exit_code != 0) {
+        try IO.eprint("http: curl exited with code {d}\n", .{result.exit_code});
     }
 
-    return exit_code;
+    return result.exit_code;
 }
 
 /// Supported HTTP methods

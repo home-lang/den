@@ -361,7 +361,6 @@ pub fn executeSelectLoop(self: *Shell, input: []const u8) !void {
     }
 
     const ps3 = self.environment.get("PS3") orelse "#? ";
-    const posix = std.posix;
 
     // Display menu
     try IO.print("\n", .{});
@@ -374,7 +373,12 @@ pub fn executeSelectLoop(self: *Shell, input: []const u8) !void {
         try IO.print("{s}", .{ps3});
 
         var input_buf: [1024]u8 = undefined;
-        const bytes_read = posix.read(posix.STDIN_FILENO, &input_buf) catch |err| {
+        const bytes_read = if (@import("builtin").os.tag == .windows) blk: {
+            var n: u32 = 0;
+            const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse break;
+            const success = std.os.windows.kernel32.ReadFile(handle, &input_buf, @intCast(input_buf.len), &n, null);
+            break :blk if (success == 0) @as(usize, 0) else @as(usize, n);
+        } else std.posix.read(std.posix.STDIN_FILENO, &input_buf) catch |err| {
             if (err == error.WouldBlock) continue;
             break;
         };

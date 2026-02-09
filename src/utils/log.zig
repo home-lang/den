@@ -122,7 +122,10 @@ pub const Logger = struct {
         // Add timestamp if enabled
         if (self.config.show_timestamp) {
             const now = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
-            const timestamp = now.timestamp.sec;
+            const timestamp: i64 = if (@import("builtin").os.tag == .windows)
+                @intCast(now.timestamp / 10_000_000) // Windows: QPC ticks, approximate conversion
+            else
+                now.timestamp.sec;
             const seconds = @mod(timestamp, 86400);
             const hours = @divTrunc(seconds, 3600);
             const minutes = @divTrunc(@mod(seconds, 3600), 60);

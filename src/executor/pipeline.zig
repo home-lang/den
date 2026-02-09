@@ -96,7 +96,9 @@ pub fn executePosix(
     var pipefail_status: i32 = 0;
     for (pids_buffer[0..commands.len]) |pid| {
         var wait_status: c_int = 0;
-        _ = std.c.waitpid(pid, &wait_status, 0);
+        if (comptime builtin.os.tag != .windows) {
+            _ = std.c.waitpid(pid, &wait_status, 0);
+        }
         const status: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
         last_status = status;
         // For pipefail: track rightmost non-zero exit status

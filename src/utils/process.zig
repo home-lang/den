@@ -259,7 +259,10 @@ fn waitProcessPosix(pid: std.posix.pid_t, options: WaitOptions) !WaitResult {
     const flags: c_int = if (options.no_hang) std.posix.W.NOHANG else 0;
 
     var wait_status: c_int = 0;
-    const wait_pid = std.c.waitpid(pid, &wait_status, flags);
+    const wait_pid = if (comptime builtin.os.tag != .windows)
+        std.c.waitpid(pid, &wait_status, flags)
+    else
+        unreachable;
     const status_u32: u32 = @bitCast(wait_status);
 
     if (wait_pid == 0 and options.no_hang) {

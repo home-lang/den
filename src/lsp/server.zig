@@ -1,5 +1,38 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const posix = std.posix;
+
+const is_windows = builtin.os.tag == .windows;
+
+fn getStdinFile() std.Io.File {
+    if (is_windows) {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse unreachable;
+        return .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    } else {
+        return .{ .handle = posix.STDIN_FILENO, .flags = .{ .nonblocking = false } };
+    }
+}
+
+fn getStdoutFile() std.Io.File {
+    if (is_windows) {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse unreachable;
+        return .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    } else {
+        return .{ .handle = posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+    }
+}
+
+fn readStdin(buf: []u8) !usize {
+    if (is_windows) {
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.Unexpected;
+        var bytes_read: u32 = 0;
+        const success = std.os.windows.kernel32.ReadFile(handle, buf.ptr, @intCast(buf.len), &bytes_read, null);
+        if (success == 0) return error.Unexpected;
+        return @intCast(bytes_read);
+    } else {
+        return posix.read(posix.STDIN_FILENO, buf) catch |err| return err;
+    }
+}
 const completion = @import("completion.zig");
 const diagnostics = @import("diagnostics.zig");
 const hover = @import("hover.zig");
@@ -133,7 +166,7 @@ pub const LspServer = struct {
 
         var total_read: usize = 0;
         while (total_read < length) {
-            const n = try posix.read(posix.STDIN_FILENO, body[total_read..]);
+            const n = try readStdin(body[total_read..]);
             if (n == 0) return error.EndOfStream;
             total_read += n;
         }
@@ -149,7 +182,7 @@ pub const LspServer = struct {
 
         while (true) {
             var byte_buf: [1]u8 = undefined;
-            const n = posix.read(posix.STDIN_FILENO, &byte_buf) catch |err| {
+            const n = readStdin(&byte_buf) catch |err| {
                 if (buf.items.len > 0) {
                     return try self.allocator.dupe(u8, buf.items);
                 }
@@ -167,7 +200,7 @@ pub const LspServer = struct {
             if (byte == '\r') {
                 // Expect \n to follow
                 var skip: [1]u8 = undefined;
-                _ = posix.read(posix.STDIN_FILENO, &skip) catch {};
+                _ = readStdin(&skip) catch {};
                 const result = try self.allocator.dupe(u8, buf.items);
                 buf.deinit(self.allocator);
                 return result;
@@ -188,7 +221,7 @@ pub const LspServer = struct {
 
     fn sendMessage(self: *LspServer, json_bytes: []const u8) !void {
         _ = self;
-        const stdout_file = std.Io.File{ .handle = posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
+        const stdout_file = getStdoutFile();
         var header_buf: [64]u8 = undefined;
         const header = try std.fmt.bufPrint(&header_buf, "Content-Length: {d}\r\n\r\n", .{json_bytes.len});
         try stdout_file.writeStreamingAll(std.Options.debug_io, header);

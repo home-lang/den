@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 const Expansion = @import("../utils/expansion.zig").Expansion;
@@ -194,7 +195,9 @@ fn applyHeredocOrHerestring(
     // Wait for writer to finish
     {
         var wait_status: c_int = 0;
-        _ = std.c.waitpid(writer_pid, &wait_status, 0);
+        if (comptime builtin.os.tag != .windows) {
+            _ = std.c.waitpid(writer_pid, &wait_status, 0);
+        }
     }
 }
 

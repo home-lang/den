@@ -119,7 +119,10 @@ pub const JobManager = struct {
             if (self.jobs[i]) |job| {
                 // Check if job has completed (non-blocking waitpid)
                 var wait_status: c_int = 0;
-                const wait_pid = std.c.waitpid(job.pid, &wait_status, std.posix.W.NOHANG);
+                const wait_pid = if (comptime builtin.os.tag != .windows)
+                    std.c.waitpid(job.pid, &wait_status, std.posix.W.NOHANG)
+                else
+                    unreachable;
 
                 if (wait_pid == job.pid) {
                     // Job completed
@@ -144,16 +147,10 @@ pub const JobManager = struct {
     pub fn killAll(self: *Self) void {
         if (builtin.os.tag == .windows) {
             // Windows: terminate processes using TerminateProcess
-            const windows = std.os.windows;
-            const PROCESS_TERMINATE: u32 = 0x0001;
-
             for (self.jobs) |maybe_job| {
                 if (maybe_job) |job| {
-                    const handle = windows.kernel32.OpenProcess(PROCESS_TERMINATE, 0, @intFromPtr(job.pid));
-                    if (handle) |h| {
-                        _ = windows.kernel32.TerminateProcess(h, 1);
-                        _ = windows.kernel32.CloseHandle(h);
-                    }
+                    // On Windows, just terminate via the handle directly
+                    _ = std.os.windows.kernel32.TerminateProcess(job.pid, 1);
                 }
             }
             return;
@@ -171,13 +168,18 @@ pub const JobManager = struct {
 
                     // Check if still running
                     var kill_wait_status: c_int = 0;
-                    const kill_wait_pid = std.c.waitpid(job.pid, &kill_wait_status, std.posix.W.NOHANG);
+                    const kill_wait_pid = if (comptime builtin.os.tag != .windows)
+                        std.c.waitpid(job.pid, &kill_wait_status, std.posix.W.NOHANG)
+                    else
+                        unreachable;
                     if (kill_wait_pid == 0) {
                         // Still running, force kill
                         _ = std.posix.kill(job.pid, std.posix.SIG.KILL) catch {};
                         // Reap the zombie
                         var reap_status: c_int = 0;
-                        _ = std.c.waitpid(job.pid, &reap_status, 0);
+                        if (comptime builtin.os.tag != .windows) {
+                            _ = std.c.waitpid(job.pid, &reap_status, 0);
+                        }
                     }
                 }
             }
@@ -291,14 +293,22 @@ pub const JobManager = struct {
                 if (stopped_only and job.status != .stopped) continue;
 
                 if (pids_only) {
-                    try IO.print("{d}\n", .{job.pid});
+                    if (builtin.os.tag == .windows) {
+                        try IO.print("{d}\n", .{@intFromPtr(job.pid)});
+                    } else {
+                        try IO.print("{d}\n", .{job.pid});
+                    }
                 } else if (show_pids) {
                     const status_str = switch (job.status) {
                         .running => "Running",
                         .stopped => "Stopped",
                         .done => "Done",
                     };
-                    try IO.print("[{d}]  {d} {s: <10} {s}\n", .{ job.job_id, job.pid, status_str, job.command });
+                    if (builtin.os.tag == .windows) {
+                        try IO.print("[{d}]  {d} {s: <10} {s}\n", .{ job.job_id, @intFromPtr(job.pid), status_str, job.command });
+                    } else {
+                        try IO.print("[{d}]  {d} {s: <10} {s}\n", .{ job.job_id, job.pid, status_str, job.command });
+                    }
                 } else {
                     const status_str = switch (job.status) {
                         .running => "Running",
@@ -340,7 +350,9 @@ pub const JobManager = struct {
 
         // Wait for the job to complete
         var fg_wait_status: c_int = 0;
-        _ = std.c.waitpid(job.pid, &fg_wait_status, 0);
+        if (comptime builtin.os.tag != .windows) {
+            _ = std.c.waitpid(job.pid, &fg_wait_status, 0);
+        }
         const exit_status = getExitStatus(@as(u32, @bitCast(fg_wait_status)));
 
         // Remove from background jobs
@@ -458,7 +470,9 @@ pub const JobManager = struct {
 
                 const job = self.jobs[slot.?].?;
                 var specific_wait_status: c_int = 0;
-                _ = std.c.waitpid(job.pid, &specific_wait_status, 0);
+                if (comptime builtin.os.tag != .windows) {
+                    _ = std.c.waitpid(job.pid, &specific_wait_status, 0);
+                }
                 last_status = getExitStatus(@as(u32, @bitCast(specific_wait_status)));
                 self.remove(slot.?);
             }
@@ -469,7 +483,9 @@ pub const JobManager = struct {
             for (&self.jobs, 0..) |*maybe_job, i| {
                 if (maybe_job.*) |job| {
                     var all_wait_status: c_int = 0;
-                    _ = std.c.waitpid(job.pid, &all_wait_status, 0);
+                    if (comptime builtin.os.tag != .windows) {
+                        _ = std.c.waitpid(job.pid, &all_wait_status, 0);
+                    }
                     last_status = getExitStatus(@as(u32, @bitCast(all_wait_status)));
                     self.allocator.free(job.command);
                     maybe_job.* = null;

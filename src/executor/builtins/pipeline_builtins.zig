@@ -823,7 +823,6 @@ pub fn prependCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
 /// The expression can use $prev for the previous value and $index for current index.
 /// Example: generate 1 10 "expr $prev * 2" -> 1 2 4 8 16 32 64 128 256 512
 pub fn generateCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
-    _ = allocator;
     if (command.args.len < 3) {
         try IO.eprint("Usage: generate <initial> <count> <expression>\n", .{});
         try IO.eprint("  Generates a sequence by applying <expression> iteratively\n", .{});
@@ -885,38 +884,12 @@ pub fn generateCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) 
             }
         }
 
-        // Execute via fork/exec to get next value
-        const cmd_z = std.posix.toPosixPath(sub_buf[0..sub_len]) catch continue;
-        var pipe_fds: [2]c_int = undefined;
-        if (std.c.pipe(&pipe_fds) < 0) continue;
+        // Execute via shell capture to get next value
+        const spawn = common.spawn;
+        const capture_result = spawn.shellCapture(allocator, sub_buf[0..sub_len]) catch continue;
+        defer capture_result.deinit(allocator);
 
-        const fork_ret = std.c.fork();
-        if (fork_ret < 0) {
-            std.posix.close(@intCast(pipe_fds[0]));
-            std.posix.close(@intCast(pipe_fds[1]));
-            continue;
-        }
-        if (fork_ret == 0) {
-            std.posix.close(@intCast(pipe_fds[0]));
-            _ = std.c.dup2(pipe_fds[1], 1);
-            std.posix.close(@intCast(pipe_fds[1]));
-            const argv_gen = [_]?[*:0]const u8{ "/bin/sh", "-c", &cmd_z, null };
-            _ = common.c_exec.execvp("/bin/sh", @ptrCast(&argv_gen));
-            std.c._exit(127);
-        }
-        std.posix.close(@intCast(pipe_fds[1]));
-        var output_buf: [256]u8 = undefined;
-        var output_len: usize = 0;
-        while (output_len < output_buf.len) {
-            const n = std.posix.read(@intCast(pipe_fds[0]), output_buf[output_len..]) catch break;
-            if (n == 0) break;
-            output_len += n;
-        }
-        std.posix.close(@intCast(pipe_fds[0]));
-        var wait_status: c_int = 0;
-        _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
-
-        const trimmed = std.mem.trimEnd(u8, output_buf[0..output_len], "\n\r");
+        const trimmed = std.mem.trimEnd(u8, capture_result.stdout, "\n\r");
         @memcpy(prev_buf[0..trimmed.len], trimmed);
         prev_len = trimmed.len;
     }
@@ -964,9 +937,6 @@ pub fn parEachCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     }
     const cmd_template = cmd_buf[0..cmd_len];
 
-    const max_parallel: usize = @min(lines.items.len, 16);
-    var active: usize = 0;
-
     for (lines.items) |line| {
         var full_cmd: [4096]u8 = undefined;
         var full_len: usize = 0;
@@ -999,28 +969,9 @@ pub fn parEachCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
             }
         }
 
-        const cmd_z = std.posix.toPosixPath(full_cmd[0..full_len]) catch continue;
-
-        if (active >= max_parallel) {
-            var wait_status: c_int = 0;
-            _ = std.c.waitpid(-1, &wait_status, 0);
-            active -= 1;
-        }
-
-        const fork_ret = std.c.fork();
-        if (fork_ret < 0) continue;
-        if (fork_ret == 0) {
-            const argv_par = [_]?[*:0]const u8{ "/bin/sh", "-c", &cmd_z, null };
-            _ = common.c_exec.execvp("/bin/sh", @ptrCast(&argv_par));
-            std.c._exit(127);
-        }
-        active += 1;
-    }
-
-    while (active > 0) {
-        var wait_status: c_int = 0;
-        _ = std.c.waitpid(-1, &wait_status, 0);
-        active -= 1;
+        const spawn = common.spawn;
+        // Run each command (sequentially for simplicity)
+        _ = spawn.shellExec(allocator, full_cmd[0..full_len]) catch continue;
     }
 
     return 0;

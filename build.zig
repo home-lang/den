@@ -50,6 +50,12 @@ pub fn build(b: *std.Build) void {
         .{ .cpu_arch = .aarch64, .os_tag = .macos },
         // Windows x64
         .{ .cpu_arch = .x86_64, .os_tag = .windows },
+        // Windows ARM64
+        .{ .cpu_arch = .aarch64, .os_tag = .windows },
+        // FreeBSD x64
+        .{ .cpu_arch = .x86_64, .os_tag = .freebsd },
+        // FreeBSD ARM64
+        .{ .cpu_arch = .aarch64, .os_tag = .freebsd },
     };
 
     const target_names = [_][]const u8{
@@ -58,6 +64,9 @@ pub fn build(b: *std.Build) void {
         "darwin-x64",
         "darwin-arm64",
         "windows-x64",
+        "windows-arm64",
+        "freebsd-x64",
+        "freebsd-arm64",
     };
 
     inline for (targets, target_names) |t, name| {

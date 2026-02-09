@@ -1,5 +1,18 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("types.zig");
+
+/// Cross-platform handle read helper
+fn readHandle(handle: anytype, buf: []u8) !usize {
+    if (builtin.os.tag == .windows) {
+        var bytes_read: u32 = 0;
+        const success = std.os.windows.kernel32.ReadFile(handle, buf.ptr, @intCast(buf.len), &bytes_read, null);
+        if (success == 0) return error.ReadFailed;
+        return bytes_read;
+    } else {
+        return std.posix.read(handle, buf);
+    }
+}
 const discovery_mod = @import("discovery.zig");
 const reporter_mod = @import("reporter.zig");
 
@@ -99,7 +112,7 @@ pub const TestRunner = struct {
         if (child.stdout) |stdout_pipe| {
             var read_buf: [4096]u8 = undefined;
             while (true) {
-                const n = std.posix.read(stdout_pipe.handle, &read_buf) catch break;
+                const n = readHandle(stdout_pipe.handle, &read_buf) catch break;
                 if (n == 0) break;
                 try stdout_buf.appendSlice(self.allocator, read_buf[0..n]);
                 if (stdout_buf.items.len >= 1024 * 1024) break;
@@ -113,7 +126,7 @@ pub const TestRunner = struct {
         if (child.stderr) |stderr_pipe| {
             var read_buf: [4096]u8 = undefined;
             while (true) {
-                const n = std.posix.read(stderr_pipe.handle, &read_buf) catch break;
+                const n = readHandle(stderr_pipe.handle, &read_buf) catch break;
                 if (n == 0) break;
                 try stderr_buf.appendSlice(self.allocator, read_buf[0..n]);
                 if (stderr_buf.items.len >= 1024 * 1024) break;

@@ -212,40 +212,29 @@ pub const LoadableBuiltins = struct {
     }
 
     /// Platform-specific library loading
-    fn openLibrary(self: *LoadableBuiltins, path: []const u8) ?*anyopaque {
-        _ = self;
-        if (builtin.os.tag == .windows) {
-            // Windows: LoadLibrary
-            @compileError("Loadable builtins not yet supported on Windows");
-        } else {
-            // POSIX: dlopen
-            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-            if (path.len >= path_buf.len) return null;
-            @memcpy(path_buf[0..path.len], path);
-            path_buf[path.len] = 0;
-            // Use LAZY and LOCAL mode for loading
-            const mode = std.c.RTLD{ .LAZY = true, .LOCAL = true };
-            return std.c.dlopen(@ptrCast(&path_buf), mode);
+    fn openLibrary(_: *LoadableBuiltins, path: []const u8) ?*anyopaque {
+        if (builtin.os.tag == .windows) return null;
+        // POSIX: dlopen
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        if (path.len >= path_buf.len) return null;
+        @memcpy(path_buf[0..path.len], path);
+        path_buf[path.len] = 0;
+        var mode = std.c.RTLD{ .LAZY = true };
+        if (@hasField(std.c.RTLD, "LOCAL")) {
+            mode.LOCAL = true;
         }
+        return std.c.dlopen(@ptrCast(&path_buf), mode);
     }
 
-    fn closeLibrary(self: *LoadableBuiltins, handle: *anyopaque) void {
-        _ = self;
-        if (builtin.os.tag == .windows) {
-            @compileError("Loadable builtins not yet supported on Windows");
-        } else {
-            _ = std.c.dlclose(handle);
-        }
+    fn closeLibrary(_: *LoadableBuiltins, handle: *anyopaque) void {
+        if (builtin.os.tag == .windows) return;
+        _ = std.c.dlclose(handle);
     }
 
-    fn lookupSymbol(self: *LoadableBuiltins, comptime T: type, handle: *anyopaque, name: [:0]const u8) ?T {
-        _ = self;
-        if (builtin.os.tag == .windows) {
-            @compileError("Loadable builtins not yet supported on Windows");
-        } else {
-            const sym = std.c.dlsym(handle, name.ptr);
-            if (sym == null) return null;
-            return @ptrCast(@alignCast(sym));
-        }
+    fn lookupSymbol(_: *LoadableBuiltins, comptime T: type, handle: *anyopaque, name: [:0]const u8) ?T {
+        if (builtin.os.tag == .windows) return null;
+        const sym = std.c.dlsym(handle, name.ptr);
+        if (sym == null) return null;
+        return @ptrCast(@alignCast(sym));
     }
 };

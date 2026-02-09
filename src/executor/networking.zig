@@ -272,7 +272,9 @@ fn connectIPv4(ip_bytes: [4]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
     if (sock < 0) return null;
 
     var addr: std.c.sockaddr.in = std.mem.zeroes(std.c.sockaddr.in);
-    addr.len = @sizeOf(std.c.sockaddr.in);
+    if (@hasField(std.c.sockaddr.in, "len")) {
+        addr.len = @sizeOf(std.c.sockaddr.in);
+    }
     addr.family = std.c.AF.INET;
     addr.port = std.mem.nativeToBig(u16, port);
     addr.addr = @bitCast(ip_bytes);
@@ -292,7 +294,9 @@ fn connectIPv6(ip_bytes: [16]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
     if (sock < 0) return null;
 
     var addr: std.c.sockaddr.in6 = std.mem.zeroes(std.c.sockaddr.in6);
-    addr.len = @sizeOf(std.c.sockaddr.in6);
+    if (@hasField(std.c.sockaddr.in6, "len")) {
+        addr.len = @sizeOf(std.c.sockaddr.in6);
+    }
     addr.family = std.c.AF.INET6;
     addr.port = std.mem.nativeToBig(u16, port);
     addr.addr = ip_bytes;

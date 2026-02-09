@@ -1,7 +1,19 @@
 const std = @import("std");
-const posix = std.posix;
+const builtin = @import("builtin");
 const types = @import("types/mod.zig");
 const DenConfig = types.DenConfig;
+
+/// Cross-platform file read helper
+fn readFileChunk(file: std.Io.File, buf: []u8) !usize {
+    if (builtin.os.tag == .windows) {
+        var bytes_read: u32 = 0;
+        const success = std.os.windows.kernel32.ReadFile(file.handle, buf.ptr, @intCast(buf.len), &bytes_read, null);
+        if (success == 0) return error.ReadFailed;
+        return bytes_read;
+    } else {
+        return std.posix.read(file.handle, buf);
+    }
+}
 
 fn getenv(key: [*:0]const u8) ?[]const u8 {
     const value = std.c.getenv(key) orelse return null;
@@ -144,7 +156,7 @@ fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
 
     var buf: [4096]u8 = undefined;
     while (true) {
-        const n = posix.read(file.handle, &buf) catch break;
+        const n = readFileChunk(file, &buf) catch break;
         if (n == 0) break;
         try content.appendSlice(allocator, buf[0..n]);
     }
@@ -177,7 +189,7 @@ fn tryLoadFromPath(comptime T: type, allocator: std.mem.Allocator, path: []const
 
     var buf: [4096]u8 = undefined;
     while (true) {
-        const n = posix.read(file.handle, &buf) catch break;
+        const n = readFileChunk(file, &buf) catch break;
         if (n == 0) break;
         content.appendSlice(allocator, buf[0..n]) catch return null;
     }
@@ -212,7 +224,7 @@ fn tryLoadDenFromPackageJson(allocator: std.mem.Allocator, path: []const u8) ?De
 
     var buf: [4096]u8 = undefined;
     while (true) {
-        const n = posix.read(file.handle, &buf) catch break;
+        const n = readFileChunk(file, &buf) catch break;
         if (n == 0) break;
         content.appendSlice(allocator, buf[0..n]) catch return null;
     }
@@ -398,7 +410,10 @@ pub const ValidationResult = struct {
 
     /// Print to stderr with color auto-detection
     pub fn printToStderr(self: *const ValidationResult) void {
-        const stderr_file = std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+        const stderr_file = if (builtin.os.tag == .windows)
+            std.Io.File{ .handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return, .flags = .{ .nonblocking = false } }
+        else
+            std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
         // Check if stderr is a TTY for color support
         const use_color = stderr_file.isTty(std.Options.debug_io) catch false;
         const stderr = stderr_file.writer(std.Options.debug_io);
