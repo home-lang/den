@@ -2485,37 +2485,87 @@ pub const Shell = struct {
             }
         }
 
+        // Check if the last expanded line ends with a pipe after done/fi/esac
+        // e.g., "done | tr a-z A-Z" or "fi | wc -l"
+        var pipe_suffix: ?[]const u8 = null;
+        if (expanded_count > 0) {
+            const last_line = expanded_buf[expanded_count - 1];
+            const terminators = [_][]const u8{ "done", "fi", "esac" };
+            for (terminators) |term| {
+                if (last_line.len > term.len and std.mem.startsWith(u8, last_line, term)) {
+                    const after_term = last_line[term.len..];
+                    const trimmed_after = std.mem.trim(u8, after_term, &std.ascii.whitespace);
+                    if (trimmed_after.len > 0 and trimmed_after[0] == '|') {
+                        pipe_suffix = std.mem.trim(u8, trimmed_after[1..], &std.ascii.whitespace);
+                        // Replace the last line with just the terminator
+                        expanded_buf[expanded_count - 1] = term;
+                        break;
+                    }
+                }
+            }
+        }
+
         const lines = expanded_buf[0..expanded_count];
+
+        // If there's a pipe suffix, run the control flow in a subshell with
+        // stdout redirected to a pipe, then pipe into the suffix command.
+        if (pipe_suffix) |pipe_cmd| {
+            if (comptime builtin.os.tag != .windows) {
+                var pipe_fds: [2]std.posix.fd_t = undefined;
+                if (std.c.pipe(&pipe_fds) != 0) return error.Unexpected;
+                const read_fd = pipe_fds[0];
+                const write_fd = pipe_fds[1];
+
+                const fork_ret = std.c.fork();
+                if (fork_ret < 0) {
+                    std.posix.close(read_fd);
+                    std.posix.close(write_fd);
+                    return error.Unexpected;
+                }
+
+                if (fork_ret == 0) {
+                    // Child: redirect stdout to write end, execute control flow
+                    std.posix.close(read_fd);
+                    _ = std.c.dup2(write_fd, std.posix.STDOUT_FILENO);
+                    std.posix.close(write_fd);
+
+                    var cf_parser = ControlFlowParser.init(self.allocator);
+                    var cf_executor = ControlFlowExecutor.init(self);
+                    self.executeCfBlock(lines, &cf_parser, &cf_executor) catch {};
+                    std.c._exit(@intCast(@as(u32, @bitCast(self.last_exit_code))));
+                    unreachable;
+                }
+
+                // Parent: redirect stdin to read end, execute pipe command
+                std.posix.close(write_fd);
+                const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
+                _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
+                std.posix.close(read_fd);
+
+                // Wait for control flow child to finish writing
+                var wait_status_cf: c_int = 0;
+                if (comptime builtin.os.tag != .windows) {
+                    _ = std.c.waitpid(@intCast(fork_ret), &wait_status_cf, 0);
+                }
+
+                // Execute the pipe command(s) — use function pointer to
+                // break the inferred error set cycle (executeCommand →
+                // executeControlFlowOneliner → executeCfBlock → executeCommand).
+                const execFn: *const fn (*Shell, []const u8) anyerror!void = &Shell.executeCommand;
+                execFn(self, pipe_cmd) catch {};
+
+                // Restore stdin
+                if (saved_stdin >= 0) {
+                    _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
+                    std.posix.close(@intCast(saved_stdin));
+                }
+                return;
+            }
+        }
 
         var cf_parser = ControlFlowParser.init(self.allocator);
         var cf_executor = ControlFlowExecutor.init(self);
-
-        if (std.mem.startsWith(u8, input, "for ")) {
-            const result = try cf_parser.parseFor(lines, 0);
-            var loop = result.loop;
-            defer loop.deinit();
-            self.last_exit_code = try cf_executor.executeFor(&loop);
-        } else if (std.mem.startsWith(u8, input, "while ")) {
-            const result = try cf_parser.parseWhile(lines, 0, false);
-            var loop = result.loop;
-            defer loop.deinit();
-            self.last_exit_code = try cf_executor.executeWhile(&loop);
-        } else if (std.mem.startsWith(u8, input, "until ")) {
-            const result = try cf_parser.parseWhile(lines, 0, true);
-            var loop = result.loop;
-            defer loop.deinit();
-            self.last_exit_code = try cf_executor.executeWhile(&loop);
-        } else if (std.mem.startsWith(u8, input, "if ")) {
-            const result = try cf_parser.parseIf(lines, 0);
-            var stmt = result.stmt;
-            defer stmt.deinit();
-            self.last_exit_code = try cf_executor.executeIf(&stmt);
-        } else if (std.mem.startsWith(u8, input, "case ")) {
-            const result = try cf_parser.parseCase(lines, 0);
-            var stmt = result.stmt;
-            defer stmt.deinit();
-            self.last_exit_code = try cf_executor.executeCase(&stmt);
-        }
+        self.executeCfBlock(lines, &cf_parser, &cf_executor) catch |err| return err;
 
         // Propagate break/continue from executor to shell so outer loops can see them
         if (cf_executor.break_levels > 0) {
@@ -2523,6 +2573,37 @@ pub const Shell = struct {
         }
         if (cf_executor.continue_levels > 0) {
             self.continue_levels = cf_executor.continue_levels;
+        }
+    }
+
+    /// Execute a control flow block (for/while/until/if/case) from parsed lines.
+    fn executeCfBlock(self: *Shell, lines: [][]const u8, cf_parser: *ControlFlowParser, cf_executor: *ControlFlowExecutor) anyerror!void {
+        const first = if (lines.len > 0) lines[0] else return;
+        if (std.mem.startsWith(u8, first, "for ")) {
+            const result = try cf_parser.parseFor(lines, 0);
+            var loop = result.loop;
+            defer loop.deinit();
+            self.last_exit_code = try cf_executor.executeFor(&loop);
+        } else if (std.mem.startsWith(u8, first, "while ")) {
+            const result = try cf_parser.parseWhile(lines, 0, false);
+            var loop = result.loop;
+            defer loop.deinit();
+            self.last_exit_code = try cf_executor.executeWhile(&loop);
+        } else if (std.mem.startsWith(u8, first, "until ")) {
+            const result = try cf_parser.parseWhile(lines, 0, true);
+            var loop = result.loop;
+            defer loop.deinit();
+            self.last_exit_code = try cf_executor.executeWhile(&loop);
+        } else if (std.mem.startsWith(u8, first, "if ")) {
+            const result = try cf_parser.parseIf(lines, 0);
+            var stmt = result.stmt;
+            defer stmt.deinit();
+            self.last_exit_code = try cf_executor.executeIf(&stmt);
+        } else if (std.mem.startsWith(u8, first, "case ")) {
+            const result = try cf_parser.parseCase(lines, 0);
+            var stmt = result.stmt;
+            defer stmt.deinit();
+            self.last_exit_code = try cf_executor.executeCase(&stmt);
         }
     }
 

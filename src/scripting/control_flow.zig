@@ -3,6 +3,16 @@ const Shell = @import("../shell.zig").Shell;
 const Expansion = @import("../utils/expansion.zig").Expansion;
 const BraceExpander = @import("../utils/brace.zig").BraceExpander;
 
+/// Check if a line is a keyword (possibly followed by |, ;, &, etc.)
+fn isKeyword(line: []const u8, keyword: []const u8) bool {
+    if (std.mem.eql(u8, line, keyword)) return true;
+    if (line.len > keyword.len and std.mem.startsWith(u8, line, keyword)) {
+        const next = line[keyword.len];
+        return next == ' ' or next == '\t' or next == '|' or next == ';' or next == '&' or next == '#';
+    }
+    return false;
+}
+
 /// Control flow statement type
 pub const ControlFlowType = enum {
     if_statement,
@@ -884,9 +894,9 @@ pub const ControlFlowParser = struct {
                     std.mem.startsWith(u8, line, "case "))
                 {
                     if_depth += 1;
-                } else if (std.mem.eql(u8, line, "fi") or
-                    std.mem.eql(u8, line, "done") or
-                    std.mem.eql(u8, line, "esac"))
+                } else if (isKeyword(line, "fi") or
+                    isKeyword(line, "done") or
+                    isKeyword(line, "esac"))
                 {
                     if_depth -= 1;
                 }
@@ -969,7 +979,7 @@ pub const ControlFlowParser = struct {
                 continue;
             }
 
-            if (std.mem.eql(u8, line, "fi")) {
+            if (isKeyword(line, "fi")) {
                 // Save current elif body if we had one
                 if (current_section == .elif and elif_count > 0 and elif_body_count > 0) {
                     const body = try self.allocator.alloc([]const u8, elif_body_count);
@@ -1065,14 +1075,14 @@ pub const ControlFlowParser = struct {
         while (i < lines.len) : (i += 1) {
             const line = std.mem.trim(u8, lines[i], &std.ascii.whitespace);
 
-            if (std.mem.eql(u8, line, "do") and nest_depth == 0) continue;
+            if (isKeyword(line, "do") and nest_depth == 0) continue;
 
             if (nest_depth > 0) {
                 if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
                     std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
                     std.mem.startsWith(u8, line, "case ")) nest_depth += 1
-                else if (std.mem.eql(u8, line, "fi") or std.mem.eql(u8, line, "done") or
-                    std.mem.eql(u8, line, "esac")) nest_depth -= 1;
+                else if (isKeyword(line, "fi") or isKeyword(line, "done") or
+                    isKeyword(line, "esac")) nest_depth -= 1;
                 if (nest_len > 0 and nest_len + 2 < nest_buf.len) {
                     nest_buf[nest_len] = ';';
                     nest_buf[nest_len + 1] = ' ';
@@ -1090,7 +1100,7 @@ pub const ControlFlowParser = struct {
                 continue;
             }
 
-            if (std.mem.eql(u8, line, "done")) break;
+            if (isKeyword(line, "done")) break;
 
             if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
                 std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
@@ -1212,14 +1222,14 @@ pub const ControlFlowParser = struct {
         while (i < lines.len) : (i += 1) {
             const line = std.mem.trim(u8, lines[i], &std.ascii.whitespace);
 
-            if (std.mem.eql(u8, line, "do") and nest_depth == 0) continue;
+            if (isKeyword(line, "do") and nest_depth == 0) continue;
 
             if (nest_depth > 0) {
                 if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
                     std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
                     std.mem.startsWith(u8, line, "case ")) nest_depth += 1
-                else if (std.mem.eql(u8, line, "fi") or std.mem.eql(u8, line, "done") or
-                    std.mem.eql(u8, line, "esac")) nest_depth -= 1;
+                else if (isKeyword(line, "fi") or isKeyword(line, "done") or
+                    isKeyword(line, "esac")) nest_depth -= 1;
                 if (nest_len > 0 and nest_len + 2 < nest_buf.len) {
                     nest_buf[nest_len] = ';';
                     nest_buf[nest_len + 1] = ' ';
@@ -1237,7 +1247,7 @@ pub const ControlFlowParser = struct {
                 continue;
             }
 
-            if (std.mem.eql(u8, line, "done")) break;
+            if (isKeyword(line, "done")) break;
 
             if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
                 std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
@@ -1306,8 +1316,8 @@ pub const ControlFlowParser = struct {
         while (i < lines.len) : (i += 1) {
             const line = std.mem.trim(u8, lines[i], &std.ascii.whitespace);
 
-            if (std.mem.eql(u8, line, "do")) continue;
-            if (std.mem.eql(u8, line, "done")) break;
+            if (isKeyword(line, "do")) continue;
+            if (isKeyword(line, "done")) break;
 
             if (line.len > 0 and line[0] != '#') {
                 if (body_count >= body_buffer.len) return error.TooManyLines;
@@ -1363,8 +1373,8 @@ pub const ControlFlowParser = struct {
         while (i < lines.len) : (i += 1) {
             const line = std.mem.trim(u8, lines[i], &std.ascii.whitespace);
 
-            if (std.mem.eql(u8, line, "do")) continue;
-            if (std.mem.eql(u8, line, "done")) break;
+            if (isKeyword(line, "do")) continue;
+            if (isKeyword(line, "done")) break;
 
             if (line.len > 0 and line[0] != '#') {
                 if (body_count >= body_buffer.len) return error.TooManyLines;
@@ -1426,7 +1436,7 @@ pub const ControlFlowParser = struct {
             if (line.len == 0 or line[0] == '#') continue;
 
             // End of case statement
-            if (std.mem.eql(u8, line, "esac")) break;
+            if (isKeyword(line, "esac")) break;
 
             // Check for case pattern line: pattern1|pattern2)
             if (!in_case_body) {
