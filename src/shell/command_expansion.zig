@@ -52,6 +52,8 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
         self.last_arg,
         self,
     );
+    const shell_mod = @import("../shell.zig");
+    expander.exec_command_fn = &shell_mod.execCommandCallback;
     expander.arrays = &self.arrays; // Add indexed array support
     expander.assoc_arrays = &self.assoc_arrays; // Add associative array support
     expander.var_attributes = &self.var_attributes; // Add nameref support
@@ -154,12 +156,12 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
                     self.allocator.free(glob_expanded);
                 }
 
-                // Add all glob matches to args
+                // Add all glob matches to args, stripping glob escape backslashes
                 for (glob_expanded) |path| {
                     if (expanded_args_count >= expanded_args_buffer.len) {
                         return error.TooManyArguments;
                     }
-                    expanded_args_buffer[expanded_args_count] = try self.allocator.dupe(u8, path);
+                    expanded_args_buffer[expanded_args_count] = try stripGlobEscapes(self.allocator, path);
                     expanded_args_count += 1;
                 }
             }
@@ -181,6 +183,32 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
             cmd.redirections[i].target = expanded_target;
         }
     }
+}
+
+/// Strip backslash escapes before glob metacharacters (*, ?, [)
+/// These are added by the tokenizer for quoted glob chars to prevent expansion
+fn stripGlobEscapes(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var len: usize = 0;
+    var i: usize = 0;
+    while (i < input.len) : (i += 1) {
+        if (input[i] == '\\' and i + 1 < input.len and
+            (input[i + 1] == '*' or input[i + 1] == '?' or input[i + 1] == '['))
+        {
+            // Skip the backslash, keep the metacharacter as literal
+            i += 1;
+            if (len < buf.len) {
+                buf[len] = input[i];
+                len += 1;
+            }
+        } else {
+            if (len < buf.len) {
+                buf[len] = input[i];
+                len += 1;
+            }
+        }
+    }
+    return allocator.dupe(u8, buf[0..len]);
 }
 
 /// Expand aliases in a command chain with circular reference detection

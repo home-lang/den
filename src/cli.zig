@@ -631,13 +631,41 @@ fn runCommandString(allocator: std.mem.Allocator, args: []const []const u8, conf
         const control_flow = @import("scripting/control_flow.zig");
         const functions = @import("scripting/functions.zig");
 
+        // Quote-aware line splitting: newlines inside quotes are not line breaks
         var lines_buffer: [10000][]const u8 = undefined;
         var lines_count: usize = 0;
-        var line_iter = std.mem.splitScalar(u8, command, '\n');
-        while (line_iter.next()) |line| {
-            if (lines_count >= lines_buffer.len) break;
-            lines_buffer[lines_count] = line;
-            lines_count += 1;
+        {
+            var line_start: usize = 0;
+            var in_sq = false;
+            var in_dq = false;
+            var escaped = false;
+            var ci2: usize = 0;
+            while (ci2 < command.len) : (ci2 += 1) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                const ch = command[ci2];
+                if (ch == '\\' and !in_sq) {
+                    escaped = true;
+                    continue;
+                }
+                if (ch == '\'' and !in_dq) {
+                    in_sq = !in_sq;
+                } else if (ch == '"' and !in_sq) {
+                    in_dq = !in_dq;
+                } else if (ch == '\n' and !in_sq and !in_dq) {
+                    if (lines_count >= lines_buffer.len) break;
+                    lines_buffer[lines_count] = command[line_start..ci2];
+                    lines_count += 1;
+                    line_start = ci2 + 1;
+                }
+            }
+            // Add final segment
+            if (line_start <= command.len and lines_count < lines_buffer.len) {
+                lines_buffer[lines_count] = command[line_start..command.len];
+                lines_count += 1;
+            }
         }
         const lines = lines_buffer[0..lines_count];
 

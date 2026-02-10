@@ -36,9 +36,9 @@ const parseIPv4 = networking.parseIPv4;
 const parseIPv6 = networking.parseIPv6;
 
 // C library extern declarations for environment manipulation (POSIX only)
-const libc_env = if (builtin.os.tag != .windows) struct {
-    extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-    extern "c" fn unsetenv(name: [*:0]const u8) c_int;
+pub const libc_env = if (builtin.os.tag != .windows) struct {
+    pub extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+    pub extern "c" fn unsetenv(name: [*:0]const u8) c_int;
 } else struct {};
 
 // Windows process access rights (for job control)

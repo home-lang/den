@@ -879,6 +879,74 @@ Y
 Z" "$(timeout 3 $DEN -c 'result=$(for f in x y z; do echo "$f"; done | tr a-z A-Z); echo "$result"')"
 
 # ===========================================================================
+# 125. Case statement with quoted values and glob patterns
+# ===========================================================================
+check "case quoted exact" "matched" "$(timeout 3 $DEN -c 'case "hello" in hello) echo matched;; *) echo no;; esac')"
+check "case quoted glob prefix" "matched" "$(timeout 3 $DEN -c 'case "hello" in h*) echo matched;; *) echo no;; esac')"
+check "case quoted glob suffix" "matched" "$(timeout 3 $DEN -c 'case "hello" in *lo) echo matched;; *) echo no;; esac')"
+check "case quoted pipe pattern" "pipe" "$(timeout 3 $DEN -c 'case "hello" in hi|hello) echo pipe;; *) echo no;; esac')"
+check "case single quoted" "matched" "$(timeout 3 $DEN -c "case 'hello' in hello) echo matched;; *) echo no;; esac")"
+check "case var pattern" "varpat" "$(timeout 3 $DEN -c 'PAT=hello; case "hello" in $PAT) echo varpat;; *) echo no;; esac')"
+check "case quoted both" "yes" "$(timeout 3 $DEN -c 'case "abc" in "abc") echo yes;; *) echo no;; esac')"
+check "case unquoted ok" "yes" "$(timeout 3 $DEN -c 'case hello in hello) echo yes;; *) echo no;; esac')"
+
+# ===========================================================================
+# 126. Nested quotes in $() command substitution
+# ===========================================================================
+check "nested dq in cmd sub" "result: hello world" "$(timeout 3 $DEN -c 'echo "result: $(echo "hello world")"')"
+check "nested dq pipe" "3" "$(timeout 3 $DEN -c 'echo "$(echo -e "a\nb\nc" | wc -l | tr -d " ")"')"
+check "multi cmd sub dq" "hello world" "$(timeout 3 $DEN -c 'echo "$(echo "hello") $(echo "world")"')"
+check "deep nested cmd sub" "deep" "$(timeout 3 $DEN -c 'echo "$(echo "$(echo "deep")")"')"
+
+# ===========================================================================
+# 127. Export variables visible in $()
+# ===========================================================================
+check "export in cmd sub" "hello" "$(timeout 3 $DEN -c 'export X=hello; echo $(echo $X)')"
+check "export dq cmd sub" "val: world" "$(timeout 3 $DEN -c 'export X=world; echo "val: $(echo "$X")"')"
+check "export name cmd sub" "done" "$(timeout 3 $DEN -c 'Y=done; export Y; echo $(echo $Y)')"
+
+# ===========================================================================
+# 128. Per-command temporary variable assignment (VAR=val cmd)
+# ===========================================================================
+check "IFS read colon" "a b c" "$(echo 'a:b:c' | timeout 3 $DEN -c 'IFS=: read x y z; echo "$x $y $z"')"
+check "temp var env" "bar" "$(timeout 3 $DEN -c 'FOO=bar env | grep "^FOO=" | cut -d= -f2')"
+check "temp var restore" "test
+original" "$(timeout 3 $DEN -c 'X=original; X=temp echo test; echo $X')"
+check "temp var unset after" "ok
+unset" "$(timeout 3 $DEN -c 'NEWVAR=hello echo ok; echo ${NEWVAR:-unset}')"
+check "multi temp var" "1 2" "$(timeout 3 $DEN -c 'A=1 B=2 env | grep -E "^(A|B)=" | sort | cut -d= -f2 | tr "\n" " " | sed "s/ $//"')"
+check "IFS comma heredoc" "x y z" "$(timeout 3 $DEN -c 'IFS=, read -r a b c <<< "x,y,z"; echo "$a $b $c"')"
+
+# ===========================================================================
+# 129. Multiline strings in -c mode
+# ===========================================================================
+check "multiline dq var" "line1
+line2" "$(timeout 3 $DEN -c 'x="line1
+line2"; echo "$x"')"
+check "multiline sq var" "line1
+line2" "$(timeout 3 $DEN -c "x='line1
+line2'; echo \"\$x\"")"
+check "multiline heredoc -c" "hello world" "$(timeout 3 $DEN -c 'cat << EOF
+hello world
+EOF')"
+
+# ===========================================================================
+# 130. Glob suppression in quotes and escaped dollar
+# ===========================================================================
+check "dq no glob" "/dev/nul*" "$(timeout 3 $DEN -c 'echo "/dev/nul*"')"
+check "sq no glob" "/dev/nul*" "$(timeout 3 $DEN -c "echo '/dev/nul*'")"
+check "unquoted glob" "/dev/null" "$(timeout 3 $DEN -c 'echo /dev/nul*')"
+check "escaped dollar dq" '$HOME' "$(timeout 3 $DEN -c 'echo "\$HOME"')"
+check "escaped dollar cost" 'cost is $5' "$(timeout 3 $DEN -c 'echo "cost is \$5"')"
+
+# ===========================================================================
+# 131. Functions visible in command substitution
+# ===========================================================================
+check "func in cmd sub" "hello" "$(timeout 3 $DEN -c 'f() { echo hello; }; echo $(f)')"
+check "func result var" "hello" "$(timeout 3 $DEN -c 'f() { echo hello; }; result=$(f); echo $result')"
+check "recursive func" "120" "$(timeout 5 $DEN -c 'fact() { if [ $1 -le 1 ]; then echo 1; else local n=$1; local prev=$(fact $((n-1))); echo $((n * prev)); fi; }; fact 5')"
+
+# ===========================================================================
 # Results
 # ===========================================================================
 echo ""

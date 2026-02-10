@@ -151,10 +151,36 @@ pub fn exportBuiltin(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             const var_name = arg[0..eq_pos];
             const var_value = arg[eq_pos + 1 ..];
             try ctx.setEnv(var_name, var_value);
+            // Also set in process environment so child processes (including $()) inherit it
+            if (comptime builtin.os.tag != .windows) {
+                if (var_name.len < 512 and var_value.len < 4096) {
+                    var name_buf: [512]u8 = undefined;
+                    var val_buf: [4096]u8 = undefined;
+                    @memcpy(name_buf[0..var_name.len], var_name);
+                    name_buf[var_name.len] = 0;
+                    @memcpy(val_buf[0..var_value.len], var_value);
+                    val_buf[var_value.len] = 0;
+                    _ = libc_env.setenv(name_buf[0..var_name.len :0], val_buf[0..var_value.len :0], 1);
+                }
+            }
         } else {
-            // Just variable name - export with empty value or existing value
-            if (ctx.getEnv(arg) == null) {
+            // Just variable name - export existing value (or empty if unset)
+            const existing = ctx.getEnv(arg);
+            if (existing == null) {
                 try ctx.setEnv(arg, "");
+            }
+            // Set in process environment with existing or empty value
+            if (comptime builtin.os.tag != .windows) {
+                const val = existing orelse "";
+                if (arg.len < 512 and val.len < 4096) {
+                    var name_buf: [512]u8 = undefined;
+                    var val_buf: [4096]u8 = undefined;
+                    @memcpy(name_buf[0..arg.len], arg);
+                    name_buf[arg.len] = 0;
+                    @memcpy(val_buf[0..val.len], val);
+                    val_buf[val.len] = 0;
+                    _ = libc_env.setenv(name_buf[0..arg.len :0], val_buf[0..val.len :0], 1);
+                }
             }
         }
     }

@@ -247,8 +247,13 @@ pub const Glob = struct {
     /// Check if string contains glob characters
     fn hasGlobChars(self: *Glob, pattern: []const u8) bool {
         _ = self;
-        for (pattern) |char| {
-            if (char == '*' or char == '?' or char == '[' or char == '~' or char == '(' or char == '|') {
+        var i: usize = 0;
+        while (i < pattern.len) : (i += 1) {
+            if (pattern[i] == '\\' and i + 1 < pattern.len) {
+                i += 1; // Skip escaped character
+                continue;
+            }
+            if (pattern[i] == '*' or pattern[i] == '?' or pattern[i] == '[' or pattern[i] == '~' or pattern[i] == '(' or pattern[i] == '|') {
                 return true;
             }
         }

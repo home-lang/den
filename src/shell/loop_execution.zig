@@ -176,6 +176,8 @@ pub fn executeCStyleLoopBodyCommand(self: *Shell, cmd: []const u8) void {
         self.last_arg,
         self,
     );
+    const shell_mod = @import("../shell.zig");
+    expander.exec_command_fn = &shell_mod.execCommandCallback;
     expander.arrays = &self.arrays;
     expander.assoc_arrays = &self.assoc_arrays;
     expander.var_attributes = &self.var_attributes;

@@ -102,6 +102,13 @@ pub const CallFrame = struct {
     source_file: []const u8,
 };
 
+/// Callback for command substitution in forked child processes.
+/// Allows expansion.zig to call shell.executeCommand without circular imports.
+pub fn execCommandCallback(shell_opaque: *anyopaque, command: []const u8) void {
+    const self: *Shell = @ptrCast(@alignCast(shell_opaque));
+    self.executeCommand(command) catch {};
+}
+
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     running: bool,
@@ -1295,19 +1302,31 @@ pub const Shell = struct {
                 if (is_valid_var and eq_pos + 1 <= trimmed_input.len) {
                     const rest = trimmed_input[eq_pos + 1 ..];
                     // Check if there are any spaces after the value that indicate more commands
-                    // Handle quoted strings and special cases
+                    // Handle quoted strings, $() nesting, and ${} nesting
                     var in_single_quote = false;
                     var in_double_quote = false;
+                    var subst_depth_check: u32 = 0;
+                    var brace_depth_check: u32 = 0;
                     var found_space_outside_quotes = false;
+                    var prev_c: u8 = 0;
                     for (rest) |c| {
-                        if (c == '\'' and !in_double_quote) {
+                        if (c == '\'' and !in_double_quote and subst_depth_check == 0) {
                             in_single_quote = !in_single_quote;
-                        } else if (c == '"' and !in_single_quote) {
+                        } else if (c == '"' and !in_single_quote and subst_depth_check == 0) {
                             in_double_quote = !in_double_quote;
-                        } else if (c == ' ' and !in_single_quote and !in_double_quote) {
+                        } else if (c == '(' and prev_c == '$' and !in_single_quote) {
+                            subst_depth_check += 1;
+                        } else if (c == '{' and prev_c == '$' and !in_single_quote) {
+                            brace_depth_check += 1;
+                        } else if (c == ')' and subst_depth_check > 0) {
+                            subst_depth_check -= 1;
+                        } else if (c == '}' and brace_depth_check > 0) {
+                            brace_depth_check -= 1;
+                        } else if (c == ' ' and !in_single_quote and !in_double_quote and subst_depth_check == 0 and brace_depth_check == 0) {
                             found_space_outside_quotes = true;
                             break;
                         }
+                        prev_c = c;
                     }
                     if (found_space_outside_quotes) {
                         // Check if ALL space-separated tokens are assignments (a=1 b=2 c=3)
@@ -1350,6 +1369,175 @@ pub const Shell = struct {
                             }
                             self.last_exit_code = 0;
                             return;
+                        }
+                        // Check for per-command temporary variable assignment: VAR=val cmd args
+                        // The first token(s) are assignments but there's a non-assignment command after
+                        if (!all_assignments) {
+                            // Collect leading assignments and find the command
+                            var prefix_assignments: [32]struct { name: []const u8, value: []const u8 } = undefined;
+                            var prefix_count: usize = 0;
+                            var cmd_start_offset: usize = 0;
+
+                            // Walk through quote-aware tokens to find assignments vs command
+                            var scan_pos: usize = 0;
+                            while (scan_pos < trimmed_input.len) {
+                                // Skip leading whitespace
+                                while (scan_pos < trimmed_input.len and trimmed_input[scan_pos] == ' ') scan_pos += 1;
+                                if (scan_pos >= trimmed_input.len) break;
+
+                                // Find end of this token (respecting quotes)
+                                const tok_start = scan_pos;
+                                var sq = false;
+                                var dq = false;
+                                while (scan_pos < trimmed_input.len) : (scan_pos += 1) {
+                                    const sc = trimmed_input[scan_pos];
+                                    if (sc == '\'' and !dq) {
+                                        sq = !sq;
+                                    } else if (sc == '"' and !sq) {
+                                        dq = !dq;
+                                    } else if (sc == ' ' and !sq and !dq) {
+                                        break;
+                                    }
+                                }
+                                const tok = trimmed_input[tok_start..scan_pos];
+
+                                // Check if this token is an assignment
+                                var is_assignment = false;
+                                if (std.mem.indexOfScalar(u8, tok, '=')) |teq| {
+                                    if (teq > 0) {
+                                        const tname = tok[0..teq];
+                                        var tvalid = tname[0] == '_' or std.ascii.isAlphabetic(tname[0]);
+                                        if (tvalid) {
+                                            for (tname[1..]) |tc| {
+                                                if (!std.ascii.isAlphanumeric(tc) and tc != '_') {
+                                                    tvalid = false;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if (tvalid and prefix_count < prefix_assignments.len) {
+                                            is_assignment = true;
+                                            const tval_raw = tok[teq + 1 ..];
+                                            // Strip surrounding quotes from value
+                                            const tval = if (tval_raw.len >= 2 and
+                                                ((tval_raw[0] == '"' and tval_raw[tval_raw.len - 1] == '"') or
+                                                (tval_raw[0] == '\'' and tval_raw[tval_raw.len - 1] == '\'')))
+                                                tval_raw[1 .. tval_raw.len - 1]
+                                            else
+                                                tval_raw;
+                                            prefix_assignments[prefix_count] = .{ .name = tname, .value = tval };
+                                            prefix_count += 1;
+                                        }
+                                    }
+                                }
+                                if (!is_assignment) {
+                                    cmd_start_offset = tok_start;
+                                    break;
+                                }
+                            }
+
+                            if (prefix_count > 0 and cmd_start_offset > 0) {
+                                const cmd_rest = trimmed_input[cmd_start_offset..];
+
+                                // Save old values (must dupe since setArithVariable frees them)
+                                var saved_values: [32]?[]const u8 = undefined;
+                                for (prefix_assignments[0..prefix_count], 0..) |a, ai| {
+                                    if (shell_mod.getVariableValue(self, a.name)) |val| {
+                                        saved_values[ai] = self.allocator.dupe(u8, val) catch null;
+                                    } else {
+                                        saved_values[ai] = null;
+                                    }
+                                }
+                                defer {
+                                    for (0..prefix_count) |di| {
+                                        if (saved_values[di]) |sv| self.allocator.free(@constCast(sv));
+                                    }
+                                }
+
+                                // Set temporary values (in both shell env and C env)
+                                for (prefix_assignments[0..prefix_count]) |a| {
+                                    shell_mod.setArithVariable(self, a.name, a.value);
+                                    if (comptime @import("builtin").os.tag != .windows) {
+                                        if (a.name.len < 512 and a.value.len < 4096) {
+                                            var nbuf: [512]u8 = undefined;
+                                            var vbuf: [4096]u8 = undefined;
+                                            @memcpy(nbuf[0..a.name.len], a.name);
+                                            nbuf[a.name.len] = 0;
+                                            @memcpy(vbuf[0..a.value.len], a.value);
+                                            vbuf[a.value.len] = 0;
+                                            const c_env = @import("executor/mod.zig").libc_env;
+                                            _ = c_env.setenv(nbuf[0..a.name.len :0], vbuf[0..a.value.len :0], 1);
+                                        }
+                                    }
+                                }
+
+                                // Execute the command
+                                self.executeCommand(cmd_rest) catch |err| {
+                                    // Restore old values before propagating error
+                                    for (prefix_assignments[0..prefix_count], 0..) |a, ai| {
+                                        if (saved_values[ai]) |old_val| {
+                                            shell_mod.setArithVariable(self, a.name, old_val);
+                                        } else {
+                                            // Variable didn't exist before - remove it
+                                            if (self.environment.fetchRemove(a.name)) |old| {
+                                                self.allocator.free(old.key);
+                                                self.allocator.free(old.value);
+                                            }
+                                        }
+                                        if (comptime @import("builtin").os.tag != .windows) {
+                                            if (a.name.len < 512) {
+                                                var nbuf2: [512]u8 = undefined;
+                                                @memcpy(nbuf2[0..a.name.len], a.name);
+                                                nbuf2[a.name.len] = 0;
+                                                const c_env2 = @import("executor/mod.zig").libc_env;
+                                                if (saved_values[ai]) |old_val| {
+                                                    if (old_val.len < 4096) {
+                                                        var vbuf2: [4096]u8 = undefined;
+                                                        @memcpy(vbuf2[0..old_val.len], old_val);
+                                                        vbuf2[old_val.len] = 0;
+                                                        _ = c_env2.setenv(nbuf2[0..a.name.len :0], vbuf2[0..old_val.len :0], 1);
+                                                    }
+                                                } else {
+                                                    _ = c_env2.unsetenv(nbuf2[0..a.name.len :0]);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (err == error.Exit) return err;
+                                    return;
+                                };
+
+                                // Restore old values
+                                for (prefix_assignments[0..prefix_count], 0..) |a, ai| {
+                                    if (saved_values[ai]) |old_val| {
+                                        shell_mod.setArithVariable(self, a.name, old_val);
+                                    } else {
+                                        if (self.environment.fetchRemove(a.name)) |old| {
+                                            self.allocator.free(old.key);
+                                            self.allocator.free(old.value);
+                                        }
+                                    }
+                                    if (comptime @import("builtin").os.tag != .windows) {
+                                        if (a.name.len < 512) {
+                                            var nbuf3: [512]u8 = undefined;
+                                            @memcpy(nbuf3[0..a.name.len], a.name);
+                                            nbuf3[a.name.len] = 0;
+                                            const c_env3 = @import("executor/mod.zig").libc_env;
+                                            if (saved_values[ai]) |old_val| {
+                                                if (old_val.len < 4096) {
+                                                    var vbuf3: [4096]u8 = undefined;
+                                                    @memcpy(vbuf3[0..old_val.len], old_val);
+                                                    vbuf3[old_val.len] = 0;
+                                                    _ = c_env3.setenv(nbuf3[0..a.name.len :0], vbuf3[0..old_val.len :0], 1);
+                                                }
+                                            } else {
+                                                _ = c_env3.unsetenv(nbuf3[0..a.name.len :0]);
+                                            }
+                                        }
+                                    }
+                                }
+                                return;
+                            }
                         }
                     }
                     if (!found_space_outside_quotes) {

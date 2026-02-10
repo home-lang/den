@@ -557,9 +557,18 @@ pub const Tokenizer = struct {
                         }
                     } else if (in_double_quote) {
                         // In double quotes: backslash is only special before $ ` " \ newline
-                        if (next_char == '$' or next_char == '`' or next_char == '"' or
-                            next_char == '\\' or next_char == '\n')
-                        {
+                        if (next_char == '$' or next_char == '`') {
+                            // Preserve backslash before $ and ` so expansion phase
+                            // can recognize them as escaped (literal) characters
+                            self.pos += 2;
+                            self.column += 2;
+                            if (word_len + 1 < word_buffer.len) {
+                                word_buffer[word_len] = '\\';
+                                word_len += 1;
+                                word_buffer[word_len] = next_char;
+                                word_len += 1;
+                            }
+                        } else if (next_char == '"' or next_char == '\\' or next_char == '\n') {
                             // Consume backslash, use next char literally
                             self.pos += 2;
                             self.column += 2;
@@ -663,21 +672,26 @@ pub const Tokenizer = struct {
                     self.column += 1;
                     continue;
                 }
-                in_double_quote = !in_double_quote;
-                // When inside $() or backticks, preserve quote chars in the buffer
+                // Inside $() or backticks, quotes are in a new context -
+                // don't toggle the outer quote state, just preserve the char
                 if (subst_depth > 0 or in_backtick) {
                     if (word_len < word_buffer.len) {
                         word_buffer[word_len] = char;
                         word_len += 1;
                     }
+                    self.pos += 1;
+                    self.column += 1;
+                    continue;
                 }
+                in_double_quote = !in_double_quote;
                 self.pos += 1;
                 self.column += 1;
                 continue;
             }
 
-            // If not in quotes, handle special characters
-            if (!in_single_quote and !in_double_quote and !in_ansi_quote) {
+            // Track $(), ${}, and backticks even inside double quotes
+            // (these create new quoting contexts in bash)
+            if (!in_single_quote and !in_ansi_quote) {
                 // Toggle backtick command substitution tracking
                 if (char == '`') {
                     in_backtick = !in_backtick;
@@ -707,18 +721,18 @@ pub const Tokenizer = struct {
                     } else if (subst_depth > 0) {
                         // Nested parenthesis inside substitution
                         subst_depth += 1;
-                    } else if (!in_backtick and brace_depth == 0) {
-                        break; // Standalone ( - break (but not inside backticks/braces)
+                    } else if (!in_double_quote and !in_backtick and brace_depth == 0) {
+                        break; // Standalone ( - break (but not inside quotes/backticks/braces)
                     }
                 } else if (char == ')') {
                     if (subst_depth > 0) {
                         subst_depth -= 1;
                         // Don't break - consume as part of word
-                    } else if (!in_backtick and brace_depth == 0) {
-                        break; // Standalone ) - break (but not inside backticks/braces)
+                    } else if (!in_double_quote and !in_backtick and brace_depth == 0) {
+                        break; // Standalone ) - break (but not inside quotes/backticks/braces)
                     }
-                } else if (subst_depth == 0 and brace_depth == 0 and !in_backtick) {
-                    // Only break on special chars when not inside a substitution, brace, or backtick
+                } else if (!in_double_quote and subst_depth == 0 and brace_depth == 0 and !in_backtick) {
+                    // Only break on special chars when not inside quotes, substitution, brace, or backtick
                     if (std.ascii.isWhitespace(char) or
                         char == '|' or char == ';' or char == '&' or
                         char == '>' or char == '<')
@@ -732,6 +746,15 @@ pub const Tokenizer = struct {
             // Add character to word
             // If in single quotes, escape special characters ($, `) so they're not expanded
             if (in_single_quote and (char == '$' or char == '`')) {
+                if (word_len + 1 < word_buffer.len) {
+                    word_buffer[word_len] = '\\';
+                    word_len += 1;
+                    word_buffer[word_len] = char;
+                    word_len += 1;
+                }
+            } else if ((in_single_quote or in_double_quote) and subst_depth == 0 and brace_depth == 0 and !in_backtick and (char == '*' or char == '?' or char == '[')) {
+                // Escape glob metacharacters inside quotes so glob expansion treats them as literals
+                // But not inside $(), ${}, or backticks where they may be part of special syntax
                 if (word_len + 1 < word_buffer.len) {
                     word_buffer[word_len] = '\\';
                     word_len += 1;

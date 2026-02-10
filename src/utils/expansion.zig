@@ -122,6 +122,7 @@ pub const Expansion = struct {
     last_background_pid: i32, // $!
     last_arg: []const u8, // $_
     shell: ?*anyopaque, // Optional shell reference for function local vars
+    exec_command_fn: ?*const fn (*anyopaque, []const u8) void, // Callback for command substitution
     option_nounset: bool, // set -u: error on unset variable
     cmd_cache: ?*ExpansionCache, // Optional cache for command substitution results
     line_number: u32, // $LINENO
@@ -141,6 +142,7 @@ pub const Expansion = struct {
             .last_background_pid = 0,
             .last_arg = "",
             .shell = null,
+            .exec_command_fn = null,
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
@@ -170,6 +172,7 @@ pub const Expansion = struct {
             .last_background_pid = last_background_pid,
             .last_arg = last_arg,
             .shell = null,
+            .exec_command_fn = null,
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
@@ -199,6 +202,7 @@ pub const Expansion = struct {
             .last_background_pid = last_background_pid,
             .last_arg = last_arg,
             .shell = shell,
+            .exec_command_fn = null,
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
@@ -1343,7 +1347,7 @@ pub const Expansion = struct {
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
         if (std.mem.eql(u8, content, "HOSTNAME")) {
-            if (@import("builtin").os.tag == .windows) {
+            if (comptime @import("builtin").os.tag == .windows) {
                 const result = try self.allocator.dupe(u8, "localhost");
                 return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
             }
@@ -1832,7 +1836,7 @@ pub const Expansion = struct {
     fn executeCommandForSubstitution(self: *Expansion, command: []const u8) ![]const u8 {
         const spawn = @import("spawn.zig");
 
-        if (@import("builtin").os.tag == .windows) {
+        if (comptime @import("builtin").os.tag == .windows) {
             // Windows: use spawn module for command substitution
             const result = try spawn.shellCapture(self.allocator, command);
             return result.stdout;
@@ -1867,26 +1871,24 @@ pub const Expansion = struct {
                 std.posix.close(@intCast(dev_null_fd));
             }
 
-            // Null-terminate the command for execve
+            // Use the shell's own execution engine to preserve function definitions,
+            // variables, and other shell state in command substitutions
+            if (self.exec_command_fn) |exec_fn| {
+                if (self.shell) |shell_opaque| {
+                    exec_fn(shell_opaque, command);
+                    // Read last_exit_code from shell (offset matches Shell struct layout)
+                    // After execution, just exit with 0 (output already went to pipe)
+                    std.c._exit(0);
+                }
+            }
+
+            // Fallback: execute via fork+execve when no shell reference available
             var cmd_buf: [8192]u8 = undefined;
             if (command.len >= cmd_buf.len) std.c._exit(1);
             @memcpy(cmd_buf[0..command.len], command);
             cmd_buf[command.len] = 0;
             const cmd_z: [*:0]const u8 = @ptrCast(&cmd_buf);
 
-            // Try to use den itself for command substitution (supports den builtins)
-            var exe_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-            const exe_path_len = std.process.executablePath(std.Options.debug_io, &exe_path_buf) catch 0;
-            if (exe_path_len > 0 and exe_path_len < exe_path_buf.len) {
-                exe_path_buf[exe_path_len] = 0;
-                const den_path: [*:0]const u8 = @ptrCast(&exe_path_buf);
-                const flag_c: [*:0]const u8 = "-c";
-                const den_argv = [_:null]?[*:0]const u8{ den_path, flag_c, cmd_z, null };
-                _ = std.c.execve(den_path, &den_argv, @extern(*[*:null]?[*:0]u8, .{ .name = "environ" }).*);
-                // If den exec fails, fall through to /bin/sh
-            }
-
-            // Fallback: execute via /bin/sh -c
             const sh_path: [*:0]const u8 = "/bin/sh";
             const sh_c: [*:0]const u8 = "-c";
             const argv_arr = [_:null]?[*:0]const u8{ sh_path, sh_c, cmd_z, null };

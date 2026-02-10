@@ -1,7 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Shell = @import("../shell.zig").Shell;
-const Expansion = @import("../utils/expansion.zig").Expansion;
+const expansion_mod = @import("../utils/expansion.zig");
+const Expansion = expansion_mod.Expansion;
+const removeQuotes = expansion_mod.removeQuotes;
 const BraceExpander = @import("../utils/brace.zig").BraceExpander;
 
 /// Check if a line is a keyword (possibly followed by |, ;, &, etc.)
@@ -607,9 +609,11 @@ pub const ControlFlowExecutor = struct {
     ///   ;& - fallthrough (execute next case body unconditionally)
     ///   ;;& - continue testing (test next pattern, execute if matches)
     pub fn executeCase(self: *ControlFlowExecutor, stmt: *CaseStatement) !i32 {
-        // Expand the value first
-        const expanded_value = try self.expandValue(stmt.value);
-        defer self.allocator.free(expanded_value);
+        // Expand the value and strip quotes
+        const expanded_raw = try self.expandValue(stmt.value);
+        defer self.allocator.free(expanded_raw);
+        const expanded_value = removeQuotes(self.allocator, expanded_raw) catch expanded_raw;
+        defer if (expanded_value.ptr != expanded_raw.ptr) self.allocator.free(expanded_value);
 
         var last_exit: i32 = 0;
         var execute_next_unconditionally = false;
@@ -624,9 +628,13 @@ pub const ControlFlowExecutor = struct {
                 matched = true;
                 execute_next_unconditionally = false;
             } else {
-                // Check patterns
+                // Check patterns (expand and strip quotes from each pattern)
                 for (case_clause.patterns) |pattern| {
-                    if (try self.matchPattern(expanded_value, pattern)) {
+                    const expanded_pattern = self.expandValue(pattern) catch pattern;
+                    defer if (expanded_pattern.ptr != pattern.ptr) self.allocator.free(expanded_pattern);
+                    const unquoted_pattern = removeQuotes(self.allocator, expanded_pattern) catch expanded_pattern;
+                    defer if (unquoted_pattern.ptr != expanded_pattern.ptr) self.allocator.free(unquoted_pattern);
+                    if (try self.matchPattern(expanded_value, unquoted_pattern)) {
                         matched = true;
                         break;
                     }
