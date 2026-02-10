@@ -82,6 +82,8 @@ pub const Parser = struct {
         var args_buffer: [64][]const u8 = undefined;
         var arg_count: usize = 0;
 
+        var quoted_buffer: [64]bool = undefined;
+
         var redir_buffer: [8]types.Redirection = undefined;
         var redir_count: usize = 0;
 
@@ -106,6 +108,7 @@ pub const Parser = struct {
                     } else {
                         if (arg_count >= args_buffer.len) return error.TooManyArguments;
                         args_buffer[arg_count] = value;
+                        quoted_buffer[arg_count] = token.was_quoted;
                         arg_count += 1;
                     }
                     self.pos += 1;
@@ -269,6 +272,9 @@ pub const Parser = struct {
         const args = try self.allocator.alloc([]const u8, arg_count);
         @memcpy(args, args_buffer[0..arg_count]);
 
+        const quoted_args = try self.allocator.alloc(bool, arg_count);
+        @memcpy(quoted_args, quoted_buffer[0..arg_count]);
+
         const redirections = try self.allocator.alloc(types.Redirection, redir_count);
         @memcpy(redirections, redir_buffer[0..redir_count]);
 
@@ -277,6 +283,7 @@ pub const Parser = struct {
             .args = args,
             .redirections = redirections,
             .type = .external,
+            .quoted_args = quoted_args,
         };
     }
 };

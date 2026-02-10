@@ -688,6 +688,7 @@ pub const Expansion = struct {
                             var arith = @import("arithmetic.zig").Arithmetic.initWithVariables(self.allocator, self.environment);
                             arith.local_vars = self.local_vars;
                             arith.arrays = self.arrays;
+                            arith.positional_params = self.positional_params;
                             const arith_result = arith.eval(resolved_index) catch {
                                 return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                             };
@@ -1400,6 +1401,80 @@ pub const Expansion = struct {
             }
         }
 
+        // Handle special variables in braces: ${?}, ${$}, ${#}, ${!}, ${@}, ${*}, ${0}-${9}
+        if (content.len == 1) {
+            switch (content[0]) {
+                '?' => {
+                    const value = try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_exit_code});
+                    return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
+                },
+                '$' => {
+                    const pid: i64 = if (@import("builtin").os.tag == .windows)
+                        @intCast(std.os.windows.GetCurrentProcessId())
+                    else
+                        @intCast(std.c.getpid());
+                    const value = try std.fmt.allocPrint(self.allocator, "{d}", .{pid});
+                    return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
+                },
+                '!' => {
+                    const value = try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_background_pid});
+                    return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
+                },
+                '@' => {
+                    if (self.positional_params.len == 0)
+                        return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                    var total_len: usize = 0;
+                    for (self.positional_params) |p| total_len += p.len;
+                    if (self.positional_params.len > 1) total_len += self.positional_params.len - 1;
+                    var result = try self.allocator.alloc(u8, total_len);
+                    var pos: usize = 0;
+                    for (self.positional_params, 0..) |p, pi| {
+                        @memcpy(result[pos..pos + p.len], p);
+                        pos += p.len;
+                        if (pi < self.positional_params.len - 1) { result[pos] = ' '; pos += 1; }
+                    }
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                },
+                '*' => {
+                    if (self.positional_params.len == 0)
+                        return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                    var total_len: usize = 0;
+                    for (self.positional_params) |p| total_len += p.len;
+                    if (self.positional_params.len > 1) total_len += self.positional_params.len - 1;
+                    var result = try self.allocator.alloc(u8, total_len);
+                    var pos: usize = 0;
+                    for (self.positional_params, 0..) |p, pi| {
+                        @memcpy(result[pos..pos + p.len], p);
+                        pos += p.len;
+                        if (pi < self.positional_params.len - 1) { result[pos] = ' '; pos += 1; }
+                    }
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                },
+                '0' => {
+                    const value = try self.allocator.dupe(u8, self.shell_name);
+                    return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
+                },
+                '1'...'9' => {
+                    const digit = content[0] - '0';
+                    if (digit <= self.positional_params.len) {
+                        const value = try self.allocator.dupe(u8, self.positional_params[digit - 1]);
+                        return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
+                    }
+                    return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                },
+                '-' => {
+                    // ${-} - current option flags
+                    const value = try self.allocator.dupe(u8, "");
+                    return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
+                },
+                '_' => {
+                    const value = try self.allocator.dupe(u8, self.last_arg);
+                    return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
+                },
+                else => {},
+            }
+        }
+
         // Simple braced variable - use getVariableValue for nameref resolution
         if (self.getVariableValue(content)) |value| {
             const result = try self.allocator.dupe(u8, value);
@@ -1876,9 +1951,11 @@ pub const Expansion = struct {
             if (self.exec_command_fn) |exec_fn| {
                 if (self.shell) |shell_opaque| {
                     exec_fn(shell_opaque, command);
-                    // Read last_exit_code from shell (offset matches Shell struct layout)
-                    // After execution, just exit with 0 (output already went to pipe)
-                    std.c._exit(0);
+                    // Exit with the shell's last exit code to propagate $?
+                    const Shell = @import("../shell.zig").Shell;
+                    const shell: *Shell = @ptrCast(@alignCast(shell_opaque));
+                    const code: u8 = @intCast(@as(u32, @bitCast(shell.last_exit_code)) & 0xff);
+                    std.c._exit(code);
                 }
             }
 
@@ -1912,10 +1989,18 @@ pub const Expansion = struct {
         }
         std.posix.close(read_end);
 
-        // Wait for child to finish
+        // Wait for child to finish and capture exit code for $?
         var wait_status: c_int = 0;
         if (comptime builtin.os.tag != .windows) {
             _ = std.c.waitpid(pid, &wait_status, 0);
+            const exit_code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
+            self.last_exit_code = exit_code;
+            // Also update the shell's exit code if available
+            if (self.shell) |shell_opaque| {
+                const Shell = @import("../shell.zig").Shell;
+                const shell: *Shell = @ptrCast(@alignCast(shell_opaque));
+                shell.last_exit_code = exit_code;
+            }
         }
 
         return try output_buffer.toOwnedSlice(self.allocator);
@@ -2008,12 +2093,82 @@ pub const Expansion = struct {
                 }
             }
         }
-        const expr: []const u8 = if (arith_expanded) arith_buf[0..arith_len] else raw_expr;
+        var expr_after_vars: []const u8 = if (arith_expanded) arith_buf[0..arith_len] else raw_expr;
+
+        // Pre-expand $(...) command substitutions (but NOT $((...)) arithmetic)
+        var cmd_buf: [4096]u8 = undefined;
+        var cmd_len: usize = 0;
+        var cmd_expanded = false;
+        if (std.mem.indexOf(u8, expr_after_vars, "$(") != null) {
+            var ci: usize = 0;
+            while (ci < expr_after_vars.len) {
+                if (ci + 1 < expr_after_vars.len and expr_after_vars[ci] == '$' and expr_after_vars[ci + 1] == '(') {
+                    // Check if it's $(( — skip nested arithmetic (handled by Arithmetic evaluator)
+                    if (ci + 2 < expr_after_vars.len and expr_after_vars[ci + 2] == '(') {
+                        // It's $(( — copy as-is, find matching ))
+                        var ad: u32 = 2;
+                        var ai: usize = ci + 3;
+                        while (ai < expr_after_vars.len and ad > 0) {
+                            if (expr_after_vars[ai] == '(') ad += 1;
+                            if (expr_after_vars[ai] == ')') ad -= 1;
+                            ai += 1;
+                        }
+                        const chunk = expr_after_vars[ci..ai];
+                        if (cmd_len + chunk.len <= cmd_buf.len) {
+                            @memcpy(cmd_buf[cmd_len..][0..chunk.len], chunk);
+                            cmd_len += chunk.len;
+                        }
+                        ci = ai;
+                    } else {
+                        // It's $(...) — find matching ) respecting nesting
+                        var pd: u32 = 1;
+                        var pi: usize = ci + 2;
+                        while (pi < expr_after_vars.len and pd > 0) {
+                            if (expr_after_vars[pi] == '(') pd += 1;
+                            if (expr_after_vars[pi] == ')') pd -= 1;
+                            if (pd > 0) pi += 1;
+                        }
+                        if (pd == 0) {
+                            const cmd_str = expr_after_vars[ci + 2 .. pi];
+                            const output = self.executeCommandForSubstitution(cmd_str) catch "";
+                            defer if (output.len > 0) self.allocator.free(output);
+
+                            // Trim trailing newlines
+                            var trimmed = output.len;
+                            while (trimmed > 0 and output[trimmed - 1] == '\n') trimmed -= 1;
+                            const trimmed_output = output[0..trimmed];
+
+                            if (cmd_len + trimmed_output.len <= cmd_buf.len) {
+                                @memcpy(cmd_buf[cmd_len..][0..trimmed_output.len], trimmed_output);
+                                cmd_len += trimmed_output.len;
+                            }
+                            cmd_expanded = true;
+                            ci = pi + 1;
+                        } else {
+                            // Unmatched — copy as-is
+                            if (cmd_len < cmd_buf.len) {
+                                cmd_buf[cmd_len] = expr_after_vars[ci];
+                                cmd_len += 1;
+                            }
+                            ci += 1;
+                        }
+                    }
+                } else {
+                    if (cmd_len < cmd_buf.len) {
+                        cmd_buf[cmd_len] = expr_after_vars[ci];
+                        cmd_len += 1;
+                    }
+                    ci += 1;
+                }
+            }
+        }
+        const expr: []const u8 = if (cmd_expanded) cmd_buf[0..cmd_len] else expr_after_vars;
 
         // Evaluate arithmetic expression with variable support
         var arith = Arithmetic.initWithVariables(self.allocator, self.environment);
         arith.local_vars = self.local_vars;
         arith.arrays = self.arrays;
+        arith.positional_params = self.positional_params;
         const result_value = arith.eval(expr) catch {
             // On error, return 0
             const value = try std.fmt.allocPrint(self.allocator, "0", .{});

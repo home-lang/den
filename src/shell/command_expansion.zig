@@ -71,10 +71,19 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
     const cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(cwd_result)), 0);
 
     for (chain.commands) |*cmd| {
+        // Save exit code before expansion to detect command substitution
+        const exit_code_before = self.last_exit_code;
+
         // Expand command name (variables only, no globs for command names)
         const expanded_name = try expander.expand(cmd.name);
         self.allocator.free(cmd.name);
         cmd.name = expanded_name;
+
+        // If exit code changed during name expansion, a command substitution ran.
+        // Track this so variable assignment can preserve the exit code (bash behavior).
+        if (self.last_exit_code != exit_code_before) {
+            cmd.cmd_sub_exit_code = self.last_exit_code;
+        }
 
         // [[ ]] is a shell keyword - skip glob expansion on its arguments
         // to preserve patterns like a* for pattern matching
@@ -85,12 +94,18 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
         var expanded_args_count: usize = 0;
 
         var prev_arg_is_v: bool = false;
-        for (cmd.args) |arg| {
+        for (cmd.args, 0..) |arg, arg_idx| {
             // For [[ -v varname ]], don't expand the variable name after -v
             const skip_expansion = skip_globs and prev_arg_is_v;
             if (skip_globs) {
                 prev_arg_is_v = std.mem.eql(u8, arg, "-v");
             }
+
+            // Check if this argument was quoted in the original source
+            const arg_was_quoted = if (cmd.quoted_args) |qa|
+                (if (arg_idx < qa.len) qa[arg_idx] else false)
+            else
+                false;
 
             // Handle spread operator: ...$var expands variable into multiple args
             if (std.mem.startsWith(u8, arg, "...")) {
@@ -135,6 +150,48 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
                 continue;
             }
 
+            // IFS word splitting: if the arg was unquoted and contained a variable
+            // reference that was expanded, split the result on IFS characters.
+            const should_ifs_split = !arg_was_quoted and containsVariableRef(arg) and
+                !std.mem.eql(u8, arg, var_expanded);
+
+            if (should_ifs_split) {
+                // Get IFS value (default: space, tab, newline)
+                const ifs = self.environment.get("IFS") orelse " \t\n";
+                const WordSplitter = @import("../utils/expansion.zig").WordSplitter;
+                var splitter = WordSplitter.initWithIfs(self.allocator, ifs);
+                const fields = try splitter.split(var_expanded);
+                defer self.allocator.free(fields);
+                // Note: fields are slices into var_expanded, so don't free individually.
+                // var_expanded is freed after we're done with the fields.
+                defer self.allocator.free(var_expanded);
+
+                for (fields) |field| {
+                    if (field.len == 0) continue;
+                    // Apply brace + glob expansion on each IFS field
+                    const brace_exp = try brace.expand(field);
+                    defer {
+                        for (brace_exp) |item| self.allocator.free(item);
+                        self.allocator.free(brace_exp);
+                    }
+                    for (brace_exp) |brace_item| {
+                        const glob_exp = try glob.expand(brace_item, cwd);
+                        defer {
+                            for (glob_exp) |p| self.allocator.free(p);
+                            self.allocator.free(glob_exp);
+                        }
+                        for (glob_exp) |path| {
+                            if (expanded_args_count >= expanded_args_buffer.len)
+                                return error.TooManyArguments;
+                            expanded_args_buffer[expanded_args_count] = try stripGlobEscapes(self.allocator, path);
+                            expanded_args_count += 1;
+                        }
+                    }
+                }
+                self.allocator.free(arg);
+                continue;
+            }
+
             defer self.allocator.free(var_expanded);
 
             // Then expand braces
@@ -172,6 +229,10 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
 
         // Replace args with expanded version
         self.allocator.free(cmd.args);
+        if (cmd.quoted_args) |qa| {
+            self.allocator.free(qa);
+            cmd.quoted_args = null;
+        }
         const new_args = try self.allocator.alloc([]const u8, expanded_args_count);
         @memcpy(new_args, expanded_args_buffer[0..expanded_args_count]);
         cmd.args = new_args;
@@ -313,6 +374,17 @@ fn isDenBuiltin(name: []const u8) bool {
     };
     for (&den_builtins) |b| {
         if (std.mem.eql(u8, name, b)) return true;
+    }
+    return false;
+}
+
+/// Check if a string contains an unescaped variable reference ($var, ${var}, $(...), etc.)
+fn containsVariableRef(s: []const u8) bool {
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        if (s[i] == '$' and (i == 0 or s[i - 1] != '\\')) {
+            return true;
+        }
     }
     return false;
 }

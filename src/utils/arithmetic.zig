@@ -110,6 +110,7 @@ pub const Arithmetic = struct {
     local_vars: ?*std.StringHashMap([]const u8) = null,
     cache: ?*ExpressionCache = null,
     arrays: ?*std.StringHashMap([][]const u8) = null,
+    positional_params: []const []const u8 = &.{},
 
     pub fn init(allocator: std.mem.Allocator) Arithmetic {
         return .{ .allocator = allocator, .variables = null, .cache = null };
@@ -191,6 +192,7 @@ pub const Arithmetic = struct {
             .variables = self.variables,
             .local_vars = self.local_vars,
             .arrays = self.arrays,
+            .positional_params = self.positional_params,
         };
 
         const result = try parser.parseExpression();
@@ -247,6 +249,7 @@ const Parser = struct {
     variables: ?*std.StringHashMap([]const u8),
     local_vars: ?*std.StringHashMap([]const u8) = null,
     arrays: ?*std.StringHashMap([][]const u8) = null,
+    positional_params: []const []const u8 = &.{},
 
     // Entry point - lowest precedence (assignment)
     fn parseExpression(self: *Parser) ArithmeticError!i64 {
@@ -792,6 +795,17 @@ const Parser = struct {
                         return std.fmt.parseInt(i64, trimmed, 10) catch 0;
                     }
                 }
+            }
+            return 0;
+        }
+
+        // Check positional parameters ($1, $2, etc.)
+        if (var_name.len == 1 and var_name[0] >= '1' and var_name[0] <= '9') {
+            const digit = var_name[0] - '0';
+            if (digit <= self.positional_params.len and digit > 0) {
+                const param_val = std.mem.trim(u8, self.positional_params[digit - 1], &std.ascii.whitespace);
+                if (param_val.len == 0) return 0;
+                return std.fmt.parseInt(i64, param_val, 10) catch 0;
             }
             return 0;
         }

@@ -123,8 +123,13 @@ pub fn dispatchBuiltin(self: *Shell, cmd: *types.ParsedCommand) !DispatchResult 
     }
 
     // Test/conditionals
-    if (std.mem.eql(u8, name, "test") or std.mem.eql(u8, name, "[") or std.mem.eql(u8, name, "[[")) {
+    if (std.mem.eql(u8, name, "test") or std.mem.eql(u8, name, "[")) {
         try shell_mod.builtinTest(self, cmd);
+        return .handled;
+    }
+    if (std.mem.eql(u8, name, "[[")) {
+        const test_builtins = @import("../executor/builtins/test_builtins.zig");
+        self.last_exit_code = try test_builtins.extendedTest(cmd, self);
         return .handled;
     }
 

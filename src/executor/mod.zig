@@ -208,6 +208,11 @@ pub const Executor = struct {
                     if (last_exit_code != 0) {
                         shell.executeErrTrap();
                     }
+
+                    // Propagate break/continue from builtins up to enclosing loop
+                    if (shell.break_levels > 0 or shell.continue_levels > 0) {
+                        return last_exit_code;
+                    }
                 }
 
                 // Check for errexit option (set -e)
@@ -440,6 +445,11 @@ pub const Executor = struct {
                     } else {
                         std.c._exit(1);
                     }
+                } else if (self.shell != null and self.shell.?.function_manager.hasFunction(cmd.name)) {
+                    // User-defined function in pipeline
+                    const shell = self.shell.?;
+                    const exit_code = shell.function_manager.executeFunction(shell, cmd.name, cmd.args) catch 1;
+                    std.c._exit(@intCast(if (exit_code >= 0) @as(u32, @intCast(exit_code)) else 1));
                 } else if (self.isBuiltin(cmd.name)) {
                     const exit_code = self.executeBuiltin(cmd) catch 1;
                     std.c._exit(@intCast(exit_code));
@@ -593,6 +603,15 @@ pub const Executor = struct {
             }
         }
 
+        // Empty command name (e.g. from $(exit 42) expanding to "") is a no-op.
+        // Preserve the current exit code like bash does.
+        if (command.name.len == 0) {
+            if (self.shell) |shell| {
+                return shell.last_exit_code;
+            }
+            return 0;
+        }
+
         // Handle bare variable assignment: VAR=value (when command name contains =)
         if (std.mem.indexOfScalar(u8, command.name, '=')) |eq_pos| {
             if (eq_pos > 0) {
@@ -622,7 +641,8 @@ pub const Executor = struct {
                                     self.allocator.free(gop.value_ptr.*);
                                 }
                                 gop.value_ptr.* = val_copy;
-                                return 0;
+                                // Preserve exit code from command substitution (bash behavior)
+                                return command.cmd_sub_exit_code orelse 0;
                             }
                         }
 
@@ -654,7 +674,9 @@ pub const Executor = struct {
                             }
                         }
                     }
-                    return 0;
+                    // Preserve exit code from command substitution (bash behavior)
+                    // e.g. x=$(exit 42); echo $? → 42
+                    return command.cmd_sub_exit_code orelse 0;
                 }
             }
         }
@@ -688,6 +710,17 @@ pub const Executor = struct {
                 }
             }
             return try self.executeBuiltin(command);
+        }
+
+        // Check if it's a user-defined function
+        if (self.shell) |shell| {
+            if (shell.function_manager.hasFunction(command.name)) {
+                const exit_code = shell.function_manager.executeFunction(shell, command.name, command.args) catch |err| {
+                    try IO.eprint("den: function error: {}\n", .{err});
+                    return 1;
+                };
+                return exit_code;
+            }
         }
 
         // Check if it's a directory path (auto cd feature, like zsh)
@@ -819,7 +852,7 @@ pub const Executor = struct {
             "localip",      "shrug",       "web",         "ip",          "return",      "local",      "copyssh",
             "reloaddns",    "emptytrash",  "wip",         "bookmark",    "code",        "pstorm",
             "show",         "hide",        "ft",          "sys-stats",   "netstats",    "net-check",  "log-tail",    "proc-monitor", "log-parse", "dotfiles", "library", "hook",
-            "ifind",        "coproc",
+            "ifind",        "coproc",      "break",       "continue",    ":",           "declare",     "typeset",     "let",         "shift",
             // Nushell-inspired structured data commands
             "from",         "to",          "table",       "grid",
             "where",        "select",      "reject",      "get",         "first",       "last",       "skip",        "take",
@@ -1106,6 +1139,28 @@ pub const Executor = struct {
             return try builtins.interactive_builtins.ifind(self.allocator, command);
         } else if (std.mem.eql(u8, command.name, "coproc")) {
             return try builtins.exec_builtins.coproc(&ctx, command);
+        } else if (std.mem.eql(u8, command.name, "break")) {
+            if (self.shell) |shell| {
+                const levels = if (command.args.len > 0)
+                    std.fmt.parseInt(u32, command.args[0], 10) catch 1
+                else
+                    1;
+                shell.break_levels = if (levels > 0) levels else 1;
+                shell.last_exit_code = 0;
+            }
+            return 0;
+        } else if (std.mem.eql(u8, command.name, "continue")) {
+            if (self.shell) |shell| {
+                const levels = if (command.args.len > 0)
+                    std.fmt.parseInt(u32, command.args[0], 10) catch 1
+                else
+                    1;
+                shell.continue_levels = if (levels > 0) levels else 1;
+                shell.last_exit_code = 0;
+            }
+            return 0;
+        } else if (std.mem.eql(u8, command.name, ":")) {
+            return 0; // No-op
         }
 
         // Nushell-inspired structured data commands

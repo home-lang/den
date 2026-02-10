@@ -1063,13 +1063,240 @@ pub const Shell = struct {
             }
         }
 
-        // Check for compound command group: { command; }
-        if (fn_trimmed.len > 2 and fn_trimmed[0] == '{' and fn_trimmed[fn_trimmed.len - 1] == '}') {
-            // Must have space after { (bash requirement)
-            if (fn_trimmed.len > 1 and (fn_trimmed[1] == ' ' or fn_trimmed[1] == '\t' or fn_trimmed[1] == '\n')) {
-                const inner = std.mem.trim(u8, fn_trimmed[1 .. fn_trimmed.len - 1], &std.ascii.whitespace);
+        // Check for compound command group: { command; } [redirections]
+        if (fn_trimmed.len > 2 and fn_trimmed[0] == '{' and
+            (fn_trimmed[1] == ' ' or fn_trimmed[1] == '\t' or fn_trimmed[1] == '\n'))
+        {
+            // Find matching } considering nesting and quotes
+            var bg_depth: i32 = 1;
+            var bg_sq = false;
+            var bg_dq = false;
+            var bg_close: ?usize = null;
+            var bg_i: usize = 1;
+            while (bg_i < fn_trimmed.len) {
+                const ch = fn_trimmed[bg_i];
+                if (ch == '\\' and bg_i + 1 < fn_trimmed.len and !bg_sq) {
+                    bg_i += 2;
+                    continue;
+                }
+                if (!bg_dq and ch == '\'') {
+                    bg_sq = !bg_sq;
+                } else if (!bg_sq and ch == '"') {
+                    bg_dq = !bg_dq;
+                } else if (!bg_sq and !bg_dq) {
+                    if (ch == '{') bg_depth += 1;
+                    if (ch == '}') {
+                        bg_depth -= 1;
+                        if (bg_depth == 0) {
+                            bg_close = bg_i;
+                            break;
+                        }
+                    }
+                }
+                bg_i += 1;
+            }
+
+            if (bg_close) |close_pos| {
+                const inner = std.mem.trim(u8, fn_trimmed[1..close_pos], &std.ascii.whitespace);
+                const after_brace = std.mem.trim(u8, fn_trimmed[close_pos + 1 ..], &std.ascii.whitespace);
+
                 if (inner.len > 0) {
-                    // Execute in current shell context (no fork)
+                    // Check for pipe after }
+                    if (after_brace.len > 0 and after_brace[0] == '|') {
+                        const pipe_cmd = std.mem.trim(u8, after_brace[1..], &std.ascii.whitespace);
+                        if (pipe_cmd.len > 0) {
+                            if (comptime builtin.os.tag != .windows) {
+                                // Fork with pipe: brace group stdout → pipe command stdin
+                                var pipe_fds: [2]std.posix.fd_t = undefined;
+                                if (std.c.pipe(&pipe_fds) != 0) return error.Unexpected;
+                                const read_fd = pipe_fds[0];
+                                const write_fd = pipe_fds[1];
+
+                                const fork_ret = std.c.fork();
+                                if (fork_ret < 0) {
+                                    std.posix.close(read_fd);
+                                    std.posix.close(write_fd);
+                                    return error.Unexpected;
+                                }
+                                if (fork_ret == 0) {
+                                    std.posix.close(read_fd);
+                                    _ = std.c.dup2(write_fd, std.posix.STDOUT_FILENO);
+                                    std.posix.close(write_fd);
+                                    self.executeCommand(inner) catch {
+                                        std.c._exit(1);
+                                    };
+                                    std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
+                                    unreachable;
+                                }
+                                std.posix.close(write_fd);
+                                const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
+                                _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
+                                std.posix.close(read_fd);
+
+                                var wait_status_bg: c_int = 0;
+                                _ = std.c.waitpid(@intCast(fork_ret), &wait_status_bg, 0);
+
+                                const execFn2: *const fn (*Shell, []const u8) anyerror!void = &Shell.executeCommand;
+                                execFn2(self, pipe_cmd) catch {};
+
+                                if (saved_stdin >= 0) {
+                                    _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
+                                    std.posix.close(@intCast(saved_stdin));
+                                }
+                            } else {
+                                self.executeCommand(inner) catch {};
+                                self.executeCommand(pipe_cmd) catch {};
+                            }
+                            return;
+                        }
+                    }
+
+                    // Check for redirections after }
+                    if (after_brace.len > 0 and (after_brace[0] == '>' or after_brace[0] == '<' or
+                        (after_brace.len > 1 and after_brace[0] >= '0' and after_brace[0] <= '9' and
+                        (after_brace[1] == '>' or after_brace[1] == '<')) or
+                        (after_brace.len > 2 and after_brace[0] >= '0' and after_brace[0] <= '9' and
+                        after_brace[1] == '>' and after_brace[2] == '&')))
+                    {
+                        if (comptime builtin.os.tag != .windows) {
+                            // Parse and apply redirections
+                            var saved_fds: [3]c_int = .{ -1, -1, -1 }; // stdin, stdout, stderr
+                            var redir_ok = true;
+                            var redir_str = after_brace;
+
+                            while (redir_str.len > 0 and redir_ok) {
+                                redir_str = std.mem.trimStart(u8, redir_str, &std.ascii.whitespace);
+                                if (redir_str.len == 0) break;
+
+                                var src_fd: std.posix.fd_t = -1;
+                                var mode: enum { write, append, read, dup_out, dup_in } = .write;
+
+                                // Parse optional fd number
+                                if (redir_str.len > 1 and redir_str[0] >= '0' and redir_str[0] <= '9') {
+                                    src_fd = @as(std.posix.fd_t, @intCast(redir_str[0] - '0'));
+                                    redir_str = redir_str[1..];
+                                }
+
+                                if (redir_str.len == 0) break;
+
+                                if (redir_str[0] == '>') {
+                                    if (src_fd == -1) src_fd = std.posix.STDOUT_FILENO;
+                                    redir_str = redir_str[1..];
+                                    if (redir_str.len > 0 and redir_str[0] == '>') {
+                                        mode = .append;
+                                        redir_str = redir_str[1..];
+                                    } else if (redir_str.len > 0 and redir_str[0] == '&') {
+                                        mode = .dup_out;
+                                        redir_str = redir_str[1..];
+                                    }
+                                } else if (redir_str[0] == '<') {
+                                    if (src_fd == -1) src_fd = std.posix.STDIN_FILENO;
+                                    mode = .read;
+                                    redir_str = redir_str[1..];
+                                } else {
+                                    break;
+                                }
+
+                                redir_str = std.mem.trimStart(u8, redir_str, &std.ascii.whitespace);
+                                // Get the target (filename or fd number)
+                                var target_end: usize = 0;
+                                while (target_end < redir_str.len and
+                                    redir_str[target_end] != ' ' and redir_str[target_end] != '\t' and
+                                    redir_str[target_end] != '>' and redir_str[target_end] != '<') : (target_end += 1)
+                                {}
+                                if (target_end == 0) {
+                                    redir_ok = false;
+                                    break;
+                                }
+                                const target = redir_str[0..target_end];
+                                redir_str = redir_str[target_end..];
+
+                                // Save original fd
+                                const ufd: usize = @intCast(src_fd);
+                                if (ufd < saved_fds.len and saved_fds[ufd] == -1) {
+                                    saved_fds[ufd] = std.c.dup(src_fd);
+                                }
+
+                                switch (mode) {
+                                    .dup_out, .dup_in => {
+                                        // >&N or <&N
+                                        if (std.mem.eql(u8, target, "-")) {
+                                            std.posix.close(src_fd);
+                                        } else if (std.fmt.parseInt(std.posix.fd_t, target, 10)) |dest_fd| {
+                                            _ = std.c.dup2(dest_fd, src_fd);
+                                        } else |_| {
+                                            redir_ok = false;
+                                        }
+                                    },
+                                    .write, .append => {
+                                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                                        if (target.len >= path_buf.len) {
+                                            redir_ok = false;
+                                            break;
+                                        }
+                                        @memcpy(path_buf[0..target.len], target);
+                                        path_buf[target.len] = 0;
+                                        const path_z: [*:0]const u8 = @ptrCast(&path_buf);
+
+                                        const flags: std.c.O = if (mode == .append)
+                                            .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }
+                                        else
+                                            .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true };
+                                        const fd = std.c.open(path_z, flags, @as(std.c.mode_t, 0o644));
+                                        if (fd >= 0) {
+                                            _ = std.c.dup2(fd, src_fd);
+                                            std.posix.close(@intCast(fd));
+                                        } else {
+                                            redir_ok = false;
+                                        }
+                                    },
+                                    .read => {
+                                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                                        if (target.len >= path_buf.len) {
+                                            redir_ok = false;
+                                            break;
+                                        }
+                                        @memcpy(path_buf[0..target.len], target);
+                                        path_buf[target.len] = 0;
+                                        const path_z: [*:0]const u8 = @ptrCast(&path_buf);
+
+                                        const fd = std.c.open(path_z, .{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+                                        if (fd >= 0) {
+                                            _ = std.c.dup2(fd, src_fd);
+                                            std.posix.close(@intCast(fd));
+                                        } else {
+                                            redir_ok = false;
+                                        }
+                                    },
+                                }
+                            }
+
+                            // Execute the group body with redirections applied
+                            self.executeCommand(inner) catch |err| {
+                                if (err == error.Exit) {
+                                    // Restore fds before propagating
+                                    for (saved_fds, 0..) |sfd, fi| {
+                                        if (sfd != -1) {
+                                            _ = std.c.dup2(sfd, @intCast(fi));
+                                            std.posix.close(@intCast(sfd));
+                                        }
+                                    }
+                                    return err;
+                                }
+                            };
+
+                            // Restore saved fds
+                            for (saved_fds, 0..) |sfd, fi| {
+                                if (sfd != -1) {
+                                    _ = std.c.dup2(sfd, @intCast(fi));
+                                    std.posix.close(@intCast(sfd));
+                                }
+                            }
+                            return;
+                        }
+                    }
+
+                    // No redirections — execute in current shell context
                     self.executeCommand(inner) catch |err| {
                         if (err == error.Exit) return err;
                     };

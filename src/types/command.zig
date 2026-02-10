@@ -41,6 +41,8 @@ pub const ParsedCommand = struct {
     args: [][]const u8,
     redirections: []Redirection,
     type: CommandType = .external,
+    quoted_args: ?[]const bool = null,
+    cmd_sub_exit_code: ?i32 = null, // Exit code from command substitution during expansion
 
     pub fn deinit(self: *ParsedCommand, allocator: std.mem.Allocator) void {
         // Free command name (allocated during parsing/expansion)
@@ -51,6 +53,11 @@ pub const ParsedCommand = struct {
             allocator.free(arg);
         }
         allocator.free(self.args);
+
+        // Free quoted_args tracking array
+        if (self.quoted_args) |qa| {
+            allocator.free(qa);
+        }
 
         // Free redirections
         for (self.redirections) |redir| {

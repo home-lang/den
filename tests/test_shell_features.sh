@@ -519,7 +519,7 @@ check "printf repeat str" "-----" "$(timeout 3 $DEN -c 'printf "%.0s-" 1 2 3 4 5
 # ===========================================================================
 # 71. Parameter substitution remove
 # ===========================================================================
-check "param remove" "hello " "$(timeout 3 $DEN -c 'x="hello world"; echo ${x/world}')"
+check "param remove" "hello" "$(timeout 3 $DEN -c 'x="hello world"; echo ${x/world}')"
 
 # ===========================================================================
 # 72. Conditional arithmetic
@@ -947,6 +947,60 @@ check "func result var" "hello" "$(timeout 3 $DEN -c 'f() { echo hello; }; resul
 check "recursive func" "120" "$(timeout 5 $DEN -c 'fact() { if [ $1 -le 1 ]; then echo 1; else local n=$1; local prev=$(fact $((n-1))); echo $((n * prev)); fi; }; fact 5')"
 
 # ===========================================================================
+# 132. Extended test [[ ]] in if statements
+check "[[ glob in if ]]" "match" "$(timeout 3 $DEN -c 'if [[ "hello" == hel* ]]; then echo "match"; fi' 2>/dev/null)"
+check "[[ regex in if ]]" "match" "$(timeout 3 $DEN -c 'if [[ "hello123" =~ ^hello[0-9]+$ ]]; then echo "match"; fi' 2>/dev/null)"
+check "[[ != glob in if ]]" "nomatch" "$(timeout 3 $DEN -c 'if [[ "hello" != xyz* ]]; then echo "nomatch"; fi' 2>/dev/null)"
+
+# 133. Positional params in arithmetic
+check "arith \$1+\$2" "7" "$(timeout 3 $DEN -c 'add() { echo $(($1 + $2)); }; add 3 4' 2>/dev/null)"
+check "arith \$1*\$2" "30" "$(timeout 3 $DEN -c 'mul() { echo $(($1 * $2)); }; mul 5 6' 2>/dev/null)"
+
+# 134. read -r raw mode
+check "read -r raw" 'hello\nworld' "$(timeout 3 $DEN -c 'read -r line <<< "hello\nworld"; echo "$line"' 2>/dev/null)"
+check "read no-r escape" "hellonworld" "$(timeout 3 $DEN -c 'read line <<< "hello\nworld"; echo "$line"' 2>/dev/null)"
+
+# 135. Functions in pipelines
+check "func in pipeline" "HELLO" "$(timeout 3 $DEN -c 'upper() { tr a-z A-Z; }; echo hello | upper' 2>/dev/null)"
+check "func mid pipeline" "HELLO HELLO" "$(timeout 3 $DEN -c 'double() { while read line; do echo "$line $line"; done; }; echo hello | double | tr a-z A-Z' 2>/dev/null)"
+
+# 136. Functions with && and || operators
+check "func && chain" "ok" "$(timeout 3 $DEN -c 'f() { return 0; }; f && echo ok' 2>/dev/null)"
+check "func || chain" "fail" "$(timeout 3 $DEN -c 'f() { return 1; }; f || echo fail' 2>/dev/null)"
+check "func && fail" "" "$(timeout 3 $DEN -c 'f() { return 1; }; f && echo nope' 2>/dev/null)"
+
+# 137. Alpha brace expansion with step
+check "alpha brace step" "a f k p u z" "$(timeout 3 $DEN -c 'echo {a..z..5}' 2>/dev/null)"
+check "alpha brace step rev" "z u p k f a" "$(timeout 3 $DEN -c 'echo {z..a..5}' 2>/dev/null)"
+
+# 138. $? expansion in double quotes
+check "\$? unquoted" "1" "$(timeout 3 $DEN -c 'false; echo $?' 2>/dev/null)"
+check "\$? in dquotes" "1" "$(timeout 3 $DEN -c 'false; echo "$?"' 2>/dev/null)"
+check "\$? embedded" "exit: 1" "$(timeout 3 $DEN -c 'false; echo "exit: $?"' 2>/dev/null)"
+
+# 139. ${?} and ${!} special variable expansion in braces
+check "\${?} expansion" "1" "$(timeout 3 $DEN -c 'false; echo "${?}"' 2>/dev/null)"
+check "\${$} expansion pid" "yes" "$(timeout 3 $DEN -c 'pid="${$}"; if [ "$pid" -gt 0 ]; then echo yes; fi' 2>/dev/null)"
+
+# 140. $(cmd) inside $((...)) arithmetic
+check "arith cmd sub" "7" "$(timeout 3 $DEN -c 'echo $(( $(echo 3) + $(echo 4) ))' 2>/dev/null)"
+check "arith multi cmd sub" "60" "$(timeout 3 $DEN -c 'echo $(( $(echo 10) + $(echo 20) + $(echo 30) ))' 2>/dev/null)"
+check "arith func cmd sub" "77" "$(timeout 3 $DEN -c 'add() { echo $(( $1 + $2 )); }; echo $(( $(add 3 4) * $(add 5 6) ))' 2>/dev/null)"
+
+# 141. Brace group redirections
+check "brace group basic" "hello" "$(timeout 3 $DEN -c '{ echo hello; }' 2>/dev/null)"
+check "brace group > file" "hello
+world" "$(timeout 3 $DEN -c '{ echo hello; echo world; } > /tmp/den_test_bg; cat /tmp/den_test_bg; rm /tmp/den_test_bg' 2>/dev/null)"
+check "brace group 2>/dev/null" "out" "$(timeout 3 $DEN -c '{ echo out; echo err >&2; } 2>/dev/null' 2>/dev/null)"
+check "brace group | pipe" "2" "$(timeout 3 $DEN -c '{ echo a; echo b; } | wc -l' 2>/dev/null | tr -d ' ')"
+
+# 142. IFS word splitting
+check "IFS split unquoted" "a b c" "$(timeout 3 $DEN -c 'x="a   b   c"; echo $x' 2>/dev/null)"
+check "IFS quoted preserves" "a   b   c" "$(timeout 3 $DEN -c 'x="a   b   c"; echo "$x"' 2>/dev/null)"
+check "IFS split args" "[hello]
+[world]" "$(timeout 3 $DEN -c 'x="hello world"; printf "[%s]\n" $x' 2>/dev/null)"
+check "IFS quoted single arg" "[hello world]" "$(timeout 3 $DEN -c 'x="hello world"; printf "[%s]\n" "$x"' 2>/dev/null)"
+
 # Results
 # ===========================================================================
 echo ""

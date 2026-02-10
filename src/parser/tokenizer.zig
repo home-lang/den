@@ -84,6 +84,7 @@ pub const Token = struct {
     value: []const u8,
     line: usize,
     column: usize,
+    was_quoted: bool = false,
 };
 
 pub const Tokenizer = struct {
@@ -132,6 +133,23 @@ pub const Tokenizer = struct {
                 self.column += 1;
             }
             self.pos += 1;
+        }
+
+        // Skip comments: # at word boundary (after whitespace or start of line)
+        // skips to end of line. Not inside quotes (handled by parseWord).
+        if (self.pos < self.input.len and self.input[self.pos] == '#') {
+            while (self.pos < self.input.len and self.input[self.pos] != '\n') {
+                self.pos += 1;
+                self.column += 1;
+            }
+            // Skip the newline if present
+            if (self.pos < self.input.len and self.input[self.pos] == '\n') {
+                self.pos += 1;
+                self.line += 1;
+                self.column = 1;
+            }
+            // Recurse to get next actual token
+            return self.nextToken();
         }
 
         if (self.pos >= self.input.len) {
@@ -471,6 +489,7 @@ pub const Tokenizer = struct {
         var subst_depth: u32 = 0; // Track $(...) / $((...)) nesting depth
         var brace_depth: u32 = 0; // Track ${...} parameter expansion depth
         var in_backtick = false; // Track `...` command substitution
+        var ever_quoted = false; // Track if any quoting was used in this word
 
         // Build the word with escape processing (16KB buffer for large tokens)
         var word_buffer: [16384]u8 = undefined;
@@ -619,6 +638,7 @@ pub const Tokenizer = struct {
             if (char == '$' and !in_single_quote and !in_double_quote and !in_ansi_quote and !in_interp_quote) {
                 if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '\'') {
                     in_ansi_quote = true;
+                    if (subst_depth == 0 and !in_backtick) ever_quoted = true;
                     self.pos += 2; // Skip $'
                     self.column += 2;
                     continue;
@@ -627,6 +647,7 @@ pub const Tokenizer = struct {
                 if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '"') {
                     in_interp_quote = true;
                     in_double_quote = true;
+                    if (subst_depth == 0 and !in_backtick) ever_quoted = true;
                     // Preserve $" in buffer so expansion phase can detect it
                     if (word_len + 1 < word_buffer.len) {
                         word_buffer[word_len] = '$';
@@ -645,6 +666,7 @@ pub const Tokenizer = struct {
                 if (in_ansi_quote) {
                     in_ansi_quote = false;
                 } else {
+                    if (!in_single_quote and subst_depth == 0 and !in_backtick) ever_quoted = true;
                     in_single_quote = !in_single_quote;
                 }
                 // When inside $() or backticks, preserve quote chars in the buffer
@@ -683,6 +705,7 @@ pub const Tokenizer = struct {
                     self.column += 1;
                     continue;
                 }
+                if (!in_double_quote and subst_depth == 0 and !in_backtick) ever_quoted = true;
                 in_double_quote = !in_double_quote;
                 self.pos += 1;
                 self.column += 1;
@@ -755,7 +778,13 @@ pub const Tokenizer = struct {
             } else if ((in_single_quote or in_double_quote) and subst_depth == 0 and brace_depth == 0 and !in_backtick and (char == '*' or char == '?' or char == '[')) {
                 // Escape glob metacharacters inside quotes so glob expansion treats them as literals
                 // But not inside $(), ${}, or backticks where they may be part of special syntax
-                if (word_len + 1 < word_buffer.len) {
+                // Also don't escape ? after $ (it's the $? special variable)
+                if (char == '?' and word_len > 0 and word_buffer[word_len - 1] == '$') {
+                    if (word_len < word_buffer.len) {
+                        word_buffer[word_len] = char;
+                        word_len += 1;
+                    }
+                } else if (word_len + 1 < word_buffer.len) {
                     word_buffer[word_len] = '\\';
                     word_len += 1;
                     word_buffer[word_len] = char;
@@ -784,6 +813,7 @@ pub const Tokenizer = struct {
             .value = word,
             .line = start_line,
             .column = start_col,
+            .was_quoted = ever_quoted,
         };
     }
 

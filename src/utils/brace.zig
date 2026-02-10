@@ -172,7 +172,7 @@ pub const BraceExpander = struct {
         const start_num = std.fmt.parseInt(i64, start_str, 10) catch {
             // Try as characters (support step for chars too)
             if (start_str.len == 1 and end_str.len == 1) {
-                return try self.expandCharSequence(prefix, start_str[0], end_str[0], suffix);
+                return try self.expandCharSequence(prefix, start_str[0], end_str[0], suffix, step_val);
             }
 
             // Invalid sequence, return as literal (no braces to prevent infinite recursion)
@@ -282,9 +282,15 @@ pub const BraceExpander = struct {
         return std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ prefix, num_str, suffix });
     }
 
-    fn expandCharSequence(self: *BraceExpander, prefix: []const u8, start: u8, end: u8, suffix: []const u8) ![][]const u8 {
-        const step: i8 = if (start <= end) 1 else -1;
-        const count = @abs(@as(i16, end) - @as(i16, start)) + 1;
+    fn expandCharSequence(self: *BraceExpander, prefix: []const u8, start: u8, end: u8, suffix: []const u8, custom_step: ?i64) ![][]const u8 {
+        const direction: i8 = if (start <= end) 1 else -1;
+        const step: i8 = if (custom_step) |cs| blk: {
+            const abs_cs: i8 = if (cs == 0) 1 else @intCast(@min(@abs(cs), 127));
+            break :blk direction * abs_cs;
+        } else direction;
+        const abs_step: u16 = @intCast(@abs(@as(i16, step)));
+        const range = @abs(@as(i16, end) - @as(i16, start));
+        const count = @divTrunc(range, abs_step) + 1;
 
         if (count > 52) {
             // Limit to prevent abuse (a-z is 26, A-Z is 26)

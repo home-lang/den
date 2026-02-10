@@ -38,6 +38,7 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
     var var_start: usize = 0;
     var prompt: ?[]const u8 = null;
     var array_mode = false;
+    var raw_mode = false;
     var nchars: ?usize = null;
     var delimiter: ?u8 = null;
 
@@ -48,7 +49,8 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
             var ci: usize = 1;
             while (ci < arg.len) : (ci += 1) {
                 switch (arg[ci]) {
-                    'r', 's' => {}, // raw mode, silent - just flags
+                    'r' => raw_mode = true,
+                    's' => {},
                     'a' => array_mode = true,
                     'p' => {
                         // -p can have inline value (-pPrompt) or next arg
@@ -142,9 +144,27 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         }
         break :blk @as(?[]u8, try self.allocator.dupe(u8, buf[0..count]));
     } else try IO.readLine(self.allocator);
-    if (line) |value| {
-        defer self.allocator.free(value);
+    if (line) |raw_value| {
+        defer self.allocator.free(raw_value);
         self.last_exit_code = 0;
+
+        // Process backslash escapes unless -r (raw mode) is set
+        var processed_buf: [4096]u8 = undefined;
+        const value = if (!raw_mode) blk: {
+            var pos: usize = 0;
+            var j: usize = 0;
+            while (j < raw_value.len and pos < processed_buf.len) {
+                if (raw_value[j] == '\\' and j + 1 < raw_value.len) {
+                    j += 1; // Skip backslash, take next char literally
+                    processed_buf[pos] = raw_value[j];
+                } else {
+                    processed_buf[pos] = raw_value[j];
+                }
+                j += 1;
+                pos += 1;
+            }
+            break :blk processed_buf[0..pos];
+        } else raw_value;
 
         // Get IFS (default: space, tab, newline)
         const ifs = self.environment.get("IFS") orelse " \t\n";
