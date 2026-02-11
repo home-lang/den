@@ -473,6 +473,31 @@ pub const ScriptManager = struct {
                 continue;
             }
 
+            if (std.mem.startsWith(u8, trimmed, "for ((")) {
+                // Collect multi-line C-style for loop and delegate to executeCommand
+                // which has proper arithmetic handling via shell/loop_execution.zig
+                if (std.mem.indexOf(u8, trimmed, "done") != null) {
+                    // One-liner - pass directly
+                    _ = shell.executeCommand(trimmed) catch {};
+                } else {
+                    // Collect lines until 'done'
+                    var combined: std.ArrayListUnmanaged(u8) = .empty;
+                    defer combined.deinit(self.allocator);
+                    combined.appendSlice(self.allocator, trimmed) catch {};
+                    while (line_num + 1 < lines.len) {
+                        line_num += 1;
+                        const body_line = std.mem.trim(u8, lines[line_num], &std.ascii.whitespace);
+                        combined.append(self.allocator, '\n') catch {};
+                        combined.appendSlice(self.allocator, body_line) catch {};
+                        if (std.mem.eql(u8, body_line, "done")) break;
+                        // Also check for 'done' followed by more (e.g. 'done; echo ...')
+                        if (std.mem.startsWith(u8, body_line, "done;") or std.mem.startsWith(u8, body_line, "done ")) break;
+                    }
+                    _ = shell.executeCommand(combined.items) catch {};
+                }
+                continue;
+            }
+
             if (std.mem.startsWith(u8, trimmed, "for ")) {
                 var result = parser.parseFor(lines, line_num) catch {
                     shell.last_exit_code = 1;

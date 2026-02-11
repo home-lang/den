@@ -321,7 +321,7 @@ pub const Executor = struct {
                 switch (redir.kind) {
                     .output_truncate, .output_append, .output_clobber => {
                         const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
-                            .truncate = (redir.kind == .output_truncate),
+                            .truncate = (redir.kind == .output_truncate or redir.kind == .output_clobber),
                         });
                         if (redir.fd == 1) {
                             children_buffer[i].stdout = file;
@@ -1418,7 +1418,7 @@ pub const Executor = struct {
             switch (redir.kind) {
                 .output_truncate, .output_append, .output_clobber => {
                     const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
-                        .truncate = (redir.kind == .output_truncate),
+                        .truncate = (redir.kind == .output_truncate or redir.kind == .output_clobber),
                     });
                     if (redir.fd == 1) {
                         child.stdout = file;
@@ -1600,7 +1600,7 @@ pub const Executor = struct {
             switch (redir.kind) {
                 .output_truncate, .output_append, .output_clobber => {
                     const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
-                        .truncate = (redir.kind == .output_truncate),
+                        .truncate = (redir.kind == .output_truncate or redir.kind == .output_clobber),
                     });
                     if (redir.fd == 1) {
                         child.stdout = file;
