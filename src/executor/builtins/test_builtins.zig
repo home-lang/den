@@ -30,6 +30,35 @@ fn evaluateTestArgs(args: []const []const u8) !i32 {
         return if (result == 0) 1 else 0;
     }
 
+    // Handle -o (logical OR) - lowest precedence, scan right-to-left
+    // so that -a binds tighter than -o
+    {
+        var i: usize = args.len;
+        while (i > 0) {
+            i -= 1;
+            if (std.mem.eql(u8, args[i], "-o")) {
+                if (i == 0 or i == args.len - 1) break; // malformed, fall through
+                const left = try evaluateTestArgs(args[0..i]);
+                const right = try evaluateTestArgs(args[i + 1 ..]);
+                return if (left == 0 or right == 0) 0 else 1;
+            }
+        }
+    }
+
+    // Handle -a (logical AND) - higher precedence than -o, scan right-to-left
+    {
+        var i: usize = args.len;
+        while (i > 0) {
+            i -= 1;
+            if (std.mem.eql(u8, args[i], "-a")) {
+                if (i == 0 or i == args.len - 1) break; // malformed, fall through
+                const left = try evaluateTestArgs(args[0..i]);
+                const right = try evaluateTestArgs(args[i + 1 ..]);
+                return if (left == 0 and right == 0) 0 else 1;
+            }
+        }
+    }
+
     // Single argument - test if non-empty string
     if (args.len == 1) {
         return if (args[0].len > 0) 0 else 1;
@@ -57,20 +86,14 @@ fn evaluateTestArgs(args: []const []const u8) !i32 {
             const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
             return if (stat.size > 0) 0 else 1;
         } else if (std.mem.eql(u8, op, "-r")) {
-            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return 1;
-            file.close(std.Options.debug_io);
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .read = true }) catch return 1;
             return 0;
         } else if (std.mem.eql(u8, op, "-w")) {
-            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{ .mode = .write_only }) catch return 1;
-            file.close(std.Options.debug_io);
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .write = true }) catch return 1;
             return 0;
         } else if (std.mem.eql(u8, op, "-x")) {
-            if (builtin.os.tag == .windows) {
-                std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return 1;
-                return 0;
-            }
-            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return 1;
-            return if (stat.permissions.toMode() & 0o111 != 0) 0 else 1;
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .execute = true }) catch return 1;
+            return 0;
         }
     }
 
@@ -233,22 +256,14 @@ fn evaluateExtendedTestExpr(args: [][]const u8, shell: ?*Shell) !bool {
             std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return false;
             return true;
         } else if (std.mem.eql(u8, op, "-r")) {
-            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
-            file.close(std.Options.debug_io);
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .read = true }) catch return false;
             return true;
         } else if (std.mem.eql(u8, op, "-w")) {
-            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{ .mode = .write_only }) catch return false;
-            file.close(std.Options.debug_io);
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .write = true }) catch return false;
             return true;
         } else if (std.mem.eql(u8, op, "-x")) {
-            if (builtin.os.tag == .windows) {
-                std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{}) catch return false;
-                return true;
-            }
-            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
-            defer file.close(std.Options.debug_io);
-            const stat = file.stat(std.Options.debug_io) catch return false;
-            return stat.permissions.toMode() & 0o111 != 0;
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .execute = true }) catch return false;
+            return true;
         } else if (std.mem.eql(u8, op, "-s")) {
             const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, arg, .{}) catch return false;
             defer file.close(std.Options.debug_io);

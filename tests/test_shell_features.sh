@@ -1001,6 +1001,549 @@ check "IFS split args" "[hello]
 [world]" "$(timeout 3 $DEN -c 'x="hello world"; printf "[%s]\n" $x' 2>/dev/null)"
 check "IFS quoted single arg" "[hello world]" "$(timeout 3 $DEN -c 'x="hello world"; printf "[%s]\n" "$x"' 2>/dev/null)"
 
+# ===========================================================================
+# 143. Tilde expansion in quotes (REGRESSION: was expanding ~ inside quotes)
+# ===========================================================================
+check "tilde dquote literal" "~" "$(timeout 3 $DEN -c 'echo "~"' 2>/dev/null)"
+check "tilde squote literal" "~" "$(timeout 3 $DEN -c "echo '~'" 2>/dev/null)"
+check "tilde unquoted expands" "$HOME" "$(timeout 3 $DEN -c 'echo ~' 2>/dev/null)"
+check "tilde dquote path" "~/test" "$(timeout 3 $DEN -c 'echo "~/test"' 2>/dev/null)"
+check "tilde unquoted path" "$HOME/test" "$(timeout 3 $DEN -c 'echo ~/test' 2>/dev/null)"
+check "tilde in mid-string" "before~after" "$(timeout 3 $DEN -c 'echo "before~after"' 2>/dev/null)"
+check "tilde assign unquoted" "$HOME" "$(timeout 3 $DEN -c 'x=~; echo "$x"' 2>/dev/null)"
+check "tilde assign quoted" "~" "$(timeout 3 $DEN -c 'x="~"; echo "$x"' 2>/dev/null)"
+check "tilde assign path" "$HOME/test" "$(timeout 3 $DEN -c 'x=~/test; echo "$x"' 2>/dev/null)"
+check "tilde assign quoted path" "~/test" "$(timeout 3 $DEN -c 'x="~/test"; echo "$x"' 2>/dev/null)"
+
+# ===========================================================================
+# 144. One-liner control flow in scripts (REGRESSION: was silent)
+# ===========================================================================
+check "oneliner for" "a b c" "$(timeout 3 $DEN -c 'for i in a b c; do echo $i; done' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "oneliner while" "0 1 2" "$(timeout 3 $DEN -c 'i=0; while [ $i -lt 3 ]; do echo $i; i=$((i+1)); done' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "oneliner if then" "yes" "$(timeout 3 $DEN -c 'if true; then echo yes; fi' 2>/dev/null)"
+check "oneliner if else" "no" "$(timeout 3 $DEN -c 'if false; then echo yes; else echo no; fi' 2>/dev/null)"
+check "oneliner until" "3" "$(timeout 3 $DEN -c 'i=0; until [ $i -ge 3 ]; do i=$((i+1)); done; echo $i' 2>/dev/null)"
+check "oneliner nested for-if" "found 2" "$(timeout 3 $DEN -c 'for i in 1 2 3; do if [ $i -eq 2 ]; then echo "found $i"; fi; done' 2>/dev/null)"
+check "oneliner for concat" "123" "$(timeout 3 $DEN -c 'r=""; for i in 1 2 3; do r="$r$i"; done; echo $r' 2>/dev/null)"
+check "oneliner nested for" "a1 a2 b1 b2" "$(timeout 3 $DEN -c 'for i in a b; do for j in 1 2; do echo "$i$j"; done; done' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "oneliner if multi body" "a b c" "$(timeout 3 $DEN -c 'if true; then echo "a"; echo "b"; echo "c"; fi' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# 145. Case toggle operators (NEW: ${var~} and ${var~~})
+# ===========================================================================
+check "case toggle first" "Hello" "$(timeout 3 $DEN -c 'x=hello; echo ${x~}' 2>/dev/null)"
+check "case toggle all" "HELLO world" "$(timeout 3 $DEN -c 'x="hello WORLD"; echo ${x~~}' 2>/dev/null)"
+check "case toggle upper" "hELLO" "$(timeout 3 $DEN -c 'x=HELLO; echo ${x~}' 2>/dev/null)"
+check "case toggle mixed" "FOObar" "$(timeout 3 $DEN -c 'x=fooBAR; echo ${x~~}' 2>/dev/null)"
+
+# ===========================================================================
+# 146. PIPESTATUS double-free fix (REGRESSION: crashed with pipefail)
+# ===========================================================================
+check "pipefail status" "1" "$(timeout 3 $DEN -c 'set -o pipefail; false | true; echo $?' 2>/dev/null)"
+check "pipefail pass" "0" "$(timeout 3 $DEN -c 'set -o pipefail; true | true; echo $?' 2>/dev/null)"
+check "pipestatus after pipe" "0 1 0" "$(timeout 3 $DEN -c 'true | false | true; echo ${PIPESTATUS[@]}' 2>/dev/null)"
+check "pipestatus multi" "0" "$(timeout 3 $DEN -c 'echo a | cat | cat; echo $?' 2>/dev/null | tail -1)"
+
+# ===========================================================================
+# 147. read -p prompt (REGRESSION: prompt not displayed)
+# ===========================================================================
+check "read -p stderr" "prompt" "$(echo 'val' | timeout 3 $DEN -c 'read -p "prompt" x' 2>&1 >/dev/null)"
+
+# ===========================================================================
+# 148. Additional quoting edge cases
+# ===========================================================================
+check "empty dquote" "" "$(timeout 3 $DEN -c 'echo -n ""' 2>/dev/null)"
+check "empty squote" "" "$(timeout 3 $DEN -c "echo -n ''" 2>/dev/null)"
+check "dquote preserve spaces" "a  b  c" "$(timeout 3 $DEN -c 'echo "a  b  c"' 2>/dev/null)"
+check "squote no expand" '$HOME' "$(timeout 3 $DEN -c "echo '\$HOME'" 2>/dev/null)"
+check "mixed quotes concat" "helloworld" "$(timeout 3 $DEN -c "echo 'hello'\"world\"" 2>/dev/null)"
+check "backslash in dquote" '\n' "$(timeout 3 $DEN -c 'echo "\n"' 2>/dev/null)"
+check "dollar literal" '$' "$(timeout 3 $DEN -c 'echo \$' 2>/dev/null)"
+check "escaped dquote" '"' "$(timeout 3 $DEN -c 'echo \"' 2>/dev/null)"
+
+# ===========================================================================
+# 149. Arithmetic edge cases
+# ===========================================================================
+check "arith power" "256" "$(timeout 3 $DEN -c 'echo $(( 2 ** 8 ))' 2>/dev/null)"
+check "arith modulo" "1" "$(timeout 3 $DEN -c 'echo $(( 7 % 3 ))' 2>/dev/null)"
+check "arith bitwise and" "2" "$(timeout 3 $DEN -c 'echo $(( 6 & 3 ))' 2>/dev/null)"
+check "arith bitwise or" "7" "$(timeout 3 $DEN -c 'echo $(( 5 | 3 ))' 2>/dev/null)"
+check "arith bitwise xor" "6" "$(timeout 3 $DEN -c 'echo $(( 5 ^ 3 ))' 2>/dev/null)"
+check "arith unary minus" "-10" "$(timeout 3 $DEN -c 'echo $(( -(5+5) ))' 2>/dev/null)"
+check "arith nested parens" "30" "$(timeout 3 $DEN -c 'echo $(( (2 + 3) * (1 + 5) ))' 2>/dev/null)"
+check "arith large power" "1073741824" "$(timeout 3 $DEN -c 'echo $(( 2 ** 30 ))' 2>/dev/null)"
+check "arith negative mod" "-3" "$(timeout 3 $DEN -c 'echo $(( -7 % 4 ))' 2>/dev/null)"
+check "arith shift right" "4" "$(timeout 3 $DEN -c 'echo $(( 16 >> 2 ))' 2>/dev/null)"
+
+# ===========================================================================
+# 150. String operations edge cases
+# ===========================================================================
+check "param empty default" "default" "$(timeout 3 $DEN -c 'x=""; echo ${x:-default}' 2>/dev/null)"
+check "param set no default" "value" "$(timeout 3 $DEN -c 'x=value; echo ${x:-default}' 2>/dev/null)"
+check "param :+ set" "alt" "$(timeout 3 $DEN -c 'x=set; echo ${x:+alt}' 2>/dev/null)"
+check "param :+ unset" "" "$(timeout 3 $DEN -c 'echo -n ${x:+alt}' 2>/dev/null)"
+check "suffix strip %%" "hello" "$(timeout 3 $DEN -c 'x=hello.tar.gz; echo ${x%%.*}' 2>/dev/null)"
+check "suffix strip %" "hello.tar" "$(timeout 3 $DEN -c 'x=hello.tar.gz; echo ${x%.*}' 2>/dev/null)"
+check "prefix strip #" "llo" "$(timeout 3 $DEN -c 'x=hello; echo ${x#he}' 2>/dev/null)"
+check "prefix strip ##" "file.txt" "$(timeout 3 $DEN -c 'x=/a/b/c/file.txt; echo ${x##*/}' 2>/dev/null)"
+check "replace prefix" "xyz world" "$(timeout 3 $DEN -c 'x="hello world"; echo ${x/#hello/xyz}' 2>/dev/null)"
+check "replace suffix" "hello xyz" "$(timeout 3 $DEN -c 'x="hello world"; echo ${x/%world/xyz}' 2>/dev/null)"
+check "lowercase first" "hELLO" "$(timeout 3 $DEN -c 'x=HELLO; echo ${x,}' 2>/dev/null)"
+
+# ===========================================================================
+# 151. Control flow edge cases
+# ===========================================================================
+check "empty for body" "" "$(timeout 3 $DEN -c 'for i in; do echo $i; done' 2>/dev/null)"
+check "for empty list" "" "$(timeout 3 $DEN -c 'x=""; for i in $x; do echo $i; done' 2>/dev/null)"
+check "while false" "" "$(timeout 3 $DEN -c 'while false; do echo nope; done' 2>/dev/null)"
+check "case no match" "" "$(timeout 3 $DEN -c 'case x in a) echo a;; b) echo b;; esac' 2>/dev/null)"
+check "case default" "default" "$(timeout 3 $DEN -c 'case x in a) echo a;; *) echo default;; esac' 2>/dev/null)"
+check "if elif else" "medium" "$(timeout 3 $DEN -c 'x=5; if [ $x -gt 10 ]; then echo big; elif [ $x -gt 3 ]; then echo medium; else echo small; fi' 2>/dev/null)"
+check "for in braces" "6" "$(timeout 3 $DEN -c 's=0; for i in {1..3}; do s=$((s+i)); done; echo $s' 2>/dev/null)"
+check "nested while" "4" "$(timeout 3 $DEN -c 'c=0; i=0; while [ $i -lt 2 ]; do j=0; while [ $j -lt 2 ]; do c=$((c+1)); j=$((j+1)); done; i=$((i+1)); done; echo $c' 2>/dev/null)"
+check "break from nested" "3" "$(timeout 3 $DEN -c 'for i in 1 2 3; do for j in a b c; do if [ $j = b ]; then break; fi; done; done; echo $i' 2>/dev/null)"
+
+# ===========================================================================
+# 152. Function edge cases
+# ===========================================================================
+check "func no args" "noargs" "$(timeout 3 $DEN -c 'f() { echo noargs; }; f' 2>/dev/null)"
+check "func return 0" "0" "$(timeout 3 $DEN -c 'f() { return 0; }; f; echo $?' 2>/dev/null)"
+check "func return 1" "1" "$(timeout 3 $DEN -c 'f() { return 1; }; f; echo $?' 2>/dev/null)"
+check "func local default" "" "$(timeout 3 $DEN -c 'f() { local x; echo -n "$x"; }; f' 2>/dev/null)"
+check "func argcount" "3" "$(timeout 3 $DEN -c 'f() { echo $#; }; f a b c' 2>/dev/null)"
+check "func recursive" "6" "$(timeout 3 $DEN -c 'fact() { if [ $1 -le 1 ]; then echo 1; else echo $(( $1 * $(fact $(($1-1))) )); fi; }; fact 3' 2>/dev/null)"
+check "func captures exit" "0" "$(timeout 3 $DEN -c 'f() { true; }; f; echo $?' 2>/dev/null)"
+
+# ===========================================================================
+# 153. Variable edge cases
+# ===========================================================================
+check "var underscore" "ok" "$(timeout 3 $DEN -c '_x=ok; echo $_x' 2>/dev/null)"
+check "var numeric suffix" "ok" "$(timeout 3 $DEN -c 'x1=ok; echo $x1' 2>/dev/null)"
+check "var empty assign" "" "$(timeout 3 $DEN -c 'x=; echo -n "$x"' 2>/dev/null)"
+check "var plus-eq string" "helloworld" "$(timeout 3 $DEN -c 'x=hello; x+=world; echo $x' 2>/dev/null)"
+check "var assign cmd sub" "hello" "$(timeout 3 $DEN -c 'x=$(echo hello); echo $x' 2>/dev/null)"
+check "var embedded expand" "val=hello" "$(timeout 3 $DEN -c 'x=hello; echo "val=$x"' 2>/dev/null)"
+check "var curly expand" "hello_world" "$(timeout 3 $DEN -c 'x=hello; echo "${x}_world"' 2>/dev/null)"
+check "var concat no space" "ab" "$(timeout 3 $DEN -c 'a=a; b=b; c=$a$b; echo $c' 2>/dev/null)"
+check "var double assign" "second" "$(timeout 3 $DEN -c 'x=first; x=second; echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 154. Redirection edge cases
+# ===========================================================================
+check "redir append create" "line1" "$(rm -f /tmp/den_test_app.txt; timeout 3 $DEN -c 'echo line1 >> /tmp/den_test_app.txt; cat /tmp/den_test_app.txt; rm -f /tmp/den_test_app.txt' 2>/dev/null)"
+check "redir input" "hello" "$(echo 'hello' > /tmp/den_test_in.txt; timeout 3 $DEN -c 'cat < /tmp/den_test_in.txt' 2>/dev/null; rm -f /tmp/den_test_in.txt)"
+check "redir stderr 2>" "" "$(timeout 3 $DEN -c 'echo err >&2' 2>/dev/null)"
+check "redir stdout and stderr" "out" "$(timeout 3 $DEN -c 'echo out; echo err >&2' 2>/dev/null)"
+check "redir both &>" "both" "$(timeout 3 $DEN -c 'echo both &>/tmp/den_test_both.txt; cat /tmp/den_test_both.txt; rm -f /tmp/den_test_both.txt' 2>/dev/null)"
+check "redir both append &>>" "line2" "$(timeout 3 $DEN -c 'echo line1 &>/tmp/den_test_ba.txt; echo line2 &>>/tmp/den_test_ba.txt; tail -1 /tmp/den_test_ba.txt; rm -f /tmp/den_test_ba.txt' 2>/dev/null)"
+check "redir fd close >&-" "ok" "$(timeout 3 $DEN -c 'echo ok 2>&-' 2>/dev/null)"
+
+# ===========================================================================
+# 155. Pipeline edge cases
+# ===========================================================================
+check "pipe exit status" "0" "$(timeout 3 $DEN -c 'echo hello | cat > /dev/null; echo $?' 2>/dev/null)"
+check "multi pipe" "hello" "$(timeout 3 $DEN -c 'echo hello | cat | cat | cat' 2>/dev/null)"
+check "pipe to head" "1" "$(timeout 3 $DEN -c 'printf "1\n2\n3\n" | head -1' 2>/dev/null)"
+check "pipe to tail" "3" "$(timeout 3 $DEN -c 'printf "1\n2\n3\n" | tail -1' 2>/dev/null)"
+check "pipe to wc" "3" "$(timeout 3 $DEN -c 'printf "a\nb\nc\n" | wc -l' 2>/dev/null | tr -d ' ')"
+check "pipe to sort" "a b c" "$(timeout 3 $DEN -c 'printf "c\na\nb\n" | sort' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "pipe to uniq" "a b" "$(timeout 3 $DEN -c 'printf "a\na\nb\nb\n" | uniq' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# 156. Heredoc edge cases
+# ===========================================================================
+check "heredoc expand" "hello" "$(timeout 3 $DEN -c 'x=hello; cat <<EOF
+$x
+EOF' 2>/dev/null)"
+check "heredoc multiline" "a
+b
+c" "$(timeout 3 $DEN -c 'cat <<EOF
+a
+b
+c
+EOF' 2>/dev/null)"
+
+# ===========================================================================
+# 157. Process substitution
+# ===========================================================================
+check "proc subst diff" "same" "$(timeout 3 $DEN -c 'diff <(echo abc) <(echo abc) && echo same || echo diff' 2>/dev/null)"
+check "proc subst cat" "hello" "$(timeout 3 $DEN -c 'cat <(echo hello)' 2>/dev/null)"
+
+# ===========================================================================
+# 158. Subshell edge cases
+# ===========================================================================
+check "subshell exit code" "1" "$(timeout 3 $DEN -c '(exit 1); echo $?' 2>/dev/null)"
+check "subshell var isolate" "outer" "$(timeout 3 $DEN -c 'x=outer; (x=inner); echo $x' 2>/dev/null)"
+check "subshell pipeline" "3" "$(timeout 3 $DEN -c '(echo -e "a\nb\nc") | wc -l' 2>/dev/null | tr -d ' ')"
+check "subshell nested" "deep" "$(timeout 3 $DEN -c '(echo $(echo deep))' 2>/dev/null)"
+
+# ===========================================================================
+# 159. Array advanced operations
+# ===========================================================================
+check "arr string elem" "hello world" "$(timeout 3 $DEN -c 'arr=("hello world" "foo"); echo ${arr[0]}' 2>/dev/null)"
+check "arr empty init" "0" "$(timeout 3 $DEN -c 'arr=(); echo ${#arr[@]}' 2>/dev/null)"
+check "arr append multi" "a b c d e" "$(timeout 3 $DEN -c 'arr=(a b); arr+=(c d e); echo ${arr[@]}' 2>/dev/null)"
+check "arr all star" "a b c" "$(timeout 3 $DEN -c 'arr=(a b c); echo ${arr[*]}' 2>/dev/null)"
+check "arr index negative" "c" "$(timeout 3 $DEN -c 'arr=(a b c); echo ${arr[-1]}' 2>/dev/null)"
+
+# ===========================================================================
+# 160. Associative array edge cases
+# ===========================================================================
+check "assoc overwrite" "new" "$(timeout 3 $DEN -c 'declare -A m; m[k]=old; m[k]=new; echo ${m[k]}' 2>/dev/null)"
+check "assoc unset elem" "" "$(timeout 3 $DEN -c 'declare -A m; m[k]=v; unset m[k]; echo -n "${m[k]}"' 2>/dev/null)"
+check "assoc length" "2" "$(timeout 3 $DEN -c 'declare -A m=([a]=1 [b]=2); echo ${#m[@]}' 2>/dev/null)"
+
+# ===========================================================================
+# 161. Special variables
+# ===========================================================================
+check "\$\$ is positive" "yes" "$(timeout 3 $DEN -c 'if [ $$ -gt 0 ]; then echo yes; fi' 2>/dev/null)"
+check "\$# no args" "0" "$(timeout 3 $DEN -c 'echo $#' 2>/dev/null)"
+check "\$0 is den" "yes" "$(timeout 3 $DEN -c 'case $0 in *den*) echo yes;; *) echo no;; esac' 2>/dev/null)"
+check "SECONDS type" "yes" "$(timeout 3 $DEN -c 'if [ "$SECONDS" -ge 0 ] 2>/dev/null; then echo yes; fi' 2>/dev/null)"
+
+# ===========================================================================
+# 162. Brace expansion edge cases
+# ===========================================================================
+check "brace numeric" "1 2 3 4 5" "$(timeout 3 $DEN -c 'echo {1..5}' 2>/dev/null)"
+check "brace alpha" "a b c d e" "$(timeout 3 $DEN -c 'echo {a..e}' 2>/dev/null)"
+check "brace reverse" "5 4 3 2 1" "$(timeout 3 $DEN -c 'echo {5..1}' 2>/dev/null)"
+check "brace step" "1 3 5 7 9" "$(timeout 3 $DEN -c 'echo {1..9..2}' 2>/dev/null)"
+check "brace list" "ax bx cx" "$(timeout 3 $DEN -c 'echo {a,b,c}x' 2>/dev/null)"
+check "brace combo" "a1 a2 b1 b2" "$(timeout 3 $DEN -c 'echo {a,b}{1,2}' 2>/dev/null)"
+check "brace zero pad" "01 02 03" "$(timeout 3 $DEN -c 'echo {01..03}' 2>/dev/null)"
+
+# ===========================================================================
+# 163. Printf edge cases
+# ===========================================================================
+check "printf string" "hello" "$(timeout 3 $DEN -c 'printf "%s" "hello"' 2>/dev/null)"
+check "printf newline" "hello" "$(timeout 3 $DEN -c 'printf "%s\n" "hello"' 2>/dev/null)"
+check "printf decimal" "42" "$(timeout 3 $DEN -c 'printf "%d" 42' 2>/dev/null)"
+check "printf hex" "ff" "$(timeout 3 $DEN -c 'printf "%x" 255' 2>/dev/null)"
+check "printf octal" "77" "$(timeout 3 $DEN -c 'printf "%o" 63' 2>/dev/null)"
+check "printf width" "  42" "$(timeout 3 $DEN -c 'printf "%4d" 42' 2>/dev/null)"
+check "printf left align" "42  " "$(timeout 3 $DEN -c 'printf "%-4d" 42' 2>/dev/null)"
+check "printf %q" "'hello world'" "$(timeout 3 $DEN -c "printf '%q' 'hello world'" 2>/dev/null)"
+
+# ===========================================================================
+# 164. Echo edge cases
+# ===========================================================================
+check "echo -n no newline" "hello" "$(timeout 3 $DEN -c 'echo -n hello; echo -n ""' 2>/dev/null)"
+check "echo -e tab" "a	b" "$(timeout 3 $DEN -c 'echo -e "a\tb"' 2>/dev/null)"
+check "echo -e newline" "a
+b" "$(timeout 3 $DEN -c 'echo -e "a\nb"' 2>/dev/null)"
+check "echo -E no escape" 'a\nb' "$(timeout 3 $DEN -c 'echo -E "a\nb"' 2>/dev/null)"
+check "echo no args" "" "$(timeout 3 $DEN -c 'echo' 2>/dev/null)"
+check "echo multi args" "a b c" "$(timeout 3 $DEN -c 'echo a b c' 2>/dev/null)"
+
+# ===========================================================================
+# 165. Command substitution edge cases
+# ===========================================================================
+check "cmd sub nested" "INNER" "$(timeout 3 $DEN -c 'echo $(echo $(echo INNER))' 2>/dev/null)"
+check "cmd sub in dquote" "result: hello" "$(timeout 3 $DEN -c 'echo "result: $(echo hello)"' 2>/dev/null)"
+check "cmd sub backtick" "hello" "$(timeout 3 $DEN -c 'echo `echo hello`' 2>/dev/null)"
+check "cmd sub strips newline" "hello" "$(timeout 3 $DEN -c 'x=$(printf "hello\n"); echo "$x"' 2>/dev/null)"
+check "cmd sub multiline" "a b" "$(timeout 3 $DEN -c 'x=$(printf "a\nb"); echo $x' 2>/dev/null)"
+check "cmd sub empty" "" "$(timeout 3 $DEN -c 'x=$(true); echo -n "$x"' 2>/dev/null)"
+
+# ===========================================================================
+# 166. Test builtin edge cases
+# ===========================================================================
+check "test -d dir" "yes" "$(timeout 3 $DEN -c '[ -d /tmp ] && echo yes' 2>/dev/null)"
+check "test -e exists" "yes" "$(timeout 3 $DEN -c '[ -e /etc/hosts ] && echo yes' 2>/dev/null)"
+check "test -r readable" "yes" "$(timeout 3 $DEN -c '[ -r /etc/shells ] && echo yes' 2>/dev/null)"
+check "test -w writable" "yes" "$(timeout 3 $DEN -c '[ -w /tmp ] && echo yes' 2>/dev/null)"
+check "test -x executable" "yes" "$(timeout 3 $DEN -c '[ -x /bin/sh ] && echo yes' 2>/dev/null)"
+check "test ! neg" "yes" "$(timeout 3 $DEN -c '[ ! -f /nonexistent_file ] && echo yes' 2>/dev/null)"
+check "test -a and" "yes" "$(timeout 3 $DEN -c '[ -d /tmp -a -f /etc/shells ] && echo yes' 2>/dev/null)"
+check "test -o or" "yes" "$(timeout 3 $DEN -c '[ -f /nonexistent -o -d /tmp ] && echo yes' 2>/dev/null)"
+check "test num eq" "yes" "$(timeout 3 $DEN -c '[ 5 -eq 5 ] && echo yes' 2>/dev/null)"
+check "test num ne" "yes" "$(timeout 3 $DEN -c '[ 5 -ne 3 ] && echo yes' 2>/dev/null)"
+check "test num le" "yes" "$(timeout 3 $DEN -c '[ 3 -le 5 ] && echo yes' 2>/dev/null)"
+check "test num ge" "yes" "$(timeout 3 $DEN -c '[ 5 -ge 3 ] && echo yes' 2>/dev/null)"
+check "test str !=" "yes" "$(timeout 3 $DEN -c '[ "abc" != "def" ] && echo yes' 2>/dev/null)"
+
+# ===========================================================================
+# 167. [[ ]] advanced tests
+# ===========================================================================
+check "[[ -z empty ]]" "yes" "$(timeout 3 $DEN -c '[[ -z "" ]] && echo yes' 2>/dev/null)"
+check "[[ -n notempty ]]" "yes" "$(timeout 3 $DEN -c '[[ -n "hello" ]] && echo yes' 2>/dev/null)"
+check "[[ && ]]" "yes" "$(timeout 3 $DEN -c '[[ 1 -eq 1 && 2 -eq 2 ]] && echo yes' 2>/dev/null)"
+check "[[ || ]]" "yes" "$(timeout 3 $DEN -c '[[ 1 -eq 2 || 2 -eq 2 ]] && echo yes' 2>/dev/null)"
+check "[[ ! ]]" "yes" "$(timeout 3 $DEN -c '[[ ! -f /nonexistent ]] && echo yes' 2>/dev/null)"
+check "[[ string < ]]" "yes" "$(timeout 3 $DEN -c '[[ "abc" < "abd" ]] && echo yes' 2>/dev/null)"
+check "[[ string > ]]" "yes" "$(timeout 3 $DEN -c '[[ "abd" > "abc" ]] && echo yes' 2>/dev/null)"
+# SKIP: BASH_REMATCH not yet implemented
+# check "[[ regex capture ]]" "123" "$(timeout 3 $DEN -c '[[ "abc123def" =~ ([0-9]+) ]] && echo ${BASH_REMATCH[1]}' 2>/dev/null)"
+
+# ===========================================================================
+# 168. Semicolon and compound command edge cases
+# ===========================================================================
+check "semicolon multi" "1 2 3" "$(timeout 3 $DEN -c 'echo 1; echo 2; echo 3' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "semicolon trailing" "ok" "$(timeout 3 $DEN -c 'echo ok;' 2>/dev/null)"
+check "semicolon in dquote" "a;b" "$(timeout 3 $DEN -c 'echo "a;b"' 2>/dev/null)"
+check "&& chain" "ok" "$(timeout 3 $DEN -c 'true && true && echo ok' 2>/dev/null)"
+check "|| chain" "fallback" "$(timeout 3 $DEN -c 'false || false || echo fallback' 2>/dev/null)"
+check "&& || combined" "B" "$(timeout 3 $DEN -c 'false && echo A || echo B' 2>/dev/null)"
+check "grouped &&" "ok" "$(timeout 3 $DEN -c '{ true && echo ok; }' 2>/dev/null)"
+
+# ===========================================================================
+# 169. Trap edge cases
+# ===========================================================================
+check "trap EXIT from func" "cleanup" "$(timeout 3 $DEN -c 'trap "echo cleanup" EXIT; f() { return 0; }; f' 2>/dev/null)"
+check "trap multiple" "before after" "$(timeout 3 $DEN -c 'trap "echo after" EXIT; echo before' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# 170. set options edge cases
+# ===========================================================================
+check "set -e stops on fail" "before" "$(timeout 3 $DEN -c 'set -e; echo before; false; echo after' 2>/dev/null)"
+check "set +e continues" "before after" "$(timeout 3 $DEN -c 'set -e; set +e; echo before; false; echo after' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "set -e func fail" "" "$(timeout 3 $DEN -c 'set -e; f() { return 1; }; f; echo should_not_reach' 2>/dev/null)"
+
+# ===========================================================================
+# 171. Glob expansion in command context
+# ===========================================================================
+check "glob star" "yes" "$(timeout 3 $DEN -c 'ls /etc/hos* > /dev/null 2>&1 && echo yes || echo no' 2>/dev/null)"
+check "glob question" "yes" "$(timeout 3 $DEN -c 'ls /etc/host? > /dev/null 2>&1 && echo yes || echo no' 2>/dev/null)"
+check "glob no match quoted" "*nonexist*" "$(timeout 3 $DEN -c 'echo "*nonexist*"' 2>/dev/null)"
+
+# ===========================================================================
+# 172. ANSI-C quoting
+# ===========================================================================
+check "ansi-c tab" "a	b" "$(timeout 3 $DEN -c "echo \$'a\tb'" 2>/dev/null)"
+check "ansi-c newline" "a
+b" "$(timeout 3 $DEN -c "echo \$'a\nb'" 2>/dev/null)"
+check "ansi-c backslash" 'a\b' "$(timeout 3 $DEN -c "echo \$'a\\\\b'" 2>/dev/null)"
+check "ansi-c squote" "a'b" "$(timeout 3 $DEN -c "echo \$'a\\'b'" 2>/dev/null)"
+
+# ===========================================================================
+# 173. Declare and readonly edge cases
+# ===========================================================================
+check "readonly prevents" "1" "$(timeout 3 $DEN -c 'readonly x=5; x=10; echo $?' 2>/dev/null)"
+check "declare -r same" "5" "$(timeout 3 $DEN -c 'declare -r x=5; echo $x' 2>/dev/null)"
+check "declare no val" "" "$(timeout 3 $DEN -c 'declare x; echo -n "$x"' 2>/dev/null)"
+
+# ===========================================================================
+# 174. Script execution edge cases (using temp files)
+# ===========================================================================
+check "script for loop" "a b c" "$(echo 'for i in a b c; do echo $i; done' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; rm -f /tmp/den_t_script.sh)"
+check "script if oneliner" "yes" "$(echo 'if true; then echo yes; fi' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null; rm -f /tmp/den_t_script.sh)"
+check "script while oneliner" "0 1 2" "$(echo 'i=0; while [ $i -lt 3 ]; do echo $i; i=$((i+1)); done' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; rm -f /tmp/den_t_script.sh)"
+check "script func def+call" "hello" "$(printf 'greet() {\n  echo hello\n}\ngreet\n' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null; rm -f /tmp/den_t_script.sh)"
+check "script multi cmds" "1 2 3" "$(echo 'echo 1; echo 2; echo 3' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; rm -f /tmp/den_t_script.sh)"
+check "script tilde quoted" "~" "$(echo 'echo "~"' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null; rm -f /tmp/den_t_script.sh)"
+check "script tilde unquoted" "$HOME" "$(echo 'echo ~' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null; rm -f /tmp/den_t_script.sh)"
+check "script var persist" "after" "$(printf 'x=before\nx=after\necho $x\n' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null; rm -f /tmp/den_t_script.sh)"
+check "script exit code" "42" "$(echo 'exit 42' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null; echo $?; rm -f /tmp/den_t_script.sh)"
+check "script nested if" "b" "$(printf 'x=5\nif [ $x -gt 10 ]; then\n  echo a\nelif [ $x -gt 3 ]; then\n  echo b\nelse\n  echo c\nfi\n' > /tmp/den_t_script.sh; timeout 3 $DEN /tmp/den_t_script.sh 2>/dev/null; rm -f /tmp/den_t_script.sh)"
+
+# ===========================================================================
+# 175. eval edge cases
+# ===========================================================================
+check "eval simple" "hello" "$(timeout 3 $DEN -c 'eval echo hello' 2>/dev/null)"
+check "eval var expand" "world" "$(timeout 3 $DEN -c 'x=world; eval echo \$x' 2>/dev/null)"
+check "eval assign" "from_eval" "$(timeout 3 $DEN -c 'eval "x=from_eval"; echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 176. Misc edge cases
+# ===========================================================================
+check "colon noop" "0" "$(timeout 3 $DEN -c ':; echo $?' 2>/dev/null)"
+check "true builtin" "0" "$(timeout 3 $DEN -c 'true; echo $?' 2>/dev/null)"
+check "false builtin" "1" "$(timeout 3 $DEN -c 'false; echo $?' 2>/dev/null)"
+check "basename equiv" "file.txt" "$(timeout 3 $DEN -c 'x=/path/to/file.txt; echo ${x##*/}' 2>/dev/null)"
+check "dirname equiv" "/path/to" "$(timeout 3 $DEN -c 'x=/path/to/file.txt; echo ${x%/*}' 2>/dev/null)"
+check "type echo" "echo is a shell builtin" "$(timeout 3 $DEN -c 'type echo' 2>/dev/null)"
+check "command -v cat" "$(which cat)" "$(timeout 3 $DEN -c 'command -v cat' 2>/dev/null)"
+check "hash command" "0" "$(timeout 3 $DEN -c 'hash ls 2>/dev/null; echo $?' 2>/dev/null)"
+check "let arith" "15" "$(timeout 3 $DEN -c 'let x=5+10; echo $x' 2>/dev/null)"
+check "pwd builtin" "$(pwd)" "$(timeout 3 $DEN -c 'cd '"$(pwd)"'; pwd' 2>/dev/null)"
+
+# ===========================================================================
+# 177. Herestring single-quote fix (REGRESSION: $x expanded in single quotes)
+# ===========================================================================
+check "herestring squote literal" 'no expand $x' "$(timeout 3 $DEN -c "cat <<< 'no expand \$x'" 2>/dev/null)"
+check "herestring dquote expand" "hello world" "$(timeout 3 $DEN -c 'x=world; cat <<< "hello $x"' 2>/dev/null)"
+check "herestring unquoted" "hello" "$(timeout 3 $DEN -c 'cat <<< hello' 2>/dev/null)"
+check "herestring unquoted var" "test" "$(timeout 3 $DEN -c 'x=test; cat <<< $x' 2>/dev/null)"
+
+# ===========================================================================
+# 178. Function name resolution (REGRESSION: short names matched aliases)
+# ===========================================================================
+check "func shadows alias" "from g" "$(timeout 3 $DEN -c 'g() { echo "from g"; }; g' 2>/dev/null)"
+check "func indirect call" "from g" "$(timeout 3 $DEN -c 'g() { echo "from g"; }; f() { g; }; f' 2>/dev/null)"
+check "func shadows builtin" "custom echo" "$(timeout 3 $DEN -c 'echo() { command echo "custom echo"; }; echo hello' 2>/dev/null)"
+
+# ===========================================================================
+# 179. Eval variable persistence (REGRESSION: eval assignments lost)
+# ===========================================================================
+check "eval assign persist" "from_eval" "$(timeout 3 $DEN -c 'eval "x=from_eval"; echo $x' 2>/dev/null)"
+check "eval compound" "done" "$(timeout 3 $DEN -c 'eval "x=42; echo done"' 2>/dev/null)"
+check "eval with expansion" "world" "$(timeout 3 $DEN -c 'x=world; eval echo \$x' 2>/dev/null)"
+
+# ===========================================================================
+# 180. Underscore in variable names (REGRESSION: $_x parsed as $_ + x)
+# ===========================================================================
+check "var underscore prefix" "ok" "$(timeout 3 $DEN -c '_x=ok; echo $_x' 2>/dev/null)"
+check "var underscore mid" "ok" "$(timeout 3 $DEN -c 'a_b=ok; echo $a_b' 2>/dev/null)"
+check "var double underscore" "ok" "$(timeout 3 $DEN -c '__x=ok; echo $__x' 2>/dev/null)"
+
+# ===========================================================================
+# 181. Printf escape sequences in command substitution
+# ===========================================================================
+check "printf newline in cmdsub" "hello" "$(timeout 3 $DEN -c 'x=$(printf "hello\n"); echo "$x"' 2>/dev/null)"
+check "printf multiline cmdsub" "a b" "$(timeout 3 $DEN -c 'x=$(printf "a\nb"); echo $x' 2>/dev/null)"
+check "printf tab in cmdsub" "a	b" "$(timeout 3 $DEN -c 'x=$(printf "a\tb"); echo "$x"' 2>/dev/null)"
+
+# ===========================================================================
+# 182. Negative array indexing
+# ===========================================================================
+check "arr neg last" "c" "$(timeout 3 $DEN -c 'arr=(a b c); echo ${arr[-1]}' 2>/dev/null)"
+check "arr neg second" "b" "$(timeout 3 $DEN -c 'arr=(a b c); echo ${arr[-2]}' 2>/dev/null)"
+check "arr neg first" "a" "$(timeout 3 $DEN -c 'arr=(a b c); echo ${arr[-3]}' 2>/dev/null)"
+
+# ===========================================================================
+# 183. Quoted array elements
+# ===========================================================================
+check "arr quoted space elem" "hello world" "$(timeout 3 $DEN -c 'arr=("hello world" "foo"); echo ${arr[0]}' 2>/dev/null)"
+check "arr quoted count" "2" "$(timeout 3 $DEN -c 'arr=("hello world" "foo"); echo ${#arr[@]}' 2>/dev/null)"
+
+# ===========================================================================
+# 184. IFS and word splitting
+# ===========================================================================
+check "IFS colon split" "a b c" "$(timeout 3 $DEN -c 'IFS=:; x="a:b:c"; echo $x' 2>/dev/null)"
+check "dquote preserves spaces" "a  b  c" "$(timeout 3 $DEN -c 'x="a  b  c"; echo "$x"' 2>/dev/null)"
+check "unquote collapses spaces" "a b c" "$(timeout 3 $DEN -c 'x="a  b  c"; echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 185. Substring expansion
+# ===========================================================================
+check "substr offset" "llo" "$(timeout 3 $DEN -c 'x=hello; echo ${x:2}' 2>/dev/null)"
+check "substr offset len" "ell" "$(timeout 3 $DEN -c 'x=hello; echo ${x:1:3}' 2>/dev/null)"
+
+# ===========================================================================
+# 186. Arithmetic with variables (no $ prefix)
+# ===========================================================================
+check "arith var no dollar" "5" "$(timeout 3 $DEN -c 'x=5; echo $(( x ))' 2>/dev/null)"
+check "arith var add" "8" "$(timeout 3 $DEN -c 'x=5; echo $(( x + 3 ))' 2>/dev/null)"
+check "arith ternary true" "10" "$(timeout 3 $DEN -c 'echo $(( 1 ? 10 : 20 ))' 2>/dev/null)"
+check "arith ternary false" "20" "$(timeout 3 $DEN -c 'echo $(( 0 ? 10 : 20 ))' 2>/dev/null)"
+check "arith base 16" "255" "$(timeout 3 $DEN -c 'echo $(( 16#ff ))' 2>/dev/null)"
+
+# ===========================================================================
+# 187. Complex pipeline patterns
+# ===========================================================================
+check "pipe tr uppercase" "HELLO" "$(timeout 3 $DEN -c 'echo hello | tr a-z A-Z' 2>/dev/null)"
+check "pipe sort" "1 2 3" "$(timeout 5 $DEN -c 'printf "3\n1\n2\n" | sort' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "pipe wc" "6" "$(timeout 3 $DEN -c 'echo hello | wc -c' 2>/dev/null | tr -d ' ')"
+
+# ===========================================================================
+# 188. While read loop pattern
+# ===========================================================================
+check "while read lines" "line: a line: b line: c" "$(timeout 3 $DEN -c 'printf "a\nb\nc\n" | while read line; do echo "line: $line"; done' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "while IFS read" "1 2 3" "$(timeout 3 $DEN -c 'echo "1:2:3" | while IFS=: read a b c; do echo "$a $b $c"; done' 2>/dev/null)"
+
+# ===========================================================================
+# 189. Conditional chains
+# ===========================================================================
+check "and chain both" "A B" "$(timeout 3 $DEN -c 'true && echo A && echo B' 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "and-or combined" "B" "$(timeout 3 $DEN -c 'false && echo A || echo B' 2>/dev/null)"
+check "or chain fallthrough" "C" "$(timeout 3 $DEN -c 'false || false || echo C' 2>/dev/null)"
+check "complex chain" "B" "$(timeout 3 $DEN -c 'true && false && echo A || echo B' 2>/dev/null)"
+
+# ===========================================================================
+# 190. Function features
+# ===========================================================================
+check "func with args" "hello world" "$(timeout 3 $DEN -c 'f() { echo "$1 $2"; }; f hello world' 2>/dev/null)"
+check "func return 42" "42" "$(timeout 3 $DEN -c 'f() { return 42; }; f; echo $?' 2>/dev/null)"
+check "func shift" "b" "$(timeout 3 $DEN -c 'f() { shift; echo $1; }; f a b c' 2>/dev/null)"
+check "func nested call" "from g" "$(timeout 3 $DEN -c 'g() { echo "from g"; }; f() { g; }; f' 2>/dev/null)"
+
+# ===========================================================================
+# 191. Variable scoping
+# ===========================================================================
+check "subshell var isolate" "1" "$(timeout 3 $DEN -c 'x=1; (x=2); echo $x' 2>/dev/null)"
+check "brace group var" "2" "$(timeout 3 $DEN -c 'x=1; { x=2; }; echo $x' 2>/dev/null)"
+check "local var scoping" "outer" "$(timeout 3 $DEN -c 'f() { local x=inner; }; x=outer; f; echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 192. Glob patterns
+# ===========================================================================
+check "glob no match literal" "*nonexist*" "$(timeout 3 $DEN -c 'echo *nonexist*' 2>/dev/null)"
+check "glob quoted no expand" "/etc/hos*" "$(timeout 3 $DEN -c 'echo "/etc/hos*"' 2>/dev/null)"
+
+# ===========================================================================
+# 193. Error handling patterns
+# ===========================================================================
+check "not found exit 127" "127" "$(timeout 3 $DEN -c 'cmd_not_found_xyz 2>/dev/null; echo $?' 2>/dev/null)"
+check "subshell exit code" "42" "$(timeout 3 $DEN -c '(exit 42); echo $?' 2>/dev/null)"
+check "negation true" "1" "$(timeout 3 $DEN -c '! true; echo $?' 2>/dev/null)"
+check "negation false" "0" "$(timeout 3 $DEN -c '! false; echo $?' 2>/dev/null)"
+
+# ===========================================================================
+# 194. Heredoc variations
+# ===========================================================================
+check "heredoc no expand squote" 'hello $HOME' "$(timeout 3 $DEN -c "cat <<'EOF'
+hello \$HOME
+EOF" 2>/dev/null)"
+check "heredoc expand dquote" "hello $HOME" "$(timeout 3 $DEN -c 'x=$HOME; cat <<EOF
+hello $x
+EOF' 2>/dev/null)"
+
+# ===========================================================================
+# 195. read builtin features
+# ===========================================================================
+check "read from pipe" "got: foo" "$(timeout 3 $DEN -c 'echo foo | { read x; echo "got: $x"; }' 2>/dev/null)"
+check "read -r no backslash" 'hello\tworld' "$(timeout 3 $DEN -c 'read -r x <<< "hello\tworld"; echo "$x"' 2>/dev/null)"
+
+# ===========================================================================
+# 196. Parameter expansion: colon in patterns, slash in defaults
+# ===========================================================================
+check "suffix strip colon glob" "abc" "$(timeout 3 $DEN -c 'x="abc:def"; echo "${x%%:*}"' 2>/dev/null)"
+check "suffix strip colon single" "a:b" "$(timeout 3 $DEN -c 'x="a:b:c"; echo "${x%:*}"' 2>/dev/null)"
+check "PATH first component" "/usr/bin" "$(timeout 3 $DEN -c 'PATH="/usr/bin:/usr/local/bin"; echo "${PATH%%:*}"' 2>/dev/null)"
+check "default with slash" "/etc/default" "$(timeout 3 $DEN -c 'echo ${C:-/etc/default}' 2>/dev/null)"
+check "assign default slash" "/etc/default" "$(timeout 3 $DEN -c ': ${CONFIG:=/etc/default}; echo $CONFIG' 2>/dev/null)"
+
+# ===========================================================================
+# 197. Function positional params on re-call
+# ===========================================================================
+check "func args second call" "Hello, User" "$(timeout 3 $DEN -c 'greet() { echo "Hello, ${1:-World}"; }; greet; greet "User"' 2>/dev/null | tail -1)"
+check "func args change" "c d" "$(timeout 3 $DEN -c 'f() { echo "$1 $2"; }; f a b; f c d' 2>/dev/null | tail -1)"
+
+# ===========================================================================
+# 198. Unset arrays
+# ===========================================================================
+check "unset indexed arr" "0" "$(timeout 3 $DEN -c 'arr=(1 2 3); unset arr; echo ${#arr[@]}' 2>/dev/null)"
+check "unset assoc arr" "0" "$(timeout 3 $DEN -c 'declare -A m=([a]=1 [b]=2); unset m; echo ${#m[@]}' 2>/dev/null)"
+
+# ===========================================================================
+# 199. Associative array variable subscript
+# ===========================================================================
+check "assoc var subscript" "value" "$(timeout 3 $DEN -c 'declare -A m=([key]=value); k=key; echo "${m[$k]}"' 2>/dev/null)"
+check "assoc var subscript 2" "1" "$(timeout 3 $DEN -c 'declare -A m=([a]=1 [b]=2); x=a; echo "${m[$x]}"' 2>/dev/null)"
+
+# ===========================================================================
+# 200. Double backslash in double quotes
+# ===========================================================================
+check "dquote double backslash" 'hello\world' "$(timeout 3 $DEN -c 'x="hello\\world"; echo "$x"' 2>/dev/null)"
+
+# ===========================================================================
+# 201. Multi-variable assignment
+# ===========================================================================
+check "multi assign simple" "1 2 3" "$(timeout 3 $DEN -c 'x=1 y=2 z=3; echo "$x $y $z"' 2>/dev/null)"
+check "multi assign crossref" "hello world" "$(timeout 3 $DEN -c 'x=hello y="$x world"; echo "$y"' 2>/dev/null)"
+
+# ===========================================================================
+# 202. Bare redirect creates file
+# ===========================================================================
+check "bare redirect create" "exists" "$(timeout 3 $DEN -c '> /tmp/den_bare_t.txt; [ -f /tmp/den_bare_t.txt ] && echo exists; rm -f /tmp/den_bare_t.txt' 2>/dev/null)"
+
+# ===========================================================================
+# 203. Case character class patterns
+# ===========================================================================
+check "case char class digit" "digit" "$(timeout 3 $DEN -c 'case 5 in [0-9]) echo digit;; *) echo other;; esac' 2>/dev/null)"
+check "case char class lower" "lower" "$(timeout 3 $DEN -c 'case a in [a-z]) echo lower;; *) echo other;; esac' 2>/dev/null)"
+check "case char class upper" "upper" "$(timeout 3 $DEN -c 'case A in [A-Z]) echo upper;; *) echo other;; esac' 2>/dev/null)"
+
 # Results
 # ===========================================================================
 echo ""

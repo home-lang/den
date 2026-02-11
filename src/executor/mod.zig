@@ -610,7 +610,40 @@ pub const Executor = struct {
 
         // Empty command name (e.g. from $(exit 42) expanding to "") is a no-op.
         // Preserve the current exit code like bash does.
+        // Exception: bare redirections like "> file" should still be applied.
         if (command.name.len == 0) {
+            if (command.redirections.len > 0) {
+                // Bare redirections: apply them to create/truncate files (POSIX behavior).
+                if (comptime builtin.os.tag != .windows) {
+                    for (command.redirections) |redir| {
+                        switch (redir.kind) {
+                            .output_truncate, .output_clobber => {
+                                const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
+                                defer self.allocator.free(path_z);
+                                const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(c_uint, 0o644));
+                                if (fd < 0) return 1;
+                                std.posix.close(@intCast(fd));
+                            },
+                            .output_append => {
+                                const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
+                                defer self.allocator.free(path_z);
+                                const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, @as(c_uint, 0o644));
+                                if (fd < 0) return 1;
+                                std.posix.close(@intCast(fd));
+                            },
+                            .input => {
+                                const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
+                                defer self.allocator.free(path_z);
+                                const fd = std.c.open(path_z, .{}, @as(c_uint, 0));
+                                if (fd < 0) return 1;
+                                std.posix.close(@intCast(fd));
+                            },
+                            else => {},
+                        }
+                    }
+                }
+                return 0;
+            }
             if (self.shell) |shell| {
                 return shell.last_exit_code;
             }
@@ -686,6 +719,17 @@ pub const Executor = struct {
             }
         }
 
+        // Check if it's a user-defined function (POSIX: functions before builtins)
+        if (self.shell) |shell| {
+            if (shell.function_manager.hasFunction(command.name)) {
+                const exit_code = shell.function_manager.executeFunction(shell, command.name, command.args) catch |err| {
+                    try IO.eprint("den: function error: {}\n", .{err});
+                    return 1;
+                };
+                return exit_code;
+            }
+        }
+
         // Check if it's a builtin
         if (self.isBuiltin(command.name)) {
             // If builtin has redirections, handle appropriately per OS
@@ -715,17 +759,6 @@ pub const Executor = struct {
                 }
             }
             return try self.executeBuiltin(command);
-        }
-
-        // Check if it's a user-defined function
-        if (self.shell) |shell| {
-            if (shell.function_manager.hasFunction(command.name)) {
-                const exit_code = shell.function_manager.executeFunction(shell, command.name, command.args) catch |err| {
-                    try IO.eprint("den: function error: {}\n", .{err});
-                    return 1;
-                };
-                return exit_code;
-            }
         }
 
         // Check if it's a directory path (auto cd feature, like zsh)

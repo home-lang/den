@@ -573,8 +573,8 @@ pub fn builtinEval(self: *Shell, cmd: *types.ParsedCommand) !void {
     try self.expandCommandChain(&chain);
     try self.expandAliases(&chain);
 
-    // Execute
-    var executor = executor_mod.Executor.init(self.allocator, &self.environment);
+    // Execute - use initWithShell so variable assignments persist to the shell
+    var executor = executor_mod.Executor.initWithShell(self.allocator, &self.environment, self);
     const exit_code = executor.executeChain(&chain) catch |err| {
         try IO.eprint("den: eval: execution error: {}\n", .{err});
         self.last_exit_code = 1;

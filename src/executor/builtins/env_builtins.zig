@@ -395,6 +395,27 @@ pub fn unset(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                 }
             }
             ctx.unsetEnv(var_name);
+            // Also remove from arrays and associative arrays hashmaps
+            if (ctx.hasShell()) {
+                const shell_ref = try ctx.getShell();
+                // Remove indexed array
+                if (shell_ref.arrays.fetchRemove(var_name)) |kv| {
+                    for (kv.value) |item| shell_ref.allocator.free(item);
+                    shell_ref.allocator.free(kv.value);
+                    shell_ref.allocator.free(kv.key);
+                }
+                // Remove associative array
+                if (shell_ref.assoc_arrays.fetchRemove(var_name)) |kv| {
+                    var assoc = kv.value;
+                    var iter = assoc.iterator();
+                    while (iter.next()) |entry| {
+                        shell_ref.allocator.free(entry.key_ptr.*);
+                        shell_ref.allocator.free(entry.value_ptr.*);
+                    }
+                    assoc.deinit();
+                    shell_ref.allocator.free(kv.key);
+                }
+            }
         }
     }
 

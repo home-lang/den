@@ -337,7 +337,13 @@ pub const Parser = struct {
         }
 
         if (command_name == null) {
-            return error.EmptyCommand;
+            // Bare redirections (e.g. "> file") are valid in POSIX sh/bash.
+            // They create/truncate the target file with no command.
+            if (redir_count > 0) {
+                command_name = try self.allocator.dupe(u8, "");
+            } else {
+                return error.EmptyCommand;
+            }
         }
 
         // Allocate and copy

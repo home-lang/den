@@ -534,6 +534,17 @@ pub const Tokenizer = struct {
 
             // Handle backslash escapes (not in regular single quotes, but yes in ANSI quotes)
             if (char == '\\' and (!in_single_quote or in_ansi_quote)) {
+                // Inside command substitution ($() or backticks), preserve backslashes
+                // literally so the child shell can re-parse them properly
+                if (subst_depth > 0 or in_backtick) {
+                    if (word_len < word_buffer.len) {
+                        word_buffer[word_len] = '\\';
+                        word_len += 1;
+                    }
+                    self.pos += 1;
+                    self.column += 1;
+                    continue;
+                }
                 if (self.pos + 1 < self.input.len) {
                     const next_char = self.input[self.pos + 1];
                     if (in_ansi_quote) {
@@ -802,7 +813,7 @@ pub const Tokenizer = struct {
 
             // Add character to word
             // If in single quotes, escape special characters ($, `) so they're not expanded
-            if (in_single_quote and (char == '$' or char == '`')) {
+            if (in_single_quote and char == '$') {
                 if (word_len + 1 < word_buffer.len) {
                     word_buffer[word_len] = '\\';
                     word_len += 1;

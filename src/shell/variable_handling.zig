@@ -272,25 +272,56 @@ pub fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
         return;
     }
 
-    // Parse array elements
+    // Parse array elements (respecting quoted strings)
     const content = std.mem.trim(u8, input[start_paren + 1 .. end_paren], &std.ascii.whitespace);
 
-    // Count elements first
+    // First pass: count elements (respecting quotes)
     var count: usize = 0;
-    var count_iter = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
-    while (count_iter.next()) |_| {
-        count += 1;
+    {
+        var ci: usize = 0;
+        while (ci < content.len) {
+            // Skip whitespace between elements
+            while (ci < content.len and std.ascii.isWhitespace(content[ci])) : (ci += 1) {}
+            if (ci >= content.len) break;
+            count += 1;
+            // Skip this element
+            if (content[ci] == '"' or content[ci] == '\'') {
+                const quote = content[ci];
+                ci += 1; // skip opening quote
+                while (ci < content.len and content[ci] != quote) : (ci += 1) {}
+                if (ci < content.len) ci += 1; // skip closing quote
+            } else {
+                while (ci < content.len and !std.ascii.isWhitespace(content[ci])) : (ci += 1) {}
+            }
+        }
     }
 
     // Allocate array
     const array = try self.allocator.alloc([]const u8, count);
     errdefer self.allocator.free(array);
 
-    // Fill array
+    // Second pass: extract elements (respecting quotes)
     var i: usize = 0;
-    var iter = std.mem.tokenizeAny(u8, content, &std.ascii.whitespace);
-    while (iter.next()) |token| : (i += 1) {
-        array[i] = try self.allocator.dupe(u8, token);
+    {
+        var ci: usize = 0;
+        while (ci < content.len) {
+            // Skip whitespace between elements
+            while (ci < content.len and std.ascii.isWhitespace(content[ci])) : (ci += 1) {}
+            if (ci >= content.len) break;
+            if (content[ci] == '"' or content[ci] == '\'') {
+                const quote = content[ci];
+                ci += 1; // skip opening quote
+                const start = ci;
+                while (ci < content.len and content[ci] != quote) : (ci += 1) {}
+                array[i] = try self.allocator.dupe(u8, content[start..ci]);
+                if (ci < content.len) ci += 1; // skip closing quote
+            } else {
+                const start = ci;
+                while (ci < content.len and !std.ascii.isWhitespace(content[ci])) : (ci += 1) {}
+                array[i] = try self.allocator.dupe(u8, content[start..ci]);
+            }
+            i += 1;
+        }
     }
 
     if (is_append) {

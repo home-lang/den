@@ -262,6 +262,17 @@ pub const Expansion = struct {
             }
         }
 
+        // Check positional parameters for numeric names ($1, $2, etc.)
+        if (name.len > 0 and name.len <= 2) {
+            if (std.fmt.parseInt(usize, name, 10)) |digit| {
+                if (digit > 0 and digit <= self.positional_params.len) {
+                    return self.positional_params[digit - 1];
+                }
+                // Positional param referenced but not set
+                if (digit > 0) return null;
+            } else |_| {}
+        }
+
         // Resolve any nameref chain
         const resolved_name = self.resolveNameref(name);
 
@@ -500,6 +511,12 @@ pub const Expansion = struct {
                 return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
             '_' => {
+                // Check if this is a variable name starting with underscore (e.g., $_x)
+                // vs the special $_ (last argument of previous command)
+                if (input.len > 2 and (std.ascii.isAlphanumeric(input[2]) or input[2] == '_')) {
+                    // $_x, $_foo, etc. - treat as simple variable name
+                    return try self.expandSimpleVariable(input);
+                }
                 // $_ - last argument of previous command
                 const value = try self.allocator.dupe(u8, self.last_arg);
                 return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
@@ -686,8 +703,8 @@ pub const Expansion = struct {
                                 resolved_index = val;
                             }
                         }
-                        // Try arithmetic evaluation for expressions
-                        const index = std.fmt.parseInt(usize, resolved_index, 10) catch blk: {
+                        // Try arithmetic evaluation for expressions (supports negative indices)
+                        const signed_index: i64 = std.fmt.parseInt(i64, resolved_index, 10) catch blk: {
                             var arith = @import("arithmetic.zig").Arithmetic.initWithVariables(self.allocator, self.environment);
                             arith.local_vars = self.local_vars;
                             arith.arrays = self.arrays;
@@ -695,9 +712,13 @@ pub const Expansion = struct {
                             const arith_result = arith.eval(resolved_index) catch {
                                 return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                             };
-                            break :blk if (arith_result >= 0) @as(usize, @intCast(arith_result)) else 0;
+                            break :blk arith_result;
                         };
-                        if (index < array.len) {
+                        // Handle negative indices: -1 = last element, -2 = second to last, etc.
+                        const arr_len: i64 = @intCast(array.len);
+                        const effective_index = if (signed_index < 0) signed_index + arr_len else signed_index;
+                        if (effective_index >= 0 and effective_index < arr_len) {
+                            const index: usize = @intCast(effective_index);
                             const value = try self.allocator.dupe(u8, array[index]);
                             return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
                         }
@@ -746,7 +767,16 @@ pub const Expansion = struct {
                         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     } else {
                         // ${assoc[key]} - specific key lookup
-                        if (assoc.get(index_part)) |value| {
+                        // Expand variables in the subscript (e.g., ${m[$k]} -> expand $k first)
+                        var resolved_key: []const u8 = index_part;
+                        if (std.mem.indexOfScalar(u8, index_part, '$') != null) {
+                            // Simple $var expansion in subscript
+                            const trimmed = std.mem.trim(u8, index_part, &[_]u8{ '$', ' ' });
+                            if (self.getVariableValue(trimmed)) |val| {
+                                resolved_key = val;
+                            }
+                        }
+                        if (assoc.get(resolved_key)) |value| {
                             const result = try self.allocator.dupe(u8, value);
                             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                         }
@@ -961,7 +991,12 @@ pub const Expansion = struct {
             // Make sure this isn't :- := :? :+ operators
             if (colon_pos + 1 < content.len) {
                 const after_colon = content[colon_pos + 1];
-                if (after_colon != '-' and after_colon != '=' and after_colon != '?' and after_colon != '+') {
+                // Also make sure this isn't a pattern operator (# ## % %%) with : in the pattern.
+                // If the part before the colon contains #, %, those are pattern operators, not var names.
+                const before_colon = content[0..colon_pos];
+                const has_pattern_op = std.mem.indexOfScalar(u8, before_colon, '#') != null or
+                    std.mem.indexOfScalar(u8, before_colon, '%') != null;
+                if (after_colon != '-' and after_colon != '=' and after_colon != '?' and after_colon != '+' and !has_pattern_op) {
                     // This is substring extraction
                     const var_name = content[0..colon_pos];
                     const params = content[colon_pos + 1 ..];
@@ -1169,8 +1204,19 @@ pub const Expansion = struct {
 
         // Check for replacement: ${VAR/pattern/replacement} or ${VAR//pattern/replacement}
         // Also handles ${VAR/#pattern/rep} (prefix) and ${VAR/%pattern/rep} (suffix)
+        // But NOT when :- := :? :+ appear before the / (those are default/assign operators with / in value)
         if (std.mem.indexOf(u8, content, "/")) |slash_pos| {
-            if (slash_pos > 0) {
+            const before_slash = content[0..slash_pos];
+            const has_default_op = std.mem.indexOf(u8, before_slash, ":-") != null or
+                std.mem.indexOf(u8, before_slash, ":=") != null or
+                std.mem.indexOf(u8, before_slash, ":?") != null or
+                std.mem.indexOf(u8, before_slash, ":+") != null or
+                // Also check non-colon variants: ${VAR-/path}, ${VAR=/path}, ${VAR?/path}, ${VAR+/path}
+                std.mem.indexOfScalar(u8, before_slash, '-') != null or
+                std.mem.indexOfScalar(u8, before_slash, '=') != null or
+                std.mem.indexOfScalar(u8, before_slash, '?') != null or
+                std.mem.indexOfScalar(u8, before_slash, '+') != null;
+            if (slash_pos > 0 and !has_default_op) {
                 const var_name = content[0..slash_pos];
                 const rest = content[slash_pos..];
 

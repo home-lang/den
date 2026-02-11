@@ -243,6 +243,36 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
 
         // Expand redirection targets (variables only, no globs)
         for (cmd.redirections, 0..) |*redir, i| {
+            if (redir.kind == .herestring) {
+                // Single-quoted herestrings have \$ escapes from the tokenizer.
+                // For these, convert \$ → $ literally without variable expansion.
+                // Unquoted/double-quoted herestrings don't have \$ and should be expanded.
+                if (std.mem.indexOf(u8, redir.target, "\\$") != null) {
+                    // Replace \$ with $ (literal) — no variable expansion
+                    const target = redir.target;
+                    var buf: [4096]u8 = undefined;
+                    var buf_len: usize = 0;
+                    var j: usize = 0;
+                    while (j < target.len) : (j += 1) {
+                        if (j + 1 < target.len and target[j] == '\\' and target[j + 1] == '$') {
+                            if (buf_len < buf.len) {
+                                buf[buf_len] = '$';
+                                buf_len += 1;
+                            }
+                            j += 1; // skip the $
+                        } else {
+                            if (buf_len < buf.len) {
+                                buf[buf_len] = target[j];
+                                buf_len += 1;
+                            }
+                        }
+                    }
+                    const literal = try self.allocator.dupe(u8, buf[0..buf_len]);
+                    self.allocator.free(cmd.redirections[i].target);
+                    cmd.redirections[i].target = literal;
+                    continue;
+                }
+            }
             const expanded_target = try expander.expand(redir.target);
             self.allocator.free(cmd.redirections[i].target);
             cmd.redirections[i].target = expanded_target;
@@ -291,6 +321,11 @@ pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
         // These are new builtins (str, path, math, date, into, from, to, etc.) that
         // may collide with pre-existing aliases from zsh/bash configs.
         if (isDenBuiltin(current_name)) continue;
+
+        // Don't expand aliases for commands that match user-defined functions.
+        // POSIX command resolution order: special builtins > functions > aliases > builtins > externals.
+        // Functions must take priority over aliases.
+        if (self.function_manager.hasFunction(current_name)) continue;
 
         // Expand aliases iteratively with circular detection
         while (self.aliases.get(current_name)) |alias_value| {

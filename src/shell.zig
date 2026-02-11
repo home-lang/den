@@ -1557,41 +1557,69 @@ pub const Shell = struct {
                         prev_c = c;
                     }
                     if (found_space_outside_quotes) {
-                        // Check if ALL space-separated tokens are assignments (a=1 b=2 c=3)
+                        // Check if ALL quote-aware tokens are assignments (a=1 b=2 c=3)
+                        // Use quote-aware scanning so that e.g. y="$x world" is one token
                         var all_assignments = true;
-                        var any_needs_pipeline = false;
-                        var check_iter = std.mem.tokenizeScalar(u8, trimmed_input, ' ');
-                        while (check_iter.next()) |tok| {
-                            var found_eq = false;
-                            var valid_name = true;
-                            for (tok, 0..) |tc, ti| {
-                                if (tc == '=') {
-                                    found_eq = ti > 0;
-                                    // Check if value needs pipeline
-                                    const tval = tok[ti + 1 ..];
-                                    for (tval) |vc| {
-                                        if (vc == '$' or vc == '`') {
-                                            any_needs_pipeline = true;
-                                            break;
-                                        }
-                                    }
-                                    break;
-                                }
-                                if (!std.ascii.isAlphanumeric(tc) and tc != '_') {
-                                    valid_name = false;
+                        var qa_check_pos: usize = 0;
+                        while (qa_check_pos < trimmed_input.len) {
+                            // Skip whitespace
+                            while (qa_check_pos < trimmed_input.len and trimmed_input[qa_check_pos] == ' ') qa_check_pos += 1;
+                            if (qa_check_pos >= trimmed_input.len) break;
+                            // Find end of this token (respecting quotes)
+                            const qa_tok_start = qa_check_pos;
+                            var qa_sq = false;
+                            var qa_dq = false;
+                            while (qa_check_pos < trimmed_input.len) : (qa_check_pos += 1) {
+                                const qc = trimmed_input[qa_check_pos];
+                                if (qc == '\'' and !qa_dq) {
+                                    qa_sq = !qa_sq;
+                                } else if (qc == '"' and !qa_sq) {
+                                    qa_dq = !qa_dq;
+                                } else if (qc == ' ' and !qa_sq and !qa_dq) {
                                     break;
                                 }
                             }
-                            if (!found_eq or !valid_name) {
+                            const qa_tok = trimmed_input[qa_tok_start..qa_check_pos];
+                            // Check if this token is a valid assignment (name=...)
+                            var qa_found_eq = false;
+                            var qa_valid_name = true;
+                            for (qa_tok, 0..) |tc, ti| {
+                                if (tc == '=') {
+                                    qa_found_eq = ti > 0;
+                                    break;
+                                }
+                                if (!std.ascii.isAlphanumeric(tc) and tc != '_') {
+                                    qa_valid_name = false;
+                                    break;
+                                }
+                            }
+                            if (!qa_found_eq or !qa_valid_name) {
                                 all_assignments = false;
                                 break;
                             }
                         }
-                        if (all_assignments and !any_needs_pipeline) {
-                            // Execute each assignment
-                            var assign_iter = std.mem.tokenizeScalar(u8, trimmed_input, ' ');
-                            while (assign_iter.next()) |tok| {
-                                self.executeCommand(tok) catch |err| {
+                        if (all_assignments) {
+                            // Execute each assignment left-to-right using quote-aware tokenization.
+                            // Using executeCommand for each handles variable expansion ($) properly.
+                            var qa_exec_pos: usize = 0;
+                            while (qa_exec_pos < trimmed_input.len) {
+                                while (qa_exec_pos < trimmed_input.len and trimmed_input[qa_exec_pos] == ' ') qa_exec_pos += 1;
+                                if (qa_exec_pos >= trimmed_input.len) break;
+                                const qa_etok_start = qa_exec_pos;
+                                var qa_esq = false;
+                                var qa_edq = false;
+                                while (qa_exec_pos < trimmed_input.len) : (qa_exec_pos += 1) {
+                                    const ec = trimmed_input[qa_exec_pos];
+                                    if (ec == '\'' and !qa_edq) {
+                                        qa_esq = !qa_esq;
+                                    } else if (ec == '"' and !qa_esq) {
+                                        qa_edq = !qa_edq;
+                                    } else if (ec == ' ' and !qa_esq and !qa_edq) {
+                                        break;
+                                    }
+                                }
+                                const qa_etok = trimmed_input[qa_etok_start..qa_exec_pos];
+                                self.executeCommand(qa_etok) catch |err| {
                                     if (err == error.Exit) return err;
                                 };
                             }
@@ -1772,11 +1800,17 @@ pub const Shell = struct {
                         const raw_value = trimmed_input[eq_pos + 1 ..];
                         // If value contains expansion characters ($, `), let the full
                         // pipeline handle it so command substitution works correctly.
+                        // But not if the entire value is single-quoted — single quotes
+                        // prevent all expansion, so $ and ` are literal.
                         var needs_full_pipeline = false;
-                        for (raw_value) |ch| {
-                            if (ch == '$' or ch == '`') {
-                                needs_full_pipeline = true;
-                                break;
+                        const entirely_single_quoted = raw_value.len >= 2 and
+                            raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'';
+                        if (!entirely_single_quoted) {
+                            for (raw_value) |ch| {
+                                if (ch == '$' or ch == '`') {
+                                    needs_full_pipeline = true;
+                                    break;
+                                }
                             }
                         }
                         if (!needs_full_pipeline) {
@@ -1794,32 +1828,71 @@ pub const Shell = struct {
                                 }
                             }
                             // Simple literal assignment - strip surrounding quotes
-                            const was_quoted = raw_value.len >= 2 and
-                                ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
-                                (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\''));
+                            const was_double_quoted = raw_value.len >= 2 and
+                                raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"';
+                            const was_single_quoted = raw_value.len >= 2 and
+                                raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'';
+                            const was_quoted = was_double_quoted or was_single_quoted;
                             const stripped = if (was_quoted)
                                 raw_value[1 .. raw_value.len - 1]
                             else
                                 raw_value;
+                            // In double quotes, process backslash escape sequences:
+                            // \\ -> \, \" -> ", \$ -> $, \` -> `, \newline -> (removed)
+                            // Other \X sequences preserve the backslash literally.
+                            var dq_escape_buf: [4096]u8 = undefined;
+                            const stripped_final = if (was_double_quoted) blk: {
+                                var oi: usize = 0;
+                                var si: usize = 0;
+                                while (si < stripped.len) : (si += 1) {
+                                    if (stripped[si] == '\\' and si + 1 < stripped.len) {
+                                        const nc = stripped[si + 1];
+                                        if (nc == '\\' or nc == '"' or nc == '$' or nc == '`') {
+                                            if (oi < dq_escape_buf.len) {
+                                                dq_escape_buf[oi] = nc;
+                                                oi += 1;
+                                            }
+                                            si += 1; // skip the next char (consumed)
+                                        } else if (nc == '\n') {
+                                            si += 1; // skip both backslash and newline
+                                        } else {
+                                            // Preserve the backslash literally
+                                            if (oi + 1 < dq_escape_buf.len) {
+                                                dq_escape_buf[oi] = '\\';
+                                                oi += 1;
+                                                dq_escape_buf[oi] = nc;
+                                                oi += 1;
+                                            }
+                                            si += 1;
+                                        }
+                                    } else {
+                                        if (oi < dq_escape_buf.len) {
+                                            dq_escape_buf[oi] = stripped[si];
+                                            oi += 1;
+                                        }
+                                    }
+                                }
+                                break :blk dq_escape_buf[0..oi];
+                            } else stripped;
                             // Tilde expansion for unquoted values (bash: x=~ sets x to home dir)
                             var tilde_buf: [4096]u8 = undefined;
-                            const value_to_use = if (!was_quoted and stripped.len > 0 and stripped[0] == '~') blk: {
-                                const home = self.environment.get("HOME") orelse break :blk stripped;
+                            const value_to_use = if (!was_quoted and stripped_final.len > 0 and stripped_final[0] == '~') blk: {
+                                const home = self.environment.get("HOME") orelse break :blk stripped_final;
                                 // ~ alone or ~/path
-                                if (stripped.len == 1) {
+                                if (stripped_final.len == 1) {
                                     break :blk home;
-                                } else if (stripped[1] == '/') {
-                                    const total = home.len + stripped.len - 1;
+                                } else if (stripped_final[1] == '/') {
+                                    const total = home.len + stripped_final.len - 1;
                                     if (total <= tilde_buf.len) {
                                         @memcpy(tilde_buf[0..home.len], home);
-                                        @memcpy(tilde_buf[home.len..total], stripped[1..]);
+                                        @memcpy(tilde_buf[home.len..total], stripped_final[1..]);
                                         break :blk tilde_buf[0..total];
                                     }
-                                    break :blk stripped;
+                                    break :blk stripped_final;
                                 } else {
-                                    break :blk stripped;
+                                    break :blk stripped_final;
                                 }
-                            } else stripped;
+                            } else stripped_final;
                             // Check if variable has integer attribute
                             const has_integer_attr = if (self.var_attributes.get(potential_var)) |attrs| attrs.integer else false;
 

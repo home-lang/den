@@ -155,8 +155,8 @@ fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !voi
 fn applyHeredocOrHerestring(
     allocator: std.mem.Allocator,
     redir: types.Redirection,
-    environment: *std.StringHashMap([]const u8),
-    expansion_context: ?ExpansionContext,
+    _: *std.StringHashMap([]const u8),
+    _: ?ExpansionContext,
 ) !void {
     if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Create a pipe for the content
@@ -168,22 +168,10 @@ fn applyHeredocOrHerestring(
     // Write content to pipe
     const content = blk: {
         if (redir.kind == .herestring) {
-            // For herestring, expand variables and use the content
-            var expansion = Expansion.init(allocator, environment, 0);
-            // Set options from context if available
-            if (expansion_context) |ctx| {
-                expansion.option_nounset = ctx.option_nounset;
-                expansion.var_attributes = ctx.var_attributes;
-                expansion.arrays = ctx.arrays;
-                expansion.assoc_arrays = ctx.assoc_arrays;
-            }
-            const expanded = expansion.expand(redir.target) catch redir.target;
-            // Add newline for herestring
+            // Herestring content is already expanded by command_expansion.zig.
+            // Just add a trailing newline (bash behavior).
             var buf: [4096]u8 = undefined;
-            const with_newline = std.fmt.bufPrint(&buf, "{s}\n", .{expanded}) catch redir.target;
-            if (expanded.ptr != redir.target.ptr) {
-                allocator.free(expanded);
-            }
+            const with_newline = std.fmt.bufPrint(&buf, "{s}\n", .{redir.target}) catch redir.target;
             break :blk try allocator.dupe(u8, with_newline);
         } else {
             // For heredoc, use the target as-is (it contains the content)
