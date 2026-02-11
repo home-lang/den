@@ -2079,8 +2079,18 @@ pub const Expansion = struct {
                             }
                         } else {
                             // ${var} - variable value
-                            const val = if (self.local_vars) |lv| lv.get(var_content) orelse self.environment.get(var_content) else self.environment.get(var_content);
-                            replacement = val orelse "0";
+                            // Check positional params first for numeric names like ${1}, ${2}
+                            const maybe_pos_idx = std.fmt.parseInt(usize, var_content, 10) catch null;
+                            if (maybe_pos_idx) |pos_idx| {
+                                if (pos_idx > 0 and pos_idx <= self.positional_params.len) {
+                                    replacement = self.positional_params[pos_idx - 1];
+                                } else {
+                                    replacement = "0";
+                                }
+                            } else {
+                                const val = if (self.local_vars) |lv| lv.get(var_content) orelse self.environment.get(var_content) else self.environment.get(var_content);
+                                replacement = val orelse "0";
+                            }
                         }
 
                         if (replacement) |repl| {

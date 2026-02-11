@@ -208,12 +208,8 @@ pub fn builtinType(shell: *Shell, cmd: *types.ParsedCommand) !void {
         return;
     }
 
-    const builtins_list = [_][]const u8{
-        "cd",     "pwd",     "echo",     "exit",  "env",
-        "export", "set",     "unset",    "jobs",  "fg",
-        "bg",     "history", "complete", "alias", "unalias",
-        "type",   "which",
-    };
+    const builtin_dispatch = @import("builtin_dispatch.zig");
+    const executor_mod = @import("../executor/mod.zig");
 
     for (cmd.args) |name| {
         // Check if it's an alias
@@ -239,16 +235,11 @@ pub fn builtinType(shell: *Shell, cmd: *types.ParsedCommand) !void {
             }
         }
 
-        // Check if it's a builtin
-        var is_builtin = false;
-        for (builtins_list) |builtin_name| {
-            if (std.mem.eql(u8, name, builtin_name)) {
-                try IO.print("{s} is a shell builtin\n", .{name});
-                is_builtin = true;
-                break;
-            }
+        // Check if it's a builtin (both shell-level and executor-level)
+        if (builtin_dispatch.isShellBuiltin(name) or executor_mod.Executor.isBuiltinName(name)) {
+            try IO.print("{s} is a shell builtin\n", .{name});
+            continue;
         }
-        if (is_builtin) continue;
 
         // Check if it's a function
         if (shell.function_manager.getFunction(name) != null) {

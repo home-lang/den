@@ -226,8 +226,18 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 i = j + 1;
             } else if (spec == 'q') {
                 // Shell-quoted string (bash extension)
+                // Escape embedded single quotes as '\'' for safe re-evaluation
                 if (arg_idx < cmd.args.len) {
-                    try IO.print("'{s}'", .{cmd.args[arg_idx]});
+                    const arg = cmd.args[arg_idx];
+                    try IO.print("'", .{});
+                    for (arg) |ch| {
+                        if (ch == 0x27) { // single quote
+                            try IO.print("'\\''", .{});
+                        } else {
+                            try IO.print("{c}", .{ch});
+                        }
+                    }
+                    try IO.print("'", .{});
                     arg_idx += 1;
                     did_consume_arg = true;
                 }

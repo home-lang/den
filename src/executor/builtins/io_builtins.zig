@@ -315,7 +315,17 @@ pub fn printf(command: *types.ParsedCommand) !i32 {
                 i = j + 1;
             } else if (spec == 'q') {
                 if (arg_idx < command.args.len) {
-                    try IO.print("'{s}'", .{command.args[arg_idx]});
+                    const arg = command.args[arg_idx];
+                    // Shell-safe quoting: wrap in single quotes, escape embedded single quotes as '\''
+                    try IO.print("'", .{});
+                    for (arg) |ch| {
+                        if (ch == 0x27) { // single quote
+                            try IO.print("'\\''", .{});
+                        } else {
+                            try IO.print("{c}", .{ch});
+                        }
+                    }
+                    try IO.print("'", .{});
                     arg_idx += 1;
                 }
                 i = j + 1;

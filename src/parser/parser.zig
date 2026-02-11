@@ -233,6 +233,56 @@ pub const Parser = struct {
                     redir_count += 1;
                     self.pos += 1;
                 },
+                .redirect_both => {
+                    // &> redirects both stdout and stderr to file
+                    self.pos += 1;
+                    if (self.pos >= self.tokens.len or self.tokens[self.pos].type != .word) {
+                        return error.RedirectionMissingTarget;
+                    }
+                    const target = try self.allocator.dupe(u8, self.tokens[self.pos].value);
+                    // Redirect stdout (fd 1) to file
+                    if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
+                    redir_buffer[redir_count] = .{
+                        .kind = .output_truncate,
+                        .fd = 1,
+                        .target = target,
+                    };
+                    redir_count += 1;
+                    // Redirect stderr (fd 2) to stdout (fd 1)
+                    if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
+                    redir_buffer[redir_count] = .{
+                        .kind = .fd_duplicate,
+                        .fd = 2,
+                        .target = try self.allocator.dupe(u8, "1"),
+                    };
+                    redir_count += 1;
+                    self.pos += 1;
+                },
+                .redirect_both_append => {
+                    // &>> appends both stdout and stderr to file
+                    self.pos += 1;
+                    if (self.pos >= self.tokens.len or self.tokens[self.pos].type != .word) {
+                        return error.RedirectionMissingTarget;
+                    }
+                    const target = try self.allocator.dupe(u8, self.tokens[self.pos].value);
+                    // Redirect stdout (fd 1) to file in append mode
+                    if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
+                    redir_buffer[redir_count] = .{
+                        .kind = .output_append,
+                        .fd = 1,
+                        .target = target,
+                    };
+                    redir_count += 1;
+                    // Redirect stderr (fd 2) to stdout (fd 1)
+                    if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
+                    redir_buffer[redir_count] = .{
+                        .kind = .fd_duplicate,
+                        .fd = 2,
+                        .target = try self.allocator.dupe(u8, "1"),
+                    };
+                    redir_count += 1;
+                    self.pos += 1;
+                },
                 .redirect_fd_dup => {
                     // Parse token like "2>&1" or "3<&0"
                     const token_value = self.tokens[self.pos].value;
@@ -259,19 +309,26 @@ pub const Parser = struct {
 
                     // Extract target FD (skip >& or <&)
                     const target_fd_str = token_value[op_pos + 2 ..];
-                    const target_fd_int = if (std.mem.eql(u8, target_fd_str, "-"))
-                        @as(i32, -1) // Close FD
-                    else
-                        std.fmt.parseInt(i32, target_fd_str, 10) catch {
-                            return error.InvalidFileDescriptor;
-                        };
 
                     if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
-                    redir_buffer[redir_count] = .{
-                        .kind = .fd_duplicate,
-                        .fd = source_fd,
-                        .target = try std.fmt.allocPrint(self.allocator, "{d}", .{target_fd_int}),
-                    };
+
+                    if (std.mem.eql(u8, target_fd_str, "-")) {
+                        // >&- or <&- means close the fd
+                        redir_buffer[redir_count] = .{
+                            .kind = .fd_close,
+                            .fd = source_fd,
+                            .target = try self.allocator.dupe(u8, "-"),
+                        };
+                    } else {
+                        const target_fd_int = std.fmt.parseInt(i32, target_fd_str, 10) catch {
+                            return error.InvalidFileDescriptor;
+                        };
+                        redir_buffer[redir_count] = .{
+                            .kind = .fd_duplicate,
+                            .fd = source_fd,
+                            .target = try std.fmt.allocPrint(self.allocator, "{d}", .{target_fd_int}),
+                        };
+                    }
                     redir_count += 1;
                     self.pos += 1;
                 },

@@ -5,6 +5,7 @@ const expansion_mod = @import("../utils/expansion.zig");
 const Expansion = expansion_mod.Expansion;
 const removeQuotes = expansion_mod.removeQuotes;
 const BraceExpander = @import("../utils/brace.zig").BraceExpander;
+const Glob = @import("../utils/glob.zig").Glob;
 
 /// Check if a line is a keyword (possibly followed by |, ;, &, etc.)
 fn isKeyword(line: []const u8, keyword: []const u8) bool {
@@ -423,7 +424,38 @@ pub const ControlFlowExecutor = struct {
             }
         }
 
-        for (expanded_items.items) |item| {
+        // Glob-expand items that contain glob characters (unquoted)
+        var glob_expanded: std.ArrayListUnmanaged([]const u8) = .empty;
+        defer glob_expanded.deinit(self.allocator);
+        // Get cwd for glob expansion
+        var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const cwd_ptr = std.c.getcwd(&cwd_buf, cwd_buf.len);
+        const cwd = if (cwd_ptr) |p| std.mem.sliceTo(@as([*:0]u8, @ptrCast(p)), 0) else ".";
+
+        for (expanded_items.items) |ei| {
+            var glob_inst = Glob.init(self.allocator);
+            if (glob_inst.hasGlobChars(ei)) {
+                const matches = glob_inst.expand(ei, cwd) catch {
+                    try glob_expanded.append(self.allocator, ei);
+                    continue;
+                };
+                defer self.allocator.free(matches);
+                if (matches.len == 1 and std.mem.eql(u8, matches[0], ei)) {
+                    // No matches — keep original pattern
+                    try glob_expanded.append(self.allocator, ei);
+                    self.allocator.free(matches[0]);
+                } else {
+                    for (matches) |m| {
+                        try glob_expanded.append(self.allocator, m);
+                    }
+                    self.allocator.free(ei);
+                }
+            } else {
+                try glob_expanded.append(self.allocator, ei);
+            }
+        }
+
+        for (glob_expanded.items) |item| {
             // Set loop variable
             const value = try self.allocator.dupe(u8, item);
 

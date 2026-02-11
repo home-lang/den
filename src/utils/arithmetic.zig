@@ -554,6 +554,8 @@ const Parser = struct {
                 self.pos += 1;
                 const right = try self.parsePower();
                 if (right == 0) return error.DivisionByZero;
+                // MIN_INT % -1 overflows (same as MIN_INT / -1)
+                if (left == std.math.minInt(i64) and right == -1) return 0;
                 left = @rem(left, right);
             } else {
                 break;
@@ -908,6 +910,8 @@ const Parser = struct {
         if (base == 0) return 0;
         if (base == 1) return 1;
         if (base == -1) return if (@rem(exp, 2) == 0) 1 else -1;
+        // Any base with abs > 1 raised to power > 62 overflows i64
+        if (exp > 62) return error.IntegerOverflow;
 
         var result: i64 = 1;
         var b = base;

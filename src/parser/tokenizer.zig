@@ -49,6 +49,7 @@ pub const TokenType = enum {
     redirect_inout, // <>
     redirect_err, // 2>
     redirect_both, // &>
+    redirect_both_append, // &>>
     redirect_fd_dup, // N>&M or N<&M for FD duplication
     heredoc, // <<
     herestring, // <<<
@@ -250,6 +251,27 @@ pub const Tokenizer = struct {
                     return Token{
                         .type = .heredoc,
                         .value = "<<",
+                        .line = start_line,
+                        .column = start_col,
+                    };
+                }
+                // Special case for &>> (append both stdout+stderr)
+                if (op.token_type == .redirect_both) {
+                    self.pos += 2;
+                    self.column += 2;
+                    if (self.pos < self.input.len and self.input[self.pos] == '>') {
+                        self.pos += 1;
+                        self.column += 1;
+                        return Token{
+                            .type = .redirect_both_append,
+                            .value = "&>>",
+                            .line = start_line,
+                            .column = start_col,
+                        };
+                    }
+                    return Token{
+                        .type = .redirect_both,
+                        .value = "&>",
                         .line = start_line,
                         .column = start_col,
                     };

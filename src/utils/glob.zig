@@ -245,7 +245,7 @@ pub const Glob = struct {
     }
 
     /// Check if string contains glob characters
-    fn hasGlobChars(self: *Glob, pattern: []const u8) bool {
+    pub fn hasGlobChars(self: *Glob, pattern: []const u8) bool {
         _ = self;
         var i: usize = 0;
         while (i < pattern.len) : (i += 1) {

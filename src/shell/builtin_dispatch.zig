@@ -18,11 +18,39 @@ pub const DispatchResult = enum {
 /// Check if a command name is a shell-level builtin (handled by dispatchBuiltin)
 pub fn isShellBuiltin(name: []const u8) bool {
     const shell_builtins = [_][]const u8{
-        "read", "printf", "mapfile", "readarray", "test", "[", "[[",
-        "declare", "typeset", "local", "readonly", "let", "shift",
-        "return", "break", "continue", "eval", "command", "builtin",
-        "source", ".", "exec", "kill", "enable", "shopt",
-        "complete", "compgen", "caller", "umask", "time", "hash",
+        // Job control
+        "jobs",    "fg",       "bg",       "wait",     "disown",
+        // History and completion
+        "history", "complete", "compgen",
+        // Alias management
+        "alias",   "unalias",
+        // Command type inspection
+        "type",    "which",
+        // Source/eval/command
+        "source",  ".",        "eval",     "command",  "builtin",
+        // I/O builtins
+        "read",    "printf",   "mapfile",  "readarray",
+        // Test/conditionals
+        "test",    "[",        "[[",
+        // Directory stack
+        "pushd",   "popd",     "dirs",
+        // Trivial builtins
+        "true",    "false",    ":",
+        // Utility builtins
+        "sleep",   "help",     "clear",
+        // Path utilities
+        "basename", "dirname", "realpath",
+        // System info
+        "uname",   "whoami",
+        // Control flow
+        "return",  "break",    "continue", "shift",
+        // Variable declaration
+        "local",   "declare",  "readonly", "typeset",  "let",
+        // Process control
+        "exec",    "kill",
+        // Misc
+        "times",   "time",     "umask",    "hash",     "shopt",
+        "caller",  "enable",
     };
     for (shell_builtins) |b| {
         if (std.mem.eql(u8, name, b)) return true;

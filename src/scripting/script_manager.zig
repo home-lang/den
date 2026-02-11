@@ -75,9 +75,10 @@ pub const ScriptManager = struct {
     }
 
     pub fn deinit(self: *ScriptManager) void {
-        // Free all cached scripts
+        // Free all cached scripts and their keys
         var iter = self.cache.iterator();
         while (iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
             var cached = entry.value_ptr;
             cached.deinit();
         }
@@ -96,9 +97,15 @@ pub const ScriptManager = struct {
         // Load from file
         const content = try self.loadScriptFromFile(path);
 
-        // Add to cache
+        // Add to cache (which duplicates the content)
         if (self.cache_enabled) {
             try self.addToCache(path, content);
+            // Free the original since the cache now owns its own copy
+            self.allocator.free(content);
+            // Return the cached copy
+            if (try self.getFromCache(path)) |cached_content| {
+                return cached_content;
+            }
         }
 
         return content;
@@ -273,8 +280,35 @@ pub const ScriptManager = struct {
             }
 
             // Handle comments (skip to end of line)
+            // But NOT inside parameter expansions like ${#var}
             if (!in_single_quote and !in_double_quote and c == '#') {
-                while (i < content.len and content[i] != '\n') : (i += 1) {}
+                // Check if this # is inside ${...} — look back for unmatched ${
+                if (brace_count <= 0 or i < 2 or content[i - 1] != '{') {
+                    // Check more carefully — if brace_count > 0 we might be in ${...}
+                    // Only treat as comment if brace_count is 0 (not inside any braces)
+                    if (brace_count <= 0) {
+                        while (i < content.len and content[i] != '\n') : (i += 1) {}
+                        continue;
+                    }
+                }
+            }
+
+            // Skip parameter expansions ${...} — don't parse inside them
+            if (!in_single_quote and !in_double_quote and c == '$' and i + 1 < content.len and content[i + 1] == '{') {
+                // Skip to matching }, tracking nesting
+                var depth: i32 = 0;
+                i += 1; // skip $, now at {
+                while (i < content.len) : (i += 1) {
+                    if (content[i] == '\\' and i + 1 < content.len) {
+                        i += 1;
+                        continue;
+                    }
+                    if (content[i] == '{') depth += 1;
+                    if (content[i] == '}') {
+                        depth -= 1;
+                        if (depth <= 0) break;
+                    }
+                }
                 continue;
             }
 
@@ -480,18 +514,30 @@ pub const ScriptManager = struct {
                     // One-liner - pass directly
                     _ = shell.executeCommand(trimmed) catch {};
                 } else {
-                    // Collect lines until 'done'
+                    // Collect lines until matching 'done', tracking nesting depth
                     var combined: std.ArrayListUnmanaged(u8) = .empty;
                     defer combined.deinit(self.allocator);
                     combined.appendSlice(self.allocator, trimmed) catch {};
+                    var do_done_depth: i32 = 1; // We already have one 'do' from the for line
                     while (line_num + 1 < lines.len) {
                         line_num += 1;
                         const body_line = std.mem.trim(u8, lines[line_num], &std.ascii.whitespace);
                         combined.append(self.allocator, '\n') catch {};
                         combined.appendSlice(self.allocator, body_line) catch {};
-                        if (std.mem.eql(u8, body_line, "done")) break;
-                        // Also check for 'done' followed by more (e.g. 'done; echo ...')
-                        if (std.mem.startsWith(u8, body_line, "done;") or std.mem.startsWith(u8, body_line, "done ")) break;
+                        // Track nested do/done depth
+                        if (std.mem.indexOf(u8, body_line, "; do") != null or
+                            std.mem.endsWith(u8, body_line, " do") or
+                            std.mem.eql(u8, body_line, "do"))
+                        {
+                            do_done_depth += 1;
+                        }
+                        if (std.mem.eql(u8, body_line, "done") or
+                            std.mem.startsWith(u8, body_line, "done;") or
+                            std.mem.startsWith(u8, body_line, "done "))
+                        {
+                            do_done_depth -= 1;
+                            if (do_done_depth <= 0) break;
+                        }
                     }
                     _ = shell.executeCommand(combined.items) catch {};
                 }

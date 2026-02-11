@@ -451,6 +451,12 @@ pub const Executor = struct {
                     const exit_code = shell.function_manager.executeFunction(shell, cmd.name, cmd.args) catch 1;
                     std.c._exit(@intCast(if (exit_code >= 0) @as(u32, @intCast(exit_code)) else 1));
                 } else if (self.isBuiltin(cmd.name)) {
+                    // Apply redirections for builtins in pipelines
+                    if (cmd.redirections.len > 0) {
+                        self.applyRedirections(cmd.redirections) catch {
+                            std.c._exit(1);
+                        };
+                    }
                     const exit_code = self.executeBuiltin(cmd) catch 1;
                     std.c._exit(@intCast(exit_code));
                 } else {
@@ -887,6 +893,11 @@ pub const Executor = struct {
             executeExternalCallback,
             @ptrCast(self),
         );
+    }
+
+    /// Public static check for whether a name is a known builtin
+    pub fn isBuiltinName(name: []const u8) bool {
+        return isBuiltinStatic(name);
     }
 
     /// Static wrapper for isBuiltin callback

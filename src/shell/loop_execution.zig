@@ -207,11 +207,6 @@ pub fn executeCStyleLoopBodyCommand(self: *Shell, cmd: []const u8) void {
         }
     }
 
-    // Set the flag to prevent nested C-style for loop detection
-    const was_in_body = self.in_cstyle_for_body;
-    self.in_cstyle_for_body = true;
-    defer self.in_cstyle_for_body = was_in_body;
-
     // Use the full executeCommand for all other commands
     self.executeCommand(expanded) catch {
         self.last_exit_code = 1;
