@@ -25,6 +25,34 @@ pub const ScriptResult = struct {
     error_message: ?[]const u8,
 };
 
+/// Extract the heredoc delimiter from a line containing <<
+/// Returns the delimiter string (stripped of quotes), or null if not found
+fn extractHeredocDelimiter(line: []const u8) ?[]const u8 {
+    const idx = std.mem.indexOf(u8, line, "<<") orelse return null;
+    var pos = idx + 2;
+    // Skip <<< (that's a herestring, not heredoc)
+    if (pos < line.len and line[pos] == '<') return null;
+    // Skip <<- (strip tabs variant)
+    if (pos < line.len and line[pos] == '-') pos += 1;
+    // Skip whitespace
+    while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) : (pos += 1) {}
+    if (pos >= line.len) return null;
+    // Handle quoted delimiters: 'EOF', "EOF", \EOF
+    const start_char = line[pos];
+    if (start_char == '\'' or start_char == '"') {
+        pos += 1;
+        const start = pos;
+        while (pos < line.len and line[pos] != start_char) : (pos += 1) {}
+        if (pos > start) return line[start..pos];
+        return null;
+    }
+    if (start_char == '\\') pos += 1;
+    const start = pos;
+    while (pos < line.len and line[pos] != ' ' and line[pos] != '\t' and line[pos] != '\n' and line[pos] != ';') : (pos += 1) {}
+    if (pos > start) return line[start..pos];
+    return null;
+}
+
 /// Script Manager - handles script loading, caching, and execution
 pub const ScriptManager = struct {
     allocator: std.mem.Allocator,
@@ -232,6 +260,7 @@ pub const ScriptManager = struct {
         var in_double_quote = false;
         var brace_count: i32 = 0;
         var paren_count: i32 = 0;
+        var case_depth: i32 = 0;
 
         var i: usize = 0;
         while (i < content.len) : (i += 1) {
@@ -243,15 +272,42 @@ pub const ScriptManager = struct {
                 continue;
             }
 
+            // Handle comments (skip to end of line)
+            if (!in_single_quote and !in_double_quote and c == '#') {
+                while (i < content.len and content[i] != '\n') : (i += 1) {}
+                continue;
+            }
+
             if (!in_double_quote and c == '\'') {
                 in_single_quote = !in_single_quote;
             } else if (!in_single_quote and c == '"') {
                 in_double_quote = !in_double_quote;
             } else if (!in_single_quote and !in_double_quote) {
+                // Track case/esac depth to ignore ) in case patterns
+                if (c == 'c' and i + 4 < content.len and
+                    std.mem.eql(u8, content[i .. i + 4], "case") and
+                    (i == 0 or content[i - 1] == ' ' or content[i - 1] == '\n' or content[i - 1] == '\t' or content[i - 1] == ';') and
+                    (i + 4 >= content.len or content[i + 4] == ' ' or content[i + 4] == '\t'))
+                {
+                    case_depth += 1;
+                    i += 3;
+                    continue;
+                }
+                if (c == 'e' and i + 4 <= content.len and
+                    std.mem.eql(u8, content[i .. i + 4], "esac") and
+                    (i == 0 or content[i - 1] == ' ' or content[i - 1] == '\n' or content[i - 1] == '\t' or content[i - 1] == ';') and
+                    (i + 4 >= content.len or content[i + 4] == ' ' or content[i + 4] == '\n' or content[i + 4] == '\t' or content[i + 4] == ';'))
+                {
+                    case_depth -= 1;
+                    i += 3;
+                    continue;
+                }
+
                 if (c == '{') brace_count += 1;
                 if (c == '}') brace_count -= 1;
                 if (c == '(') paren_count += 1;
-                if (c == ')') paren_count -= 1;
+                // In case blocks, ) is a pattern terminator, not a closing paren
+                if (c == ')' and case_depth <= 0) paren_count -= 1;
             }
         }
 
@@ -430,6 +486,47 @@ pub const ScriptManager = struct {
                 }
                 line_num = result.end;
                 continue;
+            }
+
+            if (std.mem.startsWith(u8, trimmed, "case ")) {
+                // One-liner case (has esac on same line) - delegate to executeCommand
+                if (std.mem.indexOf(u8, trimmed, "esac") != null) {
+                    _ = shell.executeCommand(trimmed) catch {};
+                } else {
+                    var result = parser.parseCase(lines, line_num) catch {
+                        shell.last_exit_code = 1;
+                        shell.executeErrTrap();
+                        break;
+                    };
+                    defer result.stmt.deinit();
+                    shell.last_exit_code = executor.executeCase(&result.stmt) catch 1;
+                    if (shell.last_exit_code != 0) {
+                        shell.executeErrTrap();
+                    }
+                    line_num = result.end;
+                }
+                continue;
+            }
+
+            // Collect heredoc content: join current line with subsequent lines until delimiter
+            if (std.mem.indexOf(u8, trimmed, "<<") != null) {
+                if (extractHeredocDelimiter(trimmed)) |delimiter| {
+                    var combined: std.ArrayListUnmanaged(u8) = .empty;
+                    defer combined.deinit(self.allocator);
+                    combined.appendSlice(self.allocator, trimmed) catch {};
+                    combined.append(self.allocator, '\n') catch {};
+                    // Collect lines until we find the delimiter
+                    while (line_num + 1 < lines.len) {
+                        line_num += 1;
+                        const heredoc_line = lines[line_num];
+                        combined.appendSlice(self.allocator, heredoc_line) catch {};
+                        combined.append(self.allocator, '\n') catch {};
+                        const htrimmed = std.mem.trim(u8, heredoc_line, &std.ascii.whitespace);
+                        if (std.mem.eql(u8, htrimmed, delimiter)) break;
+                    }
+                    _ = shell.executeCommand(combined.items) catch {};
+                    continue;
+                }
             }
 
             // Execute regular command (ignoring errors - exit code set in shell)

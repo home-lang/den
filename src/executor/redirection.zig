@@ -14,9 +14,11 @@ pub fn applyRedirections(
     expansion_context: ?ExpansionContext,
 ) !void {
     if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
+    const noclobber = if (expansion_context) |ctx| ctx.option_noclobber else false;
     for (redirections) |redir| {
         switch (redir.kind) {
-            .output_truncate => try applyOutputTruncate(allocator, redir),
+            .output_truncate => try applyOutputTruncate(allocator, redir, noclobber),
+            .output_clobber => try applyOutputTruncate(allocator, redir, false),
             .output_append => try applyOutputAppend(allocator, redir),
             .input => try applyInput(allocator, redir),
             .input_output => try applyInputOutput(allocator, redir),
@@ -30,22 +32,33 @@ pub fn applyRedirections(
 /// Context for variable expansion in heredocs/herestrings
 pub const ExpansionContext = struct {
     option_nounset: bool,
+    option_noclobber: bool = false,
     var_attributes: *std.StringHashMap(types.VarAttributes),
     arrays: *std.StringHashMap([][]const u8),
     assoc_arrays: *std.StringHashMap(std.StringHashMap([]const u8)),
 };
 
-fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection) !void {
+fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection, noclobber: bool) !void {
     if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
         std.posix.close(sock);
     } else {
-        // Open file for writing, truncate if exists
         const path_z = try allocator.dupeZ(u8, redir.target);
         defer allocator.free(path_z);
 
+        // If noclobber is set, check if file exists (skip for /dev/null etc.)
+        if (noclobber and !std.mem.startsWith(u8, redir.target, "/dev/")) {
+            const check_fd = std.c.open(path_z, .{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+            if (check_fd >= 0) {
+                std.posix.close(check_fd);
+                try IO.eprint("den: {s}: cannot overwrite existing file\n", .{redir.target});
+                std.c._exit(1);
+            }
+        }
+
+        // Open file for writing, truncate if exists
         const fd = std.c.open(
             path_z,
             .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true },

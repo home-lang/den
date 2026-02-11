@@ -44,6 +44,7 @@ pub const TokenType = enum {
     background, // &
     redirect_out, // >
     redirect_append, // >>
+    redirect_clobber, // >|
     redirect_in, // <
     redirect_inout, // <>
     redirect_err, // 2>
@@ -314,6 +315,17 @@ pub const Tokenizer = struct {
                 if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '(') {
                     // Process substitution >( - read the whole construct
                     return try self.readProcessSubstitution(false, start_line, start_col);
+                }
+                // Check for >| (force clobber)
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '|') {
+                    self.pos += 2;
+                    self.column += 2;
+                    return Token{
+                        .type = .redirect_clobber,
+                        .value = ">|",
+                        .line = start_line,
+                        .column = start_col,
+                    };
                 }
                 // Check for >&N (FD duplication, shorthand for 1>&N)
                 if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '&') {

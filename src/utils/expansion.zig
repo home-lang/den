@@ -1481,7 +1481,21 @@ pub const Expansion = struct {
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
         }
 
-        // Variable not found - return empty string
+        // Variable not found
+        // If nounset is enabled, return an error
+        if (self.option_nounset) {
+            var buf: [256]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "den: {s}: unbound variable\n", .{content}) catch "den: unbound variable\n";
+            if (is_windows) {
+                if (std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE)) |stderr_h| {
+                    var written: u32 = 0;
+                    _ = std.os.windows.kernel32.WriteFile(stderr_h, msg.ptr, @intCast(msg.len), &written, null);
+                }
+            } else {
+                _ = std.c.write(std.posix.STDERR_FILENO, msg.ptr, msg.len);
+            }
+            return error.UnboundVariable;
+        }
         return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
     }
 

@@ -47,6 +47,7 @@ pub const JobManager = struct {
     job_count: usize,
     next_job_id: usize,
     last_background_pid: ProcessId,
+    interactive: bool,
 
     const Self = @This();
 
@@ -58,6 +59,7 @@ pub const JobManager = struct {
             .job_count = 0,
             .next_job_id = 1,
             .last_background_pid = if (builtin.os.tag == .windows) std.os.windows.INVALID_HANDLE_VALUE else 0,
+            .interactive = false,
         };
     }
 
@@ -104,7 +106,9 @@ pub const JobManager = struct {
         };
         self.job_count += 1;
 
-        try IO.print("[{d}] {d}\n", .{ job_id, pid });
+        if (self.interactive) {
+            try IO.print("[{d}] {d}\n", .{ job_id, pid });
+        }
     }
 
     /// Check for completed background jobs (non-blocking).
@@ -128,7 +132,9 @@ pub const JobManager = struct {
                 if (wait_pid == job.pid) {
                     // Job completed
                     const exit_status = getExitStatus(@as(u32, @bitCast(wait_status)));
-                    try IO.print("[{d}]  Done ({d})    {s}\n", .{ job.job_id, exit_status, job.command });
+                    if (self.interactive) {
+                        try IO.print("[{d}]  Done ({d})    {s}\n", .{ job.job_id, exit_status, job.command });
+                    }
 
                     // Free command string and remove from array
                     self.allocator.free(job.command);

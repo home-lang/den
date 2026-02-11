@@ -371,6 +371,30 @@ pub fn builtinCommand(self: *Shell, cmd: *types.ParsedCommand) !void {
 
     if (verbose or short_output) {
         // command -v / command -V: locate command
+
+        // If the command contains a slash, it's a direct path — check if executable
+        if (std.mem.indexOfScalar(u8, cmd_name, '/') != null) {
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            if (cmd_name.len < path_buf.len) {
+                @memcpy(path_buf[0..cmd_name.len], cmd_name);
+                path_buf[cmd_name.len] = 0;
+                const c_path: [*:0]const u8 = path_buf[0..cmd_name.len :0];
+                if (comptime builtin.os.tag != .windows) {
+                    if (std.c.access(c_path, std.posix.X_OK) == 0) {
+                        if (verbose) {
+                            try IO.print("{s} is {s}\n", .{ cmd_name, cmd_name });
+                        } else {
+                            try IO.print("{s}\n", .{cmd_name});
+                        }
+                        self.last_exit_code = 0;
+                        return;
+                    }
+                }
+            }
+            self.last_exit_code = 1;
+            return;
+        }
+
         const builtins = [_][]const u8{
             "cd",      "echo",    "exit",    "export",  "set",     "unset",
             "alias",   "unalias", "source",  ".",       "eval",    "exec",
@@ -406,12 +430,12 @@ pub fn builtinCommand(self: *Shell, cmd: *types.ParsedCommand) !void {
 
         // Check aliases
         if (self.aliases.contains(cmd_name)) {
-            if (verbose) {
-                if (self.aliases.get(cmd_name)) |val| {
+            if (self.aliases.get(cmd_name)) |val| {
+                if (verbose) {
                     try IO.print("{s} is aliased to `{s}'\n", .{ cmd_name, val });
+                } else {
+                    try IO.print("alias {s}='{s}'\n", .{ cmd_name, val });
                 }
-            } else {
-                try IO.print("{s}\n", .{cmd_name});
             }
             self.last_exit_code = 0;
             return;

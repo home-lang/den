@@ -130,7 +130,11 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
             } else if (spec == 'd' or spec == 'i') {
                 // Integer format
                 if (arg_idx < cmd.args.len) {
-                    const num = std.fmt.parseInt(i64, cmd.args[arg_idx], 10) catch 0;
+                    const arg = cmd.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(i64, arg[1])
+                    else
+                        std.fmt.parseInt(i64, arg, 10) catch 0;
                     try printfInt(num, width, zero_pad, left_justify);
                     arg_idx += 1;
                     did_consume_arg = true;
@@ -139,7 +143,11 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
             } else if (spec == 'u') {
                 // Unsigned integer format
                 if (arg_idx < cmd.args.len) {
-                    const num = std.fmt.parseInt(u64, cmd.args[arg_idx], 10) catch 0;
+                    const arg = cmd.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(u64, arg[1])
+                    else
+                        std.fmt.parseInt(u64, arg, 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 10, false);
                     arg_idx += 1;
                     did_consume_arg = true;
@@ -148,7 +156,11 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
             } else if (spec == 'x') {
                 // Hex lowercase
                 if (arg_idx < cmd.args.len) {
-                    const num = std.fmt.parseInt(u64, cmd.args[arg_idx], 10) catch 0;
+                    const arg = cmd.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(u64, arg[1])
+                    else
+                        std.fmt.parseInt(u64, arg, 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 16, false);
                     arg_idx += 1;
                     did_consume_arg = true;
@@ -157,7 +169,11 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
             } else if (spec == 'X') {
                 // Hex uppercase
                 if (arg_idx < cmd.args.len) {
-                    const num = std.fmt.parseInt(u64, cmd.args[arg_idx], 10) catch 0;
+                    const arg = cmd.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(u64, arg[1])
+                    else
+                        std.fmt.parseInt(u64, arg, 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 16, true);
                     arg_idx += 1;
                     did_consume_arg = true;
@@ -166,7 +182,11 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
             } else if (spec == 'o') {
                 // Octal format
                 if (arg_idx < cmd.args.len) {
-                    const num = std.fmt.parseInt(u64, cmd.args[arg_idx], 10) catch 0;
+                    const arg = cmd.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(u64, arg[1])
+                    else
+                        std.fmt.parseInt(u64, arg, 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 8, false);
                     arg_idx += 1;
                     did_consume_arg = true;

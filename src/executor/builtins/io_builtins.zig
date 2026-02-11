@@ -156,7 +156,11 @@ pub fn printf(command: *types.ParsedCommand) !i32 {
 
     const format = command.args[0];
     var arg_idx: usize = 1;
-    var i: usize = 0;
+
+    // Bash behavior: reuse format string while there are remaining arguments
+    while (true) {
+        var i: usize = 0;
+        const start_arg_idx = arg_idx;
 
     while (i < format.len) {
         if (format[i] == '%' and i + 1 < format.len) {
@@ -231,35 +235,55 @@ pub fn printf(command: *types.ParsedCommand) !i32 {
                 i = j + 1;
             } else if (spec == 'd' or spec == 'i') {
                 if (arg_idx < command.args.len) {
-                    const num = std.fmt.parseInt(i64, command.args[arg_idx], 10) catch 0;
+                    const arg = command.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(i64, arg[1])
+                    else
+                        std.fmt.parseInt(i64, arg, 10) catch 0;
                     try printfInt(num, width, zero_pad, left_justify);
                     arg_idx += 1;
                 }
                 i = j + 1;
             } else if (spec == 'u') {
                 if (arg_idx < command.args.len) {
-                    const num = std.fmt.parseInt(u64, command.args[arg_idx], 10) catch 0;
+                    const arg = command.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(u64, arg[1])
+                    else
+                        std.fmt.parseInt(u64, arg, 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 10, false);
                     arg_idx += 1;
                 }
                 i = j + 1;
             } else if (spec == 'x') {
                 if (arg_idx < command.args.len) {
-                    const num = std.fmt.parseInt(u64, command.args[arg_idx], 10) catch 0;
+                    const arg = command.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(u64, arg[1])
+                    else
+                        std.fmt.parseInt(u64, arg, 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 16, false);
                     arg_idx += 1;
                 }
                 i = j + 1;
             } else if (spec == 'X') {
                 if (arg_idx < command.args.len) {
-                    const num = std.fmt.parseInt(u64, command.args[arg_idx], 10) catch 0;
+                    const arg = command.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(u64, arg[1])
+                    else
+                        std.fmt.parseInt(u64, arg, 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 16, true);
                     arg_idx += 1;
                 }
                 i = j + 1;
             } else if (spec == 'o') {
                 if (arg_idx < command.args.len) {
-                    const num = std.fmt.parseInt(u64, command.args[arg_idx], 10) catch 0;
+                    const arg = command.args[arg_idx];
+                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                        @as(u64, arg[1])
+                    else
+                        std.fmt.parseInt(u64, arg, 10) catch 0;
                     try printfUint(num, width, zero_pad, left_justify, 8, false);
                     arg_idx += 1;
                 }
@@ -349,6 +373,10 @@ pub fn printf(command: *types.ParsedCommand) !i32 {
             try IO.print("{c}", .{format[i]});
             i += 1;
         }
+    }
+
+        // Stop if no arguments were consumed in this pass, or no more args remain
+        if (arg_idx == start_arg_idx or arg_idx >= command.args.len) break;
     }
 
     return 0;

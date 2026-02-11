@@ -282,7 +282,7 @@ pub const Executor = struct {
             // Handle explicit redirections to determine behaviors
             for (cmd.redirections) |redir| {
                 switch (redir.kind) {
-                    .output_truncate, .output_append => {
+                    .output_truncate, .output_append, .output_clobber => {
                         if (redir.fd == 1) {
                             stdout_behavior = .ignore;
                         } else if (redir.fd == 2) {
@@ -319,7 +319,7 @@ pub const Executor = struct {
             // Handle explicit file redirections after spawn
             for (cmd.redirections) |redir| {
                 switch (redir.kind) {
-                    .output_truncate, .output_append => {
+                    .output_truncate, .output_append, .output_clobber => {
                         const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
                             .truncate = (redir.kind == .output_truncate),
                         });
@@ -568,6 +568,7 @@ pub const Executor = struct {
         const expansion_context: ?redirection.ExpansionContext = if (self.shell) |shell|
             .{
                 .option_nounset = shell.option_nounset,
+                .option_noclobber = shell.option_noclobber,
                 .var_attributes = &shell.var_attributes,
                 .arrays = &shell.arrays,
                 .assoc_arrays = &shell.assoc_arrays,
@@ -1381,7 +1382,7 @@ pub const Executor = struct {
         // First pass: determine behaviors
         for (command.redirections) |redir| {
             switch (redir.kind) {
-                .output_truncate, .output_append => {
+                .output_truncate, .output_append, .output_clobber => {
                     if (redir.fd == 1) {
                         stdout_behavior = .ignore;
                         has_stdout_file = true;
@@ -1415,7 +1416,7 @@ pub const Executor = struct {
         var stdout_file: ?std.Io.File = null;
         for (command.redirections) |redir| {
             switch (redir.kind) {
-                .output_truncate, .output_append => {
+                .output_truncate, .output_append, .output_clobber => {
                     const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
                         .truncate = (redir.kind == .output_truncate),
                     });
@@ -1597,7 +1598,7 @@ pub const Executor = struct {
         // Handle redirections after spawn
         for (command.redirections) |redir| {
             switch (redir.kind) {
-                .output_truncate, .output_append => {
+                .output_truncate, .output_append, .output_clobber => {
                     const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, redir.target, .{
                         .truncate = (redir.kind == .output_truncate),
                     });

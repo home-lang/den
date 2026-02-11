@@ -128,6 +128,21 @@ pub const Parser = struct {
                     redir_count += 1;
                     self.pos += 1;
                 },
+                .redirect_clobber => {
+                    self.pos += 1;
+                    if (self.pos >= self.tokens.len or self.tokens[self.pos].type != .word) {
+                        return error.RedirectionMissingTarget;
+                    }
+                    const target = try self.allocator.dupe(u8, self.tokens[self.pos].value);
+                    if (redir_count >= redir_buffer.len) return error.TooManyRedirections;
+                    redir_buffer[redir_count] = .{
+                        .kind = .output_clobber,
+                        .fd = 1,
+                        .target = target,
+                    };
+                    redir_count += 1;
+                    self.pos += 1;
+                },
                 .redirect_append => {
                     self.pos += 1;
                     if (self.pos >= self.tokens.len or self.tokens[self.pos].type != .word) {

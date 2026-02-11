@@ -364,13 +364,17 @@ pub const ControlFlowExecutor = struct {
                 _ = dot_pos;
             }
 
-            // Check if item is an array expansion
-            if (std.mem.indexOf(u8, item, "${") != null and
-                (std.mem.indexOf(u8, item, "[@]") != null or std.mem.indexOf(u8, item, "[*]") != null))
+            // Check if item is an array expansion (possibly quoted)
+            const arr_check = if (item.len >= 2 and item[0] == '"' and item[item.len - 1] == '"')
+                item[1 .. item.len - 1]
+            else
+                item;
+            if (std.mem.indexOf(u8, arr_check, "${") != null and
+                (std.mem.indexOf(u8, arr_check, "[@]") != null or std.mem.indexOf(u8, arr_check, "[*]") != null))
             {
                 // Expand the array - result may be multiple items
-                const expanded = expander.expand(item) catch item;
-                defer if (expanded.ptr != item.ptr) self.allocator.free(expanded);
+                const expanded = expander.expand(arr_check) catch arr_check;
+                defer if (expanded.ptr != arr_check.ptr) self.allocator.free(expanded);
 
                 // Split expanded result by spaces (word splitting)
                 var word_iter = std.mem.tokenizeAny(u8, expanded, " \t\n");
@@ -379,35 +383,41 @@ pub const ControlFlowExecutor = struct {
                 }
             } else {
                 // Regular item - expand variables/command substitutions
-                const expanded = expander.expand(item) catch item;
-                // If the item contained a command substitution, word-split the result
-                const has_subst = std.mem.indexOf(u8, item, "$(") != null or std.mem.indexOfScalar(u8, item, '`') != null;
                 const is_quoted = item.len >= 2 and item[0] == '"' and item[item.len - 1] == '"';
-                if (has_subst and !is_quoted and std.mem.indexOfAny(u8, expanded, " \t\n") != null) {
-                    var word_iter = std.mem.tokenizeAny(u8, expanded, " \t\n");
+
+                // For quoted items, strip the surrounding quotes before expansion
+                const expand_input = if (is_quoted) item[1 .. item.len - 1] else item;
+                const expanded = expander.expand(expand_input) catch expand_input;
+
+                // Word-split unquoted items that contain variable references
+                const has_var_ref = std.mem.indexOfScalar(u8, expand_input, '$') != null or
+                    std.mem.indexOfScalar(u8, expand_input, '`') != null;
+                const ifs_val = expander.environment.get("IFS") orelse " \t\n";
+                if (!is_quoted and has_var_ref and std.mem.indexOfAny(u8, expanded, ifs_val) != null) {
+                    var word_iter = std.mem.tokenizeAny(u8, expanded, ifs_val);
                     while (word_iter.next()) |word| {
                         try expanded_items.append(self.allocator, try self.allocator.dupe(u8, word));
                     }
-                    if (expanded.ptr != item.ptr) self.allocator.free(expanded);
+                    if (expanded.ptr != expand_input.ptr) self.allocator.free(expanded);
                 } else {
                     // Try brace expansion on the result
-                    const to_expand = if (expanded.ptr != item.ptr) expanded else item;
+                    const to_expand = if (expanded.ptr != expand_input.ptr) expanded else expand_input;
                     if (std.mem.indexOfScalar(u8, to_expand, '{') != null and std.mem.indexOf(u8, to_expand, "..") != null) {
                         var brace_exp = BraceExpander.init(self.allocator);
                         const brace_results = brace_exp.expand(to_expand) catch {
                             try expanded_items.append(self.allocator, try self.allocator.dupe(u8, to_expand));
-                            if (expanded.ptr != item.ptr) self.allocator.free(expanded);
+                            if (expanded.ptr != expand_input.ptr) self.allocator.free(expanded);
                             continue;
                         };
                         defer self.allocator.free(brace_results);
                         for (brace_results) |br| {
                             try expanded_items.append(self.allocator, br); // already duped by BraceExpander
                         }
-                        if (expanded.ptr != item.ptr) self.allocator.free(expanded);
-                    } else if (expanded.ptr != item.ptr) {
+                        if (expanded.ptr != expand_input.ptr) self.allocator.free(expanded);
+                    } else if (expanded.ptr != expand_input.ptr) {
                         try expanded_items.append(self.allocator, expanded);
                     } else {
-                        try expanded_items.append(self.allocator, try self.allocator.dupe(u8, item));
+                        try expanded_items.append(self.allocator, try self.allocator.dupe(u8, expand_input));
                     }
                 }
             }

@@ -404,6 +404,7 @@ pub const Shell = struct {
         // Detect if stdin is a TTY
         if (comptime builtin.os.tag != .windows) {
             shell.is_interactive = (std.Io.File{ .handle = std.posix.STDIN_FILENO, .flags = .{ .nonblocking = false } }).isTty(std.Options.debug_io) catch false;
+            shell.job_manager.interactive = shell.is_interactive;
         }
 
         // Load history from file
@@ -2059,7 +2060,7 @@ pub const Shell = struct {
                                 applied = true;
                             }
                         },
-                        .output_truncate, .output_append => {
+                        .output_truncate, .output_append, .output_clobber => {
                             const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
                             defer self.allocator.free(path_z);
                             const flags: std.c.O = if (redir.kind == .output_append)
@@ -3131,9 +3132,9 @@ pub const Shell = struct {
         const pp = pipe_pos orelse return false;
         if (pp + 1 >= input.len) return false;
 
-        // Check if the part after the last pipe starts with a control flow keyword
+        // Check if the part after the last pipe starts with a control flow keyword or brace group
         const right = std.mem.trim(u8, input[pp + 1 ..], &std.ascii.whitespace);
-        const cf_keywords = [_][]const u8{ "while ", "for ", "until ", "if ", "case " };
+        const cf_keywords = [_][]const u8{ "while ", "for ", "until ", "if ", "case ", "{ " };
         var is_cf = false;
         for (cf_keywords) |kw| {
             if (std.mem.startsWith(u8, right, kw)) {

@@ -26,6 +26,7 @@ pub const Redirection = struct {
     pub const Kind = enum {
         output_truncate, // >
         output_append, // >>
+        output_clobber, // >|
         input, // <
         input_output, // <>
         heredoc, // <<
