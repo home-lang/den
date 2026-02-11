@@ -496,14 +496,12 @@ pub const Executor = struct {
         // Set PIPESTATUS array in the shell
         if (self.shell) |shell| {
             // Free old PIPESTATUS array if it exists
-            if (shell.arrays.get("PIPESTATUS")) |old_arr| {
-                for (old_arr) |item| {
+            if (shell.arrays.fetchRemove("PIPESTATUS")) |kv| {
+                for (kv.value) |item| {
                     shell.allocator.free(item);
                 }
-                shell.allocator.free(old_arr);
-                const old_key = shell.arrays.getKey("PIPESTATUS").?;
-                shell.allocator.free(old_key);
-                _ = shell.arrays.remove("PIPESTATUS");
+                shell.allocator.free(kv.value);
+                shell.allocator.free(kv.key);
             }
             // Create new PIPESTATUS array
             const ps_arr = shell.allocator.alloc([]const u8, commands.len) catch null;

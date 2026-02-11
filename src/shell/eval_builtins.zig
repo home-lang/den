@@ -99,6 +99,11 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
 
     const var_names = cmd.args[var_start..];
 
+    // Print prompt to stderr if -p was specified (bash behavior)
+    if (prompt) |p| {
+        try IO.eprint("{s}", .{p});
+    }
+
     // Read from stdin: handle -n (nchars) and -d (delimiter)
     const line = if (nchars) |n| blk: {
         // Read exactly N characters

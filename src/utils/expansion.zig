@@ -127,6 +127,7 @@ pub const Expansion = struct {
     cmd_cache: ?*ExpansionCache, // Optional cache for command substitution results
     line_number: u32, // $LINENO
     shell_start_time: i64, // For $SECONDS
+    skip_tilde: bool = false, // When true, suppress tilde expansion (for quoted args)
 
     pub fn init(allocator: std.mem.Allocator, environment: *std.StringHashMap([]const u8), last_exit_code: i32) Expansion {
         return .{
@@ -147,6 +148,7 @@ pub const Expansion = struct {
             .cmd_cache = null,
             .line_number = 1,
             .shell_start_time = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| 0,
+            .skip_tilde = false,
         };
     }
 
@@ -279,7 +281,8 @@ pub const Expansion = struct {
             const char = input[i];
 
             // Handle tilde expansion at start of word or after : =
-            if (char == '~') {
+            // Skip tilde expansion for quoted arguments (bash behavior)
+            if (char == '~' and !self.skip_tilde) {
                 // Don't expand if this is the =~ regex operator (~ followed by space or end)
                 const is_regex_op = i > 0 and input[i - 1] == '=' and
                     (i + 1 >= input.len or input[i + 1] == ' ' or input[i + 1] == '\t');
@@ -1066,6 +1069,37 @@ pub const Expansion = struct {
                     if (value.len > 0) {
                         const result = try self.allocator.dupe(u8, value);
                         result[0] = std.ascii.toLower(value[0]);
+                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                    }
+                    return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
+        // ${VAR~~} - toggle case of all characters
+        if (std.mem.indexOf(u8, content, "~~")) |sep_pos| {
+            if (sep_pos > 0) {
+                const var_name_cc = content[0..sep_pos];
+                if (self.environment.get(var_name_cc)) |value| {
+                    const result = try self.allocator.alloc(u8, value.len);
+                    for (value, 0..) |c, ci| {
+                        result[ci] = if (std.ascii.isUpper(c)) std.ascii.toLower(c) else std.ascii.toUpper(c);
+                    }
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+        // ${VAR~} - toggle case of first character only
+        if (content.len > 1 and content[content.len - 1] == '~') {
+            const var_name_cc = content[0 .. content.len - 1];
+            // Make sure it's not ~~ (already handled above)
+            if (var_name_cc.len > 0 and var_name_cc[var_name_cc.len - 1] != '~') {
+                if (self.environment.get(var_name_cc)) |value| {
+                    if (value.len > 0) {
+                        const result = try self.allocator.dupe(u8, value);
+                        result[0] = if (std.ascii.isUpper(value[0])) std.ascii.toLower(value[0]) else std.ascii.toUpper(value[0]);
                         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     }
                     return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };

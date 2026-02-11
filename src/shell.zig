@@ -1794,12 +1794,32 @@ pub const Shell = struct {
                                 }
                             }
                             // Simple literal assignment - strip surrounding quotes
-                            const stripped = if (raw_value.len >= 2 and
+                            const was_quoted = raw_value.len >= 2 and
                                 ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
-                                (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
+                                (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\''));
+                            const stripped = if (was_quoted)
                                 raw_value[1 .. raw_value.len - 1]
                             else
                                 raw_value;
+                            // Tilde expansion for unquoted values (bash: x=~ sets x to home dir)
+                            var tilde_buf: [4096]u8 = undefined;
+                            const value_to_use = if (!was_quoted and stripped.len > 0 and stripped[0] == '~') blk: {
+                                const home = self.environment.get("HOME") orelse break :blk stripped;
+                                // ~ alone or ~/path
+                                if (stripped.len == 1) {
+                                    break :blk home;
+                                } else if (stripped[1] == '/') {
+                                    const total = home.len + stripped.len - 1;
+                                    if (total <= tilde_buf.len) {
+                                        @memcpy(tilde_buf[0..home.len], home);
+                                        @memcpy(tilde_buf[home.len..total], stripped[1..]);
+                                        break :blk tilde_buf[0..total];
+                                    }
+                                    break :blk stripped;
+                                } else {
+                                    break :blk stripped;
+                                }
+                            } else stripped;
                             // Check if variable has integer attribute
                             const has_integer_attr = if (self.var_attributes.get(potential_var)) |attrs| attrs.integer else false;
 
@@ -1810,13 +1830,13 @@ pub const Shell = struct {
                                 if (is_append) {
                                     const existing = shell_mod.getVariableValue(self, potential_var) orelse "0";
                                     const existing_num = std.fmt.parseInt(i64, existing, 10) catch 0;
-                                    const add_num = arith.eval(stripped) catch 0;
+                                    const add_num = arith.eval(value_to_use) catch 0;
                                     const result = existing_num + add_num;
                                     var buf: [32]u8 = undefined;
                                     const result_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
                                     shell_mod.setArithVariable(self, potential_var, result_str);
                                 } else {
-                                    const result = arith.eval(stripped) catch 0;
+                                    const result = arith.eval(value_to_use) catch 0;
                                     var buf: [32]u8 = undefined;
                                     const result_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
                                     shell_mod.setArithVariable(self, potential_var, result_str);
@@ -1824,17 +1844,17 @@ pub const Shell = struct {
                             } else if (is_append) {
                                 // += append: get existing value and concatenate
                                 const existing = shell_mod.getVariableValue(self, potential_var) orelse "";
-                                const combined = self.allocator.alloc(u8, existing.len + stripped.len) catch {
-                                    shell_mod.setArithVariable(self, potential_var, stripped);
+                                const combined = self.allocator.alloc(u8, existing.len + value_to_use.len) catch {
+                                    shell_mod.setArithVariable(self, potential_var, value_to_use);
                                     self.last_exit_code = 0;
                                     return;
                                 };
                                 defer self.allocator.free(combined);
                                 @memcpy(combined[0..existing.len], existing);
-                                @memcpy(combined[existing.len..], stripped);
+                                @memcpy(combined[existing.len..], value_to_use);
                                 shell_mod.setArithVariable(self, potential_var, combined);
                             } else {
-                                shell_mod.setArithVariable(self, potential_var, stripped);
+                                shell_mod.setArithVariable(self, potential_var, value_to_use);
                             }
                             self.last_exit_code = 0;
                             return;

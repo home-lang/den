@@ -132,10 +132,14 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
             }
 
             // First expand variables (unless this is a -v operand in [[ ]])
+            // Suppress tilde expansion for quoted arguments (bash behavior:
+            // echo "~" prints literal ~, echo ~ expands to home directory)
+            expander.skip_tilde = arg_was_quoted;
             const var_expanded = if (skip_expansion)
                 try self.allocator.dupe(u8, arg)
             else
                 try expander.expand(arg);
+            expander.skip_tilde = false;
 
             if (skip_globs) {
                 // For [[ ]], only do variable expansion, no brace/glob expansion

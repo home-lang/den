@@ -463,47 +463,62 @@ pub const ScriptManager = struct {
 
             // Check for control flow keywords
             if (std.mem.startsWith(u8, trimmed, "if ")) {
-                var result = parser.parseIf(lines, line_num) catch {
-                    shell.last_exit_code = 1;
-                    shell.executeErrTrap();
-                    break;
-                };
-                defer result.stmt.deinit();
-                shell.last_exit_code = executor.executeIf(&result.stmt) catch 1;
-                if (shell.last_exit_code != 0) {
-                    shell.executeErrTrap();
+                // One-liner if (has fi on same line) - delegate to executeCommand
+                if (std.mem.indexOf(u8, trimmed, "fi") != null) {
+                    _ = shell.executeCommand(trimmed) catch {};
+                } else {
+                    var result = parser.parseIf(lines, line_num) catch {
+                        shell.last_exit_code = 1;
+                        shell.executeErrTrap();
+                        break;
+                    };
+                    defer result.stmt.deinit();
+                    shell.last_exit_code = executor.executeIf(&result.stmt) catch 1;
+                    if (shell.last_exit_code != 0) {
+                        shell.executeErrTrap();
+                    }
+                    line_num = result.end;
                 }
-                line_num = result.end;
                 continue;
             }
 
             if (std.mem.startsWith(u8, trimmed, "while ")) {
-                var result = parser.parseWhile(lines, line_num, false) catch {
-                    shell.last_exit_code = 1;
-                    shell.executeErrTrap();
-                    break;
-                };
-                defer result.loop.deinit();
-                shell.last_exit_code = executor.executeWhile(&result.loop) catch 1;
-                if (shell.last_exit_code != 0) {
-                    shell.executeErrTrap();
+                // One-liner while (has done on same line) - delegate to executeCommand
+                if (std.mem.indexOf(u8, trimmed, "done") != null) {
+                    _ = shell.executeCommand(trimmed) catch {};
+                } else {
+                    var result = parser.parseWhile(lines, line_num, false) catch {
+                        shell.last_exit_code = 1;
+                        shell.executeErrTrap();
+                        break;
+                    };
+                    defer result.loop.deinit();
+                    shell.last_exit_code = executor.executeWhile(&result.loop) catch 1;
+                    if (shell.last_exit_code != 0) {
+                        shell.executeErrTrap();
+                    }
+                    line_num = result.end;
                 }
-                line_num = result.end;
                 continue;
             }
 
             if (std.mem.startsWith(u8, trimmed, "until ")) {
-                var result = parser.parseWhile(lines, line_num, true) catch {
-                    shell.last_exit_code = 1;
-                    shell.executeErrTrap();
-                    break;
-                };
-                defer result.loop.deinit();
-                shell.last_exit_code = executor.executeWhile(&result.loop) catch 1;
-                if (shell.last_exit_code != 0) {
-                    shell.executeErrTrap();
+                // One-liner until (has done on same line) - delegate to executeCommand
+                if (std.mem.indexOf(u8, trimmed, "done") != null) {
+                    _ = shell.executeCommand(trimmed) catch {};
+                } else {
+                    var result = parser.parseWhile(lines, line_num, true) catch {
+                        shell.last_exit_code = 1;
+                        shell.executeErrTrap();
+                        break;
+                    };
+                    defer result.loop.deinit();
+                    shell.last_exit_code = executor.executeWhile(&result.loop) catch 1;
+                    if (shell.last_exit_code != 0) {
+                        shell.executeErrTrap();
+                    }
+                    line_num = result.end;
                 }
-                line_num = result.end;
                 continue;
             }
 
@@ -545,17 +560,23 @@ pub const ScriptManager = struct {
             }
 
             if (std.mem.startsWith(u8, trimmed, "for ")) {
-                var result = parser.parseFor(lines, line_num) catch {
-                    shell.last_exit_code = 1;
-                    shell.executeErrTrap();
-                    break;
-                };
-                defer result.loop.deinit();
-                shell.last_exit_code = executor.executeFor(&result.loop) catch 1;
-                if (shell.last_exit_code != 0) {
-                    shell.executeErrTrap();
+                // One-liner for loop (has done on same line) - delegate to executeCommand
+                // which handles semicolon-to-newline conversion via executeControlFlowOneliner
+                if (std.mem.indexOf(u8, trimmed, "done") != null) {
+                    _ = shell.executeCommand(trimmed) catch {};
+                } else {
+                    var result = parser.parseFor(lines, line_num) catch {
+                        shell.last_exit_code = 1;
+                        shell.executeErrTrap();
+                        break;
+                    };
+                    defer result.loop.deinit();
+                    shell.last_exit_code = executor.executeFor(&result.loop) catch 1;
+                    if (shell.last_exit_code != 0) {
+                        shell.executeErrTrap();
+                    }
+                    line_num = result.end;
                 }
-                line_num = result.end;
                 continue;
             }
 
