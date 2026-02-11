@@ -103,6 +103,19 @@ pub const Executor = struct {
 
         if (chain.commands.len == 0) return 0;
 
+        // Determine if this chain contains && or || operators (AND-OR list).
+        // Per POSIX, errexit should not apply to the result of an AND-OR list.
+        if (self.shell) |shell| {
+            var has_and_or = false;
+            for (chain.operators) |op| {
+                if (op == .and_op or op == .or_op) {
+                    has_and_or = true;
+                    break;
+                }
+            }
+            shell.last_chain_had_and_or = has_and_or;
+        }
+
         // Single command - execute directly
         if (chain.commands.len == 1) {
             const exit_code = try self.executeCommand(&chain.commands[0]);
@@ -216,14 +229,20 @@ pub const Executor = struct {
                 }
 
                 // Check for errexit option (set -e)
+                // Per POSIX, errexit should NOT trigger for commands that are
+                // part of an && or || list — those operators handle errors themselves.
                 if (self.shell) |shell| {
                     if (shell.option_errexit and last_exit_code != 0) {
-                        // Exit on error if errexit is enabled
-                        try IO.eprint("den: command failed with exit code {d} (errexit enabled)\n", .{last_exit_code});
-                        if (shell.current_line > 0) {
-                            try IO.eprint("den: line {d}\n", .{shell.current_line});
+                        const in_and_or_chain = (i > 0 and (chain.operators[i - 1] == .and_op or chain.operators[i - 1] == .or_op)) or
+                            (i < chain.operators.len and (chain.operators[i] == .and_op or chain.operators[i] == .or_op));
+                        if (!in_and_or_chain) {
+                            // Exit on error if errexit is enabled
+                            try IO.eprint("den: command failed with exit code {d} (errexit enabled)\n", .{last_exit_code});
+                            if (shell.current_line > 0) {
+                                try IO.eprint("den: line {d}\n", .{shell.current_line});
+                            }
+                            return last_exit_code;
                         }
-                        return last_exit_code;
                     }
                 }
             }
@@ -722,6 +741,19 @@ pub const Executor = struct {
         // Check if it's a user-defined function (POSIX: functions before builtins)
         if (self.shell) |shell| {
             if (shell.function_manager.hasFunction(command.name)) {
+                // If function has redirections, save/restore fds around execution
+                if (command.redirections.len > 0) {
+                    var saved = redirection.SavedFds.save();
+                    defer saved.restore();
+                    self.applyRedirections(command.redirections) catch {
+                        return 1;
+                    };
+                    const exit_code = shell.function_manager.executeFunction(shell, command.name, command.args) catch |err| {
+                        try IO.eprint("den: function error: {}\n", .{err});
+                        return 1;
+                    };
+                    return exit_code;
+                }
                 const exit_code = shell.function_manager.executeFunction(shell, command.name, command.args) catch |err| {
                     try IO.eprint("den: function error: {}\n", .{err});
                     return 1;
@@ -732,31 +764,21 @@ pub const Executor = struct {
 
         // Check if it's a builtin
         if (self.isBuiltin(command.name)) {
-            // If builtin has redirections, handle appropriately per OS
+            // If builtin has redirections, save/restore file descriptors around execution.
+            // We must NOT fork because builtins like cd, pushd, popd, export, etc.
+            // need to affect the parent process state (working directory, environment, etc.).
             if (command.redirections.len > 0) {
                 if (builtin.os.tag == .windows) {
                     // Windows: save/restore stdout/stderr instead of fork
                     return try self.executeBuiltinWithRedirectionsWindows(command);
                 }
 
-                const fork_ret = std.c.fork();
-                if (fork_ret < 0) return error.Unexpected;
-                const pid: std.posix.pid_t = @intCast(fork_ret);
-                if (pid == 0) {
-                    // Child - apply redirections and execute builtin
-                    self.applyRedirections(command.redirections) catch {
-                        std.c._exit(1);
-                    };
-                    const exit_code = self.executeBuiltin(command) catch 1;
-                    std.c._exit(@intCast(exit_code));
-                } else {
-                    // Parent - wait for child
-                    var wait_status_builtin: c_int = 0;
-                    if (comptime builtin.os.tag != .windows) {
-                        _ = std.c.waitpid(pid, &wait_status_builtin, 0);
-                    }
-                    return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status_builtin))));
-                }
+                var saved = redirection.SavedFds.save();
+                defer saved.restore();
+                self.applyRedirections(command.redirections) catch {
+                    return 1;
+                };
+                return self.executeBuiltin(command) catch 1;
             }
             return try self.executeBuiltin(command);
         }

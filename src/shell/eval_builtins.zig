@@ -223,9 +223,35 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         }
 
         if (var_names.len <= 1) {
-            // Single variable (or REPLY): assign entire line
+            // Single variable (or REPLY): assign entire line, stripped of leading/trailing IFS whitespace
             const target = if (var_names.len == 1) var_names[0] else "REPLY";
-            const value_copy = try self.allocator.dupe(u8, value);
+            // Strip leading IFS whitespace characters
+            var strip_start: usize = 0;
+            while (strip_start < value.len) {
+                var is_ifs_ws = false;
+                for (ifs) |ic| {
+                    if (value[strip_start] == ic and (ic == ' ' or ic == '\t' or ic == '\n')) {
+                        is_ifs_ws = true;
+                        break;
+                    }
+                }
+                if (!is_ifs_ws) break;
+                strip_start += 1;
+            }
+            // Strip trailing IFS whitespace characters
+            var strip_end: usize = value.len;
+            while (strip_end > strip_start) {
+                var is_ifs_ws = false;
+                for (ifs) |ic| {
+                    if (value[strip_end - 1] == ic and (ic == ' ' or ic == '\t' or ic == '\n')) {
+                        is_ifs_ws = true;
+                        break;
+                    }
+                }
+                if (!is_ifs_ws) break;
+                strip_end -= 1;
+            }
+            const value_copy = try self.allocator.dupe(u8, value[strip_start..strip_end]);
             const gop = try self.environment.getOrPut(target);
             if (gop.found_existing) {
                 self.allocator.free(gop.value_ptr.*);
@@ -268,9 +294,21 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
                 var word_value: []const u8 = "";
 
                 if (var_idx == var_names.len - 1) {
-                    // Last variable gets remaining text
+                    // Last variable gets remaining text, with trailing IFS whitespace stripped
                     if (pos < value.len) {
-                        word_value = value[pos..];
+                        var end_pos: usize = value.len;
+                        while (end_pos > pos) {
+                            var is_ifs_ws = false;
+                            for (ifs) |ic| {
+                                if (value[end_pos - 1] == ic and (ic == ' ' or ic == '\t' or ic == '\n')) {
+                                    is_ifs_ws = true;
+                                    break;
+                                }
+                            }
+                            if (!is_ifs_ws) break;
+                            end_pos -= 1;
+                        }
+                        word_value = value[pos..end_pos];
                     }
                 } else {
                     // Find next word by splitting on IFS

@@ -9,6 +9,16 @@ fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
     return allocator.dupe(u8, value) catch null;
 }
 
+/// Update PWD and OLDPWD environment variables after a directory change.
+fn updatePwdEnvCtx(ctx: *BuiltinContext, old_cwd: []const u8) void {
+    ctx.setEnv("OLDPWD", old_cwd) catch {};
+    var new_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    if (std.c.getcwd(&new_cwd_buf, new_cwd_buf.len)) |result| {
+        const new_cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0);
+        ctx.setEnv("PWD", new_cwd) catch {};
+    }
+}
+
 /// Directory stack builtins: pushd, popd, dirs
 
 pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
@@ -47,6 +57,7 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             }
         }
 
+        updatePwdEnvCtx(ctx, cwd);
         ctx.allocator.free(shell_ref.dir_stack[shell_ref.dir_stack_count - 1].?);
         shell_ref.dir_stack[shell_ref.dir_stack_count - 1] = try ctx.allocator.dupe(u8, cwd);
 
@@ -89,6 +100,7 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             }
         }
 
+        updatePwdEnvCtx(ctx, cwd);
         ctx.allocator.free(shell_ref.dir_stack[stack_idx].?);
         shell_ref.dir_stack[stack_idx] = try ctx.allocator.dupe(u8, cwd);
 
@@ -107,6 +119,8 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             return 1;
         }
     }
+
+    updatePwdEnvCtx(ctx, cwd);
 
     if (shell_ref.dir_stack_count >= shell_ref.dir_stack.len) {
         try IO.eprint("den: pushd: directory stack full\n", .{});
@@ -174,6 +188,11 @@ pub fn popd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     };
     defer ctx.allocator.free(dir);
 
+    // Get current directory before changing
+    var popd_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const popd_cwd_result = std.c.getcwd(&popd_cwd_buf, popd_cwd_buf.len);
+    const popd_old_cwd = if (popd_cwd_result) |r| std.mem.sliceTo(@as([*:0]u8, @ptrCast(r)), 0) else "";
+
     {
         var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
         @memcpy(chdir_buf[0..dir.len], dir);
@@ -185,6 +204,7 @@ pub fn popd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         }
     }
 
+    updatePwdEnvCtx(ctx, popd_old_cwd);
     shell_ref.dir_stack[shell_ref.dir_stack_count] = null;
 
     return 0;

@@ -227,17 +227,57 @@ pub fn executeArithmeticStatement(shell: *Shell, stmt: []const u8) void {
         return;
     }
 
-    // Check for compound assignment: i+=1
-    if (std.mem.indexOf(u8, trimmed, "+=")) |pos| {
-        const var_name = trimmed[0..pos];
-        const add_val_str = trimmed[pos + 2 ..];
-        const current = shell.environment.get(var_name) orelse "0";
-        const current_val = std.fmt.parseInt(i64, current, 10) catch 0;
-        const add_val = std.fmt.parseInt(i64, add_val_str, 10) catch 0;
-        var buf: [32]u8 = undefined;
-        const new_val = std.fmt.bufPrint(&buf, "{d}", .{current_val + add_val}) catch return;
-        shell.setVariableValue(var_name, new_val) catch {};
-        return;
+    // Check for compound assignment operators: <<=, >>=, +=, -=, *=, /=, %=, &=, |=, ^=
+    // Must check 3-char operators before 2-char ones
+    const compound_ops = [_]struct { op: []const u8, op_len: usize }{
+        .{ .op = "<<=", .op_len = 3 },
+        .{ .op = ">>=", .op_len = 3 },
+        .{ .op = "+=", .op_len = 2 },
+        .{ .op = "-=", .op_len = 2 },
+        .{ .op = "*=", .op_len = 2 },
+        .{ .op = "/=", .op_len = 2 },
+        .{ .op = "%=", .op_len = 2 },
+        .{ .op = "&=", .op_len = 2 },
+        .{ .op = "|=", .op_len = 2 },
+        .{ .op = "^=", .op_len = 2 },
+    };
+    for (compound_ops) |cop| {
+        if (std.mem.indexOf(u8, trimmed, cop.op)) |pos| {
+            // Ensure the characters before the operator are a valid variable name
+            const var_name = std.mem.trim(u8, trimmed[0..pos], &std.ascii.whitespace);
+            const rhs_str = std.mem.trim(u8, trimmed[pos + cop.op_len ..], &std.ascii.whitespace);
+            const current = shell.environment.get(var_name) orelse "0";
+            const current_val = std.fmt.parseInt(i64, current, 10) catch 0;
+            const rhs_val = evaluateArithmeticExpression(shell, rhs_str);
+            const result: i64 = if (std.mem.eql(u8, cop.op, "+="))
+                current_val + rhs_val
+            else if (std.mem.eql(u8, cop.op, "-="))
+                current_val - rhs_val
+            else if (std.mem.eql(u8, cop.op, "*="))
+                current_val * rhs_val
+            else if (std.mem.eql(u8, cop.op, "/="))
+                if (rhs_val != 0) @divTrunc(current_val, rhs_val) else 0
+            else if (std.mem.eql(u8, cop.op, "%="))
+                if (rhs_val != 0) @rem(current_val, rhs_val) else 0
+            else if (std.mem.eql(u8, cop.op, "<<=")) blk: {
+                const shift_amt: u6 = @intCast(@min(@max(rhs_val, 0), 63));
+                break :blk current_val << shift_amt;
+            } else if (std.mem.eql(u8, cop.op, ">>=")) blk: {
+                const shift_amt: u6 = @intCast(@min(@max(rhs_val, 0), 63));
+                break :blk current_val >> shift_amt;
+            } else if (std.mem.eql(u8, cop.op, "&="))
+                current_val & rhs_val
+            else if (std.mem.eql(u8, cop.op, "|="))
+                current_val | rhs_val
+            else if (std.mem.eql(u8, cop.op, "^="))
+                current_val ^ rhs_val
+            else
+                current_val;
+            var buf: [32]u8 = undefined;
+            const new_val = std.fmt.bufPrint(&buf, "{d}", .{result}) catch return;
+            shell.setVariableValue(var_name, new_val) catch {};
+            return;
+        }
     }
 
     // Simple assignment: i=0

@@ -251,10 +251,10 @@ const Parser = struct {
     arrays: ?*std.StringHashMap([][]const u8) = null,
     positional_params: []const []const u8 = &.{},
 
-    // Entry point - lowest precedence (assignment)
+    // Entry point - lowest precedence (assignment and compound assignment)
     fn parseExpression(self: *Parser) ArithmeticError!i64 {
         self.skipWhitespace();
-        // Check for assignment: identifier = expr (but not ==)
+        // Check for assignment or compound assignment: identifier OP= expr
         const save_pos = self.pos;
         if (self.pos < self.input.len and (std.ascii.isAlphabetic(self.input[self.pos]) or self.input[self.pos] == '_')) {
             var end = self.pos;
@@ -262,16 +262,102 @@ const Parser = struct {
                 end += 1;
             }
             const var_name = self.input[self.pos..end];
-            var eq_pos = end;
-            // Skip whitespace before =
-            while (eq_pos < self.input.len and self.input[eq_pos] == ' ') eq_pos += 1;
-            if (eq_pos < self.input.len and self.input[eq_pos] == '=' and
-                (eq_pos + 1 >= self.input.len or self.input[eq_pos + 1] != '='))
+            var op_pos = end;
+            // Skip whitespace before operator
+            while (op_pos < self.input.len and self.input[op_pos] == ' ') op_pos += 1;
+
+            // Check for compound assignment operators: <<=, >>=, +=, -=, *=, /=, %=, &=, |=, ^=
+            // and simple assignment: =
+            const CompoundOp = enum { none, assign, add, sub, mul, div, mod, shl, shr, band, bor, bxor };
+            var compound_op: CompoundOp = .none;
+            var op_len: usize = 0;
+
+            if (op_pos + 2 < self.input.len and self.input[op_pos] == '<' and self.input[op_pos + 1] == '<' and self.input[op_pos + 2] == '=') {
+                compound_op = .shl;
+                op_len = 3;
+            } else if (op_pos + 2 < self.input.len and self.input[op_pos] == '>' and self.input[op_pos + 1] == '>' and self.input[op_pos + 2] == '=') {
+                compound_op = .shr;
+                op_len = 3;
+            } else if (op_pos + 1 < self.input.len and self.input[op_pos + 1] == '=') {
+                const op_char = self.input[op_pos];
+                switch (op_char) {
+                    '+' => {
+                        compound_op = .add;
+                        op_len = 2;
+                    },
+                    '-' => {
+                        compound_op = .sub;
+                        op_len = 2;
+                    },
+                    '*' => {
+                        compound_op = .mul;
+                        op_len = 2;
+                    },
+                    '/' => {
+                        compound_op = .div;
+                        op_len = 2;
+                    },
+                    '%' => {
+                        compound_op = .mod;
+                        op_len = 2;
+                    },
+                    '&' => {
+                        compound_op = .band;
+                        op_len = 2;
+                    },
+                    '|' => {
+                        compound_op = .bor;
+                        op_len = 2;
+                    },
+                    '^' => {
+                        compound_op = .bxor;
+                        op_len = 2;
+                    },
+                    '=' => {}, // == is not an assignment
+                    else => {},
+                }
+            } else if (op_pos < self.input.len and self.input[op_pos] == '=' and
+                (op_pos + 1 >= self.input.len or self.input[op_pos + 1] != '='))
             {
-                self.pos = eq_pos + 1;
-                const value = try self.parseExpression();
-                self.storeVariable(var_name, value);
-                return value;
+                compound_op = .assign;
+                op_len = 1;
+            }
+
+            if (compound_op != .none) {
+                self.pos = op_pos + op_len;
+                const rhs = try self.parseExpression();
+                if (compound_op == .assign) {
+                    self.storeVariable(var_name, rhs);
+                    return rhs;
+                }
+                const cur = self.getVariableValue(var_name);
+                const new_val: i64 = switch (compound_op) {
+                    .add => try checkedAdd(cur, rhs),
+                    .sub => try checkedSub(cur, rhs),
+                    .mul => try checkedMul(cur, rhs),
+                    .div => if (rhs != 0) blk: {
+                        if (cur == std.math.minInt(i64) and rhs == -1) return error.IntegerOverflow;
+                        break :blk @divTrunc(cur, rhs);
+                    } else return error.DivisionByZero,
+                    .mod => if (rhs != 0) blk: {
+                        if (cur == std.math.minInt(i64) and rhs == -1) break :blk 0;
+                        break :blk @rem(cur, rhs);
+                    } else return error.DivisionByZero,
+                    .shl => blk: {
+                        const shift_amt: u6 = @intCast(@min(@max(rhs, 0), 63));
+                        break :blk cur << shift_amt;
+                    },
+                    .shr => blk: {
+                        const shift_amt: u6 = @intCast(@min(@max(rhs, 0), 63));
+                        break :blk cur >> shift_amt;
+                    },
+                    .band => cur & rhs,
+                    .bor => cur | rhs,
+                    .bxor => cur ^ rhs,
+                    .none, .assign => unreachable,
+                };
+                self.storeVariable(var_name, new_val);
+                return new_val;
             }
         }
         self.pos = save_pos;
@@ -349,8 +435,8 @@ const Parser = struct {
         while (self.pos < self.input.len) {
             self.skipWhitespace();
             if (self.pos < self.input.len and self.input[self.pos] == '|') {
-                // Check it's not ||
-                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '|') {
+                // Check it's not || or |=
+                if (self.pos + 1 < self.input.len and (self.input[self.pos + 1] == '|' or self.input[self.pos + 1] == '=')) {
                     break;
                 }
                 self.pos += 1;
@@ -371,6 +457,8 @@ const Parser = struct {
         while (self.pos < self.input.len) {
             self.skipWhitespace();
             if (self.pos < self.input.len and self.input[self.pos] == '^') {
+                // Don't consume ^= (compound assignment)
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '=') break;
                 self.pos += 1;
                 const right = try self.parseBitwiseAnd();
                 left = left ^ right;
@@ -389,8 +477,8 @@ const Parser = struct {
         while (self.pos < self.input.len) {
             self.skipWhitespace();
             if (self.pos < self.input.len and self.input[self.pos] == '&') {
-                // Check it's not &&
-                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '&') {
+                // Check it's not && or &=
+                if (self.pos + 1 < self.input.len and (self.input[self.pos + 1] == '&' or self.input[self.pos + 1] == '=')) {
                     break;
                 }
                 self.pos += 1;
@@ -478,12 +566,16 @@ const Parser = struct {
             self.skipWhitespace();
             if (self.pos + 1 < self.input.len) {
                 if (self.input[self.pos] == '<' and self.input[self.pos + 1] == '<') {
+                    // Don't consume <<= (compound assignment)
+                    if (self.pos + 2 < self.input.len and self.input[self.pos + 2] == '=') break;
                     self.pos += 2;
                     const right = try self.parseAddSub();
                     // Zig requires u6 for shift amount
                     const shift_amt: u6 = @intCast(@min(@max(right, 0), 63));
                     left = left << shift_amt;
                 } else if (self.input[self.pos] == '>' and self.input[self.pos + 1] == '>') {
+                    // Don't consume >>= (compound assignment)
+                    if (self.pos + 2 < self.input.len and self.input[self.pos + 2] == '=') break;
                     self.pos += 2;
                     const right = try self.parseAddSub();
                     const shift_amt: u6 = @intCast(@min(@max(right, 0), 63));
@@ -508,14 +600,18 @@ const Parser = struct {
             if (self.pos >= self.input.len) break;
 
             const op = self.input[self.pos];
-            if (op == '+') {
+            if (op == '+' or op == '-') {
+                // Don't consume += or -= (compound assignment handled at expression level)
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '=') break;
+                // Don't consume ++ or -- (increment/decrement)
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == op) break;
                 self.pos += 1;
                 const right = try self.parseMulDiv();
-                left = try checkedAdd(left, right);
-            } else if (op == '-') {
-                self.pos += 1;
-                const right = try self.parseMulDiv();
-                left = try checkedSub(left, right);
+                if (op == '+') {
+                    left = try checkedAdd(left, right);
+                } else {
+                    left = try checkedSub(left, right);
+                }
             } else {
                 break;
             }
@@ -534,14 +630,16 @@ const Parser = struct {
 
             const op = self.input[self.pos];
             if (op == '*') {
-                // Check it's not **
-                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '*') {
+                // Check it's not ** or *=
+                if (self.pos + 1 < self.input.len and (self.input[self.pos + 1] == '*' or self.input[self.pos + 1] == '=')) {
                     break;
                 }
                 self.pos += 1;
                 const right = try self.parsePower();
                 left = try checkedMul(left, right);
             } else if (op == '/') {
+                // Don't consume /= (compound assignment)
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '=') break;
                 self.pos += 1;
                 const right = try self.parsePower();
                 if (right == 0) return error.DivisionByZero;
@@ -551,6 +649,8 @@ const Parser = struct {
                 }
                 left = @divTrunc(left, right);
             } else if (op == '%') {
+                // Don't consume %= (compound assignment)
+                if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '=') break;
                 self.pos += 1;
                 const right = try self.parsePower();
                 if (right == 0) return error.DivisionByZero;
@@ -758,26 +858,6 @@ const Parser = struct {
             const cur = self.getVariableValue(var_name);
             self.storeVariable(var_name, cur - 1);
             return cur; // post-decrement returns old value
-        }
-
-        // Check for compound assignment operators: +=, -=, *=, /=, %=
-        if (self.pos + 1 < self.input.len and self.input[self.pos + 1] == '=') {
-            const op_char = self.input[self.pos];
-            if (op_char == '+' or op_char == '-' or op_char == '*' or op_char == '/' or op_char == '%') {
-                self.pos += 2;
-                const rhs = self.parseExpression() catch return error.UnexpectedEnd;
-                const cur = self.getVariableValue(var_name);
-                const new_val = switch (op_char) {
-                    '+' => cur + rhs,
-                    '-' => cur - rhs,
-                    '*' => cur * rhs,
-                    '/' => if (rhs != 0) @divTrunc(cur, rhs) else return error.DivisionByZero,
-                    '%' => if (rhs != 0) @rem(cur, rhs) else return error.DivisionByZero,
-                    else => unreachable,
-                };
-                self.storeVariable(var_name, new_val);
-                return new_val;
-            }
         }
 
         // Check for array access: arr[index]

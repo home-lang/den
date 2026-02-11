@@ -229,8 +229,9 @@ fn applyFdClose(redir: types.Redirection) void {
     _ = std.c.close(@intCast(redir.fd));
 }
 
-/// Save current stdout and stderr file descriptors (for Windows builtin redirections)
+/// Save current stdin, stdout and stderr file descriptors (for builtin redirections without fork)
 pub const SavedFds = struct {
+    stdin_save: ?std.posix.fd_t = null,
     stdout_save: ?std.posix.fd_t = null,
     stderr_save: ?std.posix.fd_t = null,
 
@@ -238,15 +239,26 @@ pub const SavedFds = struct {
         if (comptime builtin.os.tag == .windows) return SavedFds{};
         var saved = SavedFds{};
 
-        // Duplicate stdout and stderr
-        saved.stdout_save = std.posix.dup(std.posix.STDOUT_FILENO) catch null;
-        saved.stderr_save = std.posix.dup(std.posix.STDERR_FILENO) catch null;
+        // Duplicate stdin, stdout and stderr using C dup
+        const stdin_dup = std.c.dup(std.posix.STDIN_FILENO);
+        saved.stdin_save = if (stdin_dup >= 0) stdin_dup else null;
+        const stdout_dup = std.c.dup(std.posix.STDOUT_FILENO);
+        saved.stdout_save = if (stdout_dup >= 0) stdout_dup else null;
+        const stderr_dup = std.c.dup(std.posix.STDERR_FILENO);
+        saved.stderr_save = if (stderr_dup >= 0) stderr_dup else null;
 
         return saved;
     }
 
     pub fn restore(self: *SavedFds) void {
         if (comptime builtin.os.tag == .windows) return;
+        // Restore stdin
+        if (self.stdin_save) |fd| {
+            _ = std.c.dup2(fd, std.posix.STDIN_FILENO);
+            std.posix.close(fd);
+            self.stdin_save = null;
+        }
+
         // Restore stdout
         if (self.stdout_save) |fd| {
             _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);

@@ -94,6 +94,9 @@ fn evaluateTestArgs(args: []const []const u8) !i32 {
         } else if (std.mem.eql(u8, op, "-x")) {
             std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .execute = true }) catch return 1;
             return 0;
+        } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{ .follow_symlinks = false }) catch return 1;
+            return if (stat.kind == .sym_link) 0 else 1;
         }
     }
 
@@ -270,7 +273,7 @@ fn evaluateExtendedTestExpr(args: [][]const u8, shell: ?*Shell) !bool {
             const stat = file.stat(std.Options.debug_io) catch return false;
             return stat.size > 0;
         } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
-            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch return false;
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{ .follow_symlinks = false }) catch return false;
             return stat.kind == .sym_link;
         } else if (std.mem.eql(u8, op, "-v")) {
             // Variable is set - check environment, arrays, and local vars

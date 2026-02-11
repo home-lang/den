@@ -3,6 +3,7 @@ const types = @import("types/mod.zig");
 const parser_mod = @import("parser/mod.zig");
 const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
+const redirection = @import("executor/redirection.zig");
 
 fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
     const raw = std.c.getenv(key) orelse return null;
@@ -187,6 +188,8 @@ pub const Shell = struct {
     break_levels: u32,
     // Counter for continue statement in loops (0 = no continue, N = continue N levels)
     continue_levels: u32,
+    // Flag: last executed chain was an AND-OR list (&&/||), so errexit should not apply
+    last_chain_had_and_or: bool,
     // Coprocess tracking
     coproc_pid: ?std.posix.pid_t,
     coproc_read_fd: ?std.posix.fd_t,
@@ -377,6 +380,7 @@ pub const Shell = struct {
             .in_cstyle_for_body = false,
             .break_levels = 0,
             .continue_levels = 0,
+            .last_chain_had_and_or = false,
             .coproc_pid = null,
             .coproc_read_fd = null,
             .coproc_write_fd = null,
@@ -2098,7 +2102,30 @@ pub const Shell = struct {
 
             // Check if this is a function call
             if (self.function_manager.hasFunction(cmd.name)) {
+                // If function call has redirections, save/restore fds around execution
+                var saved_fds = redirection.SavedFds{};
+                if (cmd.redirections.len > 0) {
+                    saved_fds = redirection.SavedFds.save();
+                    const expansion_context: ?redirection.ExpansionContext = .{
+                        .option_nounset = self.option_nounset,
+                        .option_noclobber = self.option_noclobber,
+                        .var_attributes = &self.var_attributes,
+                        .arrays = &self.arrays,
+                        .assoc_arrays = &self.assoc_arrays,
+                    };
+                    redirection.applyRedirections(
+                        self.allocator,
+                        cmd.redirections,
+                        &self.environment,
+                        expansion_context,
+                    ) catch {
+                        saved_fds.restore();
+                        self.last_exit_code = 1;
+                        return;
+                    };
+                }
                 const exit_code = self.function_manager.executeFunction(self, cmd.name, cmd.args) catch |err| {
+                    saved_fds.restore();
                     try IO.eprint("den: function error: {}\n", .{err});
                     self.last_exit_code = 1;
                     // Execute post_command hooks
@@ -2111,6 +2138,7 @@ pub const Shell = struct {
                     self.plugin_registry.executeHooks(.post_command, &post_context) catch {};
                     return;
                 };
+                saved_fds.restore();
                 self.last_exit_code = exit_code;
                 // Execute post_command hooks
                 var post_context = HookContext{
@@ -2342,6 +2370,7 @@ pub const Shell = struct {
         var line_start = content_start;
         var content_end = content_start;
         var found_delim = false;
+        var after_delim_pos: usize = input.len; // position after the delimiter line
 
         while (line_start < input.len) {
             const line_end = std.mem.indexOfScalarPos(u8, input, line_start, '\n') orelse input.len;
@@ -2357,6 +2386,7 @@ pub const Shell = struct {
             if (std.mem.eql(u8, std.mem.trim(u8, line, &std.ascii.whitespace), delimiter)) {
                 content_end = line_start;
                 found_delim = true;
+                after_delim_pos = if (line_end < input.len) line_end + 1 else input.len;
                 break;
             }
             line_start = if (line_end < input.len) line_end + 1 else input.len;
@@ -2463,11 +2493,25 @@ pub const Shell = struct {
                     std.posix.close(@intCast(saved_stdin));
                 }
 
+                // Execute any trailing content after the delimiter line
+                const trailing_q = std.mem.trim(u8, input[after_delim_pos..], &std.ascii.whitespace);
+                if (trailing_q.len > 0) {
+                    self.executeCommand(trailing_q) catch {};
+                }
+
                 // Return empty string to signal we handled it (caller will free and return)
                 return self.allocator.dupe(u8, "") catch null;
             }
         } else {
             // Unquoted heredoc: allow expansion via herestring with double quotes
+            // Also include any trailing content after the delimiter line (e.g., closing braces, more commands)
+            const trailing = std.mem.trim(u8, input[after_delim_pos..], &std.ascii.whitespace);
+            if (trailing.len > 0) {
+                const result = std.fmt.allocPrint(self.allocator, "{s} <<< \"{s}\"\n{s}", .{
+                    cmd_part, heredoc_content, trailing,
+                }) catch return null;
+                return result;
+            }
             const result = std.fmt.allocPrint(self.allocator, "{s} <<< \"{s}\"", .{
                 cmd_part, heredoc_content,
             }) catch return null;
@@ -3433,8 +3477,10 @@ pub const Shell = struct {
         // Execute each part separately
         for (parts_buf[0..part_count]) |part| {
             self.executeCommand(part) catch {};
-            // Honor set -e (errexit): stop if a command fails
-            if (self.option_errexit and self.last_exit_code != 0) break;
+            // Honor set -e (errexit): stop if a command fails.
+            // Per POSIX, errexit should not apply when the last command was part
+            // of an AND-OR list (&&/||) — those operators handle errors themselves.
+            if (self.option_errexit and self.last_exit_code != 0 and !self.last_chain_had_and_or) break;
         }
         return true;
     }

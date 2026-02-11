@@ -22,6 +22,34 @@ fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
     return allocator.dupe(u8, value) catch null;
 }
 
+/// Update PWD and OLDPWD environment variables after a directory change.
+/// old_cwd is the directory before the change.
+fn updatePwdEnv(shell: *Shell, old_cwd: []const u8) void {
+    // Set OLDPWD to the previous directory
+    const gop_old = shell.environment.getOrPut("OLDPWD") catch return;
+    if (gop_old.found_existing) {
+        shell.allocator.free(gop_old.value_ptr.*);
+        gop_old.value_ptr.* = shell.allocator.dupe(u8, old_cwd) catch return;
+    } else {
+        gop_old.key_ptr.* = shell.allocator.dupe(u8, "OLDPWD") catch return;
+        gop_old.value_ptr.* = shell.allocator.dupe(u8, old_cwd) catch return;
+    }
+
+    // Set PWD to the new current directory
+    var new_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    if (std.c.getcwd(&new_cwd_buf, new_cwd_buf.len)) |result| {
+        const new_cwd = std.mem.sliceTo(@as([*:0]u8, @ptrCast(result)), 0);
+        const gop_pwd = shell.environment.getOrPut("PWD") catch return;
+        if (gop_pwd.found_existing) {
+            shell.allocator.free(gop_pwd.value_ptr.*);
+            gop_pwd.value_ptr.* = shell.allocator.dupe(u8, new_cwd) catch return;
+        } else {
+            gop_pwd.key_ptr.* = shell.allocator.dupe(u8, "PWD") catch return;
+            gop_pwd.value_ptr.* = shell.allocator.dupe(u8, new_cwd) catch return;
+        }
+    }
+}
+
 /// Builtin: pushd - push directory onto stack and cd
 /// Supports: pushd (swap), pushd dir, pushd +N/-N (rotate)
 pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
@@ -52,6 +80,9 @@ pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 return;
             }
         }
+
+        // Update PWD/OLDPWD environment variables
+        updatePwdEnv(shell, cwd);
 
         // Push old cwd onto stack
         shell.dir_stack[shell.dir_stack_count - 1] = cwd_copy;
@@ -109,6 +140,9 @@ pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 }
             }
 
+            // Update PWD/OLDPWD environment variables
+            updatePwdEnv(shell, cwd);
+
             // Push old cwd onto stack
             if (shell.dir_stack_count >= shell.dir_stack.len) {
                 try IO.eprint("den: pushd: directory stack full\n", .{});
@@ -149,6 +183,9 @@ pub fn rotateDirStack(shell: *Shell, index: usize) !void {
             return error.Unexpected;
         }
     }
+
+    // Update PWD/OLDPWD environment variables
+    updatePwdEnv(shell, cwd);
 
     // Rotate the stack
     shell.allocator.free(shell.dir_stack[stack_idx].?);
@@ -223,6 +260,11 @@ pub fn builtinPopd(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 defer shell.allocator.free(dir);
                 shell.dir_stack[shell.dir_stack_count] = null;
 
+                // Get current directory before changing
+                var popd_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+                const popd_cwd_result = std.c.getcwd(&popd_cwd_buf, popd_cwd_buf.len);
+                const popd_old_cwd = if (popd_cwd_result) |r| std.mem.sliceTo(@as([*:0]u8, @ptrCast(r)), 0) else "";
+
                 {
                     var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
                     @memcpy(chdir_buf[0..dir.len], dir);
@@ -233,6 +275,9 @@ pub fn builtinPopd(shell: *Shell, cmd: *types.ParsedCommand) !void {
                         return;
                     }
                 }
+
+                // Update PWD/OLDPWD environment variables
+                updatePwdEnv(shell, popd_old_cwd);
             } else {
                 // Remove entry at index (without changing directory)
                 const stack_idx = shell.dir_stack_count - index;
@@ -259,6 +304,11 @@ pub fn builtinPopd(shell: *Shell, cmd: *types.ParsedCommand) !void {
     defer shell.allocator.free(dir);
     shell.dir_stack[shell.dir_stack_count] = null;
 
+    // Get current directory before changing
+    var popd_def_cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const popd_def_cwd_result = std.c.getcwd(&popd_def_cwd_buf, popd_def_cwd_buf.len);
+    const popd_def_old_cwd = if (popd_def_cwd_result) |r| std.mem.sliceTo(@as([*:0]u8, @ptrCast(r)), 0) else "";
+
     {
         var chdir_buf: [std.fs.max_path_bytes]u8 = undefined;
         @memcpy(chdir_buf[0..dir.len], dir);
@@ -269,6 +319,9 @@ pub fn builtinPopd(shell: *Shell, cmd: *types.ParsedCommand) !void {
             return;
         }
     }
+
+    // Update PWD/OLDPWD environment variables
+    updatePwdEnv(shell, popd_def_old_cwd);
 
     try printDirStack(shell);
     shell.last_exit_code = 0;

@@ -675,12 +675,20 @@ pub const Expansion = struct {
                         if (sliced.len == 0) {
                             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
                         }
+
+                        // For "${arr[*]}", use first character of IFS as separator (default: space)
+                        // For "${arr[@]}", always use space
+                        const sep: u8 = if (std.mem.eql(u8, index_part, "*")) blk: {
+                            const ifs_val = self.environment.get("IFS") orelse " \t\n";
+                            break :blk if (ifs_val.len > 0) ifs_val[0] else ' ';
+                        } else ' ';
+
                         var total_len: usize = 0;
                         for (sliced) |item| {
                             total_len += item.len;
                         }
                         if (sliced.len > 1) {
-                            total_len += sliced.len - 1; // spaces
+                            total_len += sliced.len - 1; // separators
                         }
 
                         var result = try self.allocator.alloc(u8, total_len);
@@ -689,7 +697,7 @@ pub const Expansion = struct {
                             @memcpy(result[pos..pos + item.len], item);
                             pos += item.len;
                             if (i < sliced.len - 1) {
-                                result[pos] = ' ';
+                                result[pos] = sep;
                                 pos += 1;
                             }
                         }
@@ -1051,6 +1059,68 @@ pub const Expansion = struct {
             }
         }
 
+        // Check for parameter expansion patterns BEFORE case conversion and replacement
+        // These must be checked first because patterns like ${VAR%,} could be confused
+        // with case conversion operators (${VAR,} lowercases first char).
+
+        // ${VAR##pattern} - remove longest prefix match (greedy)
+        if (std.mem.indexOf(u8, content, "##")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 2) {
+                const var_name_pp = content[0..sep_pos];
+                const pp_pattern = content[sep_pos + 2 ..];
+
+                if (self.environment.get(var_name_pp)) |value| {
+                    const result = try self.removePrefix(value, pp_pattern, true);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
+        // ${VAR#pattern} - remove shortest prefix match
+        // But NOT ${VAR/#pat/rep} which is prefix substitution (# after /)
+        if (std.mem.indexOf(u8, content, "#")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 1 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
+                const var_name_pp = content[0..sep_pos];
+                const pp_pattern = content[sep_pos + 1 ..];
+
+                if (self.environment.get(var_name_pp)) |value| {
+                    const result = try self.removePrefix(value, pp_pattern, false);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
+        // ${VAR%%pattern} - remove longest suffix match (greedy)
+        if (std.mem.indexOf(u8, content, "%%")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 2 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
+                const var_name_pp = content[0..sep_pos];
+                const pp_pattern = content[sep_pos + 2 ..];
+
+                if (self.environment.get(var_name_pp)) |value| {
+                    const result = try self.removeSuffix(value, pp_pattern, true);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
+        // ${VAR%pattern} - remove shortest suffix match
+        // But NOT ${VAR/%pat/rep} which is suffix substitution (% after /)
+        if (std.mem.indexOf(u8, content, "%")) |sep_pos| {
+            if (sep_pos > 0 and sep_pos < content.len - 1 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
+                const var_name_pp = content[0..sep_pos];
+                const pp_pattern = content[sep_pos + 1 ..];
+
+                if (self.environment.get(var_name_pp)) |value| {
+                    const result = try self.removeSuffix(value, pp_pattern, false);
+                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                }
+                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+            }
+        }
+
         // Check for case conversion: ${VAR^^} (uppercase all), ${VAR,,} (lowercase all),
         // ${VAR^} (uppercase first), ${VAR,} (lowercase first)
         if (std.mem.indexOf(u8, content, "^^")) |sep_pos| {
@@ -1138,65 +1208,6 @@ pub const Expansion = struct {
                         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     }
                     return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-                }
-                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-            }
-        }
-
-        // Check for parameter expansion patterns BEFORE replacement (which also uses /)
-        // ${VAR##pattern} - remove longest prefix match (greedy)
-        if (std.mem.indexOf(u8, content, "##")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 2) {
-                const var_name_pp = content[0..sep_pos];
-                const pp_pattern = content[sep_pos + 2 ..];
-
-                if (self.environment.get(var_name_pp)) |value| {
-                    const result = try self.removePrefix(value, pp_pattern, true);
-                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-                }
-                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-            }
-        }
-
-        // ${VAR#pattern} - remove shortest prefix match
-        // But NOT ${VAR/#pat/rep} which is prefix substitution (# after /)
-        if (std.mem.indexOf(u8, content, "#")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 1 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
-                const var_name_pp = content[0..sep_pos];
-                const pp_pattern = content[sep_pos + 1 ..];
-
-                if (self.environment.get(var_name_pp)) |value| {
-                    const result = try self.removePrefix(value, pp_pattern, false);
-                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-                }
-                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-            }
-        }
-
-        // ${VAR%%pattern} - remove longest suffix match (greedy)
-        if (std.mem.indexOf(u8, content, "%%")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 2 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
-                const var_name_pp = content[0..sep_pos];
-                const pp_pattern = content[sep_pos + 2 ..];
-
-                if (self.environment.get(var_name_pp)) |value| {
-                    const result = try self.removeSuffix(value, pp_pattern, true);
-                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-                }
-                return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
-            }
-        }
-
-        // ${VAR%pattern} - remove shortest suffix match
-        // But NOT ${VAR/%pat/rep} which is suffix substitution (% after /)
-        if (std.mem.indexOf(u8, content, "%")) |sep_pos| {
-            if (sep_pos > 0 and sep_pos < content.len - 1 and std.mem.indexOfScalar(u8, content[0..sep_pos], '/') == null) {
-                const var_name_pp = content[0..sep_pos];
-                const pp_pattern = content[sep_pos + 1 ..];
-
-                if (self.environment.get(var_name_pp)) |value| {
-                    const result = try self.removeSuffix(value, pp_pattern, false);
-                    return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
                 return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
             }

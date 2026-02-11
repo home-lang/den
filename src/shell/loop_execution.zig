@@ -359,15 +359,15 @@ pub fn executeSelectLoop(self: *Shell, input: []const u8) !void {
 
     const ps3 = self.environment.get("PS3") orelse "#? ";
 
-    // Display menu
-    try IO.print("\n", .{});
+    // Display menu on stderr (like bash)
+    try IO.eprint("\n", .{});
     for (items_buf[0..items_count], 1..) |item, idx| {
-        try IO.print("{d}) {s}\n", .{ idx, item });
+        try IO.eprint("{d}) {s}\n", .{ idx, item });
     }
 
     // Main select loop
     while (true) {
-        try IO.print("{s}", .{ps3});
+        try IO.eprint("{s}", .{ps3});
 
         var input_buf: [1024]u8 = undefined;
         const bytes_read = if (comptime @import("builtin").os.tag == .windows) blk: {
@@ -385,9 +385,9 @@ pub fn executeSelectLoop(self: *Shell, input: []const u8) !void {
         const user_input = std.mem.trim(u8, input_buf[0..bytes_read], &std.ascii.whitespace);
 
         if (user_input.len == 0) {
-            try IO.print("\n", .{});
+            try IO.eprint("\n", .{});
             for (items_buf[0..items_count], 1..) |item, idx| {
-                try IO.print("{d}) {s}\n", .{ idx, item });
+                try IO.eprint("{d}) {s}\n", .{ idx, item });
             }
             continue;
         }
@@ -472,7 +472,7 @@ pub fn executeSelectBody(self: *Shell, body: []const u8) void {
     }
 }
 
-/// Execute arithmetic statement (like i=0 or i++)
+/// Execute arithmetic statement (like i=0, i++, i+=2, etc.)
 pub fn executeArithmeticStatement(self: *Shell, stmt: []const u8) void {
     const trimmed = std.mem.trim(u8, stmt, &std.ascii.whitespace);
     if (trimmed.len == 0) return;
@@ -497,7 +497,60 @@ pub fn executeArithmeticStatement(self: *Shell, stmt: []const u8) void {
         return;
     }
 
-    // Handle assignment: var=expr
+    // Handle compound assignment operators: <<=, >>=, +=, -=, *=, /=, %=, &=, |=, ^=
+    // Check 3-char operators before 2-char ones
+    const CompoundOp = struct { pattern: []const u8, len: u8 };
+    const compound_ops = [_]CompoundOp{
+        .{ .pattern = "<<=", .len = 3 },
+        .{ .pattern = ">>=", .len = 3 },
+        .{ .pattern = "+=", .len = 2 },
+        .{ .pattern = "-=", .len = 2 },
+        .{ .pattern = "*=", .len = 2 },
+        .{ .pattern = "/=", .len = 2 },
+        .{ .pattern = "%=", .len = 2 },
+        .{ .pattern = "&=", .len = 2 },
+        .{ .pattern = "|=", .len = 2 },
+        .{ .pattern = "^=", .len = 2 },
+    };
+    for (compound_ops) |cop| {
+        if (std.mem.indexOf(u8, trimmed, cop.pattern)) |pos| {
+            const var_name = std.mem.trim(u8, trimmed[0..pos], &std.ascii.whitespace);
+            const rhs_str = std.mem.trim(u8, trimmed[pos + cop.len ..], &std.ascii.whitespace);
+            const current = getVariableValueForArith(self, var_name);
+            const current_val = std.fmt.parseInt(i64, current, 10) catch 0;
+            const rhs_val = evaluateArithmeticExpr(self, rhs_str);
+            const result: i64 = if (std.mem.eql(u8, cop.pattern, "+="))
+                current_val + rhs_val
+            else if (std.mem.eql(u8, cop.pattern, "-="))
+                current_val - rhs_val
+            else if (std.mem.eql(u8, cop.pattern, "*="))
+                current_val * rhs_val
+            else if (std.mem.eql(u8, cop.pattern, "/="))
+                if (rhs_val != 0) @divTrunc(current_val, rhs_val) else 0
+            else if (std.mem.eql(u8, cop.pattern, "%="))
+                if (rhs_val != 0) @rem(current_val, rhs_val) else 0
+            else if (std.mem.eql(u8, cop.pattern, "<<=")) blk: {
+                const shift_amt: u6 = @intCast(@min(@max(rhs_val, 0), 63));
+                break :blk current_val << shift_amt;
+            } else if (std.mem.eql(u8, cop.pattern, ">>=")) blk: {
+                const shift_amt: u6 = @intCast(@min(@max(rhs_val, 0), 63));
+                break :blk current_val >> shift_amt;
+            } else if (std.mem.eql(u8, cop.pattern, "&="))
+                current_val & rhs_val
+            else if (std.mem.eql(u8, cop.pattern, "|="))
+                current_val | rhs_val
+            else if (std.mem.eql(u8, cop.pattern, "^="))
+                current_val ^ rhs_val
+            else
+                current_val;
+            var buf: [32]u8 = undefined;
+            const new_val = std.fmt.bufPrint(&buf, "{d}", .{result}) catch return;
+            setArithVariable(self, var_name, new_val);
+            return;
+        }
+    }
+
+    // Handle simple assignment: var=expr
     if (std.mem.indexOf(u8, trimmed, "=")) |eq_pos| {
         const var_name = std.mem.trim(u8, trimmed[0..eq_pos], &std.ascii.whitespace);
         const expr = std.mem.trim(u8, trimmed[eq_pos + 1 ..], &std.ascii.whitespace);

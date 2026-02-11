@@ -549,27 +549,27 @@ pub const ControlFlowExecutor = struct {
     pub fn executeSelect(self: *ControlFlowExecutor, menu: *SelectMenu) !i32 {
         var last_exit: i32 = 0;
         const stdin_handle = if (comptime builtin.os.tag == .windows) std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.Unexpected else std.posix.STDIN_FILENO;
-        const stdout_handle = if (comptime builtin.os.tag == .windows) std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.Unexpected else std.posix.STDOUT_FILENO;
+        const stderr_handle = if (comptime builtin.os.tag == .windows) std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse return error.Unexpected else std.posix.STDERR_FILENO;
         const stdin_file = std.Io.File{ .handle = stdin_handle, .flags = .{ .nonblocking = false } };
-        const stdout_file = std.Io.File{ .handle = stdout_handle, .flags = .{ .nonblocking = false } };
+        const stderr_file = std.Io.File{ .handle = stderr_handle, .flags = .{ .nonblocking = false } };
         var stdin_buf: [4096]u8 = undefined;
         var stdin_reader = stdin_file.reader(std.Options.debug_io, &stdin_buf);
         var reader = stdin_reader.interface;
-        var stdout_buf: [4096]u8 = undefined;
-        var stdout_writer = stdout_file.writer(std.Options.debug_io, &stdout_buf);
-        defer stdout_writer.interface.flush() catch {};
+        var stderr_buf: [4096]u8 = undefined;
+        var stderr_writer = stderr_file.writer(std.Options.debug_io, &stderr_buf);
+        defer stderr_writer.interface.flush() catch {};
 
-        // Display menu items once
-        try stdout_file.writeStreamingAll(std.Options.debug_io, "\n");
+        // Display menu items once (on stderr, like bash)
+        try stderr_file.writeStreamingAll(std.Options.debug_io, "\n");
         for (menu.items, 1..) |item, idx| {
-            try stdout_writer.interface.print("{d}) {s}\n", .{ idx, item });
+            try stderr_writer.interface.print("{d}) {s}\n", .{ idx, item });
         }
-        try stdout_writer.interface.flush();
+        try stderr_writer.interface.flush();
 
         // Loop until break
         while (true) {
-            // Display prompt
-            try stdout_file.writeStreamingAll(std.Options.debug_io, menu.prompt);
+            // Display prompt on stderr (like bash)
+            try stderr_file.writeStreamingAll(std.Options.debug_io, menu.prompt);
 
             // Read user input
             var input_buf: [1024]u8 = undefined;
@@ -584,12 +584,12 @@ pub const ControlFlowExecutor = struct {
             // Parse selection number
             const selection = std.fmt.parseInt(usize, trimmed, 10) catch {
                 // Invalid number, ask again
-                try stdout_file.writeStreamingAll(std.Options.debug_io, "Invalid selection\n");
+                try stderr_file.writeStreamingAll(std.Options.debug_io, "Invalid selection\n");
                 continue;
             };
 
             if (selection == 0 or selection > menu.items.len) {
-                try stdout_file.writeStreamingAll(std.Options.debug_io, "Invalid selection\n");
+                try stderr_file.writeStreamingAll(std.Options.debug_io, "Invalid selection\n");
                 continue;
             }
 
