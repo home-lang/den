@@ -109,14 +109,14 @@ pub const BraceExpander = struct {
             } else if (c == '}') {
                 if (depth > 0) depth -= 1;
             } else if (c == ',' and depth == 0) {
-                // Found a top-level comma
-                const item = std.mem.trim(u8, content[item_start..i], &std.ascii.whitespace);
+                // Found a top-level comma - preserve whitespace (bash behavior)
+                const item = content[item_start..i];
                 try items.append(self.allocator, item);
                 item_start = i + 1;
             }
         }
-        // Don't forget the last item
-        const last_item = std.mem.trim(u8, content[item_start..], &std.ascii.whitespace);
+        // Don't forget the last item - preserve whitespace (bash behavior)
+        const last_item = content[item_start..];
         try items.append(self.allocator, last_item);
 
         // Build results
@@ -523,4 +523,101 @@ test "brace expansion deeply nested" {
     try std.testing.expectEqualStrings("a1", result[0]);
     try std.testing.expectEqualStrings("a2", result[1]);
     try std.testing.expectEqualStrings("b", result[2]);
+}
+
+test "brace expansion preserves whitespace in items" {
+    const allocator = std.testing.allocator;
+    var expander = BraceExpander.init(allocator);
+
+    // Bash preserves whitespace in brace items: {a , b} -> "a " and " b"
+    const result = try expander.expand("{a , b}");
+    defer {
+        for (result) |item| allocator.free(item);
+        allocator.free(result);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), result.len);
+    try std.testing.expectEqualStrings("a ", result[0]);
+    try std.testing.expectEqualStrings(" b", result[1]);
+}
+
+test "brace expansion empty items" {
+    const allocator = std.testing.allocator;
+    var expander = BraceExpander.init(allocator);
+
+    // Empty items: {,b} -> "" and "b"
+    const result = try expander.expand("x{,b}y");
+    defer {
+        for (result) |item| allocator.free(item);
+        allocator.free(result);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), result.len);
+    try std.testing.expectEqualStrings("xy", result[0]);
+    try std.testing.expectEqualStrings("xby", result[1]);
+}
+
+test "brace expansion reverse numeric sequence" {
+    const allocator = std.testing.allocator;
+    var expander = BraceExpander.init(allocator);
+
+    // Reverse: {3..1} -> 3, 2, 1
+    const result = try expander.expand("{3..1}");
+    defer {
+        for (result) |item| allocator.free(item);
+        allocator.free(result);
+    }
+
+    try std.testing.expectEqual(@as(usize, 3), result.len);
+    try std.testing.expectEqualStrings("3", result[0]);
+    try std.testing.expectEqualStrings("2", result[1]);
+    try std.testing.expectEqualStrings("1", result[2]);
+}
+
+test "brace expansion with step" {
+    const allocator = std.testing.allocator;
+    var expander = BraceExpander.init(allocator);
+
+    // Step: {1..10..3} -> 1, 4, 7, 10
+    const result = try expander.expand("{1..10..3}");
+    defer {
+        for (result) |item| allocator.free(item);
+        allocator.free(result);
+    }
+
+    try std.testing.expectEqual(@as(usize, 4), result.len);
+    try std.testing.expectEqualStrings("1", result[0]);
+    try std.testing.expectEqualStrings("4", result[1]);
+    try std.testing.expectEqualStrings("7", result[2]);
+    try std.testing.expectEqualStrings("10", result[3]);
+}
+
+test "brace expansion single item no expansion" {
+    const allocator = std.testing.allocator;
+    var expander = BraceExpander.init(allocator);
+
+    // Single item with no comma - no expansion
+    const result = try expander.expand("{foo}");
+    defer {
+        for (result) |item| allocator.free(item);
+        allocator.free(result);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), result.len);
+    try std.testing.expectEqualStrings("{foo}", result[0]);
+}
+
+test "brace expansion no braces" {
+    const allocator = std.testing.allocator;
+    var expander = BraceExpander.init(allocator);
+
+    // No braces at all
+    const result = try expander.expand("hello");
+    defer {
+        for (result) |item| allocator.free(item);
+        allocator.free(result);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), result.len);
+    try std.testing.expectEqualStrings("hello", result[0]);
 }

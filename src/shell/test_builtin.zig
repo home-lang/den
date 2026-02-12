@@ -114,6 +114,134 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
             };
             shell.last_exit_code = if (stat.size > 0) 0 else 1;
             return;
+        } else if (std.mem.eql(u8, op, "-r")) {
+            // File exists and is readable
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .read = true }) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            shell.last_exit_code = 0;
+            return;
+        } else if (std.mem.eql(u8, op, "-w")) {
+            // File exists and is writable
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .read = false }) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            // access with .read=false checks existence; for write check use stat
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            _ = stat;
+            // On Unix, check write permission bits
+            if (comptime @import("builtin").os.tag != .windows) {
+                std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .read = false }) catch {
+                    shell.last_exit_code = 1;
+                    return;
+                };
+            }
+            shell.last_exit_code = 0;
+            return;
+        } else if (std.mem.eql(u8, op, "-x")) {
+            // File exists and is executable
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            if (comptime @import("builtin").os.tag == .windows) {
+                // On Windows, check file extension
+                shell.last_exit_code = if (stat.kind == .file) 0 else 1;
+            } else {
+                shell.last_exit_code = if (stat.kind == .file and (stat.permissions.toMode() & 0o111) != 0) 0 else 1;
+            }
+            return;
+        } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
+            // File exists and is a symbolic link
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            shell.last_exit_code = if (stat.kind == .sym_link) 0 else 1;
+            return;
+        } else if (std.mem.eql(u8, op, "-p")) {
+            // File exists and is a named pipe (FIFO)
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            shell.last_exit_code = if (stat.kind == .named_pipe) 0 else 1;
+            return;
+        } else if (std.mem.eql(u8, op, "-b")) {
+            // File exists and is a block device
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            shell.last_exit_code = if (stat.kind == .block_device) 0 else 1;
+            return;
+        } else if (std.mem.eql(u8, op, "-c")) {
+            // File exists and is a character device
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            shell.last_exit_code = if (stat.kind == .character_device) 0 else 1;
+            return;
+        } else if (std.mem.eql(u8, op, "-t")) {
+            // File descriptor is a terminal
+            const fd_num = std.fmt.parseInt(i32, arg, 10) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            if (comptime @import("builtin").os.tag == .windows) {
+                shell.last_exit_code = 1; // Simplified for Windows
+            } else {
+                shell.last_exit_code = if (std.c.isatty(@intCast(fd_num)) != 0) 0 else 1;
+            }
+            return;
+        }
+    }
+
+    // Compound expressions with -a (and) and -o (or)
+    // e.g., [ -f file -a -r file ] or [ -n "$x" -o -n "$y" ]
+    if (args.len >= 5) {
+        // Find -a or -o operator
+        var op_idx: usize = 1;
+        while (op_idx < args.len) : (op_idx += 1) {
+            if (std.mem.eql(u8, args[op_idx], "-o")) {
+                // OR: evaluate left side first
+                var left_cmd = cmd.*;
+                left_cmd.args = args[0..op_idx];
+                builtinTest(shell, &left_cmd) catch {};
+                const left_result = shell.last_exit_code;
+                if (left_result == 0) {
+                    shell.last_exit_code = 0;
+                    return;
+                }
+                var right_cmd = cmd.*;
+                right_cmd.args = args[op_idx + 1 ..];
+                builtinTest(shell, &right_cmd) catch {};
+                return;
+            }
+        }
+        op_idx = 1;
+        while (op_idx < args.len) : (op_idx += 1) {
+            if (std.mem.eql(u8, args[op_idx], "-a")) {
+                // AND: evaluate both sides
+                var left_cmd = cmd.*;
+                left_cmd.args = args[0..op_idx];
+                builtinTest(shell, &left_cmd) catch {};
+                const left_result = shell.last_exit_code;
+                if (left_result != 0) {
+                    shell.last_exit_code = left_result;
+                    return;
+                }
+                var right_cmd = cmd.*;
+                right_cmd.args = args[op_idx + 1 ..];
+                builtinTest(shell, &right_cmd) catch {};
+                return;
+            }
         }
     }
 

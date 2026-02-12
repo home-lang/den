@@ -802,6 +802,8 @@ const Parser = struct {
             if (ch == '-') {
                 self.pos += 1;
                 const value = try self.parseUnary();
+                // Negating MIN_INT overflows since |MIN_INT| > MAX_INT
+                if (value == std.math.minInt(i64)) return error.IntegerOverflow;
                 return -value;
             } else if (ch == '+') {
                 self.pos += 1;
@@ -1284,6 +1286,51 @@ test "arithmetic boundary values" {
     try std.testing.expectEqual(@as(i64, -1), try arith.eval("(-1) ** 101"));
     try std.testing.expectEqual(@as(i64, 1), try arith.eval("1 ** 1000"));
     try std.testing.expectEqual(@as(i64, 0), try arith.eval("0 ** 100"));
+}
+
+test "arithmetic unary negation overflow" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Negating MIN_INT should overflow (since |MIN_INT| > MAX_INT)
+    // We can't write -9223372036854775808 directly as a literal,
+    // but we can get it via subtraction from boundary
+    try std.testing.expectError(error.IntegerOverflow, arith.eval("-(-9223372036854775807 - 1)"));
+
+    // Double negation of normal values should work fine
+    try std.testing.expectEqual(@as(i64, 42), try arith.eval("-(-42)"));
+    try std.testing.expectEqual(@as(i64, -1), try arith.eval("-(1)"));
+}
+
+test "arithmetic octal with 8 and 9 digits" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Valid octal
+    try std.testing.expectEqual(@as(i64, 8), try arith.eval("010"));
+    try std.testing.expectEqual(@as(i64, 63), try arith.eval("077"));
+
+    // 089 should fail - '8' is not a valid octal digit
+    try std.testing.expectError(error.InvalidNumber, arith.eval("089"));
+}
+
+test "arithmetic comma operator" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // Comma operator: evaluates all, returns last
+    try std.testing.expectEqual(@as(i64, 3), try arith.eval("1, 2, 3"));
+    try std.testing.expectEqual(@as(i64, 10), try arith.eval("5 + 5, 10"));
+}
+
+test "arithmetic base-N syntax" {
+    const allocator = std.testing.allocator;
+    var arith = Arithmetic.init(allocator);
+
+    // base#value syntax
+    try std.testing.expectEqual(@as(i64, 255), try arith.eval("16#ff"));
+    try std.testing.expectEqual(@as(i64, 10), try arith.eval("2#1010"));
+    try std.testing.expectEqual(@as(i64, 63), try arith.eval("8#77"));
 }
 
 test "expression cache basic" {

@@ -91,20 +91,38 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 }
             }
 
-            // Parse width
-            while (j < format.len and format[j] >= '0' and format[j] <= '9') {
-                width = width * 10 + (format[j] - '0');
+            // Parse width - support * (take from next argument)
+            if (j < format.len and format[j] == '*') {
+                if (arg_idx < cmd.args.len) {
+                    width = @intCast(@max(std.fmt.parseInt(i64, cmd.args[arg_idx], 10) catch 0, 0));
+                    arg_idx += 1;
+                    did_consume_arg = true;
+                }
                 j += 1;
+            } else {
+                while (j < format.len and format[j] >= '0' and format[j] <= '9') {
+                    width = width * 10 + (format[j] - '0');
+                    j += 1;
+                }
             }
 
-            // Parse precision
+            // Parse precision - support .* (take from next argument)
             if (j < format.len and format[j] == '.') {
                 j += 1;
                 precision = 0;
                 has_precision = true;
-                while (j < format.len and format[j] >= '0' and format[j] <= '9') {
-                    precision = precision * 10 + (format[j] - '0');
+                if (j < format.len and format[j] == '*') {
+                    if (arg_idx < cmd.args.len) {
+                        precision = @intCast(@max(std.fmt.parseInt(i64, cmd.args[arg_idx], 10) catch 0, 0));
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
                     j += 1;
+                } else {
+                    while (j < format.len and format[j] >= '0' and format[j] <= '9') {
+                        precision = precision * 10 + (format[j] - '0');
+                        j += 1;
+                    }
                 }
             }
 
@@ -212,6 +230,30 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     did_consume_arg = true;
                 }
                 i = j + 1;
+            } else if (spec == 'e' or spec == 'E') {
+                // Scientific notation
+                if (arg_idx < cmd.args.len) {
+                    const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
+                    try printfScientific(num, width, precision, left_justify, spec == 'E');
+                    arg_idx += 1;
+                    did_consume_arg = true;
+                }
+                i = j + 1;
+            } else if (spec == 'g' or spec == 'G') {
+                // Shortest representation (float or scientific)
+                if (arg_idx < cmd.args.len) {
+                    const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
+                    // Use scientific if exponent < -4 or >= precision
+                    const abs_num = @abs(num);
+                    if (abs_num != 0 and (abs_num < 0.0001 or abs_num >= std.math.pow(f64, 10.0, @floatFromInt(precision)))) {
+                        try printfScientific(num, width, if (precision > 0) precision - 1 else 0, left_justify, spec == 'G');
+                    } else {
+                        try printfFloat(num, width, precision, left_justify);
+                    }
+                    arg_idx += 1;
+                    did_consume_arg = true;
+                }
+                i = j + 1;
             } else if (spec == '%') {
                 // Escaped %
                 try IO.print("%", .{});
@@ -302,6 +344,72 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                         continue;
                     }
                 },
+                'u' => {
+                    // Unicode escape \uHHHH (1-4 hex digits) -> UTF-8
+                    var codepoint: u21 = 0;
+                    var hex_count: usize = 0;
+                    var k: usize = i + 2;
+                    while (k < format.len and hex_count < 4) : (k += 1) {
+                        const c = format[k];
+                        const digit: u21 = if (c >= '0' and c <= '9')
+                            c - '0'
+                        else if (c >= 'a' and c <= 'f')
+                            c - 'a' + 10
+                        else if (c >= 'A' and c <= 'F')
+                            c - 'A' + 10
+                        else
+                            break;
+                        codepoint = codepoint * 16 + digit;
+                        hex_count += 1;
+                    }
+                    if (hex_count > 0) {
+                        var utf8_buf: [4]u8 = undefined;
+                        const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch 0;
+                        if (utf8_len > 0) {
+                            try IO.print("{s}", .{utf8_buf[0..utf8_len]});
+                        }
+                        i = k;
+                        continue;
+                    } else {
+                        try IO.print("{c}", .{format[i]});
+                        i += 1;
+                        continue;
+                    }
+                },
+                'U' => {
+                    // Unicode escape \UHHHHHHHH (1-8 hex digits) -> UTF-8
+                    var codepoint: u21 = 0;
+                    var hex_count: usize = 0;
+                    var k: usize = i + 2;
+                    while (k < format.len and hex_count < 8) : (k += 1) {
+                        const c = format[k];
+                        const digit: u32 = if (c >= '0' and c <= '9')
+                            c - '0'
+                        else if (c >= 'a' and c <= 'f')
+                            c - 'a' + 10
+                        else if (c >= 'A' and c <= 'F')
+                            c - 'A' + 10
+                        else
+                            break;
+                        const new_cp = @as(u32, codepoint) * 16 + digit;
+                        if (new_cp > 0x10FFFF) break; // Max Unicode codepoint
+                        codepoint = @intCast(new_cp);
+                        hex_count += 1;
+                    }
+                    if (hex_count > 0) {
+                        var utf8_buf: [4]u8 = undefined;
+                        const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch 0;
+                        if (utf8_len > 0) {
+                            try IO.print("{s}", .{utf8_buf[0..utf8_len]});
+                        }
+                        i = k;
+                        continue;
+                    } else {
+                        try IO.print("{c}", .{format[i]});
+                        i += 1;
+                        continue;
+                    }
+                },
                 else => try IO.print("{c}", .{format[i]}),
             }
             i += 2;
@@ -353,14 +461,26 @@ pub fn printfInt(num: i64, width: usize, zero_pad: bool, left_justify: bool) !vo
     const str = std.fmt.bufPrint(&buf, "{d}", .{num}) catch return;
     if (width > 0 and str.len < width) {
         const pad = width - str.len;
-        const pad_char: u8 = if (zero_pad and !left_justify) '0' else ' ';
         if (left_justify) {
             try IO.print("{s}", .{str});
             var p: usize = 0;
             while (p < pad) : (p += 1) try IO.print(" ", .{});
+        } else if (zero_pad) {
+            // Zero-pad: place zeros after the sign but before the digits
+            // e.g., printf "%05d" -1 -> "-0001" (not "000-1")
+            if (num < 0) {
+                try IO.print("-", .{});
+                var p: usize = 0;
+                while (p < pad) : (p += 1) try IO.print("0", .{});
+                try IO.print("{s}", .{str[1..]}); // digits without the minus
+            } else {
+                var p: usize = 0;
+                while (p < pad) : (p += 1) try IO.print("0", .{});
+                try IO.print("{s}", .{str});
+            }
         } else {
             var p: usize = 0;
-            while (p < pad) : (p += 1) try IO.print("{c}", .{pad_char});
+            while (p < pad) : (p += 1) try IO.print(" ", .{});
             try IO.print("{s}", .{str});
         }
     } else {
@@ -425,6 +545,68 @@ pub fn printfFloat(num: f64, width: usize, precision: usize, left_justify: bool)
         }
     } else {
         try IO.print("{s}", .{str});
+    }
+}
+
+/// Helper for printf - format float in scientific notation (%e / %E)
+pub fn printfScientific(num: f64, width: usize, precision: usize, left_justify: bool, uppercase: bool) !void {
+    // Compute mantissa and exponent manually
+    var buf: [128]u8 = undefined;
+    const abs_num = @abs(num);
+    var exp_val: i32 = 0;
+    var mantissa = abs_num;
+
+    if (abs_num != 0.0 and !std.math.isNan(abs_num) and !std.math.isInf(abs_num)) {
+        exp_val = @intFromFloat(@floor(std.math.log10(abs_num)));
+        mantissa = abs_num / std.math.pow(f64, 10.0, @floatFromInt(exp_val));
+        // Normalize: ensure 1.0 <= mantissa < 10.0
+        if (mantissa >= 10.0) {
+            mantissa /= 10.0;
+            exp_val += 1;
+        } else if (mantissa < 1.0 and mantissa > 0.0) {
+            mantissa *= 10.0;
+            exp_val -= 1;
+        }
+    }
+
+    if (num < 0) mantissa = -mantissa;
+
+    // Format mantissa with precision
+    const mant_str = switch (precision) {
+        0 => std.fmt.bufPrint(&buf, "{d:.0}", .{mantissa}) catch return,
+        1 => std.fmt.bufPrint(&buf, "{d:.1}", .{mantissa}) catch return,
+        2 => std.fmt.bufPrint(&buf, "{d:.2}", .{mantissa}) catch return,
+        3 => std.fmt.bufPrint(&buf, "{d:.3}", .{mantissa}) catch return,
+        4 => std.fmt.bufPrint(&buf, "{d:.4}", .{mantissa}) catch return,
+        5 => std.fmt.bufPrint(&buf, "{d:.5}", .{mantissa}) catch return,
+        else => std.fmt.bufPrint(&buf, "{d:.6}", .{mantissa}) catch return,
+    };
+
+    // Format exponent
+    var exp_buf: [16]u8 = undefined;
+    const e_char: u8 = if (uppercase) 'E' else 'e';
+    const exp_str = if (exp_val >= 0)
+        std.fmt.bufPrint(&exp_buf, "{c}+{d:0>2}", .{ e_char, exp_val }) catch return
+    else
+        std.fmt.bufPrint(&exp_buf, "{c}-{d:0>2}", .{ e_char, -exp_val }) catch return;
+
+    // Combine and apply width
+    var full_buf: [160]u8 = undefined;
+    const full = std.fmt.bufPrint(&full_buf, "{s}{s}", .{ mant_str, exp_str }) catch return;
+
+    if (width > 0 and full.len < width) {
+        const pad = width - full.len;
+        if (left_justify) {
+            try IO.print("{s}", .{full});
+            var p: usize = 0;
+            while (p < pad) : (p += 1) try IO.print(" ", .{});
+        } else {
+            var p: usize = 0;
+            while (p < pad) : (p += 1) try IO.print(" ", .{});
+            try IO.print("{s}", .{full});
+        }
+    } else {
+        try IO.print("{s}", .{full});
     }
 }
 

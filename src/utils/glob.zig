@@ -598,6 +598,12 @@ pub const Glob = struct {
             end += 1;
         }
 
+        // POSIX: ] as the first character in a class (or after ! / ^) is a literal ]
+        // e.g., []abc] matches ], a, b, or c; [!]] matches anything except ]
+        if (end < pattern.len and pattern[end] == ']') {
+            end += 1;
+        }
+
         while (end < pattern.len and pattern[end] != ']') {
             end += 1;
         }
@@ -808,6 +814,50 @@ test "character class negation" {
 
     try std.testing.expect(glob.matchPattern("file[^abc].txt", "filed.txt"));
     try std.testing.expect(!glob.matchPattern("file[^abc].txt", "filea.txt"));
+}
+
+test "character class with ] as first char (POSIX)" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    // POSIX: ] as first character in class is literal
+    // []abc] should match ], a, b, or c
+    try std.testing.expect(glob.matchPattern("[]abc]", "]"));
+    try std.testing.expect(glob.matchPattern("[]abc]", "a"));
+    try std.testing.expect(glob.matchPattern("[]abc]", "b"));
+    try std.testing.expect(!glob.matchPattern("[]abc]", "d"));
+
+    // [!]] should match anything except ]
+    try std.testing.expect(!glob.matchPattern("[!]]", "]"));
+    try std.testing.expect(glob.matchPattern("[!]]", "a"));
+}
+
+test "glob edge cases" {
+    const allocator = std.testing.allocator;
+    var glob = Glob.init(allocator);
+
+    // Empty pattern matches empty string
+    try std.testing.expect(glob.matchPattern("", ""));
+    try std.testing.expect(!glob.matchPattern("", "a"));
+
+    // * matches empty string
+    try std.testing.expect(glob.matchPattern("*", ""));
+    try std.testing.expect(glob.matchPattern("*", "anything"));
+
+    // ? must match exactly one character
+    try std.testing.expect(!glob.matchPattern("?", ""));
+    try std.testing.expect(glob.matchPattern("?", "x"));
+    try std.testing.expect(!glob.matchPattern("?", "xy"));
+
+    // Multiple wildcards
+    try std.testing.expect(glob.matchPattern("*.*", "file.txt"));
+    try std.testing.expect(glob.matchPattern("*.*", ".hidden"));
+    try std.testing.expect(!glob.matchPattern("*.*", "nodot"));
+
+    // Pattern with only wildcards
+    try std.testing.expect(glob.matchPattern("???", "abc"));
+    try std.testing.expect(!glob.matchPattern("???", "ab"));
+    try std.testing.expect(!glob.matchPattern("???", "abcd"));
 }
 
 test "POSIX character classes" {

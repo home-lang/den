@@ -893,7 +893,19 @@ pub const Tokenizer = struct {
                     in_single_quote = false;
                 }
             } else if (in_double_quote) {
-                if (c == '"' and (self.pos == 0 or self.input[self.pos - 1] != '\\')) {
+                if (c == '\\' and self.pos + 1 < self.input.len) {
+                    // Skip escaped character inside double quotes entirely
+                    // This correctly handles \\" (escaped backslash before quote)
+                    if (c == '\n') {
+                        self.line += 1;
+                        self.column = 1;
+                    } else {
+                        self.column += 1;
+                    }
+                    self.pos += 1;
+                    // The escaped char will be handled by the newline/column
+                    // tracking below, then we continue
+                } else if (c == '"') {
                     in_double_quote = false;
                 }
             } else {

@@ -579,7 +579,10 @@ pub const Expansion = struct {
     /// Helper to expand a value, breaking circular error set inference
     fn expandNested(self: *Expansion, value: []const u8) []u8 {
         const expand_fn = @as(*const fn (*Expansion, []const u8) anyerror![]u8, @ptrCast(&Expansion.expand));
-        return expand_fn(self, value) catch self.allocator.dupe(u8, value) catch @constCast("");
+        return expand_fn(self, value) catch self.allocator.dupe(u8, value) catch
+        // Allocate a proper empty slice instead of @constCast on a string literal,
+        // which would cause UB if the caller tries to free it.
+            (self.allocator.alloc(u8, 0) catch &.{});
     }
 
     /// Expand ${VAR} or ${VAR:-default} form
