@@ -124,41 +124,23 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
             return;
         } else if (std.mem.eql(u8, op, "-w")) {
             // File exists and is writable
-            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .read = false }) catch {
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .write = true }) catch {
                 shell.last_exit_code = 1;
                 return;
             };
-            // access with .read=false checks existence; for write check use stat
-            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
-                shell.last_exit_code = 1;
-                return;
-            };
-            _ = stat;
-            // On Unix, check write permission bits
-            if (comptime @import("builtin").os.tag != .windows) {
-                std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .read = false }) catch {
-                    shell.last_exit_code = 1;
-                    return;
-                };
-            }
             shell.last_exit_code = 0;
             return;
         } else if (std.mem.eql(u8, op, "-x")) {
             // File exists and is executable
-            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+            std.Io.Dir.cwd().access(std.Options.debug_io, arg, .{ .execute = true }) catch {
                 shell.last_exit_code = 1;
                 return;
             };
-            if (comptime @import("builtin").os.tag == .windows) {
-                // On Windows, check file extension
-                shell.last_exit_code = if (stat.kind == .file) 0 else 1;
-            } else {
-                shell.last_exit_code = if (stat.kind == .file and (stat.permissions.toMode() & 0o111) != 0) 0 else 1;
-            }
+            shell.last_exit_code = 0;
             return;
         } else if (std.mem.eql(u8, op, "-L") or std.mem.eql(u8, op, "-h")) {
             // File exists and is a symbolic link
-            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{}) catch {
+            const stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, arg, .{ .follow_symlinks = false }) catch {
                 shell.last_exit_code = 1;
                 return;
             };
