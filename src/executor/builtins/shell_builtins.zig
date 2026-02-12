@@ -23,6 +23,15 @@ fn readStdinByte(buf: []u8) !usize {
 /// Includes: cd, pwd, read, source, history
 
 pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
+    // Restricted mode: cd is not allowed
+    if (ctx.hasShell()) {
+        const s = try ctx.getShell();
+        if (s.option_restricted) {
+            try IO.eprint("den: cd: restricted\n", .{});
+            return 1;
+        }
+    }
+
     var path = if (command.args.len > 0) command.args[0] else blk: {
         if (ctx.getEnv("HOME")) |home| {
             break :blk home;
@@ -386,6 +395,17 @@ pub fn source(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     const filename = command.args[0];
+
+    // Restricted mode: source/. with paths containing '/' is not allowed
+    if (ctx.hasShell()) {
+        const s = try ctx.getShell();
+        if (s.option_restricted) {
+            if (std.mem.indexOfScalar(u8, filename, '/') != null) {
+                try IO.eprint("den: source: restricted: cannot specify path with '/'\n", .{});
+                return 1;
+            }
+        }
+    }
     const script_args = if (command.args.len > 1) command.args[1..] else &[_][]const u8{};
 
     const result = ctx.executeScript(filename, script_args) catch |err| {

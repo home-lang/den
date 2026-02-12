@@ -503,6 +503,7 @@ pub const Executor = struct {
             if (comptime builtin.os.tag != .windows) {
                 _ = std.c.waitpid(pid, &wait_status, 0);
             }
+            // Safety: EXITSTATUS returns 0-255
             const status: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
             last_status = status;
             pipestatus_buf[pi] = status;
@@ -587,6 +588,28 @@ pub const Executor = struct {
     }
 
     fn applyRedirections(self: *Executor, redirections: []types.Redirection) !void {
+        // Restricted mode: block output redirections
+        if (self.shell) |shell| {
+            if (shell.option_restricted) {
+                for (redirections) |redir| {
+                    switch (redir.kind) {
+                        .output_truncate, .output_append, .output_clobber => {
+                            IO.eprint("den: output redirection restricted\n", .{}) catch {};
+                            return error.RestrictedMode;
+                        },
+                        .fd_duplicate => {
+                            // Block >&N redirections for stdout/stderr
+                            if (redir.fd == 1 or redir.fd == 2) {
+                                IO.eprint("den: output redirection restricted\n", .{}) catch {};
+                                return error.RestrictedMode;
+                            }
+                        },
+                        else => {},
+                    }
+                }
+            }
+        }
+
         // Build expansion context from shell if available (for heredocs/herestrings)
         const expansion_context: ?redirection.ExpansionContext = if (self.shell) |shell|
             .{
@@ -632,6 +655,21 @@ pub const Executor = struct {
         // Exception: bare redirections like "> file" should still be applied.
         if (command.name.len == 0) {
             if (command.redirections.len > 0) {
+                // Restricted mode: block output redirections even for bare redirections
+                if (self.shell) |shell| {
+                    if (shell.option_restricted) {
+                        for (command.redirections) |redir| {
+                            switch (redir.kind) {
+                                .output_truncate, .output_append, .output_clobber => {
+                                    IO.eprint("den: output redirection restricted\n", .{}) catch {};
+                                    return 1;
+                                },
+                                else => {},
+                            }
+                        }
+                    }
+                }
+
                 // Bare redirections: apply them to create/truncate files (POSIX behavior).
                 if (comptime builtin.os.tag != .windows) {
                     for (command.redirections) |redir| {
@@ -684,6 +722,20 @@ pub const Executor = struct {
                     }
                 }
                 if (is_valid) {
+                    // Restricted mode: block modifications to PATH, SHELL, ENV, BASH_ENV
+                    if (self.shell) |shell| {
+                        if (shell.option_restricted) {
+                            if (std.mem.eql(u8, var_name, "PATH") or
+                                std.mem.eql(u8, var_name, "SHELL") or
+                                std.mem.eql(u8, var_name, "ENV") or
+                                std.mem.eql(u8, var_name, "BASH_ENV"))
+                            {
+                                IO.eprint("den: {s}: restricted: cannot modify in restricted mode\n", .{var_name}) catch {};
+                                return 1;
+                            }
+                        }
+                    }
+
                     const value = command.name[eq_pos + 1 ..];
                     if (self.shell) |shell| {
                         // If inside a function and variable exists as local, update local

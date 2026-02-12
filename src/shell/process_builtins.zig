@@ -15,6 +15,13 @@ const Shell = @import("../shell.zig").Shell;
 
 /// Builtin: exec - replace shell with command
 pub fn builtinExec(self: *Shell, cmd: *types.ParsedCommand) !void {
+    // Restricted mode: exec is not allowed
+    if (self.option_restricted) {
+        try IO.eprint("den: exec: restricted\n", .{});
+        self.last_exit_code = 1;
+        return;
+    }
+
     if (cmd.args.len == 0) {
         try IO.eprint("den: exec: command required\n", .{});
         self.last_exit_code = 1;

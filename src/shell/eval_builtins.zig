@@ -99,6 +99,23 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
 
     const var_names = cmd.args[var_start..];
 
+    // Validate variable names are valid identifiers
+    for (var_names) |vname| {
+        if (vname.len == 0) continue;
+        if (vname[0] != '_' and !std.ascii.isAlphabetic(vname[0])) {
+            try IO.eprint("den: read: `{s}': not a valid identifier\n", .{vname});
+            self.last_exit_code = 1;
+            return;
+        }
+        for (vname[1..]) |c| {
+            if (c != '_' and !std.ascii.isAlphanumeric(c)) {
+                try IO.eprint("den: read: `{s}': not a valid identifier\n", .{vname});
+                self.last_exit_code = 1;
+                return;
+            }
+        }
+    }
+
     // Print prompt to stderr if -p was specified (bash behavior)
     if (prompt) |p| {
         try IO.eprint("{s}", .{p});
@@ -128,10 +145,10 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         defer self.allocator.free(buf);
         break :blk @as(?[]u8, try self.allocator.dupe(u8, buf[0..count]));
     } else if (delimiter) |d| blk: {
-        // Read until delimiter character
-        var buf: [4096]u8 = undefined;
-        var count: usize = 0;
-        while (count < buf.len) {
+        // Read until delimiter character (dynamic buffer)
+        var dyn_buf: std.ArrayList(u8) = .empty;
+        defer dyn_buf.deinit(self.allocator);
+        while (true) {
             var byte: [1]u8 = undefined;
             const bytes_read: isize = if (comptime builtin.os.tag == .windows) win_blk: {
                 const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse break :win_blk @as(isize, -1);
@@ -141,34 +158,32 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
             } else std.c.read(std.posix.STDIN_FILENO, &byte, 1);
             if (bytes_read <= 0) break;
             if (byte[0] == d) break;
-            buf[count] = byte[0];
-            count += 1;
+            dyn_buf.append(self.allocator, byte[0]) catch break;
         }
-        if (count == 0) {
+        if (dyn_buf.items.len == 0) {
             break :blk @as(?[]u8, null);
         }
-        break :blk @as(?[]u8, try self.allocator.dupe(u8, buf[0..count]));
+        break :blk @as(?[]u8, try self.allocator.dupe(u8, dyn_buf.items));
     } else try IO.readLine(self.allocator);
     if (line) |raw_value| {
         defer self.allocator.free(raw_value);
         self.last_exit_code = 0;
 
         // Process backslash escapes unless -r (raw mode) is set
-        var processed_buf: [4096]u8 = undefined;
+        var proc_buf: std.ArrayList(u8) = .empty;
+        defer proc_buf.deinit(self.allocator);
         const value = if (!raw_mode) blk: {
-            var pos: usize = 0;
             var j: usize = 0;
-            while (j < raw_value.len and pos < processed_buf.len) {
+            while (j < raw_value.len) {
                 if (raw_value[j] == '\\' and j + 1 < raw_value.len) {
                     j += 1; // Skip backslash, take next char literally
-                    processed_buf[pos] = raw_value[j];
+                    proc_buf.append(self.allocator, raw_value[j]) catch break;
                 } else {
-                    processed_buf[pos] = raw_value[j];
+                    proc_buf.append(self.allocator, raw_value[j]) catch break;
                 }
                 j += 1;
-                pos += 1;
             }
-            break :blk processed_buf[0..pos];
+            break :blk proc_buf.items;
         } else raw_value;
 
         // Get IFS (default: space, tab, newline)
@@ -177,11 +192,11 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
         // Handle -a flag: read into array
         if (array_mode) {
             const arr_name = if (var_names.len >= 1) var_names[0] else "REPLY";
-            // Split by IFS into words
-            var words_buf: [256][]const u8 = undefined;
-            var word_count: usize = 0;
+            // Split by IFS into words (dynamic list)
+            var words_list: std.ArrayList([]const u8) = .empty;
+            defer words_list.deinit(self.allocator);
             var pos: usize = 0;
-            while (pos < value.len and word_count < words_buf.len) {
+            while (pos < value.len) {
                 // Skip IFS chars
                 while (pos < value.len) {
                     var is_delim = false;
@@ -201,13 +216,13 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
                     if (is_delim) break;
                     pos += 1;
                 }
-                words_buf[word_count] = value[wstart..pos];
-                word_count += 1;
+                words_list.append(self.allocator, value[wstart..pos]) catch break;
             }
             // Create the array
+            const word_count = words_list.items.len;
             const arr = try self.allocator.alloc([]const u8, word_count);
             for (0..word_count) |i| {
-                arr[i] = try self.allocator.dupe(u8, words_buf[i]);
+                arr[i] = try self.allocator.dupe(u8, words_list.items[i]);
             }
             // Free old array if exists
             if (self.arrays.get(arr_name)) |old_arr| {
@@ -564,24 +579,26 @@ pub fn builtinEval(self: *Shell, cmd: *types.ParsedCommand) !void {
         return;
     }
 
-    // Join all arguments into a single command string
-    var cmd_buf: [4096]u8 = undefined;
-    var cmd_len: usize = 0;
+    // Join all arguments into a single command string using dynamic allocation
+    var eval_str: std.ArrayList(u8) = .empty;
+    defer eval_str.deinit(self.allocator);
 
     for (cmd.args, 0..) |arg, i| {
-        if (i > 0 and cmd_len < cmd_buf.len) {
-            cmd_buf[cmd_len] = ' ';
-            cmd_len += 1;
+        eval_str.appendSlice(self.allocator, arg) catch |err| {
+            try IO.eprint("den: eval: allocation error: {}\n", .{err});
+            self.last_exit_code = 1;
+            return;
+        };
+        if (i < cmd.args.len - 1) {
+            eval_str.append(self.allocator, ' ') catch |err| {
+                try IO.eprint("den: eval: allocation error: {}\n", .{err});
+                self.last_exit_code = 1;
+                return;
+            };
         }
-
-        const copy_len = @min(arg.len, cmd_buf.len - cmd_len);
-        @memcpy(cmd_buf[cmd_len .. cmd_len + copy_len], arg[0..copy_len]);
-        cmd_len += copy_len;
-
-        if (cmd_len >= cmd_buf.len) break;
     }
 
-    const command_str = cmd_buf[0..cmd_len];
+    const command_str = eval_str.items;
 
     // Execute as if typed at prompt
     // Tokenize

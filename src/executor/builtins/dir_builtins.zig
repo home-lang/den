@@ -27,6 +27,12 @@ pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         return 1;
     };
 
+    // Restricted mode: pushd is not allowed (changes directory)
+    if (shell_ref.option_restricted) {
+        try IO.eprint("den: pushd: restricted\n", .{});
+        return 1;
+    }
+
     // Get current directory
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cwd_len = std.Io.Dir.cwd().realPathFile(std.Options.debug_io, ".", &cwd_buf) catch |err| {
@@ -138,6 +144,12 @@ pub fn popd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         try IO.eprint("den: popd: shell context not available\n", .{});
         return 1;
     };
+
+    // Restricted mode: popd is not allowed (changes directory)
+    if (shell_ref.option_restricted) {
+        try IO.eprint("den: popd: restricted\n", .{});
+        return 1;
+    }
 
     if (shell_ref.dir_stack_count == 0) {
         try IO.eprint("den: popd: directory stack empty\n", .{});

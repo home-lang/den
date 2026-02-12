@@ -30,6 +30,14 @@ pub const DevNetPath = struct {
 ///   /dev/tcp/[::1]/8080        - IPv6 TCP connection
 ///   /dev/udp/[fe80::1]/1234    - IPv6 UDP connection
 ///
+/// Security considerations:
+/// - This feature allows connecting to arbitrary IP addresses, which poses an
+///   SSRF (Server-Side Request Forgery) risk in automated or scripted contexts.
+/// - Only literal IP addresses are accepted; no DNS resolution is performed.
+/// - Port 0 is rejected as invalid.
+/// - Consider disabling this feature in security-sensitive deployments via
+///   restricted mode.
+///
 /// Returns the socket fd on success, null if path is not a /dev/tcp or /dev/udp path
 /// or if the connection fails.
 pub fn openDevNet(path: []const u8) ?std.posix.socket_t {
@@ -130,6 +138,7 @@ pub fn parseIPv4(host: []const u8) ?[4]u8 {
     for (host) |c| {
         if (c == '.') {
             if (byte_idx >= 3 or digit_count == 0) return null;
+            // Safety: num validated <= 255 above
             ip_bytes[byte_idx] = @intCast(num);
             byte_idx += 1;
             num = 0;
@@ -144,6 +153,7 @@ pub fn parseIPv4(host: []const u8) ?[4]u8 {
     }
 
     if (byte_idx != 3 or digit_count == 0) return null;
+    // Safety: num validated <= 255 above
     ip_bytes[byte_idx] = @intCast(num);
 
     return ip_bytes;
@@ -271,6 +281,12 @@ fn connectIPv4(ip_bytes: [4]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
     const sock = std.c.socket(std.c.AF.INET, sock_type, 0);
     if (sock < 0) return null;
 
+    // Set send timeout (30s) so connect() doesn't hang indefinitely
+    setSocketTimeouts(sock) catch {
+        _ = std.c.close(sock);
+        return null;
+    };
+
     var addr: std.c.sockaddr.in = std.mem.zeroes(std.c.sockaddr.in);
     if (@hasField(std.c.sockaddr.in, "len")) {
         addr.len = @sizeOf(std.c.sockaddr.in);
@@ -293,6 +309,12 @@ fn connectIPv6(ip_bytes: [16]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
     const sock = std.c.socket(std.c.AF.INET6, sock_type, 0);
     if (sock < 0) return null;
 
+    // Set send timeout (30s) so connect() doesn't hang indefinitely
+    setSocketTimeouts(sock) catch {
+        _ = std.c.close(sock);
+        return null;
+    };
+
     var addr: std.c.sockaddr.in6 = std.mem.zeroes(std.c.sockaddr.in6);
     if (@hasField(std.c.sockaddr.in6, "len")) {
         addr.len = @sizeOf(std.c.sockaddr.in6);
@@ -307,6 +329,24 @@ fn connectIPv6(ip_bytes: [16]u8, port: u16, is_tcp: bool) ?std.posix.socket_t {
     }
 
     return sock;
+}
+
+/// Connection timeout in seconds for /dev/tcp and /dev/udp sockets.
+const socket_timeout_sec = 30;
+
+/// Set SO_SNDTIMEO and SO_RCVTIMEO on a socket to prevent indefinite hangs.
+/// SO_SNDTIMEO bounds the connect() call, SO_RCVTIMEO bounds subsequent reads.
+fn setSocketTimeouts(sock: std.posix.socket_t) !void {
+    const timeout = std.c.timeval{ .sec = socket_timeout_sec, .usec = 0 };
+    const timeout_ptr: *const anyopaque = @ptrCast(&timeout);
+    const timeout_len: std.c.socklen_t = @sizeOf(std.c.timeval);
+
+    if (std.c.setsockopt(sock, @intCast(std.c.SOL.SOCKET), std.c.SO.SNDTIMEO, timeout_ptr, timeout_len) < 0) {
+        return error.SetSockOptFailed;
+    }
+    if (std.c.setsockopt(sock, @intCast(std.c.SOL.SOCKET), std.c.SO.RCVTIMEO, timeout_ptr, timeout_len) < 0) {
+        return error.SetSockOptFailed;
+    }
 }
 
 /// Perform connect with retry on EINTR

@@ -1922,13 +1922,10 @@ pub const Expansion = struct {
 
         const command = input[2..end];
 
-        // Check cache first (if available)
-        if (self.cmd_cache) |cache| {
-            if (cache.get(command)) |cached| {
-                const result = try self.allocator.dupe(u8, cached);
-                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-            }
-        }
+        // Note: Command substitution caching is intentionally disabled.
+        // Caching by command string is incorrect because the same command
+        // can produce different results each time (e.g., `echo $(date +%s) $(date +%s)`).
+        // Each substitution must execute independently for correctness.
 
         // Execute the command and capture output
         const output = self.executeCommandForSubstitution(command) catch {
@@ -1944,13 +1941,6 @@ pub const Expansion = struct {
         }
 
         const result = try self.allocator.dupe(u8, output[0..trimmed_len]);
-
-        // Cache the result (if cache is available)
-        if (self.cmd_cache) |cache| {
-            cache.put(command, result) catch {
-                // Caching failed, but that's okay - we have the result
-            };
-        }
 
         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
     }
@@ -1979,13 +1969,8 @@ pub const Expansion = struct {
 
         const command = input[1..end];
 
-        // Check cache first (if available)
-        if (self.cmd_cache) |cache| {
-            if (cache.get(command)) |cached| {
-                const result = try self.allocator.dupe(u8, cached);
-                return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
-            }
-        }
+        // Note: Command substitution caching is intentionally disabled.
+        // See expandCommandSubstitution for rationale.
 
         // Execute the command and capture output
         const output = self.executeCommandForSubstitution(command) catch {
@@ -2001,13 +1986,6 @@ pub const Expansion = struct {
         }
 
         const result = try self.allocator.dupe(u8, output[0..trimmed_len]);
-
-        // Cache the result (if cache is available)
-        if (self.cmd_cache) |cache| {
-            cache.put(command, result) catch {
-                // Caching failed, but that's okay - we have the result
-            };
-        }
 
         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
     }
@@ -2557,8 +2535,19 @@ pub const Expansion = struct {
                 std.posix.close(pipe_fds[0]);
             }
 
-            // Execute the command via sh -c
-            // Create null-terminated command string
+            // Use the shell's own execution engine to preserve function definitions,
+            // variables, and other shell state in process substitutions
+            if (self.exec_command_fn) |exec_fn| {
+                if (self.shell) |shell_opaque| {
+                    exec_fn(shell_opaque, command);
+                    const Shell = @import("../shell.zig").Shell;
+                    const shell: *Shell = @ptrCast(@alignCast(shell_opaque));
+                    const code: u8 = @intCast(@as(u32, @bitCast(shell.last_exit_code)) & 0xff);
+                    std.c._exit(code);
+                }
+            }
+
+            // Fallback: execute via /bin/sh -c when no shell reference available
             var cmd_buf: [4096]u8 = undefined;
             if (command.len >= cmd_buf.len) {
                 std.process.exit(1);

@@ -145,6 +145,7 @@ pub const Shell = struct {
     option_verbose: bool, // set -v: print input lines as read
     option_noglob: bool, // set -f: disable filename expansion (globbing)
     option_noclobber: bool, // set -C: prevent overwriting files with >
+    option_restricted: bool, // set -r: restricted mode (cannot be unset once enabled)
     current_line: usize, // For error reporting
     // Script management
     script_manager: ScriptManager,
@@ -229,6 +230,15 @@ pub const Shell = struct {
         return initWithConfig(allocator, null);
     }
 
+    /// Initialize shell without loading any configuration files (--norc mode).
+    /// Uses default configuration only, skipping all config file discovery.
+    pub fn initNoConfig(allocator: std.mem.Allocator) !Shell {
+        return initWithConfigResult(allocator, config_loader.ConfigLoadResult{
+            .config = types.DenConfig{},
+            .source = .{ .path = null, .source_type = .default },
+        });
+    }
+
     /// Initialize shell with a custom config path
     /// If config_path is provided, it takes priority over default search paths
     pub fn initWithConfig(allocator: std.mem.Allocator, config_path: ?[]const u8) !Shell {
@@ -237,6 +247,11 @@ pub const Shell = struct {
             .config = types.DenConfig{},
             .source = .{ .path = null, .source_type = .default },
         };
+        return initWithConfigResult(allocator, config_result);
+    }
+
+    /// Internal: initialize shell with a pre-resolved config result
+    fn initWithConfigResult(allocator: std.mem.Allocator, config_result: config_loader.ConfigLoadResult) !Shell {
         const config = config_result.config;
         const config_source = config_result.source;
 
@@ -354,6 +369,7 @@ pub const Shell = struct {
             .option_verbose = false,
             .option_noglob = false,
             .option_noclobber = false,
+            .option_restricted = false,
             .current_line = 0,
             .script_manager = ScriptManager.init(allocator),
             .function_manager = FunctionManager.init(allocator),
@@ -404,6 +420,16 @@ pub const Shell = struct {
             .call_stack_depth = 0,
             .loadable_builtins = LoadableBuiltins.init(allocator),
         };
+
+        // Detect setuid condition and drop privileges
+        if (comptime builtin.os.tag != .windows) {
+            const real_uid = std.c.getuid();
+            const effective_uid = std.c.geteuid();
+            if (real_uid != effective_uid) {
+                IO.eprint("den: warning: running with elevated privileges, dropping to real uid\n", .{}) catch {};
+                _ = std.c.setuid(real_uid);
+            }
+        }
 
         // Detect if stdin is a TTY
         if (comptime builtin.os.tag != .windows) {
@@ -1818,6 +1844,18 @@ pub const Shell = struct {
                             }
                         }
                         if (!needs_full_pipeline) {
+                            // Restricted mode: block modifications to PATH, SHELL, ENV, BASH_ENV
+                            if (self.option_restricted) {
+                                if (std.mem.eql(u8, potential_var, "PATH") or
+                                    std.mem.eql(u8, potential_var, "SHELL") or
+                                    std.mem.eql(u8, potential_var, "ENV") or
+                                    std.mem.eql(u8, potential_var, "BASH_ENV"))
+                                {
+                                    try IO.eprint("den: {s}: restricted: cannot modify in restricted mode\n", .{potential_var});
+                                    self.last_exit_code = 1;
+                                    return;
+                                }
+                            }
                             // Check if readonly or immutable before assignment
                             if (self.var_attributes.get(potential_var)) |attrs| {
                                 if (attrs.readonly) {
@@ -2163,6 +2201,26 @@ pub const Shell = struct {
                     return;
                 }
             } else if (shell_mod.isShellBuiltin(cmd.name)) {
+                // Restricted mode: block output redirections for shell builtins
+                if (self.option_restricted) {
+                    for (cmd.redirections) |redir| {
+                        switch (redir.kind) {
+                            .output_truncate, .output_append, .output_clobber => {
+                                IO.eprint("den: output redirection restricted\n", .{}) catch {};
+                                self.last_exit_code = 1;
+                                return;
+                            },
+                            .fd_duplicate => {
+                                if (redir.fd == 1 or redir.fd == 2) {
+                                    IO.eprint("den: output redirection restricted\n", .{}) catch {};
+                                    self.last_exit_code = 1;
+                                    return;
+                                }
+                            },
+                            else => {},
+                        }
+                    }
+                }
                 // Shell-level builtin with redirections: apply redirections manually
                 // Skip on Windows (fd-level redirections not supported)
                 if (comptime builtin.os.tag != .windows) {

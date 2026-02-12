@@ -1544,6 +1544,121 @@ check "case char class digit" "digit" "$(timeout 3 $DEN -c 'case 5 in [0-9]) ech
 check "case char class lower" "lower" "$(timeout 3 $DEN -c 'case a in [a-z]) echo lower;; *) echo other;; esac' 2>/dev/null)"
 check "case char class upper" "upper" "$(timeout 3 $DEN -c 'case A in [A-Z]) echo upper;; *) echo other;; esac' 2>/dev/null)"
 
+# ===========================================================================
+# 204. Arithmetic compound assignments
+# ===========================================================================
+check "arith +=" "15" "$(timeout 3 $DEN -c 'x=10; echo $((x += 5))' 2>/dev/null)"
+check "arith -=" "7" "$(timeout 3 $DEN -c 'x=10; echo $((x -= 3))' 2>/dev/null)"
+check "arith *=" "20" "$(timeout 3 $DEN -c 'x=4; echo $((x *= 5))' 2>/dev/null)"
+check "arith /=" "3" "$(timeout 3 $DEN -c 'x=12; echo $((x /= 4))' 2>/dev/null)"
+check "arith %=" "1" "$(timeout 3 $DEN -c 'x=10; echo $((x %= 3))' 2>/dev/null)"
+check "arith <<=" "16" "$(timeout 3 $DEN -c 'x=4; echo $((x <<= 2))' 2>/dev/null)"
+check "arith >>=" "2" "$(timeout 3 $DEN -c 'x=8; echo $((x >>= 2))' 2>/dev/null)"
+check "arith &=" "2" "$(timeout 3 $DEN -c 'x=6; echo $((x &= 3))' 2>/dev/null)"
+check "arith |=" "7" "$(timeout 3 $DEN -c 'x=5; echo $((x |= 3))' 2>/dev/null)"
+check "arith ^=" "6" "$(timeout 3 $DEN -c 'x=5; echo $((x ^= 3))' 2>/dev/null)"
+check "arith += persists" "15" "$(timeout 3 $DEN -c 'x=10; : $((x += 5)); echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 205. C-style for loop with compound assignments
+# ===========================================================================
+check "cfor +=" "0 2 4 6 8" "$(timeout 3 $DEN -c 'for ((i=0; i<10; i+=2)); do printf "%s " $i; done; echo' 2>/dev/null | tr -s ' ' | sed 's/ $//')"
+check "cfor -=" "10 8 6 4 2" "$(timeout 3 $DEN -c 'for ((i=10; i>0; i-=2)); do printf "%s " $i; done; echo' 2>/dev/null | tr -s ' ' | sed 's/ $//')"
+check "cfor *=" "1 2 4 8" "$(timeout 3 $DEN -c 'for ((i=1; i<10; i*=2)); do printf "%s " $i; done; echo' 2>/dev/null | tr -s ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# 206. IFS array join with ${arr[*]}
+# ===========================================================================
+check "ifs array join comma" "a,b,c" "$(timeout 3 $DEN -c 'arr=(a b c); IFS=,; echo "${arr[*]}"' 2>/dev/null)"
+check "ifs array join pipe" "a|b|c" "$(timeout 3 $DEN -c 'arr=(a b c); IFS="|"; echo "${arr[*]}"' 2>/dev/null)"
+check "ifs array join dash" "1-2-3" "$(timeout 3 $DEN -c 'arr=(1 2 3); IFS=-; echo "${arr[*]}"' 2>/dev/null)"
+
+# ===========================================================================
+# 207. Read builtin IFS whitespace trimming
+# ===========================================================================
+check "read trims leading space" "hello" "$(echo '  hello  ' | timeout 3 $DEN -c 'read x; echo "$x"' 2>/dev/null)"
+check "read trims tab" "hello" "$(printf '\thello\t' | timeout 3 $DEN -c 'read x; echo "$x"' 2>/dev/null)"
+
+# ===========================================================================
+# 208. Test -L symlink detection
+# ===========================================================================
+check "test -L symlink" "yes" "$(timeout 3 $DEN -c 'ln -sf /dev/null /tmp/den_link_t; [ -L /tmp/den_link_t ] && echo yes; rm -f /tmp/den_link_t' 2>/dev/null)"
+check "test -L regular" "no" "$(timeout 3 $DEN -c 'touch /tmp/den_reg_t; [ -L /tmp/den_reg_t ] && echo yes || echo no; rm -f /tmp/den_reg_t' 2>/dev/null)"
+
+# ===========================================================================
+# 209. set -e with || guard
+# ===========================================================================
+check "set -e or guard" "alive" "$(timeout 3 $DEN -c 'set -e; false || true; echo alive' 2>/dev/null)"
+check "set -e and guard" "alive" "$(timeout 3 $DEN -c 'set -e; true && false; echo alive' 2>/dev/null)"
+check "set -e kills unguarded" "" "$(timeout 3 $DEN -c 'set -e; false; echo dead' 2>/dev/null)"
+
+# ===========================================================================
+# 210. Suffix removal with comma in pattern
+# ===========================================================================
+check "suffix strip comma" "hello" "$(timeout 3 $DEN -c 'x="hello,world"; echo "${x%,*}"' 2>/dev/null)"
+check "suffix strip comma glob" "hello" "$(timeout 3 $DEN -c 'x="hello,one,two"; echo "${x%%,*}"' 2>/dev/null)"
+
+# ===========================================================================
+# 211. pushd/popd directory changes
+# ===========================================================================
+check "pushd changes dir" "yes" "$(timeout 3 $DEN -c 'pushd /tmp >/dev/null 2>&1; case "$(pwd)" in *tmp) echo yes;; *) echo no;; esac' 2>/dev/null)"
+check "popd restores dir" "yes" "$(timeout 3 $DEN -c 'ORIG=$(pwd); pushd /tmp >/dev/null 2>&1; popd >/dev/null 2>&1; [ "$(pwd)" = "$ORIG" ] && echo yes' 2>/dev/null)"
+
+# ===========================================================================
+# 212. Select statement outputs menu to stderr
+# ===========================================================================
+check "select menu stderr" "a" "$(echo 1 | timeout 3 $DEN -c 'select x in a b c; do echo "$x"; break; done' 2>/dev/null)"
+
+# ===========================================================================
+# 213. Function call with redirections
+# ===========================================================================
+check "func redir output" "hello" "$(timeout 3 $DEN -c 'f() { echo hello; }; f > /tmp/den_fr_t.txt; cat /tmp/den_fr_t.txt; rm -f /tmp/den_fr_t.txt' 2>/dev/null)"
+check "func redir stderr" "err" "$(timeout 3 $DEN -c 'f() { echo err >&2; }; f 2>/tmp/den_fre_t.txt; cat /tmp/den_fre_t.txt; rm -f /tmp/den_fre_t.txt' 2>/dev/null)"
+
+# ===========================================================================
+# 214. Pre/post increment/decrement in arithmetic
+# ===========================================================================
+check "arith pre-increment" "11" "$(timeout 3 $DEN -c 'x=10; echo $((++x))' 2>/dev/null)"
+check "arith post-increment" "10" "$(timeout 3 $DEN -c 'x=10; echo $((x++))' 2>/dev/null)"
+check "arith post-incr persists" "11" "$(timeout 3 $DEN -c 'x=10; : $((x++)); echo $x' 2>/dev/null)"
+check "arith pre-decrement" "9" "$(timeout 3 $DEN -c 'x=10; echo $((--x))' 2>/dev/null)"
+check "arith post-decrement" "10" "$(timeout 3 $DEN -c 'x=10; echo $((x--))' 2>/dev/null)"
+
+# ===========================================================================
+# 215. Arithmetic ternary operator
+# ===========================================================================
+check "arith ternary true" "1" "$(timeout 3 $DEN -c 'echo $((1 ? 1 : 0))' 2>/dev/null)"
+check "arith ternary false" "0" "$(timeout 3 $DEN -c 'echo $((0 ? 1 : 0))' 2>/dev/null)"
+check "arith ternary expr" "yes" "$(timeout 3 $DEN -c 'x=5; r=$((x > 3 ? 1 : 0)); [ $r -eq 1 ] && echo yes' 2>/dev/null)"
+
+# ===========================================================================
+# 216. Nested arithmetic expressions
+# ===========================================================================
+check "arith nested parens" "14" "$(timeout 3 $DEN -c 'echo $(( (2 + 5) * 2 ))' 2>/dev/null)"
+check "arith complex expr" "7" "$(timeout 3 $DEN -c 'x=3; y=4; echo $((x*x + y - x*y/2))' 2>/dev/null)"
+
+# ===========================================================================
+# 217. Multiple redirections on single command
+# ===========================================================================
+check "multi redir out+err" "out:err" "$(timeout 3 $DEN -c 'echo out > /tmp/den_mr1.txt; echo err > /tmp/den_mr2.txt; echo "$(cat /tmp/den_mr1.txt):$(cat /tmp/den_mr2.txt)"; rm -f /tmp/den_mr1.txt /tmp/den_mr2.txt' 2>/dev/null)"
+
+# ===========================================================================
+# 218. Here-string with variable expansion
+# ===========================================================================
+check "herestring var expand" "hello" "$(timeout 3 $DEN -c 'x=hello; read y <<< "$x"; echo "$y"' 2>/dev/null)"
+check "herestring literal" "hello world" "$(timeout 3 $DEN -c 'read y <<< "hello world"; echo "$y"' 2>/dev/null)"
+
+# ===========================================================================
+# 219. Subshell variable isolation
+# ===========================================================================
+check "subshell var isolated" "outer" "$(timeout 3 $DEN -c 'x=outer; (x=inner); echo $x' 2>/dev/null)"
+check "subshell exit no affect" "alive" "$(timeout 3 $DEN -c '(exit 1); echo alive' 2>/dev/null)"
+
+# ===========================================================================
+# 220. While read loop with pipeline
+# ===========================================================================
+check "while read pipe" "3" "$(printf 'a\nb\nc\n' | timeout 3 $DEN -c 'n=0; while read line; do n=$((n+1)); done; echo $n' 2>/dev/null)"
+
 # Results
 # ===========================================================================
 echo ""

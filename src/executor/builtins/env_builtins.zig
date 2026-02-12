@@ -150,6 +150,20 @@ pub fn exportBuiltin(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
             const var_name = arg[0..eq_pos];
             const var_value = arg[eq_pos + 1 ..];
+            // Restricted mode: block modifications to PATH, SHELL, ENV, BASH_ENV
+            if (ctx.hasShell()) {
+                const s = try ctx.getShell();
+                if (s.option_restricted) {
+                    if (std.mem.eql(u8, var_name, "PATH") or
+                        std.mem.eql(u8, var_name, "SHELL") or
+                        std.mem.eql(u8, var_name, "ENV") or
+                        std.mem.eql(u8, var_name, "BASH_ENV"))
+                    {
+                        try IO.eprint("den: export: {s}: restricted: cannot modify in restricted mode\n", .{var_name});
+                        return 1;
+                    }
+                }
+            }
             try ctx.setEnv(var_name, var_value);
             // Also set in process environment so child processes (including $()) inherit it
             if (comptime builtin.os.tag != .windows) {
@@ -245,6 +259,16 @@ pub fn set(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                     shell_ref.option_noglob = enable;
                 } else if (std.mem.eql(u8, option, "C")) {
                     shell_ref.option_noclobber = enable;
+                } else if (std.mem.eql(u8, option, "r")) {
+                    if (enable) {
+                        shell_ref.option_restricted = true;
+                    } else {
+                        // Restricted mode cannot be unset once enabled
+                        if (shell_ref.option_restricted) {
+                            try IO.eprint("den: set: cannot unset restricted mode\n", .{});
+                            return 1;
+                        }
+                    }
                 } else if (std.mem.eql(u8, option, "o")) {
                     if (arg_idx + 1 < command.args.len) {
                         const opt_name = command.args[arg_idx + 1];
@@ -266,6 +290,15 @@ pub fn set(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                             shell_ref.option_noglob = enable;
                         } else if (std.mem.eql(u8, opt_name, "noclobber")) {
                             shell_ref.option_noclobber = enable;
+                        } else if (std.mem.eql(u8, opt_name, "restricted")) {
+                            if (enable) {
+                                shell_ref.option_restricted = true;
+                            } else {
+                                if (shell_ref.option_restricted) {
+                                    try IO.eprint("den: set: cannot unset restricted mode\n", .{});
+                                    return 1;
+                                }
+                            }
                         } else {
                             try IO.eprint("den: set: {s}: invalid option name\n", .{opt_name});
                             return 1;
@@ -282,6 +315,7 @@ pub fn set(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                         try IO.print("verbose        {s}\n", .{if (shell_ref.option_verbose) "on" else "off"});
                         try IO.print("noglob         {s}\n", .{if (shell_ref.option_noglob) "on" else "off"});
                         try IO.print("noclobber      {s}\n", .{if (shell_ref.option_noclobber) "on" else "off"});
+                        try IO.print("restricted     {s}\n", .{if (shell_ref.option_restricted) "on" else "off"});
                     }
                 } else {
                     try IO.eprint("den: set: unknown option: {s}\n", .{arg});
@@ -294,6 +328,20 @@ pub fn set(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         } else if (std.mem.indexOf(u8, arg, "=")) |eq_pos| {
             const var_name = arg[0..eq_pos];
             const var_value = arg[eq_pos + 1 ..];
+            // Restricted mode: block modifications to PATH, SHELL, ENV, BASH_ENV
+            if (ctx.hasShell()) {
+                const s = try ctx.getShell();
+                if (s.option_restricted) {
+                    if (std.mem.eql(u8, var_name, "PATH") or
+                        std.mem.eql(u8, var_name, "SHELL") or
+                        std.mem.eql(u8, var_name, "ENV") or
+                        std.mem.eql(u8, var_name, "BASH_ENV"))
+                    {
+                        try IO.eprint("den: set: {s}: restricted: cannot modify in restricted mode\n", .{var_name});
+                        return 1;
+                    }
+                }
+            }
             try ctx.setEnv(var_name, var_value);
         } else {
             try IO.eprint("den: set: {s}: not a valid identifier\n", .{arg});
@@ -355,6 +403,23 @@ pub fn unset(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     }
 
     if (unset_variables) {
+        // Restricted mode: block unsetting PATH, SHELL, ENV, BASH_ENV
+        if (ctx.hasShell()) {
+            const s = try ctx.getShell();
+            if (s.option_restricted) {
+                for (command.args[arg_start..]) |vn| {
+                    if (std.mem.eql(u8, vn, "PATH") or
+                        std.mem.eql(u8, vn, "SHELL") or
+                        std.mem.eql(u8, vn, "ENV") or
+                        std.mem.eql(u8, vn, "BASH_ENV"))
+                    {
+                        try IO.eprint("den: unset: {s}: restricted: cannot modify in restricted mode\n", .{vn});
+                        return 1;
+                    }
+                }
+            }
+        }
+
         for (command.args[arg_start..]) |var_name| {
             // Check for array element syntax: arr[index]
             if (std.mem.indexOfScalar(u8, var_name, '[')) |bracket_pos| {

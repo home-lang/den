@@ -147,7 +147,9 @@ pub fn httpCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
         try argv.append(allocator, b);
     }
 
-    // Add URL (must be last)
+    // Add URL (must be last). Use "--" to prevent URLs starting with "-"
+    // from being interpreted as curl options (option injection prevention).
+    try argv.append(allocator, "--");
     try argv.append(allocator, url);
 
     // Use spawn.captureOutput for cross-platform process execution

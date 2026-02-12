@@ -53,6 +53,13 @@ fn updatePwdEnv(shell: *Shell, old_cwd: []const u8) void {
 /// Builtin: pushd - push directory onto stack and cd
 /// Supports: pushd (swap), pushd dir, pushd +N/-N (rotate)
 pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
+    // Restricted mode: pushd is not allowed (changes directory)
+    if (shell.option_restricted) {
+        try IO.eprint("den: pushd: restricted\n", .{});
+        shell.last_exit_code = 1;
+        return;
+    }
+
     if (cmd.args.len == 0) {
         // pushd with no args: swap top two directories
         if (shell.dir_stack_count < 1) {
@@ -228,6 +235,13 @@ pub fn printDirStack(shell: *Shell) !void {
 /// Builtin: popd - pop directory from stack and cd
 /// Supports: popd, popd +N/-N (remove specific entry)
 pub fn builtinPopd(shell: *Shell, cmd: *types.ParsedCommand) !void {
+    // Restricted mode: popd is not allowed (changes directory)
+    if (shell.option_restricted) {
+        try IO.eprint("den: popd: restricted\n", .{});
+        shell.last_exit_code = 1;
+        return;
+    }
+
     if (shell.dir_stack_count == 0) {
         try IO.eprint("den: popd: directory stack empty\n", .{});
         shell.last_exit_code = 1;

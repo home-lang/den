@@ -708,8 +708,21 @@ const Parser = struct {
         return 0;
     }
 
+    // Sensitive variable names that must not be modified via arithmetic assignment
+    const sensitive_vars = [_][]const u8{
+        "PATH", "IFS", "HOME", "SHELL", "ENV", "BASH_ENV", "LD_PRELOAD", "LD_LIBRARY_PATH",
+    };
+
     // Store a value into a variable
     fn storeVariable(self: *Parser, var_name: []const u8, value: i64) void {
+        // Reject writes to sensitive environment variables to prevent
+        // arithmetic expressions from modifying security-critical state.
+        for (sensitive_vars) |sensitive| {
+            if (std.mem.eql(u8, var_name, sensitive)) {
+                std.debug.print("den: warning: arithmetic assignment to sensitive variable '{s}' blocked\n", .{var_name});
+                return;
+            }
+        }
         if (self.variables) |vars| {
             var buf: [32]u8 = undefined;
             const val_str = std.fmt.bufPrint(&buf, "{d}", .{value}) catch return;

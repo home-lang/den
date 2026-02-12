@@ -45,6 +45,15 @@ pub fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
 
     const filename = cmd.args[0];
 
+    // Restricted mode: source/. with paths containing '/' is not allowed
+    if (self.option_restricted) {
+        if (std.mem.indexOfScalar(u8, filename, '/') != null) {
+            try IO.eprint("den: source: restricted: cannot specify path with '/'\n", .{});
+            self.last_exit_code = 1;
+            return;
+        }
+    }
+
     // Read file contents
     const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, filename, .{}) catch |err| {
         try IO.eprint("den: source: {s}: {}\n", .{ filename, err });
@@ -78,16 +87,60 @@ pub fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
     }
     const content = buffer[0..total_read];
 
-    // Execute each line in the shell's context so variables persist
-    var lines = std.mem.splitScalar(u8, content, '\n');
-    while (lines.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
-        if (trimmed.len == 0) continue;
-        if (trimmed[0] == '#') continue; // Skip comments
+    // Save current positional parameters if source was called with extra arguments
+    var saved_params: [64]?[]const u8 = undefined;
+    var saved_count: usize = 0;
+    const has_extra_args = cmd.args.len > 1;
 
-        // Use @as to break circular error set inference
+    if (has_extra_args) {
+        saved_count = self.positional_params_count;
+        for (0..self.positional_params.len) |i| {
+            saved_params[i] = self.positional_params[i];
+        }
+
+        // Set new positional parameters from source arguments (skip filename)
+        for (0..self.positional_params.len) |i| {
+            self.positional_params[i] = null;
+        }
+        self.positional_params_count = cmd.args.len - 1;
+        for (cmd.args[1..], 0..) |arg, i| {
+            if (i >= self.positional_params.len) break;
+            self.positional_params[i] = self.allocator.dupe(u8, arg) catch null;
+        }
+    }
+    defer {
+        if (has_extra_args) {
+            // Free temporary positional params
+            for (0..self.positional_params.len) |i| {
+                if (self.positional_params[i]) |p| {
+                    self.allocator.free(p);
+                }
+            }
+            // Restore saved positional parameters
+            for (0..self.positional_params.len) |i| {
+                self.positional_params[i] = saved_params[i];
+            }
+            self.positional_params_count = saved_count;
+        }
+    }
+
+    // Execute file content line by line through the shell's executeCommand,
+    // which properly handles function definitions, variable assignments,
+    // multi-line constructs, heredocs, and all other shell features.
+    var line_start: usize = 0;
+    while (line_start < content.len) {
+        // Find end of line
+        const line_end = std.mem.indexOfScalarPos(u8, content, line_start, '\n') orelse content.len;
+        const line = std.mem.trim(u8, content[line_start..line_end], &std.ascii.whitespace);
+        line_start = line_end + 1;
+
+        // Skip empty lines and comments
+        if (line.len == 0 or line[0] == '#') continue;
+
+        // Use @ptrCast to break circular error set inference
+        // (builtinSource → executeCommand → dispatchBuiltin → builtinSource)
         const cmd_fn = @as(*const fn (*Shell, []const u8) anyerror!void, @ptrCast(&Shell.executeCommand));
-        cmd_fn(self, trimmed) catch {
+        cmd_fn(self, line) catch {
             self.last_exit_code = 1;
             continue;
         };

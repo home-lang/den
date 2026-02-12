@@ -170,9 +170,10 @@ fn applyHeredocOrHerestring(
         if (redir.kind == .herestring) {
             // Herestring content is already expanded by command_expansion.zig.
             // Just add a trailing newline (bash behavior).
-            var buf: [4096]u8 = undefined;
-            const with_newline = std.fmt.bufPrint(&buf, "{s}\n", .{redir.target}) catch redir.target;
-            break :blk try allocator.dupe(u8, with_newline);
+            const result = try allocator.alloc(u8, redir.target.len + 1);
+            @memcpy(result[0..redir.target.len], redir.target);
+            result[redir.target.len] = '\n';
+            break :blk result;
         } else {
             // For heredoc, use the target as-is (it contains the content)
             // Note: Full heredoc support requires parser changes

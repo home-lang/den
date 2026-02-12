@@ -33,6 +33,15 @@ pub fn eval(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
 
 /// exec - replace shell with command
 pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
+    // Restricted mode: exec is not allowed
+    if (ctx.hasShell()) {
+        const s = try ctx.getShell();
+        if (s.option_restricted) {
+            try IO.eprint("den: exec: restricted\n", .{});
+            return 1;
+        }
+    }
+
     if (cmd.args.len == 0) {
         // exec with no args - do nothing
         return 0;
