@@ -829,11 +829,19 @@ pub const Executor = struct {
                 }
 
                 var saved = redirection.SavedFds.save();
-                defer saved.restore();
                 self.applyRedirections(command.redirections) catch {
+                    saved.restore();
                     return 1;
                 };
-                return self.executeBuiltin(command) catch 1;
+                const result = self.executeBuiltin(command) catch 1;
+                // exec with no args + redirections returns -2 to signal
+                // that redirections should be kept permanent (not restored).
+                if (result == -2) {
+                    saved.discard();
+                    return 0;
+                }
+                saved.restore();
+                return result;
             }
             return try self.executeBuiltin(command);
         }
@@ -1617,8 +1625,14 @@ pub const Executor = struct {
             var wait_status_exec: c_int = 0;
             if (comptime builtin.os.tag != .windows) {
                 _ = std.c.waitpid(pid, &wait_status_exec, 0);
+                const raw: u32 = @bitCast(wait_status_exec);
+                if (std.posix.W.IFSIGNALED(raw)) {
+                    return 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(raw))));
+                } else {
+                    return @intCast(std.posix.W.EXITSTATUS(raw));
+                }
             }
-            return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status_exec))));
+            return 0;
         }
     }
 

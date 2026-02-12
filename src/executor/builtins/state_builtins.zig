@@ -87,7 +87,6 @@ pub fn trap(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     if (std.mem.eql(u8, action, "-")) {
         for (signals) |signal| {
             _ = ctx.removeSignalHandler(signal);
-            try ctx.setSignalHandler(signal, "");
         }
         return 0;
     }

@@ -43,7 +43,12 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     }
 
     if (cmd.args.len == 0) {
-        // exec with no args - do nothing
+        // exec with no args but with redirections: signal the caller
+        // to keep the redirections permanent (don't restore saved FDs).
+        // Return -2 as a sentinel value that mod.zig checks.
+        if (cmd.redirections.len > 0) {
+            return -2;
+        }
         return 0;
     }
 

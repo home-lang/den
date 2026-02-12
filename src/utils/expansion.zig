@@ -1032,8 +1032,8 @@ pub const Expansion = struct {
             // Check for indirect expansion: ${!VAR}
             const indirect_name = content[1..];
             // Get the value of the named variable, then use that as a variable name
-            if (self.environment.get(indirect_name)) |ref_name| {
-                if (self.environment.get(ref_name)) |value| {
+            if (self.getVariableValue(indirect_name)) |ref_name| {
+                if (self.getVariableValue(ref_name)) |value| {
                     const result = try self.allocator.dupe(u8, value);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }

@@ -776,7 +776,7 @@ const Parser = struct {
                 if (self.pos > save) {
                     const vname = self.input[save..self.pos];
                     const cur = self.getVariableValue(vname);
-                    const new_val = cur + 1;
+                    const new_val = checkedAdd(cur, 1) catch return error.IntegerOverflow;
                     self.storeVariable(vname, new_val);
                     return new_val;
                 }
@@ -793,7 +793,7 @@ const Parser = struct {
                 if (self.pos > save) {
                     const vname = self.input[save..self.pos];
                     const cur = self.getVariableValue(vname);
-                    const new_val = cur - 1;
+                    const new_val = checkedSub(cur, 1) catch return error.IntegerOverflow;
                     self.storeVariable(vname, new_val);
                     return new_val;
                 }
@@ -884,13 +884,13 @@ const Parser = struct {
         if (self.pos + 1 < self.input.len and self.input[self.pos] == '+' and self.input[self.pos + 1] == '+') {
             self.pos += 2;
             const cur = self.getVariableValue(var_name);
-            self.storeVariable(var_name, cur + 1);
+            self.storeVariable(var_name, checkedAdd(cur, 1) catch return error.IntegerOverflow);
             return cur; // post-increment returns old value
         }
         if (self.pos + 1 < self.input.len and self.input[self.pos] == '-' and self.input[self.pos + 1] == '-') {
             self.pos += 2;
             const cur = self.getVariableValue(var_name);
-            self.storeVariable(var_name, cur - 1);
+            self.storeVariable(var_name, checkedSub(cur, 1) catch return error.IntegerOverflow);
             return cur; // post-decrement returns old value
         }
 

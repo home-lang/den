@@ -147,6 +147,76 @@ fn printWithEscapes(s: []const u8) !void {
                     }
                     continue;
                 },
+                'u' => {
+                    var codepoint: u21 = 0;
+                    var hex_count: usize = 0;
+                    var k: usize = i + 2;
+                    while (k < s.len and hex_count < 4) : (k += 1) {
+                        const c = s[k];
+                        const digit: u21 = if (c >= '0' and c <= '9')
+                            c - '0'
+                        else if (c >= 'a' and c <= 'f')
+                            c - 'a' + 10
+                        else if (c >= 'A' and c <= 'F')
+                            c - 'A' + 10
+                        else
+                            break;
+                        codepoint = codepoint * 16 + digit;
+                        hex_count += 1;
+                    }
+                    if (hex_count > 0) {
+                        var utf8_buf: [4]u8 = undefined;
+                        const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch {
+                            i = k;
+                            continue;
+                        };
+                        var ui: usize = 0;
+                        while (ui < utf8_len) : (ui += 1) {
+                            try IO.print("{c}", .{utf8_buf[ui]});
+                        }
+                        i = k;
+                        continue;
+                    } else {
+                        try IO.print("{c}", .{s[i]});
+                        i += 1;
+                        continue;
+                    }
+                },
+                'U' => {
+                    var codepoint: u21 = 0;
+                    var hex_count: usize = 0;
+                    var k: usize = i + 2;
+                    while (k < s.len and hex_count < 8) : (k += 1) {
+                        const c = s[k];
+                        const digit: u21 = if (c >= '0' and c <= '9')
+                            c - '0'
+                        else if (c >= 'a' and c <= 'f')
+                            c - 'a' + 10
+                        else if (c >= 'A' and c <= 'F')
+                            c - 'A' + 10
+                        else
+                            break;
+                        codepoint = codepoint * 16 + digit;
+                        hex_count += 1;
+                    }
+                    if (hex_count > 0) {
+                        var utf8_buf: [4]u8 = undefined;
+                        const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch {
+                            i = k;
+                            continue;
+                        };
+                        var ui: usize = 0;
+                        while (ui < utf8_len) : (ui += 1) {
+                            try IO.print("{c}", .{utf8_buf[ui]});
+                        }
+                        i = k;
+                        continue;
+                    } else {
+                        try IO.print("{c}", .{s[i]});
+                        i += 1;
+                        continue;
+                    }
+                },
                 else => {
                     try IO.print("{c}", .{s[i]});
                     i += 1;
@@ -371,15 +441,25 @@ pub fn printf(command: *types.ParsedCommand) !i32 {
                     continue;
                 },
                 'x' => {
-                    if (i + 3 < format.len) {
-                        const hex = format[i + 2 .. i + 4];
-                        const val = std.fmt.parseInt(u8, hex, 16) catch {
-                            try IO.print("{c}", .{format[i]});
-                            i += 1;
-                            continue;
-                        };
-                        try IO.print("{c}", .{val});
-                        i += 4;
+                    var hex_val: u8 = 0;
+                    var hex_count: usize = 0;
+                    var k: usize = i + 2;
+                    while (k < format.len and hex_count < 2) : (k += 1) {
+                        const c = format[k];
+                        const digit: u8 = if (c >= '0' and c <= '9')
+                            c - '0'
+                        else if (c >= 'a' and c <= 'f')
+                            c - 'a' + 10
+                        else if (c >= 'A' and c <= 'F')
+                            c - 'A' + 10
+                        else
+                            break;
+                        hex_val = hex_val * 16 + digit;
+                        hex_count += 1;
+                    }
+                    if (hex_count > 0) {
+                        try IO.print("{c}", .{hex_val});
+                        i = k;
                         continue;
                     } else {
                         try IO.print("{c}", .{format[i]});

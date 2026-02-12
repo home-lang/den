@@ -274,6 +274,25 @@ pub const SavedFds = struct {
             self.stderr_save = null;
         }
     }
+
+    /// Discard saved FDs without restoring them.
+    /// Used by `exec` with no args + redirections to make redirections permanent.
+    /// Closes the saved copies so they don't leak, but does NOT dup2 them back.
+    pub fn discard(self: *SavedFds) void {
+        if (comptime builtin.os.tag == .windows) return;
+        if (self.stdin_save) |fd| {
+            std.posix.close(fd);
+            self.stdin_save = null;
+        }
+        if (self.stdout_save) |fd| {
+            std.posix.close(fd);
+            self.stdout_save = null;
+        }
+        if (self.stderr_save) |fd| {
+            std.posix.close(fd);
+            self.stderr_save = null;
+        }
+    }
 };
 
 // Tests

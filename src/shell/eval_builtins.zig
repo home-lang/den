@@ -80,6 +80,8 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
                         } else if (var_start < cmd.args.len) {
                             if (cmd.args[var_start].len > 0) {
                                 delimiter = cmd.args[var_start][0];
+                            } else {
+                                delimiter = 0; // empty string means NUL delimiter (bash behavior)
                             }
                             var_start += 1;
                         }

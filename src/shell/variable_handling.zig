@@ -343,7 +343,6 @@ pub fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
         }
     } else {
         // Store array (replace)
-        const key = try self.allocator.dupe(u8, name);
 
         // Free old array if exists
         if (self.arrays.get(name)) |old_array| {
@@ -356,6 +355,8 @@ pub fn executeArrayAssignment(self: *Shell, input: []const u8) !void {
             _ = self.arrays.remove(name);
         }
 
+        const key = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(key);
         try self.arrays.put(key, array);
     }
     self.last_exit_code = 0;

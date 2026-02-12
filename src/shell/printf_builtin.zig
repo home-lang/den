@@ -275,16 +275,26 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     continue;
                 },
                 'x' => {
-                    // Hex escape \xNN
-                    if (i + 3 < format.len) {
-                        const hex = format[i + 2 .. i + 4];
-                        const val = std.fmt.parseInt(u8, hex, 16) catch {
-                            try IO.print("{c}", .{format[i]});
-                            i += 1;
-                            continue;
-                        };
-                        try IO.print("{c}", .{val});
-                        i += 4;
+                    // Hex escape \xN or \xNN (1-2 hex digits)
+                    var hex_val: u8 = 0;
+                    var hex_count: usize = 0;
+                    var k: usize = i + 2;
+                    while (k < format.len and hex_count < 2) : (k += 1) {
+                        const c = format[k];
+                        const digit: u8 = if (c >= '0' and c <= '9')
+                            c - '0'
+                        else if (c >= 'a' and c <= 'f')
+                            c - 'a' + 10
+                        else if (c >= 'A' and c <= 'F')
+                            c - 'A' + 10
+                        else
+                            break;
+                        hex_val = hex_val * 16 + digit;
+                        hex_count += 1;
+                    }
+                    if (hex_count > 0) {
+                        try IO.print("{c}", .{hex_val});
+                        i = k;
                         continue;
                     } else {
                         try IO.print("{c}", .{format[i]});
@@ -433,6 +443,51 @@ pub fn printWithEscapes(str: []const u8) !void {
                 'f' => try IO.print("\x0c", .{}),
                 'v' => try IO.print("\x0b", .{}),
                 'e' => try IO.print("\x1b", .{}),
+                'c' => return,
+                '0' => {
+                    // Octal escape \0NNN (up to 3 octal digits)
+                    var val: u8 = 0;
+                    var k: usize = i + 2;
+                    var count: usize = 0;
+                    while (k < str.len and count < 3) : (k += 1) {
+                        if (str[k] >= '0' and str[k] <= '7') {
+                            val = val * 8 + (str[k] - '0');
+                            count += 1;
+                        } else break;
+                    }
+                    try IO.print("{c}", .{val});
+                    i = k;
+                    continue;
+                },
+                'x' => {
+                    // Hex escape \xH or \xHH (1 or 2 hex digits)
+                    var val: u8 = 0;
+                    var k: usize = i + 2;
+                    var count: usize = 0;
+                    while (k < str.len and count < 2) : (k += 1) {
+                        const c = str[k];
+                        if (c >= '0' and c <= '9') {
+                            val = val * 16 + (c - '0');
+                            count += 1;
+                        } else if (c >= 'a' and c <= 'f') {
+                            val = val * 16 + (c - 'a' + 10);
+                            count += 1;
+                        } else if (c >= 'A' and c <= 'F') {
+                            val = val * 16 + (c - 'A' + 10);
+                            count += 1;
+                        } else break;
+                    }
+                    if (count > 0) {
+                        try IO.print("{c}", .{val});
+                        i = k;
+                        continue;
+                    } else {
+                        // No valid hex digits after \x, print literally
+                        try IO.print("{c}", .{str[i]});
+                        i += 1;
+                        continue;
+                    }
+                },
                 else => {
                     try IO.print("{c}", .{str[i]});
                     i += 1;

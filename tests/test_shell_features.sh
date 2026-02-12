@@ -1898,6 +1898,88 @@ check "read -a basic" "b" "$(echo 'a b c' | timeout 3 $DEN -c 'read -a arr; echo
 check "nested cmd subst" "HELLO" "$(timeout 3 $DEN -c 'echo $(echo $(echo HELLO))' 2>/dev/null)"
 check "cmd subst in arith" "10" "$(timeout 3 $DEN -c 'echo $(( $(echo 5) + $(echo 5) ))' 2>/dev/null)"
 
+# ===========================================================================
+# 252. printf %b octal escapes (\0NNN)
+# ===========================================================================
+check 'printf %b \0101=A' "A" "$(timeout 3 $DEN -c "printf '%b' '\0101'" 2>/dev/null)"
+check 'printf %b \0110=H' "H" "$(timeout 3 $DEN -c "printf '%b' '\0110'" 2>/dev/null)"
+
+# ===========================================================================
+# 253. printf %b hex escapes (\xHH)
+# ===========================================================================
+check 'printf %b \x41=A' "A" "$(timeout 3 $DEN -c "printf '%b' '\x41'" 2>/dev/null)"
+check 'printf %b \x48=H' "H" "$(timeout 3 $DEN -c "printf '%b' '\x48'" 2>/dev/null)"
+
+# ===========================================================================
+# 254. printf %b \c stops output
+# ===========================================================================
+check 'printf %b \c stops' "hello" "$(timeout 3 $DEN -c "printf '%b' 'hello\cworld'" 2>/dev/null)"
+
+# ===========================================================================
+# 255. printf format \x with single hex digit
+# ===========================================================================
+check 'printf \xA single hex' "$(printf 'a\nz')" "$(timeout 3 $DEN -c "printf 'a\xAz'" 2>/dev/null)"
+check 'printf \x41=A' "A" "$(timeout 3 $DEN -c "printf '\x41'" 2>/dev/null)"
+
+# ===========================================================================
+# 256. echo -e Unicode escapes
+# ===========================================================================
+check 'echo -e \u0041=A' "A" "$(timeout 3 $DEN -c 'echo -e "\u0041"' 2>/dev/null)"
+check 'echo -e \u00e9=e-acute' "$(printf '\xc3\xa9')" "$(timeout 3 $DEN -c 'echo -e "\u00e9"' 2>/dev/null)"
+
+# ===========================================================================
+# 257. read -d empty string = NUL delimiter
+# ===========================================================================
+check 'read -d "" basic' "hello" "$(printf 'hello\0world' | timeout 3 $DEN -c "read -d '' var; echo \$var" 2>/dev/null)"
+
+# ===========================================================================
+# 258. Arithmetic overflow-checked increment
+# ===========================================================================
+check 'arith normal increment' "6" "$(timeout 3 $DEN -c 'x=5; echo $((++x))' 2>/dev/null)"
+check 'arith normal decrement' "4" "$(timeout 3 $DEN -c 'x=5; echo $((--x))' 2>/dev/null)"
+
+# ===========================================================================
+# 259. ${!VAR} indirect expansion with local vars
+# ===========================================================================
+check '${!VAR} basic' "world" "$(timeout 3 $DEN -c 'target=world; ref=target; echo ${!ref}' 2>/dev/null)"
+
+# ===========================================================================
+# 260. trap - SIGNAL resets to default
+# ===========================================================================
+check 'trap - removes handler' "" "$(timeout 3 $DEN -c 'trap "echo trapped" USR1; trap - USR1; trap -p USR1' 2>/dev/null)"
+
+# ===========================================================================
+# 261. umask -S symbolic display
+# ===========================================================================
+check 'umask octal' "0022" "$(timeout 3 $DEN -c 'umask 0022; umask' 2>/dev/null)"
+check 'umask -S display' "u=rwx,g=r-x,o=r-x" "$(timeout 3 $DEN -c 'umask 0022; umask -S' 2>/dev/null)"
+
+# ===========================================================================
+# 262. umask symbolic mode set
+# ===========================================================================
+check 'umask symbolic u=rwx,g=rx,o=rx' "0022" "$(timeout 3 $DEN -c 'umask u=rwx,g=rx,o=rx; umask' 2>/dev/null)"
+
+# ===========================================================================
+# 263. source multi-line constructs
+# ===========================================================================
+printf 'if true; then\necho yes\nfi\n' > /tmp/den_test_source_ml.sh
+check 'source if/then/fi' "yes" "$(timeout 3 $DEN -c 'source /tmp/den_test_source_ml.sh' 2>/dev/null)"
+rm -f /tmp/den_test_source_ml.sh
+printf 'myfn() {\necho hello\n}\n' > /tmp/den_test_source_fn.sh
+check 'source function def' "hello" "$(timeout 3 $DEN -c 'source /tmp/den_test_source_fn.sh; myfn' 2>/dev/null)"
+rm -f /tmp/den_test_source_fn.sh
+
+# ===========================================================================
+# 264. exec with redirections (no args)
+# ===========================================================================
+check 'exec >file redirect' "hello" "$(timeout 3 $DEN -c 'exec > /tmp/den_test_exec_redir.txt; echo hello; exec > /dev/stdout; cat /tmp/den_test_exec_redir.txt; rm /tmp/den_test_exec_redir.txt' 2>/dev/null)"
+
+# ===========================================================================
+# 265. Array assignment key leak fix (functional test)
+# ===========================================================================
+check 'array reassign' "new" "$(timeout 3 $DEN -c 'arr=(old); arr=(new); echo ${arr[0]}' 2>/dev/null)"
+check 'array reassign multi' "c" "$(timeout 3 $DEN -c 'arr=(a b); arr=(c d e); echo ${arr[0]}' 2>/dev/null)"
+
 # Results
 # ===========================================================================
 echo ""

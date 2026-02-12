@@ -7,6 +7,7 @@
 //! - hash: manage named directories
 
 const std = @import("std");
+const builtin = @import("builtin");
 const IO = @import("../utils/io.zig").IO;
 const types = @import("../types/mod.zig");
 const parser_mod = @import("../parser/mod.zig");
@@ -124,26 +125,137 @@ pub fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
         }
     }
 
-    // Execute file content line by line through the shell's executeCommand,
-    // which properly handles function definitions, variable assignments,
-    // multi-line constructs, heredocs, and all other shell features.
-    var line_start: usize = 0;
-    while (line_start < content.len) {
-        // Find end of line
-        const line_end = std.mem.indexOfScalarPos(u8, content, line_start, '\n') orelse content.len;
-        const line = std.mem.trim(u8, content[line_start..line_end], &std.ascii.whitespace);
-        line_start = line_end + 1;
+    // Execute file content using multi-line script processing.
+    // Split on newlines and use ControlFlowParser for if/while/for/case/functions,
+    // matching the same approach used by the -c flag handler.
+    if (content.len > 0) {
+        const control_flow = @import("../scripting/control_flow.zig");
+        const functions = @import("../scripting/functions.zig");
 
-        // Skip empty lines and comments
-        if (line.len == 0 or line[0] == '#') continue;
+        // Split content into lines (quote-aware)
+        var lines_buffer: [10000][]const u8 = undefined;
+        var lines_count: usize = 0;
+        {
+            var line_start: usize = 0;
+            var in_sq = false;
+            var in_dq = false;
+            var escaped = false;
+            var ci: usize = 0;
+            while (ci < content.len) : (ci += 1) {
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                const ch = content[ci];
+                if (ch == '\\' and !in_sq) {
+                    escaped = true;
+                    continue;
+                }
+                if (ch == '\'' and !in_dq) {
+                    in_sq = !in_sq;
+                } else if (ch == '"' and !in_sq) {
+                    in_dq = !in_dq;
+                } else if (ch == '\n' and !in_sq and !in_dq) {
+                    if (lines_count >= lines_buffer.len) break;
+                    lines_buffer[lines_count] = content[line_start..ci];
+                    lines_count += 1;
+                    line_start = ci + 1;
+                }
+            }
+            if (line_start <= content.len and lines_count < lines_buffer.len) {
+                lines_buffer[lines_count] = content[line_start..content.len];
+                lines_count += 1;
+            }
+        }
+        const lines = lines_buffer[0..lines_count];
+
+        var line_num: usize = 0;
+        var cf_parser = control_flow.ControlFlowParser.init(self.allocator);
+        var cf_executor = control_flow.ControlFlowExecutor.init(self);
+        var func_parser = functions.FunctionParser.init(self.allocator);
 
         // Use @ptrCast to break circular error set inference
-        // (builtinSource → executeCommand → dispatchBuiltin → builtinSource)
         const cmd_fn = @as(*const fn (*Shell, []const u8) anyerror!void, @ptrCast(&Shell.executeCommand));
-        cmd_fn(self, line) catch {
-            self.last_exit_code = 1;
-            continue;
-        };
+
+        while (line_num < lines.len) : (line_num += 1) {
+            const trimmed = std.mem.trim(u8, lines[line_num], &std.ascii.whitespace);
+            if (trimmed.len == 0 or trimmed[0] == '#') continue;
+
+            // Check function definitions
+            const is_func_kw = std.mem.startsWith(u8, trimmed, "function ");
+            var is_paren_syntax = false;
+            if (std.mem.indexOf(u8, trimmed, "()")) |_| {
+                if (std.mem.indexOf(u8, trimmed, "{") != null) {
+                    is_paren_syntax = true;
+                } else if (line_num + 1 < lines.len) {
+                    const next_t = std.mem.trim(u8, lines[line_num + 1], &std.ascii.whitespace);
+                    if (std.mem.startsWith(u8, next_t, "{")) is_paren_syntax = true;
+                }
+            }
+            if (is_func_kw or is_paren_syntax) {
+                // Check if this is a single-line function (both { and } on same line)
+                // If so, let the shell's own function parser handle it via cmd_fn
+                const has_close_brace = std.mem.indexOf(u8, trimmed, "}") != null;
+                if (!has_close_brace) {
+                    if (func_parser.parseFunction(lines, line_num)) |result_val| {
+                        var result = result_val;
+                        defer {
+                            self.allocator.free(result.name);
+                            for (result.body) |line| self.allocator.free(line);
+                            self.allocator.free(result.body);
+                        }
+                        self.function_manager.defineFunction(result.name, result.body, false) catch break;
+                        line_num = result.end;
+                        continue;
+                    } else |_| {
+                        // Parse failure: fall through to cmd_fn
+                    }
+                }
+                // Single-line function or parse failure: fall through to cmd_fn
+            }
+
+            // Control flow constructs
+            if (std.mem.startsWith(u8, trimmed, "if ")) {
+                var result = cf_parser.parseIf(lines, line_num) catch break;
+                defer result.stmt.deinit();
+                self.last_exit_code = cf_executor.executeIf(&result.stmt) catch 1;
+                line_num = result.end;
+                continue;
+            }
+            if (std.mem.startsWith(u8, trimmed, "while ")) {
+                var result = cf_parser.parseWhile(lines, line_num, false) catch break;
+                defer result.loop.deinit();
+                self.last_exit_code = cf_executor.executeWhile(&result.loop) catch 1;
+                line_num = result.end;
+                continue;
+            }
+            if (std.mem.startsWith(u8, trimmed, "until ")) {
+                var result = cf_parser.parseWhile(lines, line_num, true) catch break;
+                defer result.loop.deinit();
+                self.last_exit_code = cf_executor.executeWhile(&result.loop) catch 1;
+                line_num = result.end;
+                continue;
+            }
+            if (std.mem.startsWith(u8, trimmed, "for ")) {
+                var result = cf_parser.parseFor(lines, line_num) catch break;
+                defer result.loop.deinit();
+                self.last_exit_code = cf_executor.executeFor(&result.loop) catch 1;
+                line_num = result.end;
+                continue;
+            }
+            if (std.mem.startsWith(u8, trimmed, "case ")) {
+                var result = cf_parser.parseCase(lines, line_num) catch break;
+                defer result.stmt.deinit();
+                self.last_exit_code = cf_executor.executeCase(&result.stmt) catch 1;
+                line_num = result.end;
+                continue;
+            }
+
+            // Simple command - execute directly
+            cmd_fn(self, trimmed) catch {
+                self.last_exit_code = 1;
+            };
+        }
     }
 }
 
@@ -236,13 +348,39 @@ pub fn builtinMapfile(self: *Shell, cmd: *types.ParsedCommand) !void {
 
     var line_count: usize = 0;
     var skipped: usize = 0;
-    // Note: delimiter parameter is parsed but we use newline for now
-    const actual_delim = if (delimiter == '\n') delimiter else '\n';
-    _ = actual_delim;
 
-    // Read lines from stdin
+    // Read lines from stdin, respecting the delimiter
     while (true) {
-        const line = IO.readLine(self.allocator) catch break;
+        const line = if (delimiter == '\n') blk: {
+            // Default newline delimiter: use existing IO.readLine
+            break :blk IO.readLine(self.allocator) catch break;
+        } else blk: {
+            // Custom delimiter: read byte-by-byte until delimiter is found
+            var line_buf: std.ArrayList(u8) = .empty;
+            errdefer line_buf.deinit(self.allocator);
+            var found_delim = false;
+            if (comptime builtin.os.tag != .windows) {
+                while (true) {
+                    var byte_buf: [1]u8 = undefined;
+                    const bytes_read = std.posix.read(std.posix.STDIN_FILENO, &byte_buf) catch break;
+                    if (bytes_read == 0) break; // EOF
+                    if (byte_buf[0] == delimiter) {
+                        found_delim = true;
+                        break;
+                    }
+                    line_buf.append(self.allocator, byte_buf[0]) catch break;
+                }
+            }
+            if (line_buf.items.len == 0 and !found_delim) {
+                line_buf.deinit(self.allocator);
+                break :blk @as(?[]u8, null);
+            }
+            const result = line_buf.toOwnedSlice(self.allocator) catch {
+                line_buf.deinit(self.allocator);
+                break :blk @as(?[]u8, null);
+            };
+            break :blk @as(?[]u8, result);
+        };
         if (line == null) break;
         defer self.allocator.free(line.?);
 
@@ -528,23 +666,138 @@ pub fn builtinHash(self: *Shell, cmd: *types.ParsedCommand) !void {
 
 /// Builtin: umask - set file creation mask
 pub fn builtinUmask(self: *Shell, cmd: *types.ParsedCommand) !void {
-    if (cmd.args.len == 0) {
-        // Display current umask
-        const current = std.c.umask(0);
-        _ = std.c.umask(current); // Restore it
-        try IO.print("{o:0>4}\n", .{current});
+    // Parse flags
+    var symbolic_output = false; // -S: symbolic output
+    var arg_idx: usize = 0;
+
+    while (arg_idx < cmd.args.len) {
+        const arg = cmd.args[arg_idx];
+        if (arg.len > 0 and arg[0] == '-') {
+            for (arg[1..]) |c| {
+                switch (c) {
+                    'S' => symbolic_output = true,
+                    else => {
+                        try IO.eprint("den: umask: -{c}: invalid option\n", .{c});
+                        self.last_exit_code = 1;
+                        return;
+                    },
+                }
+            }
+            arg_idx += 1;
+        } else {
+            break;
+        }
+    }
+
+    // Get current umask
+    const current = std.c.umask(0);
+    _ = std.c.umask(current); // Restore it
+
+    if (arg_idx >= cmd.args.len) {
+        // No mask argument - display current umask
+        if (symbolic_output) {
+            // Symbolic format: u=rwx,g=rx,o=rx (showing what IS allowed, not masked)
+            const perms: u9 = @truncate(~current & 0o777);
+            const u_r: u8 = if (perms & 0o400 != 0) 'r' else '-';
+            const u_w: u8 = if (perms & 0o200 != 0) 'w' else '-';
+            const u_x: u8 = if (perms & 0o100 != 0) 'x' else '-';
+            const g_r: u8 = if (perms & 0o040 != 0) 'r' else '-';
+            const g_w: u8 = if (perms & 0o020 != 0) 'w' else '-';
+            const g_x: u8 = if (perms & 0o010 != 0) 'x' else '-';
+            const o_r: u8 = if (perms & 0o004 != 0) 'r' else '-';
+            const o_w: u8 = if (perms & 0o002 != 0) 'w' else '-';
+            const o_x: u8 = if (perms & 0o001 != 0) 'x' else '-';
+            try IO.print("u={c}{c}{c},g={c}{c}{c},o={c}{c}{c}\n", .{ u_r, u_w, u_x, g_r, g_w, g_x, o_r, o_w, o_x });
+        } else {
+            try IO.print("{o:0>4}\n", .{current});
+        }
         self.last_exit_code = 0;
+        return;
+    }
+
+    // Set umask
+    const mask_str = cmd.args[arg_idx];
+
+    // Check if it's symbolic mode (contains letters like u,g,o,a or operators +,-,=)
+    var is_symbolic_mode = false;
+    for (mask_str) |c| {
+        if (c == 'u' or c == 'g' or c == 'o' or c == 'a' or c == '+' or c == '-' or c == '=') {
+            is_symbolic_mode = true;
+            break;
+        }
+    }
+
+    if (is_symbolic_mode) {
+        // Parse symbolic mode like u=rwx,g=rx,o=rx or u+w,g-w
+        var new_mask = current;
+
+        var iter = std.mem.splitScalar(u8, mask_str, ',');
+        while (iter.next()) |part| {
+            if (part.len < 2) continue;
+
+            // Parse who (u, g, o, a)
+            var who_mask: std.c.mode_t = 0;
+            var i: usize = 0;
+            while (i < part.len and (part[i] == 'u' or part[i] == 'g' or part[i] == 'o' or part[i] == 'a')) : (i += 1) {
+                switch (part[i]) {
+                    'u' => who_mask |= 0o700,
+                    'g' => who_mask |= 0o070,
+                    'o' => who_mask |= 0o007,
+                    'a' => who_mask |= 0o777,
+                    else => {},
+                }
+            }
+            if (who_mask == 0) who_mask = 0o777; // default to all
+
+            if (i >= part.len) continue;
+
+            // Parse operator (+, -, =)
+            const op = part[i];
+            i += 1;
+
+            // Parse permissions (r, w, x)
+            var perm_bits: std.c.mode_t = 0;
+            while (i < part.len) : (i += 1) {
+                switch (part[i]) {
+                    'r' => perm_bits |= 0o444,
+                    'w' => perm_bits |= 0o222,
+                    'x' => perm_bits |= 0o111,
+                    else => {},
+                }
+            }
+
+            // Apply based on who
+            perm_bits &= who_mask;
+
+            switch (op) {
+                '=' => {
+                    // Clear and set: set masked bits for who, clear allowed bits
+                    new_mask = (new_mask & ~who_mask) | (~perm_bits & who_mask);
+                },
+                '+' => {
+                    // Remove from mask (allow permission)
+                    new_mask &= ~perm_bits;
+                },
+                '-' => {
+                    // Add to mask (deny permission)
+                    new_mask |= perm_bits;
+                },
+                else => {},
+            }
+        }
+
+        _ = std.c.umask(new_mask);
     } else {
-        // Set new umask
-        const new_mask = std.fmt.parseInt(u32, cmd.args[0], 8) catch {
-            try IO.eprint("den: umask: invalid octal number: {s}\n", .{cmd.args[0]});
+        // Octal mode
+        const new_mask = std.fmt.parseInt(u32, mask_str, 8) catch {
+            try IO.eprint("den: umask: {s}: invalid octal number\n", .{mask_str});
             self.last_exit_code = 1;
             return;
         };
-
         _ = std.c.umask(@intCast(new_mask));
-        self.last_exit_code = 0;
     }
+
+    self.last_exit_code = 0;
 }
 
 /// Builtin: caller - display call stack
