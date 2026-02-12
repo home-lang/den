@@ -364,6 +364,11 @@ pub const JobManager = struct {
             };
             exit_status = result.status.code;
         } else {
+            // Send SIGCONT to resume the stopped process before waiting.
+            // Use negative pid to target the entire process group.
+            // Ignore errors: the process might already be running.
+            _ = std.posix.kill(-job.pid, std.posix.SIG.CONT) catch {};
+
             var fg_wait_status: c_int = 0;
             _ = std.c.waitpid(job.pid, &fg_wait_status, 0);
             exit_status = getExitStatus(@as(u32, @bitCast(fg_wait_status)));

@@ -2441,7 +2441,11 @@ pub const Shell = struct {
                 }
             }
 
-            if (std.mem.eql(u8, std.mem.trim(u8, line, &std.ascii.whitespace), delimiter)) {
+            // For normal heredocs (<<), the delimiter must match the line exactly.
+            // For strip-tabs heredocs (<<-), leading tabs were already stripped above.
+            // In both cases, trim only trailing whitespace (e.g. trailing \r) but never leading.
+            const trimmed_line = std.mem.trimEnd(u8, line, &std.ascii.whitespace);
+            if (std.mem.eql(u8, trimmed_line, delimiter)) {
                 content_end = line_start;
                 found_delim = true;
                 after_delim_pos = if (line_end < input.len) line_end + 1 else input.len;

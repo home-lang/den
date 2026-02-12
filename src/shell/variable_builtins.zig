@@ -520,7 +520,15 @@ pub fn setVarAttributes(shell: *Shell, name: []const u8, attrs: types.VarAttribu
 
     if (remove) {
         // Remove specified attributes
-        if (attrs.readonly) gop.value_ptr.*.readonly = false;
+        if (attrs.readonly) {
+            // In bash, once a variable is readonly, you cannot remove the readonly attribute.
+            if (gop.value_ptr.*.readonly) {
+                try IO.eprint("den: {s}: readonly variable\n", .{name});
+                shell.last_exit_code = 1;
+                return;
+            }
+            gop.value_ptr.*.readonly = false;
+        }
         if (attrs.integer) gop.value_ptr.*.integer = false;
         if (attrs.exported) gop.value_ptr.*.exported = false;
         if (attrs.lowercase) gop.value_ptr.*.lowercase = false;

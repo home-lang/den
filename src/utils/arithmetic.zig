@@ -667,22 +667,18 @@ const Parser = struct {
 
     // Power: ** (right associative)
     fn parsePower(self: *Parser) ArithmeticError!i64 {
-        var left = try self.parseUnary();
+        const left = try self.parseUnary();
 
-        while (self.pos < self.input.len) {
-            self.skipWhitespace();
-            if (self.pos >= self.input.len) break;
-
+        self.skipWhitespace();
+        if (self.pos < self.input.len) {
             // Check for ** operator
             if (self.pos + 1 < self.input.len and
                 self.input[self.pos] == '*' and
                 self.input[self.pos + 1] == '*')
             {
                 self.pos += 2;
-                const right = try self.parseUnary();
-                left = try self.power(left, right);
-            } else {
-                break;
+                const right = try self.parsePower(); // recurse for right-associativity
+                return try self.power(left, right);
             }
         }
 

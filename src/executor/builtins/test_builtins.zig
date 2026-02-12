@@ -157,59 +157,108 @@ pub fn extendedTest(command: *types.ParsedCommand, shell: ?*Shell) !i32 {
 
     if (args.len == 0) return 1; // Empty test is false
 
-    // Handle compound expressions with && and ||
-    var i: usize = 0;
-    var last_result: bool = true;
-    var pending_op: ?enum { and_op, or_op } = null;
+    // Parse compound expressions with correct operator precedence:
+    // && binds tighter than || (like bash).
+    // We use a recursive-descent approach:
+    //   parseOr  -> parseAnd ( "||" parseAnd )*
+    //   parseAnd -> primary   ( "&&" primary  )*
+    // where "primary" is the next simple/unary/binary expression or parenthesized group.
 
+    // First, split the args into a list of tokens that are either operators
+    // (&&, ||) or sub-expression slices, respecting parenthesis nesting.
+    // We represent this as a flat list of "segments" separated by the operators
+    // found at paren-depth 0, then apply precedence during evaluation.
+
+    var pos: usize = 0;
+    const result = try parseOr(args, &pos, shell);
+    return if (result) 0 else 1;
+}
+
+/// Find the end of the next primary expression starting at args[pos],
+/// skipping over parenthesized groups. Returns the index one-past-the-end
+/// of the primary (i.e. the index of the next && / || operator, or args.len).
+fn findPrimaryEnd(args: [][]const u8, start: usize) usize {
+    var i = start;
+    var paren_depth: u32 = 0;
     while (i < args.len) {
-        // Find the next && or || or end of args
-        var expr_end = i;
-        var paren_depth: u32 = 0;
-        while (expr_end < args.len) {
-            const arg = args[expr_end];
-            if (std.mem.eql(u8, arg, "(")) {
-                paren_depth += 1;
-            } else if (std.mem.eql(u8, arg, ")")) {
-                if (paren_depth > 0) paren_depth -= 1;
-            } else if (paren_depth == 0) {
-                if (std.mem.eql(u8, arg, "&&") or std.mem.eql(u8, arg, "||")) {
-                    break;
-                }
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "(")) {
+            paren_depth += 1;
+        } else if (std.mem.eql(u8, arg, ")")) {
+            if (paren_depth > 0) {
+                paren_depth -= 1;
             }
-            expr_end += 1;
+        } else if (paren_depth == 0) {
+            if (std.mem.eql(u8, arg, "&&") or std.mem.eql(u8, arg, "||")) {
+                break;
+            }
         }
+        i += 1;
+    }
+    return i;
+}
 
-        // Evaluate the sub-expression
-        const sub_result = try evaluateExtendedTestExpr(args[i..expr_end], shell);
+/// parseOr: evaluate a sequence of &&-groups separated by "||".
+///   parseOr -> parseAnd ( "||" parseAnd )*
+/// Short-circuits: if left side is true, skip right side.
+fn parseOr(args: [][]const u8, pos: *usize, shell: ?*Shell) !bool {
+    var result = try parseAnd(args, pos, shell);
 
-        // Apply pending operator
-        if (pending_op) |op| {
-            switch (op) {
-                .and_op => last_result = last_result and sub_result,
-                .or_op => last_result = last_result or sub_result,
-            }
+    while (pos.* < args.len and std.mem.eql(u8, args[pos.*], "||")) {
+        pos.* += 1; // consume "||"
+        if (result) {
+            // Short-circuit: skip the right-hand parseAnd operand
+            skipAnd(args, pos);
         } else {
-            last_result = sub_result;
-        }
-
-        // Short-circuit evaluation
-        if (expr_end < args.len) {
-            const op_str = args[expr_end];
-            if (std.mem.eql(u8, op_str, "&&")) {
-                if (!last_result) return 1;
-                pending_op = .and_op;
-            } else if (std.mem.eql(u8, op_str, "||")) {
-                if (last_result) return 0;
-                pending_op = .or_op;
-            }
-            i = expr_end + 1;
-        } else {
-            break;
+            result = try parseAnd(args, pos, shell);
         }
     }
 
-    return if (last_result) 0 else 1;
+    return result;
+}
+
+/// parseAnd: evaluate a sequence of primaries separated by "&&".
+///   parseAnd -> primary ( "&&" primary )*
+/// Short-circuits: if left side is false, skip right side.
+fn parseAnd(args: [][]const u8, pos: *usize, shell: ?*Shell) !bool {
+    var result = try parsePrimary(args, pos, shell);
+
+    while (pos.* < args.len and std.mem.eql(u8, args[pos.*], "&&")) {
+        pos.* += 1; // consume "&&"
+        if (!result) {
+            // Short-circuit: skip the right-hand primary
+            skipPrimary(args, pos);
+        } else {
+            result = try parsePrimary(args, pos, shell);
+        }
+    }
+
+    return result;
+}
+
+/// parsePrimary: consume and evaluate one primary expression starting at pos.
+/// A primary is everything up to the next top-level && or ||.
+fn parsePrimary(args: [][]const u8, pos: *usize, shell: ?*Shell) !bool {
+    const start = pos.*;
+    const end = findPrimaryEnd(args, start);
+    pos.* = end;
+    return evaluateExtendedTestExpr(args[start..end], shell);
+}
+
+/// skipAnd: advance pos past an entire parseAnd production without evaluating.
+/// This skips: primary ( "&&" primary )*
+fn skipAnd(args: [][]const u8, pos: *usize) void {
+    skipPrimary(args, pos);
+    while (pos.* < args.len and std.mem.eql(u8, args[pos.*], "&&")) {
+        pos.* += 1; // skip "&&"
+        skipPrimary(args, pos);
+    }
+}
+
+/// skipPrimary: advance pos past one primary expression without evaluating.
+fn skipPrimary(args: [][]const u8, pos: *usize) void {
+    const end = findPrimaryEnd(args, pos.*);
+    pos.* = end;
 }
 
 /// Evaluate a single extended test expression (without && / ||)

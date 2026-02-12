@@ -881,21 +881,22 @@ pub const ControlFlowExecutor = struct {
         return self.shell.last_exit_code;
     }
 
-    /// Evaluate arithmetic condition for C-style for loops
+    /// Evaluate arithmetic condition for C-style for loops.
+    /// In bash, for ((i=0; i<10; i++)), the condition is evaluated as an
+    /// arithmetic expression: non-zero means true (continue), zero means false (stop).
+    /// An empty condition means always true (infinite loop).
     fn evaluateArithmeticCondition(self: *ControlFlowExecutor, condition: []const u8) !bool {
         const trimmed = std.mem.trim(u8, condition, &std.ascii.whitespace);
-        if (trimmed.len == 0) return true; // Empty condition is true
+        if (trimmed.len == 0) return true; // Empty condition is always true (bash behavior)
 
-        // Build a test command: test condition
-        const test_cmd = try std.fmt.allocPrint(self.allocator, "test {s}", .{trimmed});
-        defer self.allocator.free(test_cmd);
+        // Use the arithmetic evaluator to evaluate the condition as an arithmetic expression
+        const Arithmetic = @import("../utils/arithmetic.zig").Arithmetic;
+        var arith = Arithmetic.initWithVariables(self.allocator, &self.shell.environment);
+        arith.arrays = &self.shell.arrays;
+        const result = arith.eval(trimmed) catch 0;
 
-        // Execute and check result
-        self.shell.executeCommand(test_cmd) catch {
-            return false;
-        };
-
-        return self.shell.last_exit_code == 0;
+        // Non-zero result means true (continue looping), zero means false (stop)
+        return result != 0;
     }
 };
 

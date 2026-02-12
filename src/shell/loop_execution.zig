@@ -62,8 +62,9 @@ pub fn executeCStyleForLoopOneline(self: *Shell, input: []const u8) !void {
     }
     body_start = std.mem.trim(u8, body_start[2..], &std.ascii.whitespace);
 
-    // Find "done" keyword - it might be followed by more commands (done; echo $sum)
-    const done_pos = std.mem.indexOf(u8, body_start, "done") orelse {
+    // Find "done" keyword as a standalone word, not inside quotes or as a substring.
+    // Also accounts for nesting: inner for/while/until loops have their own "done".
+    const done_pos = findStandaloneDone(body_start) orelse {
         try IO.eprint("den: syntax error: expected 'done'\n", .{});
         self.last_exit_code = 1;
         return;
@@ -722,4 +723,85 @@ pub fn getVariableValueForArith(self: *Shell, name: []const u8) []const u8 {
         return val;
     }
     return "0";
+}
+
+/// Find the position of "done" as a standalone keyword in a one-line loop body.
+/// This correctly handles:
+///   - Word boundaries: "undone" or "done_flag" are NOT matched
+///   - Quoted strings: `echo "not done yet"` does not match
+///   - Nesting: inner for/while/until/select loops have their own "done"
+/// Returns the byte offset of the standalone "done", or null if not found.
+fn findStandaloneDone(input: []const u8) ?usize {
+    var i: usize = 0;
+    var in_single_quote = false;
+    var in_double_quote = false;
+    var nesting_depth: u32 = 0;
+
+    while (i < input.len) {
+        const c = input[i];
+
+        // Track quote state (single quotes are not escaped inside double quotes and vice versa)
+        if (c == '\'' and !in_double_quote) {
+            in_single_quote = !in_single_quote;
+            i += 1;
+            continue;
+        }
+        if (c == '"' and !in_single_quote) {
+            in_double_quote = !in_double_quote;
+            i += 1;
+            continue;
+        }
+
+        // Skip content inside quotes entirely
+        if (in_single_quote or in_double_quote) {
+            i += 1;
+            continue;
+        }
+
+        // Track nesting: "for ", "while ", "until ", "select " increase depth
+        // We check for these keywords followed by a space to avoid false matches
+        if (startsWithKeyword(input[i..], "for") or
+            startsWithKeyword(input[i..], "while") or
+            startsWithKeyword(input[i..], "until") or
+            startsWithKeyword(input[i..], "select"))
+        {
+            // Only count as nesting if preceded by start-of-string, whitespace, or semicolon
+            if (i == 0 or input[i - 1] == ' ' or input[i - 1] == '\t' or input[i - 1] == ';' or input[i - 1] == '\n') {
+                nesting_depth += 1;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Check for "done" as a standalone word
+        if (i + 4 <= input.len and std.mem.eql(u8, input[i..][0..4], "done")) {
+            // Check left boundary: must be at start or preceded by whitespace/semicolon
+            const left_ok = (i == 0) or input[i - 1] == ' ' or input[i - 1] == '\t' or input[i - 1] == ';' or input[i - 1] == '\n';
+            // Check right boundary: must be at end or followed by whitespace/semicolon/EOF
+            const right_ok = (i + 4 >= input.len) or input[i + 4] == ' ' or input[i + 4] == '\t' or input[i + 4] == ';' or input[i + 4] == '\n';
+
+            if (left_ok and right_ok) {
+                if (nesting_depth > 0) {
+                    // This "done" closes an inner loop, not ours
+                    nesting_depth -= 1;
+                    i += 4;
+                    continue;
+                }
+                return i;
+            }
+        }
+
+        i += 1;
+    }
+
+    return null;
+}
+
+/// Check if a slice starts with a keyword followed by a word boundary (space, tab, semicolon, or end).
+fn startsWithKeyword(input: []const u8, keyword: []const u8) bool {
+    if (input.len < keyword.len) return false;
+    if (!std.mem.eql(u8, input[0..keyword.len], keyword)) return false;
+    if (input.len == keyword.len) return true;
+    const next = input[keyword.len];
+    return next == ' ' or next == '\t' or next == ';' or next == '\n' or next == '(';
 }

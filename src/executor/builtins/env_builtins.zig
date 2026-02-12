@@ -236,40 +236,16 @@ pub fn set(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             return 0;
         }
 
-        // Handle shell options (-e, -E, +e, +E, etc.)
+        // Handle shell options (-e, -E, +e, +E, -exu, +exu, -o name, +o name, etc.)
         if (arg.len > 0 and (arg[0] == '-' or arg[0] == '+')) {
             const enable = arg[0] == '-';
             const option = arg[1..];
 
             if (ctx.hasShell()) {
                 const shell_ref = try ctx.getShell();
-                if (std.mem.eql(u8, option, "e")) {
-                    shell_ref.option_errexit = enable;
-                } else if (std.mem.eql(u8, option, "E")) {
-                    shell_ref.option_errtrace = enable;
-                } else if (std.mem.eql(u8, option, "x")) {
-                    shell_ref.option_xtrace = enable;
-                } else if (std.mem.eql(u8, option, "u")) {
-                    shell_ref.option_nounset = enable;
-                } else if (std.mem.eql(u8, option, "n")) {
-                    shell_ref.option_noexec = enable;
-                } else if (std.mem.eql(u8, option, "v")) {
-                    shell_ref.option_verbose = enable;
-                } else if (std.mem.eql(u8, option, "f")) {
-                    shell_ref.option_noglob = enable;
-                } else if (std.mem.eql(u8, option, "C")) {
-                    shell_ref.option_noclobber = enable;
-                } else if (std.mem.eql(u8, option, "r")) {
-                    if (enable) {
-                        shell_ref.option_restricted = true;
-                    } else {
-                        // Restricted mode cannot be unset once enabled
-                        if (shell_ref.option_restricted) {
-                            try IO.eprint("den: set: cannot unset restricted mode\n", .{});
-                            return 1;
-                        }
-                    }
-                } else if (std.mem.eql(u8, option, "o")) {
+
+                // Special case: -o / +o takes a separate argument or prints options
+                if (std.mem.eql(u8, option, "o")) {
                     if (arg_idx + 1 < command.args.len) {
                         const opt_name = command.args[arg_idx + 1];
                         if (std.mem.eql(u8, opt_name, "errexit")) {
@@ -318,8 +294,35 @@ pub fn set(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                         try IO.print("restricted     {s}\n", .{if (shell_ref.option_restricted) "on" else "off"});
                     }
                 } else {
-                    try IO.eprint("den: set: unknown option: {s}\n", .{arg});
-                    return 1;
+                    // Iterate through each character in the option string to support
+                    // combined flags like -exu (enables errexit, xtrace, nounset).
+                    for (option) |ch| {
+                        switch (ch) {
+                            'e' => shell_ref.option_errexit = enable,
+                            'E' => shell_ref.option_errtrace = enable,
+                            'x' => shell_ref.option_xtrace = enable,
+                            'u' => shell_ref.option_nounset = enable,
+                            'n' => shell_ref.option_noexec = enable,
+                            'v' => shell_ref.option_verbose = enable,
+                            'f' => shell_ref.option_noglob = enable,
+                            'C' => shell_ref.option_noclobber = enable,
+                            'r' => {
+                                if (enable) {
+                                    shell_ref.option_restricted = true;
+                                } else {
+                                    // Restricted mode cannot be unset once enabled
+                                    if (shell_ref.option_restricted) {
+                                        try IO.eprint("den: set: cannot unset restricted mode\n", .{});
+                                        return 1;
+                                    }
+                                }
+                            },
+                            else => {
+                                try IO.eprint("den: set: unknown option: {s}\n", .{arg});
+                                return 1;
+                            },
+                        }
+                    }
                 }
             } else {
                 try IO.eprint("den: set: shell options not available in this context\n", .{});

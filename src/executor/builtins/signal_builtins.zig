@@ -23,38 +23,40 @@ pub fn kill(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
     // Check for -l flag (list signals)
     if (std.mem.eql(u8, command.args[0], "-l") or std.mem.eql(u8, command.args[0], "-L") or std.mem.eql(u8, command.args[0], "--list")) {
-        const signal_table = [_]struct { num: u6, name: []const u8 }{
-            .{ .num = 1, .name = "HUP" },
-            .{ .num = 2, .name = "INT" },
-            .{ .num = 3, .name = "QUIT" },
-            .{ .num = 4, .name = "ILL" },
-            .{ .num = 5, .name = "TRAP" },
-            .{ .num = 6, .name = "ABRT" },
-            .{ .num = 7, .name = "BUS" },
-            .{ .num = 8, .name = "FPE" },
-            .{ .num = 9, .name = "KILL" },
-            .{ .num = 10, .name = "USR1" },
-            .{ .num = 11, .name = "SEGV" },
-            .{ .num = 12, .name = "USR2" },
-            .{ .num = 13, .name = "PIPE" },
-            .{ .num = 14, .name = "ALRM" },
-            .{ .num = 15, .name = "TERM" },
-            .{ .num = 17, .name = "CHLD" },
-            .{ .num = 18, .name = "CONT" },
-            .{ .num = 19, .name = "STOP" },
-            .{ .num = 20, .name = "TSTP" },
-            .{ .num = 21, .name = "TTIN" },
-            .{ .num = 22, .name = "TTOU" },
-            .{ .num = 23, .name = "URG" },
-            .{ .num = 24, .name = "XCPU" },
-            .{ .num = 25, .name = "XFSZ" },
-            .{ .num = 26, .name = "VTALRM" },
-            .{ .num = 27, .name = "PROF" },
-            .{ .num = 28, .name = "WINCH" },
-            .{ .num = 29, .name = "IO" },
-            .{ .num = 30, .name = "PWR" },
-            .{ .num = 31, .name = "SYS" },
-        };
+        const signal_table = if (comptime builtin.os.tag == .windows)
+            [_]struct { num: u6, name: []const u8 }{}
+        else
+            [_]struct { num: u6, name: []const u8 }{
+                .{ .num = @intFromEnum(std.posix.SIG.HUP), .name = "HUP" },
+                .{ .num = @intFromEnum(std.posix.SIG.INT), .name = "INT" },
+                .{ .num = @intFromEnum(std.posix.SIG.QUIT), .name = "QUIT" },
+                .{ .num = @intFromEnum(std.posix.SIG.ILL), .name = "ILL" },
+                .{ .num = @intFromEnum(std.posix.SIG.TRAP), .name = "TRAP" },
+                .{ .num = @intFromEnum(std.posix.SIG.ABRT), .name = "ABRT" },
+                .{ .num = @intFromEnum(std.posix.SIG.BUS), .name = "BUS" },
+                .{ .num = @intFromEnum(std.posix.SIG.FPE), .name = "FPE" },
+                .{ .num = @intFromEnum(std.posix.SIG.KILL), .name = "KILL" },
+                .{ .num = @intFromEnum(std.posix.SIG.USR1), .name = "USR1" },
+                .{ .num = @intFromEnum(std.posix.SIG.SEGV), .name = "SEGV" },
+                .{ .num = @intFromEnum(std.posix.SIG.USR2), .name = "USR2" },
+                .{ .num = @intFromEnum(std.posix.SIG.PIPE), .name = "PIPE" },
+                .{ .num = @intFromEnum(std.posix.SIG.ALRM), .name = "ALRM" },
+                .{ .num = @intFromEnum(std.posix.SIG.TERM), .name = "TERM" },
+                .{ .num = @intFromEnum(std.posix.SIG.CHLD), .name = "CHLD" },
+                .{ .num = @intFromEnum(std.posix.SIG.CONT), .name = "CONT" },
+                .{ .num = @intFromEnum(std.posix.SIG.STOP), .name = "STOP" },
+                .{ .num = @intFromEnum(std.posix.SIG.TSTP), .name = "TSTP" },
+                .{ .num = @intFromEnum(std.posix.SIG.TTIN), .name = "TTIN" },
+                .{ .num = @intFromEnum(std.posix.SIG.TTOU), .name = "TTOU" },
+                .{ .num = @intFromEnum(std.posix.SIG.URG), .name = "URG" },
+                .{ .num = @intFromEnum(std.posix.SIG.XCPU), .name = "XCPU" },
+                .{ .num = @intFromEnum(std.posix.SIG.XFSZ), .name = "XFSZ" },
+                .{ .num = @intFromEnum(std.posix.SIG.VTALRM), .name = "VTALRM" },
+                .{ .num = @intFromEnum(std.posix.SIG.PROF), .name = "PROF" },
+                .{ .num = @intFromEnum(std.posix.SIG.WINCH), .name = "WINCH" },
+                .{ .num = @intFromEnum(std.posix.SIG.IO), .name = "IO" },
+                .{ .num = @intFromEnum(std.posix.SIG.SYS), .name = "SYS" },
+            };
 
         // If a signal number is given after -l, print just that signal name
         if (command.args.len >= 2) {

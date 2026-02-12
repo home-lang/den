@@ -834,8 +834,9 @@ pub const Tokenizer = struct {
         // Allocate and copy the processed word
         const word = try self.allocator.dupe(u8, word_buffer[0..word_len]);
 
-        // Check for keywords (only if not quoted)
-        const token_type = if (in_single_quote or in_double_quote or in_ansi_quote)
+        // Check for keywords (only if the word was never quoted)
+        // e.g. "while" or 'while' should be treated as a plain word, not a keyword
+        const token_type = if (ever_quoted)
             TokenType.word
         else
             self.getKeywordType(word);

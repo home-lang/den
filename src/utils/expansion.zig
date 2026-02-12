@@ -464,17 +464,22 @@ pub const Expansion = struct {
                 return ExpansionResult{ .value = result, .consumed = 2, .owned = true };
             },
             '*' => {
-                // $* - all positional parameters as single word
+                // $* - all positional parameters joined by first char of IFS
                 if (self.positional_params.len == 0) {
                     return ExpansionResult{ .value = "", .consumed = 2, .owned = false };
                 }
+                // Determine the separator from IFS
+                const ifs_val = self.environment.get("IFS");
+                const sep_len: usize = if (ifs_val) |ifs| (if (ifs.len > 0) @as(usize, 1) else @as(usize, 0)) else @as(usize, 1);
+                const sep_char: u8 = if (ifs_val) |ifs| (if (ifs.len > 0) ifs[0] else ' ') else ' ';
+
                 // Calculate total length needed
                 var total_len: usize = 0;
                 for (self.positional_params) |param| {
                     total_len += param.len;
                 }
                 if (self.positional_params.len > 1) {
-                    total_len += self.positional_params.len - 1; // spaces
+                    total_len += (self.positional_params.len - 1) * sep_len;
                 }
 
                 // Build result string
@@ -483,8 +488,8 @@ pub const Expansion = struct {
                 for (self.positional_params, 0..) |param, i| {
                     @memcpy(result[pos..pos + param.len], param);
                     pos += param.len;
-                    if (i < self.positional_params.len - 1) {
-                        result[pos] = ' ';
+                    if (i < self.positional_params.len - 1 and sep_len > 0) {
+                        result[pos] = sep_char;
                         pos += 1;
                     }
                 }
@@ -1069,7 +1074,7 @@ pub const Expansion = struct {
                 const var_name_pp = content[0..sep_pos];
                 const pp_pattern = content[sep_pos + 2 ..];
 
-                if (self.environment.get(var_name_pp)) |value| {
+                if (self.getVariableValue(var_name_pp)) |value| {
                     const result = try self.removePrefix(value, pp_pattern, true);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
@@ -1084,7 +1089,7 @@ pub const Expansion = struct {
                 const var_name_pp = content[0..sep_pos];
                 const pp_pattern = content[sep_pos + 1 ..];
 
-                if (self.environment.get(var_name_pp)) |value| {
+                if (self.getVariableValue(var_name_pp)) |value| {
                     const result = try self.removePrefix(value, pp_pattern, false);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
@@ -1098,7 +1103,7 @@ pub const Expansion = struct {
                 const var_name_pp = content[0..sep_pos];
                 const pp_pattern = content[sep_pos + 2 ..];
 
-                if (self.environment.get(var_name_pp)) |value| {
+                if (self.getVariableValue(var_name_pp)) |value| {
                     const result = try self.removeSuffix(value, pp_pattern, true);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
@@ -1113,7 +1118,7 @@ pub const Expansion = struct {
                 const var_name_pp = content[0..sep_pos];
                 const pp_pattern = content[sep_pos + 1 ..];
 
-                if (self.environment.get(var_name_pp)) |value| {
+                if (self.getVariableValue(var_name_pp)) |value| {
                     const result = try self.removeSuffix(value, pp_pattern, false);
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 }
@@ -1126,7 +1131,7 @@ pub const Expansion = struct {
         if (std.mem.indexOf(u8, content, "^^")) |sep_pos| {
             if (sep_pos > 0) {
                 const var_name_cc = content[0..sep_pos];
-                if (self.environment.get(var_name_cc)) |value| {
+                if (self.getVariableValue(var_name_cc)) |value| {
                     const result = try self.allocator.alloc(u8, value.len);
                     for (value, 0..) |c, ci| {
                         result[ci] = std.ascii.toUpper(c);
@@ -1139,7 +1144,7 @@ pub const Expansion = struct {
         if (std.mem.indexOf(u8, content, ",,")) |sep_pos| {
             if (sep_pos > 0) {
                 const var_name_cc = content[0..sep_pos];
-                if (self.environment.get(var_name_cc)) |value| {
+                if (self.getVariableValue(var_name_cc)) |value| {
                     const result = try self.allocator.alloc(u8, value.len);
                     for (value, 0..) |c, ci| {
                         result[ci] = std.ascii.toLower(c);
@@ -1154,7 +1159,7 @@ pub const Expansion = struct {
             const var_name_cc = content[0 .. content.len - 1];
             // Make sure it's not ^^ (already handled above)
             if (var_name_cc.len > 0 and var_name_cc[var_name_cc.len - 1] != '^') {
-                if (self.environment.get(var_name_cc)) |value| {
+                if (self.getVariableValue(var_name_cc)) |value| {
                     if (value.len > 0) {
                         const result = try self.allocator.dupe(u8, value);
                         result[0] = std.ascii.toUpper(value[0]);
@@ -1170,7 +1175,7 @@ pub const Expansion = struct {
             const var_name_cc = content[0 .. content.len - 1];
             // Make sure it's not ,, (already handled above)
             if (var_name_cc.len > 0 and var_name_cc[var_name_cc.len - 1] != ',') {
-                if (self.environment.get(var_name_cc)) |value| {
+                if (self.getVariableValue(var_name_cc)) |value| {
                     if (value.len > 0) {
                         const result = try self.allocator.dupe(u8, value);
                         result[0] = std.ascii.toLower(value[0]);
@@ -1186,7 +1191,7 @@ pub const Expansion = struct {
         if (std.mem.indexOf(u8, content, "~~")) |sep_pos| {
             if (sep_pos > 0) {
                 const var_name_cc = content[0..sep_pos];
-                if (self.environment.get(var_name_cc)) |value| {
+                if (self.getVariableValue(var_name_cc)) |value| {
                     const result = try self.allocator.alloc(u8, value.len);
                     for (value, 0..) |c, ci| {
                         result[ci] = if (std.ascii.isUpper(c)) std.ascii.toLower(c) else std.ascii.toUpper(c);
@@ -1201,7 +1206,7 @@ pub const Expansion = struct {
             const var_name_cc = content[0 .. content.len - 1];
             // Make sure it's not ~~ (already handled above)
             if (var_name_cc.len > 0 and var_name_cc[var_name_cc.len - 1] != '~') {
-                if (self.environment.get(var_name_cc)) |value| {
+                if (self.getVariableValue(var_name_cc)) |value| {
                     if (value.len > 0) {
                         const result = try self.allocator.dupe(u8, value);
                         result[0] = if (std.ascii.isUpper(value[0])) std.ascii.toLower(value[0]) else std.ascii.toUpper(value[0]);
@@ -1480,12 +1485,41 @@ pub const Expansion = struct {
                         return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                     },
                     'Q' => {
-                        // Quote the value
-                        const result = try self.allocator.alloc(u8, value.len + 2);
-                        result[0] = '\'';
-                        @memcpy(result[1 .. value.len + 1], value);
-                        result[value.len + 1] = '\'';
-                        return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                        // Quote the value, escaping single quotes with '\'' idiom
+                        // Count single quotes in value to determine extra space needed
+                        var sq_count: usize = 0;
+                        for (value) |c| {
+                            if (c == '\'') sq_count += 1;
+                        }
+                        if (sq_count == 0) {
+                            // No single quotes, simple wrap
+                            const result = try self.allocator.alloc(u8, value.len + 2);
+                            result[0] = '\'';
+                            @memcpy(result[1 .. value.len + 1], value);
+                            result[value.len + 1] = '\'';
+                            return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
+                        }
+                        // Each single quote becomes '\'' (4 chars) replacing 1 char = +3 per quote
+                        const result_len = value.len + 2 + sq_count * 3;
+                        const result = try self.allocator.alloc(u8, result_len);
+                        var rpos: usize = 0;
+                        result[rpos] = '\'';
+                        rpos += 1;
+                        for (value) |c| {
+                            if (c == '\'') {
+                                result[rpos] = '\'';
+                                result[rpos + 1] = '\\';
+                                result[rpos + 2] = '\'';
+                                result[rpos + 3] = '\'';
+                                rpos += 4;
+                            } else {
+                                result[rpos] = c;
+                                rpos += 1;
+                            }
+                        }
+                        result[rpos] = '\'';
+                        rpos += 1;
+                        return ExpansionResult{ .value = result[0..rpos], .consumed = end + 1, .owned = true };
                     },
                     else => {},
                 }
@@ -2022,12 +2056,7 @@ pub const Expansion = struct {
             if (std.c.dup2(write_end, std.posix.STDOUT_FILENO) < 0) std.c._exit(1);
             std.posix.close(write_end);
 
-            // Redirect stderr to /dev/null
-            const dev_null_fd = std.c.open("/dev/null", .{ .ACCMODE = .WRONLY }, @as(std.c.mode_t, 0));
-            if (dev_null_fd >= 0) {
-                _ = std.c.dup2(dev_null_fd, std.posix.STDERR_FILENO);
-                std.posix.close(@intCast(dev_null_fd));
-            }
+            // stderr inherits from parent process (like bash)
 
             // Use the shell's own execution engine to preserve function definitions,
             // variables, and other shell state in command substitutions

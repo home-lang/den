@@ -100,7 +100,18 @@ pub fn executePosix(
         if (comptime builtin.os.tag != .windows) {
             _ = std.c.waitpid(pid, &wait_status, 0);
         }
-        const status: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
+        const raw_status: u32 = @bitCast(wait_status);
+        var status: i32 = undefined;
+        if (comptime builtin.os.tag != .windows) {
+            if (std.posix.W.IFSIGNALED(raw_status)) {
+                // Process was killed by a signal: exit code = 128 + signal_number (bash convention)
+                status = 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(raw_status))));
+            } else {
+                status = @intCast(std.posix.W.EXITSTATUS(raw_status));
+            }
+        } else {
+            status = @intCast(std.posix.W.EXITSTATUS(raw_status));
+        }
         last_status = status;
         // For pipefail: track rightmost non-zero exit status
         if (status != 0) {
