@@ -12,6 +12,21 @@ const is_windows = builtin.os.tag == .windows;
 // Forward declaration for Shell type
 const Shell = @import("../shell.zig").Shell;
 
+/// Parse an integer argument with auto-detection of base.
+/// Handles 0x/0X prefix for hex, 0 prefix for octal, and plain decimal.
+/// Also handles character constants like 'A' or "A".
+fn parseIntArg(comptime T: type, arg: []const u8) T {
+    if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"')) {
+        return @as(T, arg[1]);
+    }
+    if (arg.len >= 2 and arg[0] == '0' and (arg[1] == 'x' or arg[1] == 'X')) {
+        return std.fmt.parseInt(T, arg[2..], 16) catch 0;
+    } else if (arg.len >= 2 and arg[0] == '0' and std.ascii.isDigit(arg[1])) {
+        return std.fmt.parseInt(T, arg[1..], 8) catch 0;
+    }
+    return std.fmt.parseInt(T, arg, 10) catch 0;
+}
+
 /// Builtin: printf - formatted output with full format string support
 pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
     if (cmd.args.len == 0) {
@@ -131,10 +146,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 // Integer format
                 if (arg_idx < cmd.args.len) {
                     const arg = cmd.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(i64, arg[1])
-                    else
-                        std.fmt.parseInt(i64, arg, 10) catch 0;
+                    const num = parseIntArg(i64, arg);
                     try printfInt(num, width, zero_pad, left_justify);
                     arg_idx += 1;
                     did_consume_arg = true;
@@ -144,10 +156,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 // Unsigned integer format
                 if (arg_idx < cmd.args.len) {
                     const arg = cmd.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(u64, arg[1])
-                    else
-                        std.fmt.parseInt(u64, arg, 10) catch 0;
+                    const num = parseIntArg(u64, arg);
                     try printfUint(num, width, zero_pad, left_justify, 10, false);
                     arg_idx += 1;
                     did_consume_arg = true;
@@ -157,10 +166,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 // Hex lowercase
                 if (arg_idx < cmd.args.len) {
                     const arg = cmd.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(u64, arg[1])
-                    else
-                        std.fmt.parseInt(u64, arg, 10) catch 0;
+                    const num = parseIntArg(u64, arg);
                     try printfUint(num, width, zero_pad, left_justify, 16, false);
                     arg_idx += 1;
                     did_consume_arg = true;
@@ -170,10 +176,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 // Hex uppercase
                 if (arg_idx < cmd.args.len) {
                     const arg = cmd.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(u64, arg[1])
-                    else
-                        std.fmt.parseInt(u64, arg, 10) catch 0;
+                    const num = parseIntArg(u64, arg);
                     try printfUint(num, width, zero_pad, left_justify, 16, true);
                     arg_idx += 1;
                     did_consume_arg = true;
@@ -183,10 +186,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 // Octal format
                 if (arg_idx < cmd.args.len) {
                     const arg = cmd.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(u64, arg[1])
-                    else
-                        std.fmt.parseInt(u64, arg, 10) catch 0;
+                    const num = parseIntArg(u64, arg);
                     try printfUint(num, width, zero_pad, left_justify, 8, false);
                     arg_idx += 1;
                     did_consume_arg = true;

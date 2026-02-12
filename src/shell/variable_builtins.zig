@@ -57,11 +57,11 @@ pub fn builtinLocal(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 var var_value: []const u8 = arg[eq_pos + 1 ..];
 
                 // Apply integer attribute
+                var int_buf: [32]u8 = undefined;
                 if (attrs.integer) {
                     var arith = arithmetic.Arithmetic.initWithVariables(shell.allocator, &shell.environment);
                     const result = arith.eval(var_value) catch 0;
-                    var buf: [32]u8 = undefined;
-                    const num_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                    const num_str = std.fmt.bufPrint(&int_buf, "{d}", .{result}) catch "0";
                     var_value = num_str;
                 }
 
@@ -101,11 +101,11 @@ pub fn builtinLocal(shell: *Shell, cmd: *types.ParsedCommand) !void {
             var var_value: []const u8 = arg[eq_pos + 1 ..];
 
             // Apply integer attribute
+            var int_buf: [32]u8 = undefined;
             if (attrs.integer) {
                 var arith = arithmetic.Arithmetic.initWithVariables(shell.allocator, &shell.environment);
                 const result = arith.eval(var_value) catch 0;
-                var buf: [32]u8 = undefined;
-                const num_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                const num_str = std.fmt.bufPrint(&int_buf, "{d}", .{result}) catch "0";
                 var_value = num_str;
             }
 
@@ -346,12 +346,12 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 var final_value = value;
 
                 // Apply integer attribute
+                var int_buf: [32]u8 = undefined;
                 if (attrs.integer) {
                     // Evaluate as arithmetic expression
                     var arith = arithmetic.Arithmetic.initWithVariables(shell.allocator, &shell.environment);
                     const result = arith.eval(value) catch 0;
-                    var buf: [32]u8 = undefined;
-                    const num_str = std.fmt.bufPrint(&buf, "{d}", .{result}) catch "0";
+                    const num_str = std.fmt.bufPrint(&int_buf, "{d}", .{result}) catch "0";
                     final_value = num_str;
                 }
 
@@ -371,7 +371,11 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 }
 
                 // Set the variable
-                const dup_value = try shell.allocator.dupe(u8, final_value);
+                // If case conversion already allocated, reuse it; otherwise dupe
+                const dup_value = if (attrs.lowercase or attrs.uppercase)
+                    final_value // already heap-allocated by alloc() above
+                else
+                    try shell.allocator.dupe(u8, final_value);
                 const gop = try shell.environment.getOrPut(var_name);
                 if (gop.found_existing) {
                     shell.allocator.free(gop.value_ptr.*);
@@ -392,7 +396,9 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
         }
     }
 
-    shell.last_exit_code = 0;
+    if (shell.last_exit_code != 1) {
+        shell.last_exit_code = 0;
+    }
 }
 
 /// Helper to print declare output with value
@@ -613,7 +619,9 @@ pub fn builtinReadonly(shell: *Shell, cmd: *types.ParsedCommand) !void {
         }
         gop.value_ptr.*.readonly = true;
     }
-    shell.last_exit_code = 0;
+    if (shell.last_exit_code != 1) {
+        shell.last_exit_code = 0;
+    }
 }
 
 /// Builtin: typeset - alias for declare (bash compatibility)
@@ -665,9 +673,9 @@ pub fn builtinLet(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     break :blk 0;
                 };
                 result = switch (op) {
-                    '+' => current_val + result,
-                    '-' => current_val - result,
-                    '*' => current_val * result,
+                    '+' => current_val +% result,
+                    '-' => current_val -% result,
+                    '*' => current_val *% result,
                     '/' => if (result != 0) @divTrunc(current_val, result) else 0,
                     '%' => if (result != 0) @mod(current_val, result) else 0,
                     else => result,

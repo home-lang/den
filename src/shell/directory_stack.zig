@@ -116,6 +116,11 @@ pub fn builtinPushd(shell: *Shell, cmd: *types.ParsedCommand) !void {
 
             // Calculate index: +N counts from left, -N from right
             const index = if (arg[0] == '+') n else total_size - n;
+            if (index >= total_size) {
+                try IO.eprint("den: pushd: {s}: directory stack index out of range\n", .{arg});
+                shell.last_exit_code = 1;
+                return;
+            }
             if (index == 0) {
                 // Already at current directory, nothing to do
                 try printDirStack(shell);
@@ -266,6 +271,12 @@ pub fn builtinPopd(shell: *Shell, cmd: *types.ParsedCommand) !void {
             }
 
             const index = if (arg[0] == '+') n else total_size - n;
+
+            if (index >= total_size) {
+                try IO.eprint("den: popd: {s}: directory stack index out of range\n", .{arg});
+                shell.last_exit_code = 1;
+                return;
+            }
 
             if (index == 0) {
                 // Remove current directory - same as normal popd

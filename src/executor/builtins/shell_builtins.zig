@@ -343,12 +343,15 @@ pub fn read(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         processed_line = processed_buf[0..pos];
     }
 
+    // Get IFS (default: space, tab, newline)
+    const ifs = ctx.getEnv("IFS") orelse " \t\n";
+
     // Handle -a (array) mode
     if (array_name) |arr_name| {
         var words = std.ArrayList([]const u8).empty;
         defer words.deinit(ctx.allocator);
 
-        var word_iter = std.mem.tokenizeAny(u8, processed_line, " \t");
+        var word_iter = std.mem.tokenizeAny(u8, processed_line, ifs);
         while (word_iter.next()) |word| {
             try words.append(ctx.allocator, try ctx.allocator.dupe(u8, word));
         }
@@ -363,7 +366,7 @@ pub fn read(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     if (var_names.len == 1) {
         try ctx.setEnv(var_names[0], processed_line);
     } else {
-        var word_iter = std.mem.tokenizeAny(u8, processed_line, " \t");
+        var word_iter = std.mem.tokenizeAny(u8, processed_line, ifs);
         var var_idx: usize = 0;
 
         while (var_idx < var_names.len) : (var_idx += 1) {

@@ -1592,36 +1592,54 @@ pub const ControlFlowParser = struct {
     }
 
     /// Detect case terminator in a line (;;, ;&, or ;;&)
-    /// Returns the body content before the terminator and the terminator type
+    /// Returns the body content before the terminator and the terminator type.
+    /// Skips terminators that appear inside single or double quotes.
     fn detectTerminator(self: *ControlFlowParser, line: []const u8) struct { body: []const u8, terminator: CaseTerminator, found: bool } {
         _ = self;
 
-        // Check for ;;& first (longest match)
-        if (std.mem.indexOf(u8, line, ";;&")) |pos| {
-            return .{
-                .body = std.mem.trim(u8, line[0..pos], &std.ascii.whitespace),
-                .terminator = .continue_testing,
-                .found = true,
-            };
-        }
-
-        // Check for ;& (fallthrough)
-        if (std.mem.indexOf(u8, line, ";&")) |pos| {
-            // Make sure it's not part of ;;& (already checked above)
-            return .{
-                .body = std.mem.trim(u8, line[0..pos], &std.ascii.whitespace),
-                .terminator = .fallthrough,
-                .found = true,
-            };
-        }
-
-        // Check for ;; (normal termination)
-        if (std.mem.indexOf(u8, line, ";;")) |pos| {
-            return .{
-                .body = std.mem.trim(u8, line[0..pos], &std.ascii.whitespace),
-                .terminator = .normal,
-                .found = true,
-            };
+        var i: usize = 0;
+        var in_sq = false;
+        var in_dq = false;
+        while (i < line.len) : (i += 1) {
+            const ch = line[i];
+            if (ch == '\\' and !in_sq and i + 1 < line.len) {
+                i += 1; // skip escaped char
+                continue;
+            }
+            if (ch == '\'' and !in_dq) {
+                in_sq = !in_sq;
+                continue;
+            }
+            if (ch == '"' and !in_sq) {
+                in_dq = !in_dq;
+                continue;
+            }
+            if (!in_sq and !in_dq and ch == ';') {
+                // Check for ;;& first (longest match)
+                if (i + 2 < line.len and line[i + 1] == ';' and line[i + 2] == '&') {
+                    return .{
+                        .body = std.mem.trim(u8, line[0..i], &std.ascii.whitespace),
+                        .terminator = .continue_testing,
+                        .found = true,
+                    };
+                }
+                // Check for ;& (fallthrough)
+                if (i + 1 < line.len and line[i + 1] == '&') {
+                    return .{
+                        .body = std.mem.trim(u8, line[0..i], &std.ascii.whitespace),
+                        .terminator = .fallthrough,
+                        .found = true,
+                    };
+                }
+                // Check for ;; (normal termination)
+                if (i + 1 < line.len and line[i + 1] == ';') {
+                    return .{
+                        .body = std.mem.trim(u8, line[0..i], &std.ascii.whitespace),
+                        .terminator = .normal,
+                        .found = true,
+                    };
+                }
+            }
         }
 
         // No terminator found

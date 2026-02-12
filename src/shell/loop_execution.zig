@@ -121,6 +121,19 @@ pub fn executeCStyleForLoopOneline(self: *Shell, input: []const u8) !void {
         // Execute body commands - directly using a simple method that avoids recursion
         for (body_cmds.items) |cmd| {
             executeCStyleLoopBodyCommand(self, cmd);
+            if (self.break_levels > 0 or self.continue_levels > 0) break;
+        }
+
+        // Check for break after body execution
+        if (self.break_levels > 0) {
+            self.break_levels -= 1;
+            break;
+        }
+
+        // Check for continue after body execution
+        if (self.continue_levels > 0) {
+            self.continue_levels -= 1;
+            // Still execute update, then continue to next iteration
         }
 
         // Execute update
@@ -629,92 +642,16 @@ pub fn evaluateArithmeticCondition(self: *Shell, cond: []const u8) bool {
     const trimmed = std.mem.trim(u8, cond, &std.ascii.whitespace);
     if (trimmed.len == 0) return true;
 
-    if (std.mem.indexOf(u8, trimmed, "<=")) |pos| {
-        const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-        const right = evaluateArithmeticExpr(self, trimmed[pos + 2 ..]);
-        return left <= right;
-    }
-    if (std.mem.indexOf(u8, trimmed, ">=")) |pos| {
-        const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-        const right = evaluateArithmeticExpr(self, trimmed[pos + 2 ..]);
-        return left >= right;
-    }
-    if (std.mem.indexOf(u8, trimmed, "!=")) |pos| {
-        const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-        const right = evaluateArithmeticExpr(self, trimmed[pos + 2 ..]);
-        return left != right;
-    }
-    if (std.mem.indexOf(u8, trimmed, "==")) |pos| {
-        const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-        const right = evaluateArithmeticExpr(self, trimmed[pos + 2 ..]);
-        return left == right;
-    }
-    if (std.mem.indexOf(u8, trimmed, "<")) |pos| {
-        const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-        const right = evaluateArithmeticExpr(self, trimmed[pos + 1 ..]);
-        return left < right;
-    }
-    if (std.mem.indexOf(u8, trimmed, ">")) |pos| {
-        const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-        const right = evaluateArithmeticExpr(self, trimmed[pos + 1 ..]);
-        return left > right;
-    }
-
     return evaluateArithmeticExpr(self, trimmed) != 0;
 }
 
-/// Evaluate arithmetic expression
+/// Evaluate arithmetic expression using the proper Arithmetic evaluator
+/// which handles operator precedence correctly.
 pub fn evaluateArithmeticExpr(self: *Shell, expr: []const u8) i64 {
-    const trimmed = std.mem.trim(u8, expr, &std.ascii.whitespace);
-    if (trimmed.len == 0) return 0;
-
-    // Handle addition
-    if (std.mem.lastIndexOf(u8, trimmed, "+")) |pos| {
-        if (pos > 0 and pos < trimmed.len - 1) {
-            const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-            const right = evaluateArithmeticExpr(self, trimmed[pos + 1 ..]);
-            return left + right;
-        }
-    }
-
-    // Handle subtraction
-    var i: usize = trimmed.len;
-    while (i > 0) {
-        i -= 1;
-        if (trimmed[i] == '-' and i > 0) {
-            const left = evaluateArithmeticExpr(self, trimmed[0..i]);
-            const right = evaluateArithmeticExpr(self, trimmed[i + 1 ..]);
-            return left - right;
-        }
-    }
-
-    // Handle multiplication
-    if (std.mem.lastIndexOf(u8, trimmed, "*")) |pos| {
-        if (pos > 0 and pos < trimmed.len - 1) {
-            const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-            const right = evaluateArithmeticExpr(self, trimmed[pos + 1 ..]);
-            return left * right;
-        }
-    }
-
-    // Handle division
-    if (std.mem.lastIndexOf(u8, trimmed, "/")) |pos| {
-        if (pos > 0 and pos < trimmed.len - 1) {
-            const left = evaluateArithmeticExpr(self, trimmed[0..pos]);
-            const right = evaluateArithmeticExpr(self, trimmed[pos + 1 ..]);
-            if (right == 0) return 0;
-            return @divTrunc(left, right);
-        }
-    }
-
-    // Try to parse as number
-    if (std.fmt.parseInt(i64, trimmed, 10)) |num| {
-        return num;
-    } else |_| {}
-
-    // Otherwise, treat as variable name
-    const val = getVariableValueForArith(self, trimmed);
-    return std.fmt.parseInt(i64, val, 10) catch 0;
+    const Arithmetic = @import("../utils/arithmetic.zig").Arithmetic;
+    var arith = Arithmetic.initWithVariables(self.allocator, &self.environment);
+    arith.arrays = &self.arrays;
+    return arith.eval(expr) catch 0;
 }
 
 /// Get variable value (helper for arithmetic)

@@ -503,8 +503,11 @@ pub const Executor = struct {
             if (comptime builtin.os.tag != .windows) {
                 _ = std.c.waitpid(pid, &wait_status, 0);
             }
-            // Safety: EXITSTATUS returns 0-255
-            const status: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
+            const raw: u32 = @bitCast(wait_status);
+            const status: i32 = if (std.posix.W.IFSIGNALED(raw))
+                128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(raw))))
+            else
+                @intCast(std.posix.W.EXITSTATUS(raw));
             last_status = status;
             pipestatus_buf[pi] = status;
             // For pipefail: track rightmost non-zero exit status

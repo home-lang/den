@@ -92,6 +92,15 @@ fn getExitStatus(status: u32) i32 {
 }
 
 /// Cross-platform getenv wrapper
+fn isValidVarName(name: []const u8) bool {
+    if (name.len == 0) return false;
+    if (!std.ascii.isAlphabetic(name[0]) and name[0] != '_') return false;
+    for (name[1..]) |c| {
+        if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
+    }
+    return true;
+}
+
 fn getenv(key: []const u8) ?[]const u8 {
     return env_utils.getEnv(key);
 }
@@ -463,6 +472,20 @@ pub const Shell = struct {
     }
 
     pub fn deinit(self: *Shell) void {
+        // Clean up coprocess
+        if (comptime builtin.os.tag != .windows) {
+            if (self.coproc_read_fd) |fd| std.posix.close(fd);
+            if (self.coproc_write_fd) |fd| std.posix.close(fd);
+            if (self.coproc_pid) |pid| {
+                _ = std.posix.kill(pid, std.posix.SIG.HUP) catch {};
+                var ws: c_int = 0;
+                _ = std.c.waitpid(@intCast(pid), &ws, std.posix.W.NOHANG);
+            }
+        }
+        self.coproc_read_fd = null;
+        self.coproc_write_fd = null;
+        self.coproc_pid = null;
+
         // Clean up async git fetcher
         self.async_git.deinit();
 
@@ -930,7 +953,7 @@ pub const Shell = struct {
                 // Handle post-increment: (( x++ ))
                 if (std.mem.endsWith(u8, expr, "++")) {
                     const var_name = std.mem.trim(u8, expr[0 .. expr.len - 2], &std.ascii.whitespace);
-                    if (var_name.len > 0) {
+                    if (isValidVarName(var_name)) {
                         const current = shell_mod.getVariableValue(self, var_name) orelse "0";
                         const num = std.fmt.parseInt(i64, current, 10) catch 0;
                         var buf: [32]u8 = undefined;
@@ -941,9 +964,9 @@ pub const Shell = struct {
                     }
                 }
                 // Handle post-decrement: (( x-- ))
-                if (std.mem.endsWith(u8, expr, "--")) {
+                else if (std.mem.endsWith(u8, expr, "--")) {
                     const var_name = std.mem.trim(u8, expr[0 .. expr.len - 2], &std.ascii.whitespace);
-                    if (var_name.len > 0) {
+                    if (isValidVarName(var_name)) {
                         const current = shell_mod.getVariableValue(self, var_name) orelse "0";
                         const num = std.fmt.parseInt(i64, current, 10) catch 0;
                         var buf: [32]u8 = undefined;
@@ -956,7 +979,7 @@ pub const Shell = struct {
                 // Handle pre-increment: (( ++x ))
                 if (std.mem.startsWith(u8, expr, "++")) {
                     const var_name = std.mem.trim(u8, expr[2..], &std.ascii.whitespace);
-                    if (var_name.len > 0) {
+                    if (isValidVarName(var_name)) {
                         const current = shell_mod.getVariableValue(self, var_name) orelse "0";
                         const num = std.fmt.parseInt(i64, current, 10) catch 0;
                         const new_num = num + 1;
@@ -968,9 +991,9 @@ pub const Shell = struct {
                     }
                 }
                 // Handle pre-decrement: (( --x ))
-                if (std.mem.startsWith(u8, expr, "--")) {
+                else if (std.mem.startsWith(u8, expr, "--")) {
                     const var_name = std.mem.trim(u8, expr[2..], &std.ascii.whitespace);
-                    if (var_name.len > 0) {
+                    if (isValidVarName(var_name)) {
                         const current = shell_mod.getVariableValue(self, var_name) orelse "0";
                         const num = std.fmt.parseInt(i64, current, 10) catch 0;
                         const new_num = num - 1;

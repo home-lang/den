@@ -5,6 +5,23 @@ const env_utils = @import("env.zig");
 
 const is_windows = builtin.os.tag == .windows;
 
+/// Persistent PRNG state for $RANDOM, shared across all accesses
+var global_random_state: ?std.Random.DefaultPrng = null;
+
+fn getRandomValue() u16 {
+    if (global_random_state == null) {
+        const seed: u64 = if (std.time.Instant.now()) |inst|
+            (if (is_windows)
+                inst.timestamp
+            else
+                @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec)))
+        else |_|
+            42;
+        global_random_state = std.Random.DefaultPrng.init(seed);
+    }
+    return global_random_state.?.random().intRangeAtMost(u16, 0, 32767);
+}
+
 /// LRU cache for variable expansion results
 pub const ExpansionCache = struct {
     const CacheEntry = struct {
@@ -263,7 +280,7 @@ pub const Expansion = struct {
         }
 
         // Check positional parameters for numeric names ($1, $2, etc.)
-        if (name.len > 0 and name.len <= 2) {
+        if (name.len > 0) {
             if (std.fmt.parseInt(usize, name, 10)) |digit| {
                 if (digit > 0 and digit <= self.positional_params.len) {
                     return self.positional_params[digit - 1];
@@ -526,6 +543,18 @@ pub const Expansion = struct {
                 const value = try self.allocator.dupe(u8, self.last_arg);
                 return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
             },
+            '-' => {
+                // $- - current option flags
+                var flags_buf: [16]u8 = undefined;
+                var flags_len: usize = 0;
+                if (self.option_nounset) {
+                    flags_buf[flags_len] = 'u';
+                    flags_len += 1;
+                }
+                // TODO: add more flags (e.g., 'e' for errexit, 'x' for xtrace) when accessible
+                const value = try self.allocator.dupe(u8, flags_buf[0..flags_len]);
+                return ExpansionResult{ .value = value, .consumed = 2, .owned = true };
+            },
             '(' => {
                 // Check if it's $(( for arithmetic or $( for command substitution
                 if (input.len > 2 and input[2] == '(') {
@@ -559,15 +588,28 @@ pub const Expansion = struct {
             return ExpansionResult{ .value = "$", .consumed = 1, .owned = false };
         }
 
-        // Find closing brace (tracking nesting)
+        // Find closing brace (tracking nesting and quotes)
         var end: usize = 2;
         var brace_depth: usize = 1;
+        var in_sq = false;
+        var in_dq = false;
         while (end < input.len) {
-            if (input[end] == '{') {
-                brace_depth += 1;
-            } else if (input[end] == '}') {
-                brace_depth -= 1;
-                if (brace_depth == 0) break;
+            const ch = input[end];
+            if (ch == '\\' and !in_sq and end + 1 < input.len) {
+                end += 2;
+                continue;
+            }
+            if (ch == '\'' and !in_dq) {
+                in_sq = !in_sq;
+            } else if (ch == '"' and !in_sq) {
+                in_dq = !in_dq;
+            } else if (!in_sq and !in_dq) {
+                if (ch == '{') {
+                    brace_depth += 1;
+                } else if (ch == '}') {
+                    brace_depth -= 1;
+                    if (brace_depth == 0) break;
+                }
             }
             end += 1;
         }
@@ -844,7 +886,7 @@ pub const Expansion = struct {
                 }
             }
             // Then check scalar variables for string length
-            if (self.environment.get(var_name)) |value| {
+            if (self.getVariableValue(var_name)) |value| {
                 const len_str = try std.fmt.allocPrint(self.allocator, "{d}", .{value.len});
                 return ExpansionResult{ .value = len_str, .consumed = end + 1, .owned = true };
             }
@@ -1014,7 +1056,7 @@ pub const Expansion = struct {
                     const var_name = content[0..colon_pos];
                     const params = content[colon_pos + 1 ..];
 
-                    if (self.environment.get(var_name)) |value| {
+                    if (self.getVariableValue(var_name)) |value| {
                         // Parse offset and optional length
                         var offset: i64 = 0;
                         var length: ?usize = null;
@@ -1394,9 +1436,7 @@ pub const Expansion = struct {
         // Handle special dynamic variables in braced form
         if (std.mem.eql(u8, content, "RANDOM")) {
             var buf: [16]u8 = undefined;
-            const seed: u64 = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) inst.timestamp else @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec))) else |_| 42;
-            var prng = std.Random.DefaultPrng.init(seed);
-            const val = prng.random().intRangeAtMost(u16, 0, 32767);
+            const val = getRandomValue();
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{val}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
@@ -1563,15 +1603,18 @@ pub const Expansion = struct {
                 '*' => {
                     if (self.positional_params.len == 0)
                         return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
+                    const ifs_val = self.environment.get("IFS");
+                    const sep_char: u8 = if (ifs_val) |ifs| (if (ifs.len > 0) ifs[0] else 0) else ' ';
+                    const sep_len: usize = if (ifs_val) |ifs| (if (ifs.len > 0) @as(usize, 1) else @as(usize, 0)) else 1;
                     var total_len: usize = 0;
                     for (self.positional_params) |p| total_len += p.len;
-                    if (self.positional_params.len > 1) total_len += self.positional_params.len - 1;
+                    if (self.positional_params.len > 1) total_len += (self.positional_params.len - 1) * sep_len;
                     var result = try self.allocator.alloc(u8, total_len);
                     var pos: usize = 0;
                     for (self.positional_params, 0..) |p, pi| {
                         @memcpy(result[pos..pos + p.len], p);
                         pos += p.len;
-                        if (pi < self.positional_params.len - 1) { result[pos] = ' '; pos += 1; }
+                        if (pi < self.positional_params.len - 1 and sep_len > 0) { result[pos] = sep_char; pos += 1; }
                     }
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 },
@@ -1589,7 +1632,14 @@ pub const Expansion = struct {
                 },
                 '-' => {
                     // ${-} - current option flags
-                    const value = try self.allocator.dupe(u8, "");
+                    var flags_buf: [16]u8 = undefined;
+                    var flags_len: usize = 0;
+                    if (self.option_nounset) {
+                        flags_buf[flags_len] = 'u';
+                        flags_len += 1;
+                    }
+                    // TODO: add more flags (e.g., 'e' for errexit, 'x' for xtrace) when accessible
+                    const value = try self.allocator.dupe(u8, flags_buf[0..flags_len]);
                     return ExpansionResult{ .value = value, .consumed = end + 1, .owned = true };
                 },
                 '_' => {
@@ -1845,9 +1895,7 @@ pub const Expansion = struct {
         // Handle special dynamic variables
         if (std.mem.eql(u8, var_name, "RANDOM")) {
             var buf: [16]u8 = undefined;
-            const seed: u64 = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) inst.timestamp else @as(u64, @intCast(inst.timestamp.sec)) *% 1000000000 +% @as(u64, @intCast(inst.timestamp.nsec))) else |_| 42;
-            var prng = std.Random.DefaultPrng.init(seed);
-            const val = prng.random().intRangeAtMost(u16, 0, 32767);
+            const val = getRandomValue();
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{val}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
             return ExpansionResult{ .value = result, .consumed = end, .owned = true };

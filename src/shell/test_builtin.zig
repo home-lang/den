@@ -216,6 +216,42 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
             // String greater than (lexicographic)
             shell.last_exit_code = if (std.mem.lessThan(u8, right, left)) 0 else 1;
             return;
+        } else if (std.mem.eql(u8, op, "-nt")) {
+            // Newer than (compare modification times)
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch {
+                shell.last_exit_code = 0;
+                return;
+            };
+            shell.last_exit_code = if (left_stat.mtime.nanoseconds > right_stat.mtime.nanoseconds) 0 else 1;
+            return;
+        } else if (std.mem.eql(u8, op, "-ot")) {
+            // Older than (compare modification times)
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch {
+                shell.last_exit_code = 0;
+                return;
+            };
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            shell.last_exit_code = if (left_stat.mtime.nanoseconds < right_stat.mtime.nanoseconds) 0 else 1;
+            return;
+        } else if (std.mem.eql(u8, op, "-ef")) {
+            // Same file (compare inode)
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch {
+                shell.last_exit_code = 1;
+                return;
+            };
+            shell.last_exit_code = if (left_stat.inode == right_stat.inode) 0 else 1;
+            return;
         }
     }
 

@@ -510,7 +510,13 @@ pub fn builtinHash(self: *Shell, cmd: *types.ParsedCommand) !void {
             }
         }
     } else if (std.mem.eql(u8, cmd.args[0], "-r")) {
-        // Clear hash table
+        // Clear the command path hash table
+        var cache_iter = self.command_cache.iterator();
+        while (cache_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.command_cache.clearRetainingCapacity();
         try IO.print("den: hash: cache cleared\n", .{});
         self.last_exit_code = 0;
     } else {

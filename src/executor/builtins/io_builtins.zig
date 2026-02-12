@@ -122,19 +122,30 @@ fn printWithEscapes(s: []const u8) !void {
                     }
                 },
                 'x' => {
-                    if (i + 3 < s.len) {
-                        const hex = s[i + 2 .. i + 4];
-                        if (std.fmt.parseInt(u8, hex, 16)) |val| {
-                            try IO.print("{c}", .{val});
-                            i += 4;
-                        } else |_| {
-                            try IO.print("{c}", .{s[i]});
-                            i += 1;
-                        }
-                    } else {
-                        try IO.print("{c}", .{s[i]});
-                        i += 1;
+                    var hex_val: u8 = 0;
+                    var hex_count: usize = 0;
+                    var k: usize = i + 2;
+                    while (k < s.len and hex_count < 2) : (k += 1) {
+                        const c = s[k];
+                        const digit: u8 = if (c >= '0' and c <= '9')
+                            c - '0'
+                        else if (c >= 'a' and c <= 'f')
+                            c - 'a' + 10
+                        else if (c >= 'A' and c <= 'F')
+                            c - 'A' + 10
+                        else
+                            break;
+                        hex_val = hex_val * 16 + digit;
+                        hex_count += 1;
                     }
+                    if (hex_count > 0) {
+                        try IO.print("{c}", .{hex_val});
+                        i = k;
+                    } else {
+                        try IO.print("\\x", .{});
+                        i += 2;
+                    }
+                    continue;
                 },
                 else => {
                     try IO.print("{c}", .{s[i]});

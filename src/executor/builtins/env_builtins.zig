@@ -141,7 +141,21 @@ pub fn exportBuiltin(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
 
     if (unexport_mode) {
         for (command.args[arg_start..]) |arg| {
-            ctx.unsetEnv(arg);
+            // Remove the export attribute but keep the variable value
+            if (ctx.getVarAttributes(arg)) |attrs| {
+                var new_attrs = attrs;
+                new_attrs.exported = false;
+                try ctx.setVarAttributes(arg, new_attrs);
+            }
+            // Remove from process environment so child processes don't inherit it
+            if (comptime builtin.os.tag != .windows) {
+                if (arg.len < 512) {
+                    var name_buf: [512]u8 = undefined;
+                    @memcpy(name_buf[0..arg.len], arg);
+                    name_buf[arg.len] = 0;
+                    _ = libc_env.unsetenv(name_buf[0..arg.len :0]);
+                }
+            }
         }
         return 0;
     }
@@ -424,6 +438,13 @@ pub fn unset(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         }
 
         for (command.args[arg_start..]) |var_name| {
+            // Check readonly attribute
+            if (ctx.getVarAttributes(var_name)) |attrs| {
+                if (attrs.readonly) {
+                    try IO.eprint("den: unset: {s}: cannot unset: readonly variable\n", .{var_name});
+                    return 1;
+                }
+            }
             // Check for array element syntax: arr[index]
             if (std.mem.indexOfScalar(u8, var_name, '[')) |bracket_pos| {
                 if (bracket_pos > 0 and std.mem.indexOfScalar(u8, var_name[bracket_pos..], ']') != null) {

@@ -125,22 +125,32 @@ pub const JobManager = struct {
                 // Check if job has completed (non-blocking waitpid)
                 var wait_status: c_int = 0;
                 const wait_pid = if (comptime builtin.os.tag != .windows)
-                    std.c.waitpid(job.pid, &wait_status, std.posix.W.NOHANG)
+                    std.c.waitpid(job.pid, &wait_status, std.posix.W.NOHANG | std.c.W.UNTRACED)
                 else
                     unreachable;
 
                 if (wait_pid == job.pid) {
-                    // Job completed
-                    const exit_status = getExitStatus(@as(u32, @bitCast(wait_status)));
-                    if (self.interactive) {
-                        try IO.print("[{d}]  Done ({d})    {s}\n", .{ job.job_id, exit_status, job.command });
-                    }
+                    const raw: u32 = @bitCast(wait_status);
+                    if (std.posix.W.IFSTOPPED(raw)) {
+                        // Job was stopped (e.g. Ctrl+Z), mark as stopped but keep in table
+                        self.jobs[i].?.status = .stopped;
+                        i += 1;
+                    } else {
+                        // Job completed or was signaled
+                        const exit_status = if (std.posix.W.IFSIGNALED(raw))
+                            128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(raw))))
+                        else
+                            getExitStatus(raw);
+                        if (self.interactive) {
+                            try IO.print("[{d}]  Done ({d})    {s}\n", .{ job.job_id, exit_status, job.command });
+                        }
 
-                    // Free command string and remove from array
-                    self.allocator.free(job.command);
-                    self.jobs[i] = null;
-                    self.job_count -= 1;
-                    // Don't increment i, check this slot again
+                        // Free command string and remove from array
+                        self.allocator.free(job.command);
+                        self.jobs[i] = null;
+                        self.job_count -= 1;
+                        // Don't increment i, check this slot again
+                    }
                 } else {
                     i += 1;
                 }
@@ -335,7 +345,11 @@ pub const JobManager = struct {
         var job_slot: ?usize = null;
 
         if (args.len > 0) {
-            const job_id = std.fmt.parseInt(usize, args[0], 10) catch {
+            var arg = args[0];
+            if (arg.len > 0 and arg[0] == '%') {
+                arg = arg[1..];
+            }
+            const job_id = std.fmt.parseInt(usize, arg, 10) catch {
                 try IO.eprint("den: fg: {s}: no such job\n", .{args[0]});
                 return 1;
             };
@@ -370,12 +384,24 @@ pub const JobManager = struct {
             _ = std.posix.kill(-job.pid, std.posix.SIG.CONT) catch {};
 
             var fg_wait_status: c_int = 0;
-            _ = std.c.waitpid(job.pid, &fg_wait_status, 0);
-            exit_status = getExitStatus(@as(u32, @bitCast(fg_wait_status)));
-        }
+            _ = std.c.waitpid(job.pid, &fg_wait_status, std.c.W.UNTRACED);
 
-        // Remove from background jobs
-        self.remove(job_slot.?);
+            const raw: u32 = @bitCast(fg_wait_status);
+            if (std.posix.W.IFSTOPPED(raw)) {
+                // Job was re-stopped (e.g. Ctrl+Z), keep in table
+                if (job_slot) |slot| {
+                    self.jobs[slot].?.status = .stopped;
+                }
+                try IO.print("\n", .{});
+                exit_status = 128 + @as(i32, @intCast(std.posix.W.STOPSIG(raw)));
+            } else if (std.posix.W.IFSIGNALED(raw)) {
+                exit_status = 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(raw))));
+                if (job_slot) |slot| self.remove(slot);
+            } else {
+                exit_status = getExitStatus(@as(u32, @bitCast(fg_wait_status)));
+                if (job_slot) |slot| self.remove(slot);
+            }
+        }
 
         return exit_status;
     }
@@ -385,7 +411,11 @@ pub const JobManager = struct {
         var job_slot: ?usize = null;
 
         if (args.len > 0) {
-            const job_id = std.fmt.parseInt(usize, args[0], 10) catch {
+            var arg = args[0];
+            if (arg.len > 0 and arg[0] == '%') {
+                arg = arg[1..];
+            }
+            const job_id = std.fmt.parseInt(usize, arg, 10) catch {
                 try IO.eprint("den: bg: {s}: no such job\n", .{args[0]});
                 return 1;
             };
@@ -442,7 +472,11 @@ pub const JobManager = struct {
                 return 0;
             }
 
-            const job_id = std.fmt.parseInt(usize, args[0], 10) catch {
+            var arg = args[0];
+            if (arg.len > 0 and arg[0] == '%') {
+                arg = arg[1..];
+            }
+            const job_id = std.fmt.parseInt(usize, arg, 10) catch {
                 try IO.eprint("den: disown: {s}: no such job\n", .{args[0]});
                 return 1;
             };
@@ -474,9 +508,13 @@ pub const JobManager = struct {
         if (args.len > 0) {
             // Wait for specific job(s)
             var last_status: i32 = 0;
-            for (args) |arg| {
+            for (args) |raw_arg| {
+                var arg = raw_arg;
+                if (arg.len > 0 and arg[0] == '%') {
+                    arg = arg[1..];
+                }
                 const job_id = std.fmt.parseInt(usize, arg, 10) catch {
-                    try IO.eprint("den: wait: {s}: no such job\n", .{arg});
+                    try IO.eprint("den: wait: {s}: no such job\n", .{raw_arg});
                     last_status = 127;
                     continue;
                 };

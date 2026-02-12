@@ -1659,6 +1659,245 @@ check "subshell exit no affect" "alive" "$(timeout 3 $DEN -c '(exit 1); echo ali
 # ===========================================================================
 check "while read pipe" "3" "$(printf 'a\nb\nc\n' | timeout 3 $DEN -c 'n=0; while read line; do n=$((n+1)); done; echo $n' 2>/dev/null)"
 
+# ===========================================================================
+# 221. [[ ]] operator precedence (&&  binds tighter than ||)
+# ===========================================================================
+check "[[ ]] && tighter than ||" "0" "$(timeout 3 $DEN -c '[[ -n "a" || -n "b" && -z "c" ]]; echo $?' 2>/dev/null)"
+check "[[ ]] or-and chain" "0" "$(timeout 3 $DEN -c '[[ -z "a" || -z "b" && -z "c" || -n "x" ]]; echo $?' 2>/dev/null)"
+check "[[ ]] simple and" "1" "$(timeout 3 $DEN -c '[[ -n "x" && -z "x" ]]; echo $?' 2>/dev/null)"
+check "[[ ]] simple or" "0" "$(timeout 3 $DEN -c '[[ -z "x" || -n "x" ]]; echo $?' 2>/dev/null)"
+
+# ===========================================================================
+# 222. set -exu combined flags
+# ===========================================================================
+check "set -eu combined" "ok" "$(timeout 3 $DEN -c 'set -eu; x=ok; echo $x' 2>/dev/null)"
+check "set -xu nounset" "1" "$(timeout 3 $DEN -c 'set -xu; echo $UNDEFINED_VAR_12345; echo $?' 2>/dev/null)"
+check "set +eu disable" "ok" "$(timeout 3 $DEN -c 'set -eu; set +eu; x=ok; echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 223. Command substitution stderr inherits
+# ===========================================================================
+check "cmd subst stderr" "err" "$(timeout 3 $DEN -c 'x=$(echo err >&2); echo "$x"' 2>&1 | head -1)"
+
+# ===========================================================================
+# 224. Exponentiation right-associativity
+# ===========================================================================
+check "power right-assoc" "512" "$(timeout 3 $DEN -c 'echo $((2**3**2))' 2>/dev/null)"
+check "power simple" "8" "$(timeout 3 $DEN -c 'echo $((2**3))' 2>/dev/null)"
+check "power chain" "256" "$(timeout 3 $DEN -c 'echo $((2**2**3))' 2>/dev/null)"
+
+# ===========================================================================
+# 225. Quoted keywords treated as words
+# ===========================================================================
+check "quoted while not keyword" "while" "$(timeout 3 $DEN -c 'echo "while"' 2>/dev/null)"
+check "quoted if not keyword" "if" "$(timeout 3 $DEN -c 'echo "if"' 2>/dev/null)"
+check "single-quoted for" "for" "$(timeout 3 $DEN -c "echo 'for'" 2>/dev/null)"
+
+# ===========================================================================
+# 226. Parameter expansion with local vars
+# ===========================================================================
+check "param expand local default" "fallback" "$(timeout 3 $DEN -c 'f() { local x; echo ${x:-fallback}; }; f' 2>/dev/null)"
+check "param expand local set" "hello" "$(timeout 3 $DEN -c 'f() { local x=hello; echo ${x:-fallback}; }; f' 2>/dev/null)"
+
+# ===========================================================================
+# 227. C-style for loop arithmetic condition
+# ===========================================================================
+check "c-for loop sum" "10" "$(timeout 3 $DEN -c 'sum=0; for ((i=1; i<=4; i++)); do sum=$((sum+i)); done; echo $sum' 2>/dev/null)"
+check "c-for zero iters" "0" "$(timeout 3 $DEN -c 'n=0; for ((i=10; i<5; i++)); do n=$((n+1)); done; echo $n' 2>/dev/null)"
+
+# ===========================================================================
+# 228. done not matched as substring
+# ===========================================================================
+check "echo undone in loop" "undone" "$(timeout 3 $DEN -c 'for x in a; do echo undone; done' 2>/dev/null)"
+check "echo done in quotes" "not done yet" "$(timeout 3 $DEN -c 'for x in a; do echo "not done yet"; done' 2>/dev/null)"
+
+# ===========================================================================
+# 229. declare +r readonly protection
+# ===========================================================================
+check "declare +r blocked" "1" "$(timeout 3 $DEN -c 'declare -r RO=val; declare +r RO 2>/dev/null; echo $?' 2>/dev/null)"
+check "readonly preserved" "val" "$(timeout 3 $DEN -c 'declare -r RO=val; declare +r RO 2>/dev/null; echo $RO' 2>/dev/null)"
+
+# ===========================================================================
+# 230. $* joins with IFS
+# ===========================================================================
+check '$* unquoted' "a b c" "$(timeout 3 $DEN -c 'set -- a b c; echo $*' 2>/dev/null)"
+check '$* positional params' "x y z" "$(timeout 3 $DEN -c 'set -- x y z; echo $*' 2>/dev/null)"
+
+# ===========================================================================
+# 231. ${VAR@Q} single quote escaping
+# ===========================================================================
+check '${VAR@Q} simple' "'hello'" "$(timeout 3 $DEN -c "x=hello; echo \${x@Q}" 2>/dev/null)"
+check '${VAR@Q} with quote' "'it'\\''s'" "$(timeout 3 $DEN -c "x=\"it's\"; echo \${x@Q}" 2>/dev/null)"
+
+# ===========================================================================
+# 232. Heredoc delimiter matching
+# ===========================================================================
+check "heredoc basic" "hello" "$(timeout 3 $DEN -c 'cat <<EOF
+hello
+EOF' 2>/dev/null)"
+check "heredoc strip tabs" "indented" "$(timeout 3 $DEN -c "$(printf 'cat <<-EOF\n\t\tindented\n\tEOF')" 2>/dev/null)"
+
+# ===========================================================================
+# 233. declare -i integer attribute
+# ===========================================================================
+check "declare -i eval" "10" "$(timeout 3 $DEN -c 'declare -i x=5+5; echo $x' 2>/dev/null)"
+check "declare -i var" "15" "$(timeout 3 $DEN -c 'declare -i x=10; declare -i y=x+5; echo $y' 2>/dev/null)"
+
+# ===========================================================================
+# 234. $RANDOM produces different values
+# ===========================================================================
+check '$RANDOM is numeric' "0" "$(timeout 3 $DEN -c 'r=$RANDOM; if [ "$r" -ge 0 ] 2>/dev/null && [ "$r" -le 32767 ] 2>/dev/null; then echo 0; else echo 1; fi' 2>/dev/null)"
+
+# ===========================================================================
+# 235. Arithmetic short-circuit
+# ===========================================================================
+check "arith || short-circuit" "1" "$(timeout 3 $DEN -c 'echo $((1 || 0))' 2>/dev/null)"
+check "arith && short-circuit" "0" "$(timeout 3 $DEN -c 'echo $((0 && 1))' 2>/dev/null)"
+check "arith ternary true" "5" "$(timeout 3 $DEN -c 'echo $((1 ? 5 : 10))' 2>/dev/null)"
+check "arith ternary false" "10" "$(timeout 3 $DEN -c 'echo $((0 ? 5 : 10))' 2>/dev/null)"
+
+# ===========================================================================
+# 236. (( x++ )) with valid names only
+# ===========================================================================
+check "(( x++ ))" "6" "$(timeout 3 $DEN -c 'x=5; (( x++ )); echo $x' 2>/dev/null)"
+check "(( ++x ))" "6" "$(timeout 3 $DEN -c 'x=5; (( ++x )); echo $x' 2>/dev/null)"
+check "(( x-- ))" "4" "$(timeout 3 $DEN -c 'x=5; (( x-- )); echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 237. readonly cannot be unset
+# ===========================================================================
+check "readonly reassign blocked" "1" "$(timeout 3 $DEN -c 'readonly RO=val; readonly RO=new 2>/dev/null; echo $?' 2>/dev/null)"
+check "readonly value preserved" "val" "$(timeout 3 $DEN -c 'readonly RO=val; readonly RO=new 2>/dev/null; echo $RO' 2>/dev/null)"
+
+# ===========================================================================
+# 238. printf hex/octal input
+# ===========================================================================
+check "printf hex input" "255" "$(timeout 3 $DEN -c 'printf "%d" 0xff' 2>/dev/null)"
+check "printf octal input" "8" "$(timeout 3 $DEN -c 'printf "%d" 010' 2>/dev/null)"
+
+# ===========================================================================
+# 239. read with custom IFS
+# ===========================================================================
+check "read splits on IFS" "usr" "$(echo 'usr:x:1000' | timeout 3 $DEN -c 'IFS=:; read a b rest; echo $a' 2>/dev/null)"
+
+# ===========================================================================
+# 240. ${#VAR} with local variables
+# ===========================================================================
+check '${#local_var}' "5" "$(timeout 3 $DEN -c 'f() { local x=hello; echo ${#x}; }; f' 2>/dev/null)"
+
+# ===========================================================================
+# 241. ${VAR:offset} with local variables
+# ===========================================================================
+check '${local:2}' "llo" "$(timeout 3 $DEN -c 'f() { local x=hello; echo ${x:2}; }; f' 2>/dev/null)"
+check '${local:1:3}' "ell" "$(timeout 3 $DEN -c 'f() { local x=hello; echo ${x:1:3}; }; f' 2>/dev/null)"
+
+# ===========================================================================
+# 242. %N job spec syntax
+# ===========================================================================
+check "fg %invalid" "1" "$(timeout 3 $DEN -c 'fg %999 2>/dev/null; echo $?' 2>/dev/null)"
+
+# ===========================================================================
+# 243. C-style for break in loop
+# ===========================================================================
+check "c-for break" "done" "$(timeout 3 $DEN -c 'for i in 1 2 3; do if [ $i -eq 2 ]; then break; fi; done; echo done' 2>/dev/null)"
+
+# ===========================================================================
+# 244. ${*} braced with IFS
+# ===========================================================================
+check '${*} unquoted' "a b c" "$(timeout 3 $DEN -c 'set -- a b c; echo ${*}' 2>/dev/null)"
+
+# ===========================================================================
+# 245. hash -r clears cache
+# ===========================================================================
+check "hash -r runs" "0" "$(timeout 3 $DEN -c 'hash -r 2>/dev/null; echo $?' 2>/dev/null)"
+
+# ===========================================================================
+# 246. test -nt/-ot/-ef file tests
+# ===========================================================================
+check "test -ef same file" "0" "$(timeout 3 $DEN -c '[ /etc/hosts -ef /etc/hosts ]; echo $?' 2>/dev/null)"
+check "test -nt nonexist" "0" "$(timeout 3 $DEN -c '[ /etc/hosts -nt /nonexistent_file_xyz ]; echo $?' 2>/dev/null)"
+
+# ===========================================================================
+# 247. unset readonly blocked
+# ===========================================================================
+check "unset readonly var" "1" "$(timeout 3 $DEN -c 'declare -r ROVAR=x; unset ROVAR 2>/dev/null; echo $?' 2>/dev/null)"
+check "unset readonly preserved" "x" "$(timeout 3 $DEN -c 'declare -r ROVAR=x; unset ROVAR 2>/dev/null; echo $ROVAR' 2>/dev/null)"
+
+# ===========================================================================
+# 248. export -n keeps value
+# ===========================================================================
+check "export -n keeps var" "bar" "$(timeout 3 $DEN -c 'export FOO=bar; export -n FOO; echo $FOO' 2>/dev/null)"
+
+# ===========================================================================
+# 249. echo -e single hex digit
+# ===========================================================================
+check "echo -e hex 2 digits" "A" "$(timeout 3 $DEN -c 'echo -e "\x41"' 2>/dev/null)"
+check "echo -e hex 1 digit" "	" "$(timeout 3 $DEN -c 'echo -e "\x9"' 2>/dev/null)"
+
+# ===========================================================================
+# 250. let wrapping arithmetic
+# ===========================================================================
+check "let basic" "15" "$(timeout 3 $DEN -c 'x=10; let x=x+5; echo $x' 2>/dev/null)"
+check "let multiply" "50" "$(timeout 3 $DEN -c 'x=10; let x=x*5; echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 251. popd/pushd bounds check
+# ===========================================================================
+check "popd no stack" "1" "$(timeout 3 $DEN -c 'popd 2>/dev/null; echo $?' 2>/dev/null)"
+
+# ===========================================================================
+# 252. Arithmetic precedence in loops
+# ===========================================================================
+check "arith precedence" "14" "$(timeout 3 $DEN -c 'echo $((2+3*4))' 2>/dev/null)"
+
+# ===========================================================================
+# 253. ${var:-"with}braces"} brace scan respects quotes
+# ===========================================================================
+check 'brace in default quotes' "ab}" "$(timeout 3 $DEN -c 'echo ${UNDEF_VAR:-a\}b}' 2>/dev/null)"
+check 'default value basic' "default" "$(timeout 3 $DEN -c 'echo ${UNDEF_VAR:-default}' 2>/dev/null)"
+
+# ===========================================================================
+# 245. $- option flags
+# ===========================================================================
+check '$- returns u' "u" "$(timeout 3 $DEN -c 'set -u; echo $-' 2>/dev/null)"
+
+# ===========================================================================
+# 246. Arithmetic assignment operators
+# ===========================================================================
+check 'arith +=' "15" "$(timeout 3 $DEN -c 'x=10; (( x += 5 )); echo $x' 2>/dev/null)"
+check 'arith -=' "5" "$(timeout 3 $DEN -c 'x=10; (( x -= 5 )); echo $x' 2>/dev/null)"
+check 'arith *=' "50" "$(timeout 3 $DEN -c 'x=10; (( x *= 5 )); echo $x' 2>/dev/null)"
+
+# ===========================================================================
+# 247. Parameter expansion case operators with local
+# ===========================================================================
+check '${local^^}' "HELLO" "$(timeout 3 $DEN -c 'f() { local x=hello; echo ${x^^}; }; f' 2>/dev/null)"
+check '${local,,}' "hello" "$(timeout 3 $DEN -c 'f() { local x=HELLO; echo ${x,,}; }; f' 2>/dev/null)"
+
+# ===========================================================================
+# 248. Parameter expansion pattern with local
+# ===========================================================================
+check '${local#pattern}' "world" "$(timeout 3 $DEN -c 'f() { local x="hello_world"; echo ${x#hello_}; }; f' 2>/dev/null)"
+check '${local%pattern}' "hello" "$(timeout 3 $DEN -c 'f() { local x="hello_world"; echo ${x%_world}; }; f' 2>/dev/null)"
+
+# ===========================================================================
+# 249. printf format specifiers
+# ===========================================================================
+check 'printf %x' "ff" "$(timeout 3 $DEN -c 'printf "%x" 255' 2>/dev/null)"
+check 'printf %o' "10" "$(timeout 3 $DEN -c 'printf "%o" 8' 2>/dev/null)"
+check 'printf %s' "hello" "$(timeout 3 $DEN -c 'printf "%s" hello' 2>/dev/null)"
+
+# ===========================================================================
+# 250. read -a with IFS
+# ===========================================================================
+check "read -a basic" "b" "$(echo 'a b c' | timeout 3 $DEN -c 'read -a arr; echo ${arr[1]}' 2>/dev/null)"
+
+# ===========================================================================
+# 251. Nested command substitution
+# ===========================================================================
+check "nested cmd subst" "HELLO" "$(timeout 3 $DEN -c 'echo $(echo $(echo HELLO))' 2>/dev/null)"
+check "cmd subst in arith" "10" "$(timeout 3 $DEN -c 'echo $(( $(echo 5) + $(echo 5) ))' 2>/dev/null)"
+
 # Results
 # ===========================================================================
 echo ""

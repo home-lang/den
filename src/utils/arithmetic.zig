@@ -371,16 +371,29 @@ const Parser = struct {
         self.skipWhitespace();
         if (self.pos < self.input.len and self.input[self.pos] == '?') {
             self.pos += 1;
-            const true_val = try self.parseTernary();
 
-            self.skipWhitespace();
-            if (self.pos >= self.input.len or self.input[self.pos] != ':') {
-                return error.MissingColonInTernary;
+            if (condition != 0) {
+                // Condition is true: evaluate true branch, discard false branch
+                const true_val = try self.parseTernary();
+
+                self.skipWhitespace();
+                if (self.pos >= self.input.len or self.input[self.pos] != ':') {
+                    return error.MissingColonInTernary;
+                }
+                self.pos += 1;
+                _ = try self.parseTernary(); // consume false branch but discard
+                return true_val;
+            } else {
+                // Condition is false: discard true branch, evaluate false branch
+                _ = try self.parseTernary(); // consume true branch but discard
+
+                self.skipWhitespace();
+                if (self.pos >= self.input.len or self.input[self.pos] != ':') {
+                    return error.MissingColonInTernary;
+                }
+                self.pos += 1;
+                return try self.parseTernary(); // evaluate false branch
             }
-            self.pos += 1;
-            const false_val = try self.parseTernary();
-
-            return if (condition != 0) true_val else false_val;
         }
 
         return condition;
@@ -397,8 +410,14 @@ const Parser = struct {
                 self.input[self.pos + 1] == '|')
             {
                 self.pos += 2;
-                const right = try self.parseLogicalAnd();
-                left = if (left != 0 or right != 0) 1 else 0;
+                if (left != 0) {
+                    // Short circuit: still parse right side to advance position, but result is 1
+                    _ = try self.parseLogicalAnd();
+                    left = 1;
+                } else {
+                    const right = try self.parseLogicalAnd();
+                    left = if (right != 0) @as(i64, 1) else @as(i64, 0);
+                }
             } else {
                 break;
             }
@@ -418,8 +437,14 @@ const Parser = struct {
                 self.input[self.pos + 1] == '&')
             {
                 self.pos += 2;
-                const right = try self.parseBitwiseOr();
-                left = if (left != 0 and right != 0) 1 else 0;
+                if (left == 0) {
+                    // Short circuit: still parse right side to advance position, but result is 0
+                    _ = try self.parseBitwiseOr();
+                    // left stays 0
+                } else {
+                    const right = try self.parseBitwiseOr();
+                    left = if (right != 0) @as(i64, 1) else @as(i64, 0);
+                }
             } else {
                 break;
             }

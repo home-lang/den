@@ -140,6 +140,18 @@ fn evaluateTestArgs(args: []const []const u8) !i32 {
         } else if (std.mem.eql(u8, op, ">")) {
             // String greater than (lexicographic)
             return if (std.mem.lessThan(u8, right, left)) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-nt")) {
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return 1;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return 0;
+            return if (left_stat.mtime.nanoseconds > right_stat.mtime.nanoseconds) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-ot")) {
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return 0;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return 1;
+            return if (left_stat.mtime.nanoseconds < right_stat.mtime.nanoseconds) 0 else 1;
+        } else if (std.mem.eql(u8, op, "-ef")) {
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return 1;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return 1;
+            return if (left_stat.inode == right_stat.inode) 0 else 1;
         }
     }
 
