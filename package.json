@@ -13,7 +13,12 @@
   "bugs": {
     "url": "https://github.com/stacksjs/den/issues"
   },
-  "keywords": ["typescript", "shell", "cross-platform", "bun"],
+  "keywords": [
+    "typescript",
+    "shell",
+    "cross-platform",
+    "bun"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -28,7 +33,10 @@
   "bin": {
     "den": "./dist/bin/cli.js"
   },
-  "files": ["README.md", "dist"],
+  "files": [
+    "README.md",
+    "dist"
+  ],
   "scripts": {
     "build": "bun --bun build.ts",
     "compile": "bun build ./bin/cli.ts --compile --minify --outfile bin/den",
@@ -48,14 +56,11 @@
     "fresh": "bunx rimraf node_modules/ bun.lock && bun i",
     "prepublishOnly": "bun --bun run build && bun run compile:all && bun run zip",
     "test": "bun test",
-    "lint": "bunx --bun pickier lint . --config pickier.config.ts --max-warnings 9999",
-    "lint:fix": "bunx --bun pickier lint . --fix --config pickier.config.ts --max-warnings 9999",
-    "format": "bunx --bun pickier format . --config pickier.config.ts",
-    "format:fix": "bunx --bun pickier format . --write --config pickier.config.ts",
+    "lint": "bunx --bun pickier .",
+    "lint:fix": "bunx --bun pickier . --fix",
     "changelog": "bunx logsmith --verbose",
     "changelog:generate": "bunx logsmith --output CHANGELOG.md",
     "release": "bun --bun run changelog:generate && bunx --bun bumpx prompt --recursive",
-    "postinstall": "bunx git-hooks",
     "dev:docs": "bun --bun vitepress dev docs",
     "build:docs": "bun --bun vitepress build docs",
     "preview:docs": "bun --bun vitepress preview docs",
@@ -76,13 +81,5 @@
   },
   "overrides": {
     "unconfig": "0.3.10"
-  },
-  "git-hooks": {
-    "pre-commit": {
-      "staged-lint": {
-        "*.{js,ts,json,yaml,yml,md}": "bunx --bun pickier lint --fix"
-      }
-    },
-    "commit-msg": "bunx gitlint --edit .git/COMMIT_EDITMSG"
   }
 }
