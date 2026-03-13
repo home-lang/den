@@ -2,7 +2,7 @@
 
 ## About
 
-A performant & customizable, cross-platform shell for your terminal.
+A modern POSIX-compliant shell written in Zig, delivering native performance with a ~1.8MB binary and ~5ms startup time (5-9x faster than bash/zsh/fish). It includes 54 built-in commands, pipelines, I/O redirection, job control, variable/command/arithmetic/brace/tilde/glob expansion, persistent history, tab completion, and aliases. Originally built with TypeScript/Bun, it was rewritten in Zig for zero runtime dependencies and minimal memory usage (~2MB idle).
 
 ## Linting
 
