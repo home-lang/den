@@ -78,13 +78,11 @@ pub const GitModule = struct {
     pub fn getInfo(self: *GitModule, cwd: []const u8) !GitInfo {
         var info = GitInfo.init(self.allocator);
 
-        // Check if we're in a git repository
-        if (!self.isGitRepository(cwd)) {
-            return info;
-        }
-
-        // Get branch name
+        // Get branch name (will fail if not in a git repo)
         info.branch = self.getBranch(cwd) catch null;
+
+        // If no branch, we're not in a git repo
+        if (info.branch == null) return info;
 
         // Get commit hash
         info.commit_hash = self.getCommitHash(cwd) catch null;
@@ -203,29 +201,29 @@ pub const GitModule = struct {
 
     /// Run a git command and return output
     fn runGitCommand(self: *GitModule, cwd: []const u8, argv: []const []const u8) ![]const u8 {
-        var child = std.process.spawn(std.Options.debug_io, .{
+        const result = std.process.run(self.allocator, std.Options.debug_io, .{
             .argv = argv,
             .cwd = .{ .path = cwd },
-            .stdout = .pipe,
-            .stderr = .ignore,
-        }) catch |err| return err;
+        }) catch |err| {
+            std.debug.print("DEBUG runGitCommand error: {} argv[0]={s} cwd={s}\n", .{ err, argv[0], cwd });
+            return error.CommandFailed;
+        };
 
-        // Read stdout manually (readToEndAlloc not available in Zig 0.16)
-        var output_buf = std.ArrayList(u8).empty;
-        errdefer output_buf.deinit(self.allocator);
+        defer self.allocator.free(result.stderr);
 
-        if (child.stdout) |stdout_pipe| {
-            var read_buf: [4096]u8 = undefined;
-            while (true) {
-                const n = stdout_pipe.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
-                if (n == 0) break;
-                try output_buf.appendSlice(self.allocator, read_buf[0..n]);
-            }
+        switch (result.term) {
+            .exited => |code| {
+                if (code == 0) {
+                    return result.stdout;
+                }
+                self.allocator.free(result.stdout);
+                return error.CommandFailed;
+            },
+            else => {
+                self.allocator.free(result.stdout);
+                return error.CommandFailed;
+            },
         }
-
-        _ = try child.wait(std.Options.debug_io);
-
-        return try output_buf.toOwnedSlice(self.allocator);
     }
 
     /// Find git repository root from a given path

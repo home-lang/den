@@ -7,7 +7,7 @@ on:
     branches: [main, develop]
 
 env:
-  ZIG_VERSION: '0.16-dev'
+  ZIG_VERSION: '0.16.0-dev.2962+08416b44f'
 
 jobs:
   test:
@@ -26,7 +26,7 @@ jobs:
           submodules: recursive
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -89,7 +89,7 @@ jobs:
           submodules: recursive
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -111,7 +111,7 @@ jobs:
           submodules: recursive
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
