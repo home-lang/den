@@ -4,7 +4,6 @@ const IO = @import("../../utils/io.zig").IO;
 
 /// I/O builtins: echo, printf
 /// Extracted from executor/mod.zig for better modularity
-
 pub fn echo(command: *types.ParsedCommand) !i32 {
     var no_newline = false;
     var interpret_escapes = false;
@@ -243,238 +242,238 @@ pub fn printf(command: *types.ParsedCommand) !i32 {
         var i: usize = 0;
         const start_arg_idx = arg_idx;
 
-    while (i < format.len) {
-        if (format[i] == '%' and i + 1 < format.len) {
-            var j = i + 1;
-            var left_justify = false;
-            var zero_pad = false;
-            var width: usize = 0;
-            var precision: usize = 6;
-            var has_precision = false;
+        while (i < format.len) {
+            if (format[i] == '%' and i + 1 < format.len) {
+                var j = i + 1;
+                var left_justify = false;
+                var zero_pad = false;
+                var width: usize = 0;
+                var precision: usize = 6;
+                var has_precision = false;
 
-            // Parse flags
-            while (j < format.len) {
-                if (format[j] == '-') {
-                    left_justify = true;
-                    j += 1;
-                } else if (format[j] == '0') {
-                    zero_pad = true;
-                    j += 1;
-                } else if (format[j] == '+' or format[j] == ' ' or format[j] == '#') {
-                    j += 1;
-                } else {
-                    break;
-                }
-            }
-
-            // Parse width
-            while (j < format.len and format[j] >= '0' and format[j] <= '9') {
-                width = width * 10 + (format[j] - '0');
-                j += 1;
-            }
-
-            // Parse precision
-            if (j < format.len and format[j] == '.') {
-                j += 1;
-                precision = 0;
-                has_precision = true;
-                while (j < format.len and format[j] >= '0' and format[j] <= '9') {
-                    precision = precision * 10 + (format[j] - '0');
-                    j += 1;
-                }
-            }
-
-            if (j >= format.len) {
-                try IO.print("{c}", .{format[i]});
-                i += 1;
-                continue;
-            }
-
-            const spec = format[j];
-            if (spec == 's') {
-                if (arg_idx < command.args.len) {
-                    var str = command.args[arg_idx];
-                    if (has_precision and str.len > precision) {
-                        str = str[0..precision];
-                    }
-                    if (width > 0 and str.len < width) {
-                        const pad = width - str.len;
-                        if (left_justify) {
-                            try IO.print("{s}", .{str});
-                            var p: usize = 0;
-                            while (p < pad) : (p += 1) try IO.print(" ", .{});
-                        } else {
-                            var p: usize = 0;
-                            while (p < pad) : (p += 1) try IO.print(" ", .{});
-                            try IO.print("{s}", .{str});
-                        }
+                // Parse flags
+                while (j < format.len) {
+                    if (format[j] == '-') {
+                        left_justify = true;
+                        j += 1;
+                    } else if (format[j] == '0') {
+                        zero_pad = true;
+                        j += 1;
+                    } else if (format[j] == '+' or format[j] == ' ' or format[j] == '#') {
+                        j += 1;
                     } else {
-                        try IO.print("{s}", .{str});
+                        break;
                     }
-                    arg_idx += 1;
                 }
-                i = j + 1;
-            } else if (spec == 'd' or spec == 'i') {
-                if (arg_idx < command.args.len) {
-                    const arg = command.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(i64, arg[1])
-                    else
-                        std.fmt.parseInt(i64, arg, 10) catch 0;
-                    try printfInt(num, width, zero_pad, left_justify);
-                    arg_idx += 1;
+
+                // Parse width
+                while (j < format.len and format[j] >= '0' and format[j] <= '9') {
+                    width = width * 10 + (format[j] - '0');
+                    j += 1;
                 }
-                i = j + 1;
-            } else if (spec == 'u') {
-                if (arg_idx < command.args.len) {
-                    const arg = command.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(u64, arg[1])
-                    else
-                        std.fmt.parseInt(u64, arg, 10) catch 0;
-                    try printfUint(num, width, zero_pad, left_justify, 10, false);
-                    arg_idx += 1;
-                }
-                i = j + 1;
-            } else if (spec == 'x') {
-                if (arg_idx < command.args.len) {
-                    const arg = command.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(u64, arg[1])
-                    else
-                        std.fmt.parseInt(u64, arg, 10) catch 0;
-                    try printfUint(num, width, zero_pad, left_justify, 16, false);
-                    arg_idx += 1;
-                }
-                i = j + 1;
-            } else if (spec == 'X') {
-                if (arg_idx < command.args.len) {
-                    const arg = command.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(u64, arg[1])
-                    else
-                        std.fmt.parseInt(u64, arg, 10) catch 0;
-                    try printfUint(num, width, zero_pad, left_justify, 16, true);
-                    arg_idx += 1;
-                }
-                i = j + 1;
-            } else if (spec == 'o') {
-                if (arg_idx < command.args.len) {
-                    const arg = command.args[arg_idx];
-                    const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
-                        @as(u64, arg[1])
-                    else
-                        std.fmt.parseInt(u64, arg, 10) catch 0;
-                    try printfUint(num, width, zero_pad, left_justify, 8, false);
-                    arg_idx += 1;
-                }
-                i = j + 1;
-            } else if (spec == 'c') {
-                if (arg_idx < command.args.len) {
-                    const arg = command.args[arg_idx];
-                    if (arg.len > 0) {
-                        try IO.print("{c}", .{arg[0]});
+
+                // Parse precision
+                if (j < format.len and format[j] == '.') {
+                    j += 1;
+                    precision = 0;
+                    has_precision = true;
+                    while (j < format.len and format[j] >= '0' and format[j] <= '9') {
+                        precision = precision * 10 + (format[j] - '0');
+                        j += 1;
                     }
-                    arg_idx += 1;
                 }
-                i = j + 1;
-            } else if (spec == 'f' or spec == 'F') {
-                if (arg_idx < command.args.len) {
-                    const num = std.fmt.parseFloat(f64, command.args[arg_idx]) catch 0.0;
-                    try printfFloat(num, width, precision, left_justify);
-                    arg_idx += 1;
+
+                if (j >= format.len) {
+                    try IO.print("{c}", .{format[i]});
+                    i += 1;
+                    continue;
                 }
-                i = j + 1;
-            } else if (spec == '%') {
-                try IO.print("%", .{});
-                i = j + 1;
-            } else if (spec == 'b') {
-                if (arg_idx < command.args.len) {
-                    try printWithEscapes(command.args[arg_idx]);
-                    arg_idx += 1;
-                }
-                i = j + 1;
-            } else if (spec == 'q') {
-                if (arg_idx < command.args.len) {
-                    const arg = command.args[arg_idx];
-                    // Shell-safe quoting: wrap in single quotes, escape embedded single quotes as '\''
-                    try IO.print("'", .{});
-                    for (arg) |ch| {
-                        if (ch == 0x27) { // single quote
-                            try IO.print("'\\''", .{});
-                        } else {
-                            try IO.print("{c}", .{ch});
+
+                const spec = format[j];
+                if (spec == 's') {
+                    if (arg_idx < command.args.len) {
+                        var str = command.args[arg_idx];
+                        if (has_precision and str.len > precision) {
+                            str = str[0..precision];
                         }
+                        if (width > 0 and str.len < width) {
+                            const pad = width - str.len;
+                            if (left_justify) {
+                                try IO.print("{s}", .{str});
+                                var p: usize = 0;
+                                while (p < pad) : (p += 1) try IO.print(" ", .{});
+                            } else {
+                                var p: usize = 0;
+                                while (p < pad) : (p += 1) try IO.print(" ", .{});
+                                try IO.print("{s}", .{str});
+                            }
+                        } else {
+                            try IO.print("{s}", .{str});
+                        }
+                        arg_idx += 1;
                     }
-                    try IO.print("'", .{});
-                    arg_idx += 1;
+                    i = j + 1;
+                } else if (spec == 'd' or spec == 'i') {
+                    if (arg_idx < command.args.len) {
+                        const arg = command.args[arg_idx];
+                        const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                            @as(i64, arg[1])
+                        else
+                            std.fmt.parseInt(i64, arg, 10) catch 0;
+                        try printfInt(num, width, zero_pad, left_justify);
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else if (spec == 'u') {
+                    if (arg_idx < command.args.len) {
+                        const arg = command.args[arg_idx];
+                        const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                            @as(u64, arg[1])
+                        else
+                            std.fmt.parseInt(u64, arg, 10) catch 0;
+                        try printfUint(num, width, zero_pad, left_justify, 10, false);
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else if (spec == 'x') {
+                    if (arg_idx < command.args.len) {
+                        const arg = command.args[arg_idx];
+                        const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                            @as(u64, arg[1])
+                        else
+                            std.fmt.parseInt(u64, arg, 10) catch 0;
+                        try printfUint(num, width, zero_pad, left_justify, 16, false);
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else if (spec == 'X') {
+                    if (arg_idx < command.args.len) {
+                        const arg = command.args[arg_idx];
+                        const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                            @as(u64, arg[1])
+                        else
+                            std.fmt.parseInt(u64, arg, 10) catch 0;
+                        try printfUint(num, width, zero_pad, left_justify, 16, true);
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else if (spec == 'o') {
+                    if (arg_idx < command.args.len) {
+                        const arg = command.args[arg_idx];
+                        const num = if (arg.len >= 2 and (arg[0] == '\'' or arg[0] == '"'))
+                            @as(u64, arg[1])
+                        else
+                            std.fmt.parseInt(u64, arg, 10) catch 0;
+                        try printfUint(num, width, zero_pad, left_justify, 8, false);
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else if (spec == 'c') {
+                    if (arg_idx < command.args.len) {
+                        const arg = command.args[arg_idx];
+                        if (arg.len > 0) {
+                            try IO.print("{c}", .{arg[0]});
+                        }
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else if (spec == 'f' or spec == 'F') {
+                    if (arg_idx < command.args.len) {
+                        const num = std.fmt.parseFloat(f64, command.args[arg_idx]) catch 0.0;
+                        try printfFloat(num, width, precision, left_justify);
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else if (spec == '%') {
+                    try IO.print("%", .{});
+                    i = j + 1;
+                } else if (spec == 'b') {
+                    if (arg_idx < command.args.len) {
+                        try printWithEscapes(command.args[arg_idx]);
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else if (spec == 'q') {
+                    if (arg_idx < command.args.len) {
+                        const arg = command.args[arg_idx];
+                        // Shell-safe quoting: wrap in single quotes, escape embedded single quotes as '\''
+                        try IO.print("'", .{});
+                        for (arg) |ch| {
+                            if (ch == 0x27) { // single quote
+                                try IO.print("'\\''", .{});
+                            } else {
+                                try IO.print("{c}", .{ch});
+                            }
+                        }
+                        try IO.print("'", .{});
+                        arg_idx += 1;
+                    }
+                    i = j + 1;
+                } else {
+                    try IO.print("{c}", .{format[i]});
+                    i += 1;
                 }
-                i = j + 1;
+            } else if (format[i] == '\\' and i + 1 < format.len) {
+                const esc = format[i + 1];
+                switch (esc) {
+                    'n' => try IO.print("\n", .{}),
+                    't' => try IO.print("\t", .{}),
+                    'r' => try IO.print("\r", .{}),
+                    '\\' => try IO.print("\\", .{}),
+                    'a' => try IO.print("\x07", .{}),
+                    'b' => try IO.print("\x08", .{}),
+                    'f' => try IO.print("\x0c", .{}),
+                    'v' => try IO.print("\x0b", .{}),
+                    'e' => try IO.print("\x1b", .{}),
+                    '0' => {
+                        var val: u8 = 0;
+                        var k: usize = i + 2;
+                        var count: usize = 0;
+                        while (k < format.len and count < 3) : (k += 1) {
+                            if (format[k] >= '0' and format[k] <= '7') {
+                                val = val * 8 + (format[k] - '0');
+                                count += 1;
+                            } else break;
+                        }
+                        try IO.print("{c}", .{val});
+                        i = k;
+                        continue;
+                    },
+                    'x' => {
+                        var hex_val: u8 = 0;
+                        var hex_count: usize = 0;
+                        var k: usize = i + 2;
+                        while (k < format.len and hex_count < 2) : (k += 1) {
+                            const c = format[k];
+                            const digit: u8 = if (c >= '0' and c <= '9')
+                                c - '0'
+                            else if (c >= 'a' and c <= 'f')
+                                c - 'a' + 10
+                            else if (c >= 'A' and c <= 'F')
+                                c - 'A' + 10
+                            else
+                                break;
+                            hex_val = hex_val * 16 + digit;
+                            hex_count += 1;
+                        }
+                        if (hex_count > 0) {
+                            try IO.print("{c}", .{hex_val});
+                            i = k;
+                            continue;
+                        } else {
+                            try IO.print("{c}", .{format[i]});
+                            i += 1;
+                            continue;
+                        }
+                    },
+                    else => try IO.print("{c}", .{format[i]}),
+                }
+                i += 2;
             } else {
                 try IO.print("{c}", .{format[i]});
                 i += 1;
             }
-        } else if (format[i] == '\\' and i + 1 < format.len) {
-            const esc = format[i + 1];
-            switch (esc) {
-                'n' => try IO.print("\n", .{}),
-                't' => try IO.print("\t", .{}),
-                'r' => try IO.print("\r", .{}),
-                '\\' => try IO.print("\\", .{}),
-                'a' => try IO.print("\x07", .{}),
-                'b' => try IO.print("\x08", .{}),
-                'f' => try IO.print("\x0c", .{}),
-                'v' => try IO.print("\x0b", .{}),
-                'e' => try IO.print("\x1b", .{}),
-                '0' => {
-                    var val: u8 = 0;
-                    var k: usize = i + 2;
-                    var count: usize = 0;
-                    while (k < format.len and count < 3) : (k += 1) {
-                        if (format[k] >= '0' and format[k] <= '7') {
-                            val = val * 8 + (format[k] - '0');
-                            count += 1;
-                        } else break;
-                    }
-                    try IO.print("{c}", .{val});
-                    i = k;
-                    continue;
-                },
-                'x' => {
-                    var hex_val: u8 = 0;
-                    var hex_count: usize = 0;
-                    var k: usize = i + 2;
-                    while (k < format.len and hex_count < 2) : (k += 1) {
-                        const c = format[k];
-                        const digit: u8 = if (c >= '0' and c <= '9')
-                            c - '0'
-                        else if (c >= 'a' and c <= 'f')
-                            c - 'a' + 10
-                        else if (c >= 'A' and c <= 'F')
-                            c - 'A' + 10
-                        else
-                            break;
-                        hex_val = hex_val * 16 + digit;
-                        hex_count += 1;
-                    }
-                    if (hex_count > 0) {
-                        try IO.print("{c}", .{hex_val});
-                        i = k;
-                        continue;
-                    } else {
-                        try IO.print("{c}", .{format[i]});
-                        i += 1;
-                        continue;
-                    }
-                },
-                else => try IO.print("{c}", .{format[i]}),
-            }
-            i += 2;
-        } else {
-            try IO.print("{c}", .{format[i]});
-            i += 1;
         }
-    }
 
         // Stop if no arguments were consumed in this pass, or no more args remain
         if (arg_idx == start_arg_idx or arg_idx >= command.args.len) break;

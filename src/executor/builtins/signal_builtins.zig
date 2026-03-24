@@ -226,34 +226,5 @@ pub fn signalFromName(name: []const u8) ?u8 {
         return null;
     }
 
-    if (std.mem.eql(u8, name, "HUP")) return @intFromEnum(std.posix.SIG.HUP)
-    else if (std.mem.eql(u8, name, "INT")) return @intFromEnum(std.posix.SIG.INT)
-    else if (std.mem.eql(u8, name, "QUIT")) return @intFromEnum(std.posix.SIG.QUIT)
-    else if (std.mem.eql(u8, name, "ILL")) return @intFromEnum(std.posix.SIG.ILL)
-    else if (std.mem.eql(u8, name, "TRAP")) return @intFromEnum(std.posix.SIG.TRAP)
-    else if (std.mem.eql(u8, name, "ABRT")) return @intFromEnum(std.posix.SIG.ABRT)
-    else if (std.mem.eql(u8, name, "BUS")) return @intFromEnum(std.posix.SIG.BUS)
-    else if (std.mem.eql(u8, name, "FPE")) return @intFromEnum(std.posix.SIG.FPE)
-    else if (std.mem.eql(u8, name, "KILL")) return @intFromEnum(std.posix.SIG.KILL)
-    else if (std.mem.eql(u8, name, "USR1")) return @intFromEnum(std.posix.SIG.USR1)
-    else if (std.mem.eql(u8, name, "SEGV")) return @intFromEnum(std.posix.SIG.SEGV)
-    else if (std.mem.eql(u8, name, "USR2")) return @intFromEnum(std.posix.SIG.USR2)
-    else if (std.mem.eql(u8, name, "PIPE")) return @intFromEnum(std.posix.SIG.PIPE)
-    else if (std.mem.eql(u8, name, "ALRM")) return @intFromEnum(std.posix.SIG.ALRM)
-    else if (std.mem.eql(u8, name, "TERM")) return @intFromEnum(std.posix.SIG.TERM)
-    else if (std.mem.eql(u8, name, "CHLD")) return @intFromEnum(std.posix.SIG.CHLD)
-    else if (std.mem.eql(u8, name, "CONT")) return @intFromEnum(std.posix.SIG.CONT)
-    else if (std.mem.eql(u8, name, "STOP")) return @intFromEnum(std.posix.SIG.STOP)
-    else if (std.mem.eql(u8, name, "TSTP")) return @intFromEnum(std.posix.SIG.TSTP)
-    else if (std.mem.eql(u8, name, "TTIN")) return @intFromEnum(std.posix.SIG.TTIN)
-    else if (std.mem.eql(u8, name, "TTOU")) return @intFromEnum(std.posix.SIG.TTOU)
-    else if (std.mem.eql(u8, name, "URG")) return @intFromEnum(std.posix.SIG.URG)
-    else if (std.mem.eql(u8, name, "XCPU")) return @intFromEnum(std.posix.SIG.XCPU)
-    else if (std.mem.eql(u8, name, "XFSZ")) return @intFromEnum(std.posix.SIG.XFSZ)
-    else if (std.mem.eql(u8, name, "VTALRM")) return @intFromEnum(std.posix.SIG.VTALRM)
-    else if (std.mem.eql(u8, name, "PROF")) return @intFromEnum(std.posix.SIG.PROF)
-    else if (std.mem.eql(u8, name, "WINCH")) return @intFromEnum(std.posix.SIG.WINCH)
-    else if (std.mem.eql(u8, name, "IO")) return @intFromEnum(std.posix.SIG.IO)
-    else if (std.mem.eql(u8, name, "SYS")) return @intFromEnum(std.posix.SIG.SYS)
-    else return null;
+    if (std.mem.eql(u8, name, "HUP")) return @intFromEnum(std.posix.SIG.HUP) else if (std.mem.eql(u8, name, "INT")) return @intFromEnum(std.posix.SIG.INT) else if (std.mem.eql(u8, name, "QUIT")) return @intFromEnum(std.posix.SIG.QUIT) else if (std.mem.eql(u8, name, "ILL")) return @intFromEnum(std.posix.SIG.ILL) else if (std.mem.eql(u8, name, "TRAP")) return @intFromEnum(std.posix.SIG.TRAP) else if (std.mem.eql(u8, name, "ABRT")) return @intFromEnum(std.posix.SIG.ABRT) else if (std.mem.eql(u8, name, "BUS")) return @intFromEnum(std.posix.SIG.BUS) else if (std.mem.eql(u8, name, "FPE")) return @intFromEnum(std.posix.SIG.FPE) else if (std.mem.eql(u8, name, "KILL")) return @intFromEnum(std.posix.SIG.KILL) else if (std.mem.eql(u8, name, "USR1")) return @intFromEnum(std.posix.SIG.USR1) else if (std.mem.eql(u8, name, "SEGV")) return @intFromEnum(std.posix.SIG.SEGV) else if (std.mem.eql(u8, name, "USR2")) return @intFromEnum(std.posix.SIG.USR2) else if (std.mem.eql(u8, name, "PIPE")) return @intFromEnum(std.posix.SIG.PIPE) else if (std.mem.eql(u8, name, "ALRM")) return @intFromEnum(std.posix.SIG.ALRM) else if (std.mem.eql(u8, name, "TERM")) return @intFromEnum(std.posix.SIG.TERM) else if (std.mem.eql(u8, name, "CHLD")) return @intFromEnum(std.posix.SIG.CHLD) else if (std.mem.eql(u8, name, "CONT")) return @intFromEnum(std.posix.SIG.CONT) else if (std.mem.eql(u8, name, "STOP")) return @intFromEnum(std.posix.SIG.STOP) else if (std.mem.eql(u8, name, "TSTP")) return @intFromEnum(std.posix.SIG.TSTP) else if (std.mem.eql(u8, name, "TTIN")) return @intFromEnum(std.posix.SIG.TTIN) else if (std.mem.eql(u8, name, "TTOU")) return @intFromEnum(std.posix.SIG.TTOU) else if (std.mem.eql(u8, name, "URG")) return @intFromEnum(std.posix.SIG.URG) else if (std.mem.eql(u8, name, "XCPU")) return @intFromEnum(std.posix.SIG.XCPU) else if (std.mem.eql(u8, name, "XFSZ")) return @intFromEnum(std.posix.SIG.XFSZ) else if (std.mem.eql(u8, name, "VTALRM")) return @intFromEnum(std.posix.SIG.VTALRM) else if (std.mem.eql(u8, name, "PROF")) return @intFromEnum(std.posix.SIG.PROF) else if (std.mem.eql(u8, name, "WINCH")) return @intFromEnum(std.posix.SIG.WINCH) else if (std.mem.eql(u8, name, "IO")) return @intFromEnum(std.posix.SIG.IO) else if (std.mem.eql(u8, name, "SYS")) return @intFromEnum(std.posix.SIG.SYS) else return null;
 }

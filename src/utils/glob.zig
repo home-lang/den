@@ -272,7 +272,7 @@ pub const Glob = struct {
         // Check for exclusion pattern: *.txt~*.log
         if (std.mem.indexOfScalar(u8, pattern, '~')) |tilde_pos| {
             const base = pattern[0..tilde_pos];
-            const exclusion = pattern[tilde_pos + 1..];
+            const exclusion = pattern[tilde_pos + 1 ..];
 
             // Check for qualifier after exclusion
             if (std.mem.lastIndexOfScalar(u8, exclusion, '(')) |qual_pos| {

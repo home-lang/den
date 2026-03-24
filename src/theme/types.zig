@@ -77,21 +77,21 @@ pub const ColorConfig = struct {
     pub fn initDefault(allocator: std.mem.Allocator) ColorConfig {
         return .{
             .foreground = Color.fromAnsi(15), // White
-            .background = Color.fromAnsi(0),  // Black
-            .success = Color.fromAnsi(10),    // Bright green
-            .err = Color.fromAnsi(9),         // Bright red
-            .warning = Color.fromAnsi(11),    // Bright yellow
-            .info = Color.fromAnsi(14),       // Bright cyan
+            .background = Color.fromAnsi(0), // Black
+            .success = Color.fromAnsi(10), // Bright green
+            .err = Color.fromAnsi(9), // Bright red
+            .warning = Color.fromAnsi(11), // Bright yellow
+            .info = Color.fromAnsi(14), // Bright cyan
             .prompt_symbol = Color.fromAnsi(12), // Bright blue
-            .prompt_path = Color.fromAnsi(14),   // Bright cyan
-            .prompt_git = Color.fromAnsi(11),    // Bright yellow
-            .command = Color.fromAnsi(13),    // Bright magenta
-            .argument = Color.fromAnsi(15),   // White
-            .option = Color.fromAnsi(10),     // Bright green
-            .string = Color.fromAnsi(11),     // Bright yellow
-            .number = Color.fromAnsi(13),     // Bright magenta
-            .operator = Color.fromAnsi(9),    // Bright red
-            .comment = Color.fromAnsi(8),     // Bright black (gray)
+            .prompt_path = Color.fromAnsi(14), // Bright cyan
+            .prompt_git = Color.fromAnsi(11), // Bright yellow
+            .command = Color.fromAnsi(13), // Bright magenta
+            .argument = Color.fromAnsi(15), // White
+            .option = Color.fromAnsi(10), // Bright green
+            .string = Color.fromAnsi(11), // Bright yellow
+            .number = Color.fromAnsi(13), // Bright magenta
+            .operator = Color.fromAnsi(9), // Bright red
+            .comment = Color.fromAnsi(8), // Bright black (gray)
             .allocator = allocator,
         };
     }

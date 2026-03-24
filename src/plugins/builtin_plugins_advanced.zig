@@ -61,9 +61,9 @@ pub const AutoSuggestPlugin = struct {
 
         // Add common builtin commands if they match
         const builtins = [_][]const u8{
-            "cd", "echo", "pwd", "export", "exit", "source",
-            "alias", "unalias", "history", "jobs", "fg", "bg",
-            "test", "read", "printf", "true", "false", "sleep",
+            "cd",    "echo",    "pwd",     "export", "exit",  "source",
+            "alias", "unalias", "history", "jobs",   "fg",    "bg",
+            "test",  "read",    "printf",  "true",   "false", "sleep",
         };
 
         for (builtins) |builtin| {
@@ -274,11 +274,11 @@ pub const HighlightPlugin = struct {
     fn isBuiltin(self: *HighlightPlugin, word: []const u8) bool {
         _ = self;
         const builtins = [_][]const u8{
-            "cd", "echo", "pwd", "export", "exit", "source",
-            "alias", "unalias", "history", "jobs", "fg", "bg",
-            "test", "read", "printf", "true", "false", "sleep",
-            "if", "then", "else", "elif", "fi", "while", "do",
-            "done", "for", "case", "esac", "function",
+            "cd",    "echo",    "pwd",     "export", "exit",  "source",
+            "alias", "unalias", "history", "jobs",   "fg",    "bg",
+            "test",  "read",    "printf",  "true",   "false", "sleep",
+            "if",    "then",    "else",    "elif",   "fi",    "while",
+            "do",    "done",    "for",     "case",   "esac",  "function",
         };
 
         for (builtins) |builtin| {

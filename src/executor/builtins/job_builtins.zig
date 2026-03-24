@@ -4,7 +4,6 @@ const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 
 /// Job control builtins: jobs, fg, bg, wait, disown
-
 /// jobs - list active jobs
 pub fn jobs(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     return ctx.builtinJobs(command.args) catch |err| {

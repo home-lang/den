@@ -224,7 +224,7 @@ fn forkAndExecPosix(allocator: std.mem.Allocator, opts: SpawnOptions) !posix.pid
             // Set environ directly in child process, then execvp
             // (execvpe is a GNU extension, not portable)
             const c_environ = @extern(*[*:null]?[*:0]u8, .{ .name = "environ" });
-            c_environ.* = @constCast(@ptrCast(env));
+            c_environ.* = @ptrCast(@constCast(env));
             _ = cExecvp(argv_buf[0].?, argv_ptr);
         } else {
             _ = cExecvp(argv_buf[0].?, argv_ptr);

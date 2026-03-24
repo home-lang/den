@@ -4,7 +4,6 @@ const std = @import("std");
 ///
 /// Provides functions for monitoring configuration file changes
 /// to support hot-reload functionality.
-
 /// Get modification time of a file.
 ///
 /// Parameters:

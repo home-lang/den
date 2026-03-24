@@ -3,7 +3,6 @@ const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 
 /// Interactive builtins: ifind (interactive file finder)
-
 /// File type filter for ifind
 pub const FileTypeFilter = enum { all, files, dirs };
 

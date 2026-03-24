@@ -6,7 +6,6 @@ const BuiltinContext = @import("context.zig").BuiltinContext;
 /// Alias builtins: alias, unalias
 /// Supports -s flag for suffix aliases (zsh-style): alias -s ts='bun'
 /// Supports -g flag for global aliases (zsh-style): alias -g L='| less'
-
 pub fn alias(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     const shell_ref = ctx.getShell() catch {
         try IO.eprint("den: alias: shell context not available\n", .{});
@@ -117,7 +116,7 @@ fn handleSuffixAlias(ctx: *BuiltinContext, shell_ref: anytype, effective_args: [
     // Remove quotes if present
     if (value.len >= 2 and
         ((value[0] == '\'' and value[value.len - 1] == '\'') or
-        (value[0] == '"' and value[value.len - 1] == '"')))
+            (value[0] == '"' and value[value.len - 1] == '"')))
     {
         value = value[1 .. value.len - 1];
     }
@@ -161,7 +160,7 @@ fn handleGlobalAlias(ctx: *BuiltinContext, shell_ref: anytype, effective_args: [
     // Remove quotes if present
     if (value.len >= 2 and
         ((value[0] == '\'' and value[value.len - 1] == '\'') or
-        (value[0] == '"' and value[value.len - 1] == '"')))
+            (value[0] == '"' and value[value.len - 1] == '"')))
     {
         value = value[1 .. value.len - 1];
     }

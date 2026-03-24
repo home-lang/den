@@ -407,9 +407,9 @@ pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
 /// These builtins should not be overridden by aliases inherited from zsh/bash configs.
 fn isDenBuiltin(name: []const u8) bool {
     const den_builtins = [_][]const u8{
-        "str", "path", "math", "date", "into", "from", "to",
-        "encode", "decode", "detect", "explore", "generate",
-        "par-each", "seq-char", "bench", "watch", "use",
+        "str",    "path",   "math",   "date",    "into",     "from",     "to",
+        "encode", "decode", "detect", "explore", "generate", "par-each", "seq-char",
+        "bench",  "watch",  "use",
     };
     for (&den_builtins) |b| {
         if (std.mem.eql(u8, name, b)) return true;

@@ -193,7 +193,7 @@ fn hasBunLock(self: *Shell, cwd: []const u8) bool {
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
 
         // Just check if file exists
-        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,path, .{}) catch continue;
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch continue;
         file.close(std.Options.debug_io);
         return true;
     }

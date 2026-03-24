@@ -163,14 +163,13 @@ pub const Executor = struct {
 
                         // Find the end of the pipeline
                         while (pipeline_end < chain.operators.len and
-                               chain.operators[pipeline_end] == .pipe) {
+                            chain.operators[pipeline_end] == .pipe)
+                        {
                             pipeline_end += 1;
                         }
 
                         // Execute the pipeline
-                        last_exit_code = try self.executePipeline(
-                            chain.commands[pipeline_start..pipeline_end + 1]
-                        );
+                        last_exit_code = try self.executePipeline(chain.commands[pipeline_start .. pipeline_end + 1]);
 
                         // Skip to the end of the pipeline
                         i = pipeline_end + 1;
@@ -190,14 +189,13 @@ pub const Executor = struct {
 
                 // Find the end of the pipeline
                 while (pipeline_end < chain.operators.len and
-                       chain.operators[pipeline_end] == .pipe) {
+                    chain.operators[pipeline_end] == .pipe)
+                {
                     pipeline_end += 1;
                 }
 
                 // Execute the pipeline
-                last_exit_code = try self.executePipeline(
-                    chain.commands[pipeline_start..pipeline_end + 1]
-                );
+                last_exit_code = try self.executePipeline(chain.commands[pipeline_start .. pipeline_end + 1]);
 
                 // Skip to the end of the pipeline
                 i = pipeline_end + 1;
@@ -964,28 +962,25 @@ pub const Executor = struct {
     /// Check if a command name is a shell builtin.
     fn isBuiltin(self: *Executor, name: []const u8) bool {
         const builtin_names = [_][]const u8{
-            "cd",           "pwd",         "echo",        "exit",        "env",         "export",     "set",         "unset",
-            "true",         "false",       "test",        "[",           "[[",          "alias",      "unalias",     "which",
-            "type",         "help",        "read",        "printf",      "source",      ".",          "history",
-            "pushd",        "popd",        "dirs",        "eval",        "exec",        "command",    "builtin",
-            "jobs",         "fg",          "bg",          "wait",        "disown",      "kill",       "trap",        "times",
-            "umask",        "getopts",     "clear",       "time",        "timeout",     "hash",       "yes",         "reload",
-            "watch",        "tree",        "grep",        "find",        "calc",        "json",       "ls",
-            "seq",          "date",        "parallel",    "http",        "base64",      "uuid",
-            "localip",      "shrug",       "web",         "ip",          "return",      "local",      "copyssh",
-            "reloaddns",    "emptytrash",  "wip",         "bookmark",    "code",        "pstorm",
-            "show",         "hide",        "ft",          "sys-stats",   "netstats",    "net-check",  "log-tail",    "proc-monitor", "log-parse", "dotfiles", "library", "hook",
-            "ifind",        "coproc",      "break",       "continue",    ":",           "declare",     "typeset",     "let",         "shift",
+            "cd",        "pwd",      "echo",      "exit",       "env",      "export",    "set",       "unset",
+            "true",      "false",    "test",      "[",          "[[",       "alias",     "unalias",   "which",
+            "type",      "help",     "read",      "printf",     "source",   ".",         "history",   "pushd",
+            "popd",      "dirs",     "eval",      "exec",       "command",  "builtin",   "jobs",      "fg",
+            "bg",        "wait",     "disown",    "kill",       "trap",     "times",     "umask",     "getopts",
+            "clear",     "time",     "timeout",   "hash",       "yes",      "reload",    "watch",     "tree",
+            "grep",      "find",     "calc",      "json",       "ls",       "seq",       "date",      "parallel",
+            "http",      "base64",   "uuid",      "localip",    "shrug",    "web",       "ip",        "return",
+            "local",     "copyssh",  "reloaddns", "emptytrash", "wip",      "bookmark",  "code",      "pstorm",
+            "show",      "hide",     "ft",        "sys-stats",  "netstats", "net-check", "log-tail",  "proc-monitor",
+            "log-parse", "dotfiles", "library",   "hook",       "ifind",    "coproc",    "break",     "continue",
+            ":",         "declare",  "typeset",   "let",        "shift",
             // Nushell-inspired structured data commands
-            "from",         "to",          "table",       "grid",
-            "where",        "select",      "reject",      "get",         "first",       "last",       "skip",        "take",
-            "length",       "flatten",     "uniq",        "sort-by",     "reverse",     "transpose",  "group-by",
-            "enumerate",    "wrap",        "columns",     "values",      "headers",     "compact",    "rename",
-            "append",       "prepend",
-            "str",          "path",        "math",
-            "into",         "encode",      "decode",
-            "detect",       "bench",       "seq-char",    "generate",    "par-each",
-            "explore",      "use",
+               "from",      "to",        "table",
+            "grid",      "where",    "select",    "reject",     "get",      "first",     "last",      "skip",
+            "take",      "length",   "flatten",   "uniq",       "sort-by",  "reverse",   "transpose", "group-by",
+            "enumerate", "wrap",     "columns",   "values",     "headers",  "compact",   "rename",    "append",
+            "prepend",   "str",      "path",      "math",       "into",     "encode",    "decode",    "detect",
+            "bench",     "seq-char", "generate",  "par-each",   "explore",  "use",
         };
         for (builtin_names) |builtin_name| {
             if (std.mem.eql(u8, name, builtin_name)) return true;
@@ -1020,28 +1015,23 @@ pub const Executor = struct {
     fn isBuiltinStatic(name: []const u8) bool {
         // Check against all known builtin names
         const builtin_names = [_][]const u8{
-            "echo", "pwd", "cd", "env", "export", "set", "unset", "true", "false",
-            "test", "[", "[[", "which", "type", "help", "alias", "unalias", "read",
-            "printf", "source", ".", "history", "pushd", "popd", "dirs", "eval",
-            "exec", "command", "builtin", "jobs", "fg", "bg", "wait", "disown",
-            "kill", "trap", "times", "umask", "getopts", "clear", "time", "timeout",
-            "hash", "yes", "reload", "watch", "tree", "grep", "find", "ft", "calc",
-            "json", "ls", "seq", "date", "parallel", "http", "base64", "uuid",
-            "localip", "ip", "shrug", "web", "return", "local", "copyssh", "reloaddns",
-            "emptytrash", "wip", "bookmark", "code", "pstorm", "show", "hide",
-            "sys-stats", "netstats", "net-check", "log-tail", "proc-monitor",
-            "log-parse", "dotfiles", "library", "hook", "ifind", "coproc", "exit",
-            ":", "declare", "typeset", "let", "shift", "break", "continue",
+            "echo",    "pwd",      "cd",        "env",       "export",     "set",      "unset",        "true",      "false",
+            "test",    "[",        "[[",        "which",     "type",       "help",     "alias",        "unalias",   "read",
+            "printf",  "source",   ".",         "history",   "pushd",      "popd",     "dirs",         "eval",      "exec",
+            "command", "builtin",  "jobs",      "fg",        "bg",         "wait",     "disown",       "kill",      "trap",
+            "times",   "umask",    "getopts",   "clear",     "time",       "timeout",  "hash",         "yes",       "reload",
+            "watch",   "tree",     "grep",      "find",      "ft",         "calc",     "json",         "ls",        "seq",
+            "date",    "parallel", "http",      "base64",    "uuid",       "localip",  "ip",           "shrug",     "web",
+            "return",  "local",    "copyssh",   "reloaddns", "emptytrash", "wip",      "bookmark",     "code",      "pstorm",
+            "show",    "hide",     "sys-stats", "netstats",  "net-check",  "log-tail", "proc-monitor", "log-parse", "dotfiles",
+            "library", "hook",     "ifind",     "coproc",    "exit",       ":",        "declare",      "typeset",   "let",
+            "shift",   "break",    "continue",
             // Nushell-inspired structured data commands
-            "from",  "to",     "table",    "grid",
-            "where", "select", "reject",   "get",       "first",     "last",      "skip",      "take",
-            "length","flatten","uniq",     "sort-by",   "reverse",   "transpose", "group-by",
-            "enumerate","wrap","columns",  "values",    "headers",   "compact",   "rename",
-            "append","prepend",
-            "str",   "path",   "math",
-            "into",  "encode", "decode",
-            "detect","bench","seq-char","generate","par-each",
-            "explore",      "use",
+             "from",      "to",         "table",    "grid",         "where",     "select",
+            "reject",  "get",      "first",     "last",      "skip",       "take",     "length",       "flatten",   "uniq",
+            "sort-by", "reverse",  "transpose", "group-by",  "enumerate",  "wrap",     "columns",      "values",    "headers",
+            "compact", "rename",   "append",    "prepend",   "str",        "path",     "math",         "into",      "encode",
+            "decode",  "detect",   "bench",     "seq-char",  "generate",   "par-each", "explore",      "use",
         };
         for (builtin_names) |b| {
             if (std.mem.eql(u8, name, b)) return true;
@@ -1756,7 +1746,6 @@ pub const Executor = struct {
         // Detach - don't wait for completion
         // The process will continue running independently
     }
-
 };
 
 // ========================================

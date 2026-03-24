@@ -6,9 +6,9 @@ const RGB = types.RGB;
 
 /// Terminal color support level
 pub const ColorSupport = enum {
-    none,      // No color support
-    basic,     // 16 colors (4-bit)
-    extended,  // 256 colors (8-bit)
+    none, // No color support
+    basic, // 16 colors (4-bit)
+    extended, // 256 colors (8-bit)
     truecolor, // 16 million colors (24-bit RGB)
 
     pub fn fromColorterm(colorterm: ?[]const u8) ColorSupport {

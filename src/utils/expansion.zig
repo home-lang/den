@@ -327,7 +327,7 @@ pub const Expansion = struct {
                     if (result_len + expansion_result.value.len > result_buffer.len) {
                         return error.ExpansionTooLong;
                     }
-                    @memcpy(result_buffer[result_len..result_len + expansion_result.value.len], expansion_result.value);
+                    @memcpy(result_buffer[result_len .. result_len + expansion_result.value.len], expansion_result.value);
                     result_len += expansion_result.value.len;
 
                     i += expansion_result.consumed;
@@ -345,7 +345,7 @@ pub const Expansion = struct {
                     if (result_len + expansion_result.value.len > result_buffer.len) {
                         return error.ExpansionTooLong;
                     }
-                    @memcpy(result_buffer[result_len..result_len + expansion_result.value.len], expansion_result.value);
+                    @memcpy(result_buffer[result_len .. result_len + expansion_result.value.len], expansion_result.value);
                     result_len += expansion_result.value.len;
 
                     i += expansion_result.consumed;
@@ -365,7 +365,7 @@ pub const Expansion = struct {
                 if (result_len + expansion_result.value.len > result_buffer.len) {
                     return error.ExpansionTooLong;
                 }
-                @memcpy(result_buffer[result_len..result_len + expansion_result.value.len], expansion_result.value);
+                @memcpy(result_buffer[result_len .. result_len + expansion_result.value.len], expansion_result.value);
                 result_len += expansion_result.value.len;
 
                 i += expansion_result.consumed;
@@ -404,7 +404,7 @@ pub const Expansion = struct {
                 if (result_len + expansion_result.value.len > result_buffer.len) {
                     return error.ExpansionTooLong;
                 }
-                @memcpy(result_buffer[result_len..result_len + expansion_result.value.len], expansion_result.value);
+                @memcpy(result_buffer[result_len .. result_len + expansion_result.value.len], expansion_result.value);
                 result_len += expansion_result.value.len;
 
                 i += expansion_result.consumed;
@@ -472,7 +472,7 @@ pub const Expansion = struct {
                 var result = try self.allocator.alloc(u8, total_len);
                 var pos: usize = 0;
                 for (self.positional_params, 0..) |param, i| {
-                    @memcpy(result[pos..pos + param.len], param);
+                    @memcpy(result[pos .. pos + param.len], param);
                     pos += param.len;
                     if (i < self.positional_params.len - 1) {
                         result[pos] = ' ';
@@ -504,7 +504,7 @@ pub const Expansion = struct {
                 var result = try self.allocator.alloc(u8, total_len);
                 var pos: usize = 0;
                 for (self.positional_params, 0..) |param, i| {
-                    @memcpy(result[pos..pos + param.len], param);
+                    @memcpy(result[pos .. pos + param.len], param);
                     pos += param.len;
                     if (i < self.positional_params.len - 1 and sep_len > 0) {
                         result[pos] = sep_char;
@@ -581,8 +581,8 @@ pub const Expansion = struct {
     fn expandNested(self: *Expansion, value: []const u8) []u8 {
         const expand_fn = @as(*const fn (*Expansion, []const u8) anyerror![]u8, @ptrCast(&Expansion.expand));
         return expand_fn(self, value) catch self.allocator.dupe(u8, value) catch
-        // Allocate a proper empty slice instead of @constCast on a string literal,
-        // which would cause UB if the caller tries to free it.
+            // Allocate a proper empty slice instead of @constCast on a string literal,
+            // which would cause UB if the caller tries to free it.
             (self.allocator.alloc(u8, 0) catch &.{});
     }
 
@@ -745,7 +745,7 @@ pub const Expansion = struct {
                         var result = try self.allocator.alloc(u8, total_len);
                         var pos: usize = 0;
                         for (sliced, 0..) |item, i| {
-                            @memcpy(result[pos..pos + item.len], item);
+                            @memcpy(result[pos .. pos + item.len], item);
                             pos += item.len;
                             if (i < sliced.len - 1) {
                                 result[pos] = sep;
@@ -816,7 +816,7 @@ pub const Expansion = struct {
                         var result = try self.allocator.alloc(u8, total_len);
                         var pos: usize = 0;
                         for (values.items, 0..) |item, i| {
-                            @memcpy(result[pos..pos + item.len], item);
+                            @memcpy(result[pos .. pos + item.len], item);
                             pos += item.len;
                             if (i < values.items.len - 1) {
                                 result[pos] = ' ';
@@ -1598,9 +1598,12 @@ pub const Expansion = struct {
                     var result = try self.allocator.alloc(u8, total_len);
                     var pos: usize = 0;
                     for (self.positional_params, 0..) |p, pi| {
-                        @memcpy(result[pos..pos + p.len], p);
+                        @memcpy(result[pos .. pos + p.len], p);
                         pos += p.len;
-                        if (pi < self.positional_params.len - 1) { result[pos] = ' '; pos += 1; }
+                        if (pi < self.positional_params.len - 1) {
+                            result[pos] = ' ';
+                            pos += 1;
+                        }
                     }
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 },
@@ -1616,9 +1619,12 @@ pub const Expansion = struct {
                     var result = try self.allocator.alloc(u8, total_len);
                     var pos: usize = 0;
                     for (self.positional_params, 0..) |p, pi| {
-                        @memcpy(result[pos..pos + p.len], p);
+                        @memcpy(result[pos .. pos + p.len], p);
                         pos += p.len;
-                        if (pi < self.positional_params.len - 1 and sep_len > 0) { result[pos] = sep_char; pos += 1; }
+                        if (pi < self.positional_params.len - 1 and sep_len > 0) {
+                            result[pos] = sep_char;
+                            pos += 1;
+                        }
                     }
                     return ExpansionResult{ .value = result, .consumed = end + 1, .owned = true };
                 },
@@ -2194,7 +2200,7 @@ pub const Expansion = struct {
         }
 
         // Extract expression (between (( and ))
-        const raw_expr = input[3..end - 1];
+        const raw_expr = input[3 .. end - 1];
 
         // Pre-expand ${...} parameter expansions within the arithmetic expression
         // Uses direct environment lookups to avoid recursive error set issues

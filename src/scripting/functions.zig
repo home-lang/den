@@ -208,7 +208,7 @@ pub const FunctionManager = struct {
     }
 
     /// Execute a function
-    pub fn executeFunction(self: *FunctionManager, shell: *Shell, name: []const u8, args: []const []const u8) error{FunctionNotFound,CallStackOverflow,OutOfMemory}!i32 {
+    pub fn executeFunction(self: *FunctionManager, shell: *Shell, name: []const u8, args: []const []const u8) error{ FunctionNotFound, CallStackOverflow, OutOfMemory }!i32 {
         const func = self.getFunction(name) orelse return error.FunctionNotFound;
 
         // Push call frame

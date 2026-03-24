@@ -4,7 +4,6 @@ const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 
 /// Miscellaneous builtins - delegated to Shell
-
 pub fn sleep(shell: *Shell, cmd: *types.ParsedCommand) !void {
     return shell.builtinSleep(cmd);
 }

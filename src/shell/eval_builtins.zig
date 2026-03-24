@@ -203,7 +203,10 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
                 while (pos < value.len) {
                     var is_delim = false;
                     for (ifs) |ic| {
-                        if (value[pos] == ic) { is_delim = true; break; }
+                        if (value[pos] == ic) {
+                            is_delim = true;
+                            break;
+                        }
                     }
                     if (!is_delim) break;
                     pos += 1;
@@ -213,7 +216,10 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
                 while (pos < value.len) {
                     var is_delim = false;
                     for (ifs) |ic| {
-                        if (value[pos] == ic) { is_delim = true; break; }
+                        if (value[pos] == ic) {
+                            is_delim = true;
+                            break;
+                        }
                     }
                     if (is_delim) break;
                     pos += 1;
@@ -456,14 +462,14 @@ pub fn builtinCommand(self: *Shell, cmd: *types.ParsedCommand) !void {
         }
 
         const builtins = [_][]const u8{
-            "cd",      "echo",    "exit",    "export",  "set",     "unset",
-            "alias",   "unalias", "source",  ".",       "eval",    "exec",
-            "command", "builtin", "type",    "which",   "test",    "[",
-            "[[",      "true",    "false",   "read",    "printf",  "pwd",
-            "pushd",   "popd",    "dirs",    "history", "jobs",    "fg",
-            "bg",      "kill",    "wait",    "trap",    "shift",   "return",
-            "break",   "continue","local",   "declare", "typeset", "readonly",
-            "let",     "hash",    "umask",   "ulimit",  "getopts", ":",
+            "cd",      "echo",     "exit",   "export",  "set",     "unset",
+            "alias",   "unalias",  "source", ".",       "eval",    "exec",
+            "command", "builtin",  "type",   "which",   "test",    "[",
+            "[[",      "true",     "false",  "read",    "printf",  "pwd",
+            "pushd",   "popd",     "dirs",   "history", "jobs",    "fg",
+            "bg",      "kill",     "wait",   "trap",    "shift",   "return",
+            "break",   "continue", "local",  "declare", "typeset", "readonly",
+            "let",     "hash",     "umask",  "ulimit",  "getopts", ":",
         };
         for (builtins) |b| {
             if (std.mem.eql(u8, cmd_name, b)) {

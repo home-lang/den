@@ -7,7 +7,6 @@ const common = @import("common.zig");
 
 /// Standalone utility builtins that don't require shell state.
 /// These can operate with just an allocator.
-
 /// base64 - encode/decode base64
 pub fn base64(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     if (command.args.len == 0) {

@@ -142,7 +142,7 @@ pub fn executeArrayElementAssignment(self: *Shell, input: []const u8) !void {
     // Strip quotes
     if (raw_value.len >= 2 and
         ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
-        (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
+            (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
     {
         raw_value = raw_value[1 .. raw_value.len - 1];
     }
@@ -465,7 +465,7 @@ pub fn executeAssocArrayElementAssignment(self: *Shell, input: []const u8) !void
     var raw_value = trimmed[abs_close + 2 ..];
     if (raw_value.len >= 2 and
         ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
-        (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
+            (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
     {
         raw_value = raw_value[1 .. raw_value.len - 1];
     }

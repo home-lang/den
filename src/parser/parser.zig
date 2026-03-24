@@ -95,11 +95,7 @@ pub const Parser = struct {
             switch (token.type) {
                 // Words and keyword tokens can be command names or arguments
                 // Keywords like 'done', 'fi', 'if' etc. can be used as arguments in command context
-                .word, .process_sub_in, .process_sub_out,
-                .kw_if, .kw_then, .kw_else, .kw_elif, .kw_fi,
-                .kw_for, .kw_while, .kw_do, .kw_done,
-                .kw_case, .kw_esac, .kw_in, .kw_function,
-                .kw_let, .kw_mut, .kw_try, .kw_catch, .kw_match => {
+                .word, .process_sub_in, .process_sub_out, .kw_if, .kw_then, .kw_else, .kw_elif, .kw_fi, .kw_for, .kw_while, .kw_do, .kw_done, .kw_case, .kw_esac, .kw_in, .kw_function, .kw_let, .kw_mut, .kw_try, .kw_catch, .kw_match => {
                     // Process substitution tokens are treated as word arguments
                     // The value contains the full construct like "<(echo hello)"
                     const value = try self.allocator.dupe(u8, token.value);
@@ -292,7 +288,8 @@ pub const Parser = struct {
                     while (op_pos < token_value.len) : (op_pos += 1) {
                         if (op_pos + 1 < token_value.len) {
                             if ((token_value[op_pos] == '>' or token_value[op_pos] == '<') and
-                                token_value[op_pos + 1] == '&') {
+                                token_value[op_pos + 1] == '&')
+                            {
                                 break;
                             }
                         }

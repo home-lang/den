@@ -18,7 +18,7 @@ pub fn detectPackageVersion(allocator: std.mem.Allocator, cwd: []const u8) ![]co
         var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ cwd, filename }) catch continue;
 
-        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,path, .{}) catch continue;
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch continue;
         defer file.close(std.Options.debug_io);
 
         const max_size: usize = 8192;

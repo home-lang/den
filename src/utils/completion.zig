@@ -262,10 +262,10 @@ pub const Completion = struct {
                     // Check if executable
                     const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch continue;
                     const is_executable = if (is_windows) true else (stat.permissions.toMode() & 0o111) != 0;
-                    
+
                     if (is_executable) {
                         if (match_count >= matches_buffer.len) break;
-                        
+
                         // Check for duplicates
                         var is_dup = false;
                         for (matches_buffer[0..match_count]) |existing| {
@@ -274,7 +274,7 @@ pub const Completion = struct {
                                 break;
                             }
                         }
-                        
+
                         if (!is_dup) {
                             matches_buffer[match_count] = try self.allocator.dupe(u8, entry.name);
                             match_count += 1;
@@ -622,7 +622,7 @@ pub const Completion = struct {
                         test_buf[pos] = '/';
                         pos += 1;
                     }
-                    @memcpy(test_buf[pos..pos + seg.len], seg);
+                    @memcpy(test_buf[pos .. pos + seg.len], seg);
                     pos += seg.len;
                 }
                 break :blk test_buf[0..pos];
@@ -633,7 +633,7 @@ pub const Completion = struct {
                         test_buf[pos] = '/';
                         pos += 1;
                     }
-                    @memcpy(test_buf[pos..pos + seg.len], seg);
+                    @memcpy(test_buf[pos .. pos + seg.len], seg);
                     pos += seg.len;
                 }
                 break :blk test_buf[0..pos];
@@ -670,7 +670,7 @@ pub const Completion = struct {
             else if (std.mem.eql(u8, current_dir, "."))
                 try std.fmt.bufPrint(&new_dir_buf, "{s}", .{segment})
             else
-                try std.fmt.bufPrint(&new_dir_buf, "{s}/{s}", .{current_dir, segment});
+                try std.fmt.bufPrint(&new_dir_buf, "{s}/{s}", .{ current_dir, segment });
 
             return try self.expandPathWithLookahead(new_dir, rest, depth + 1);
         }
@@ -704,7 +704,7 @@ pub const Completion = struct {
             else if (std.mem.eql(u8, current_dir, "."))
                 try std.fmt.bufPrint(&new_dir_buf, "{s}", .{matches[0]})
             else
-                try std.fmt.bufPrint(&new_dir_buf, "{s}/{s}", .{current_dir, matches[0]});
+                try std.fmt.bufPrint(&new_dir_buf, "{s}/{s}", .{ current_dir, matches[0] });
 
             return try self.expandPathWithLookahead(new_dir, rest, depth + 1);
         }
@@ -721,7 +721,7 @@ pub const Completion = struct {
                 else if (std.mem.eql(u8, current_dir, "."))
                     try std.fmt.bufPrint(&test_dir_buf, "{s}", .{match})
                 else
-                    try std.fmt.bufPrint(&test_dir_buf, "{s}/{s}", .{current_dir, match});
+                    try std.fmt.bufPrint(&test_dir_buf, "{s}/{s}", .{ current_dir, match });
 
                 if (try self.expandPathWithLookahead(test_dir, rest, depth + 1)) |expanded_path| {
                     if (successful_path) |old_path| {
@@ -974,7 +974,7 @@ test "mid-word path expansion - simple case" {
     if (expanded) |path| {
         defer allocator.free(path);
         // Should expand to /usr/local/bin if it exists
-        std.debug.print("\nExpanded '{s}' to '{s}'\n", .{test_path, path});
+        std.debug.print("\nExpanded '{s}' to '{s}'\n", .{ test_path, path });
     }
 }
 
@@ -1019,7 +1019,7 @@ test "mid-word path expansion - relative path" {
 
     if (expanded) |path| {
         defer allocator.free(path);
-        std.debug.print("\nExpanded '{s}' to '{s}'\n", .{test_path, path});
+        std.debug.print("\nExpanded '{s}' to '{s}'\n", .{ test_path, path });
         try std.testing.expect(std.mem.indexOf(u8, path, "testdir") != null);
         try std.testing.expect(std.mem.indexOf(u8, path, "subdir") != null);
     }

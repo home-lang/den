@@ -7,7 +7,6 @@ const utils = @import("../../utils.zig");
 const common = @import("common.zig");
 
 /// Execution builtins: eval, exec, command, builtin, coproc
-
 /// eval - evaluate string as shell command
 pub fn eval(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     if (cmd.args.len == 0) {
@@ -73,7 +72,7 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         // Search in PATH
         while (path_iter.next()) |dir| {
             const full_path = std.fmt.bufPrint(&exe_path_buf, "{s}" ++ path_sep_str ++ "{s}", .{ dir, cmd_name }) catch continue;
-            std.Io.Dir.accessAbsolute(std.Options.debug_io,full_path, .{}) catch continue;
+            std.Io.Dir.accessAbsolute(std.Options.debug_io, full_path, .{}) catch continue;
             exe_path = full_path;
             break;
         }

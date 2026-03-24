@@ -9,7 +9,6 @@ const LspServer = @import("lsp/server.zig").LspServer;
 
 /// Den Shell CLI
 /// Provides command-line interface and subcommand handling
-
 pub const VERSION = "0.1.0";
 
 pub const Command = enum {

@@ -218,8 +218,8 @@ pub fn detectUnicodeSupport(allocator: std.mem.Allocator) bool {
 pub fn detectTerminalEmulator(allocator: std.mem.Allocator) ?[]const u8 {
     // Check common terminal-specific environment variables
     const vars = [_][]const u8{
-        "TERM_PROGRAM",     // macOS Terminal, iTerm2
-        "KITTY_WINDOW_ID",  // Kitty
+        "TERM_PROGRAM", // macOS Terminal, iTerm2
+        "KITTY_WINDOW_ID", // Kitty
         "ALACRITTY_SOCKET", // Alacritty
         "WEZTERM_EXECUTABLE", // WezTerm
     };

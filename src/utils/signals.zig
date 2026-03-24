@@ -15,9 +15,9 @@ const CTRL_SHUTDOWN_EVENT: u32 = 6;
 /// Signal types we handle
 pub const Signal = enum {
     none,
-    interrupt,  // SIGINT (Ctrl+C) / CTRL_C_EVENT
-    terminate,  // SIGTERM / CTRL_CLOSE_EVENT
-    winch,      // SIGWINCH (window resize)
+    interrupt, // SIGINT (Ctrl+C) / CTRL_C_EVENT
+    terminate, // SIGTERM / CTRL_CLOSE_EVENT
+    winch, // SIGWINCH (window resize)
 
     pub fn fromPosix(sig: u32) Signal {
         if (builtin.os.tag == .windows) {

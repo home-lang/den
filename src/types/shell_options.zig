@@ -3,7 +3,6 @@
 /// This module contains all shell option flags including:
 /// - POSIX set options (-e, -u, -x, etc.)
 /// - Bash-style shopt options (extglob, globstar, etc.)
-
 /// Shell options controlled by the `set` builtin.
 pub const SetOptions = struct {
     /// set -e: Exit immediately if a command exits with non-zero status.

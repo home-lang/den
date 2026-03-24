@@ -5,7 +5,6 @@ const IO = @import("../../utils/io.zig").IO;
 const common = @import("common.zig");
 
 /// Monitoring builtins: sys-stats, netstats, net-check, log-tail, proc-monitor, log-parse
-
 pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = allocator;
 
@@ -60,7 +59,7 @@ pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
         if (builtin.os.tag == .macos) {
             try IO.print("  Cores: {d}\n", .{try std.Thread.getCpuCount()});
         } else if (builtin.os.tag == .linux) {
-            if (std.Io.Dir.cwd().openFile(std.Options.debug_io,"/proc/cpuinfo", .{})) |file| {
+            if (std.Io.Dir.cwd().openFile(std.Options.debug_io, "/proc/cpuinfo", .{})) |file| {
                 defer file.close(std.Options.debug_io);
                 var cores: u32 = 0;
                 var buf: [4096]u8 = undefined;
@@ -85,7 +84,7 @@ pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     if (show_memory) {
         try IO.print("\x1b[1;33mMemory:\x1b[0m\n", .{});
         if (builtin.os.tag == .linux) {
-            if (std.Io.Dir.cwd().openFile(std.Options.debug_io,"/proc/meminfo", .{})) |file| {
+            if (std.Io.Dir.cwd().openFile(std.Options.debug_io, "/proc/meminfo", .{})) |file| {
                 defer file.close(std.Options.debug_io);
                 var buf: [4096]u8 = undefined;
                 const n = file.readStreaming(std.Options.debug_io, &.{&buf}) catch 0;
@@ -128,7 +127,7 @@ pub fn sysStats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     if (show_uptime) {
         try IO.print("\x1b[1;33mUptime:\x1b[0m\n", .{});
         if (builtin.os.tag == .linux) {
-            if (std.Io.Dir.cwd().openFile(std.Options.debug_io,"/proc/uptime", .{})) |file| {
+            if (std.Io.Dir.cwd().openFile(std.Options.debug_io, "/proc/uptime", .{})) |file| {
                 defer file.close(std.Options.debug_io);
                 var buf: [128]u8 = undefined;
                 const n = file.readStreaming(std.Options.debug_io, &.{&buf}) catch 0;
@@ -201,7 +200,7 @@ pub fn netstats(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
     if (show_interfaces) {
         try IO.print("\x1b[1;33mNetwork Interfaces:\x1b[0m\n", .{});
         if (builtin.os.tag == .linux) {
-            var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io,"/sys/class/net", .{ .iterate = true }) catch {
+            var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, "/sys/class/net", .{ .iterate = true }) catch {
                 try IO.print("  (unable to list interfaces)\n", .{});
                 return 0;
             };
@@ -448,7 +447,7 @@ pub fn logTail(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
 
     const path = file_path.?;
 
-    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch |err| {
         try IO.eprint("den: log-tail: cannot open '{s}': {}\n", .{ path, err });
         return 1;
     };
@@ -547,7 +546,6 @@ pub fn logTail(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32
 }
 
 pub fn procMonitor(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
-
     var pattern: ?[]const u8 = null;
     var pid_filter: ?i32 = null;
     var interval: u32 = 2;

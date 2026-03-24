@@ -4,7 +4,6 @@ const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 
 /// Variable management builtins - delegated to Shell
-
 pub fn local(shell: *Shell, cmd: *types.ParsedCommand) !void {
     return shell.builtinLocal(cmd);
 }

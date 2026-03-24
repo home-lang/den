@@ -6,7 +6,6 @@ const common = @import("common.zig");
 
 /// File operations builtins: tree, grep, find, ft, ls, json, calc
 /// Extracted from executor/mod.zig for better modularity
-
 pub fn tree(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     const path = if (command.args.len > 0) command.args[0] else ".";
     try IO.print("{s}\n", .{path});
@@ -15,7 +14,7 @@ pub fn tree(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 }
 
 fn printTree(allocator: std.mem.Allocator, dir_path: []const u8, prefix: []const u8) !void {
-    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,dir_path, .{ .iterate = true }) catch |err| {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch |err| {
         try IO.eprint("den: tree: cannot open {s}: {}\n", .{ dir_path, err });
         return;
     };
@@ -125,7 +124,7 @@ pub fn grep(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     var total_matches: usize = 0;
 
     for (files) |file_path| {
-        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,file_path, .{}) catch |err| {
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, file_path, .{}) catch |err| {
             try IO.eprint("den: grep: {s}: {}\n", .{ file_path, err });
             continue;
         };
@@ -280,7 +279,7 @@ pub fn find(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 }
 
 fn findRecursive(allocator: std.mem.Allocator, dir_path: []const u8, name_pattern: ?[]const u8, type_filter: ?u8) !void {
-    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,dir_path, .{ .iterate = true }) catch |err| {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch |err| {
         try IO.eprint("den: find: cannot open {s}: {}\n", .{ dir_path, err });
         return;
     };
@@ -433,7 +432,7 @@ fn fuzzyFindRecursive(
     if (current_depth >= max_depth) return;
     if (results.items.len >= max_collect) return;
 
-    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,dir_path, .{ .iterate = true }) catch {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch {
         return;
     };
     defer dir.close(std.Options.debug_io);
@@ -625,7 +624,7 @@ pub fn json(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     }
 
     const file_path = command.args[0];
-    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,file_path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, file_path, .{}) catch |err| {
         try IO.eprint("den: json: cannot open {s}: {}\n", .{ file_path, err });
         return 1;
     };
@@ -705,7 +704,7 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         return 0;
     }
 
-    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,target_path, .{ .iterate = true }) catch |err| {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, target_path, .{ .iterate = true }) catch |err| {
         try IO.eprint("den: ls: cannot access '{s}': {}\n", .{ target_path, err });
         return 1;
     };

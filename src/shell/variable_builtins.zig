@@ -311,7 +311,10 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     const name_len = @min(var_name.len, buf.len - pos);
                     @memcpy(buf[pos .. pos + name_len], var_name[0..name_len]);
                     pos += name_len;
-                    if (pos < buf.len) { buf[pos] = '='; pos += 1; }
+                    if (pos < buf.len) {
+                        buf[pos] = '=';
+                        pos += 1;
+                    }
                     // Write first value part
                     const val_len = @min(val.len, buf.len - pos);
                     @memcpy(buf[pos .. pos + val_len], val[0..val_len]);
@@ -319,7 +322,10 @@ pub fn builtinDeclare(shell: *Shell, cmd: *types.ParsedCommand) !void {
                     // If value doesn't end with ), join remaining args
                     if (val[val.len - 1] != ')') {
                         for (cmd.args[arg_start + 1 ..]) |extra| {
-                            if (pos < buf.len) { buf[pos] = ' '; pos += 1; }
+                            if (pos < buf.len) {
+                                buf[pos] = ' ';
+                                pos += 1;
+                            }
                             const extra_len = @min(extra.len, buf.len - pos);
                             @memcpy(buf[pos .. pos + extra_len], extra[0..extra_len]);
                             pos += extra_len;
@@ -406,14 +412,38 @@ fn printDeclareWithValue(shell: *Shell, name: []const u8, attrs: types.VarAttrib
     var flags_buf: [16]u8 = undefined;
     var flags_len: usize = 0;
 
-    if (attrs.readonly) { flags_buf[flags_len] = 'r'; flags_len += 1; }
-    if (attrs.integer) { flags_buf[flags_len] = 'i'; flags_len += 1; }
-    if (attrs.exported) { flags_buf[flags_len] = 'x'; flags_len += 1; }
-    if (attrs.lowercase) { flags_buf[flags_len] = 'l'; flags_len += 1; }
-    if (attrs.uppercase) { flags_buf[flags_len] = 'u'; flags_len += 1; }
-    if (attrs.nameref) { flags_buf[flags_len] = 'n'; flags_len += 1; }
-    if (attrs.indexed_array) { flags_buf[flags_len] = 'a'; flags_len += 1; }
-    if (attrs.assoc_array) { flags_buf[flags_len] = 'A'; flags_len += 1; }
+    if (attrs.readonly) {
+        flags_buf[flags_len] = 'r';
+        flags_len += 1;
+    }
+    if (attrs.integer) {
+        flags_buf[flags_len] = 'i';
+        flags_len += 1;
+    }
+    if (attrs.exported) {
+        flags_buf[flags_len] = 'x';
+        flags_len += 1;
+    }
+    if (attrs.lowercase) {
+        flags_buf[flags_len] = 'l';
+        flags_len += 1;
+    }
+    if (attrs.uppercase) {
+        flags_buf[flags_len] = 'u';
+        flags_len += 1;
+    }
+    if (attrs.nameref) {
+        flags_buf[flags_len] = 'n';
+        flags_len += 1;
+    }
+    if (attrs.indexed_array) {
+        flags_buf[flags_len] = 'a';
+        flags_len += 1;
+    }
+    if (attrs.assoc_array) {
+        flags_buf[flags_len] = 'A';
+        flags_len += 1;
+    }
 
     // Check for array value
     if (attrs.indexed_array) {

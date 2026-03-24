@@ -6,7 +6,6 @@ const Shell = @import("../../shell.zig").Shell;
 
 /// Test builtins: test, [, [[
 /// Extracted from executor/mod.zig for better modularity
-
 pub fn testBuiltin(command: *types.ParsedCommand) !i32 {
     // Handle both 'test' and '[' syntax
     const args = if (std.mem.eql(u8, command.name, "[")) blk: {

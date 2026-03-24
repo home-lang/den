@@ -167,7 +167,7 @@ pub const CloudProvider = struct {
         .icon = "󰠅",
         .color = "#0078d4",
         .env_vars = &[_][]const u8{ "AZURE_SUBSCRIPTION_ID", "AZURE_TENANT_ID" },
-        .config_paths = &[_][]const u8{ ".azure/azureProfile.json" },
+        .config_paths = &[_][]const u8{".azure/azureProfile.json"},
     };
 
     pub const GCP = CloudProvider{
@@ -175,7 +175,7 @@ pub const CloudProvider = struct {
         .icon = "󱇶",
         .color = "#4285f4",
         .env_vars = &[_][]const u8{ "GOOGLE_CLOUD_PROJECT", "GCP_PROJECT", "GCLOUD_PROJECT" },
-        .config_paths = &[_][]const u8{ ".config/gcloud/configurations/config_default" },
+        .config_paths = &[_][]const u8{".config/gcloud/configurations/config_default"},
     };
 };
 

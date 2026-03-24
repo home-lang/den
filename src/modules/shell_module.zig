@@ -242,7 +242,7 @@ test "ShellModule define and lookup command" {
     var module = try ShellModule.init(allocator, "math");
     defer module.deinit(allocator);
 
-    const body = &[_][]const u8{ "expr $a + $b" };
+    const body = &[_][]const u8{"expr $a + $b"};
     try module.defineCommand(allocator, "add", body);
 
     const cmd = module.getCommand("add");
@@ -268,10 +268,10 @@ test "ShellModule redefine command replaces old" {
     var module = try ShellModule.init(allocator, "math");
     defer module.deinit(allocator);
 
-    const body1 = &[_][]const u8{ "expr $a + $b" };
+    const body1 = &[_][]const u8{"expr $a + $b"};
     try module.defineCommand(allocator, "add", body1);
 
-    const body2 = &[_][]const u8{ "echo $(( $a + $b ))" };
+    const body2 = &[_][]const u8{"echo $(( $a + $b ))"};
     try module.defineCommand(allocator, "add", body2);
 
     const cmd = module.getCommand("add");

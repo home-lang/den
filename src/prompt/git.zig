@@ -201,26 +201,26 @@ pub const GitModule = struct {
 
     /// Run a git command and return output
     fn runGitCommand(self: *GitModule, cwd: []const u8, argv: []const []const u8) ![]const u8 {
-        const result = std.process.run(self.allocator, std.Options.debug_io, .{
+        // Use page_allocator for process spawning to avoid debug allocator limits
+        const page_alloc = std.heap.page_allocator;
+        const result = std.process.run(page_alloc, std.Options.debug_io, .{
             .argv = argv,
-            .cwd = .{ .path = cwd },
         }) catch |err| {
             std.debug.print("DEBUG runGitCommand error: {} argv[0]={s} cwd={s}\n", .{ err, argv[0], cwd });
             return error.CommandFailed;
         };
 
-        defer self.allocator.free(result.stderr);
+        defer page_alloc.free(result.stderr);
+        defer page_alloc.free(result.stdout);
 
         switch (result.term) {
             .exited => |code| {
                 if (code == 0) {
-                    return result.stdout;
+                    return try self.allocator.dupe(u8, result.stdout);
                 }
-                self.allocator.free(result.stdout);
                 return error.CommandFailed;
             },
             else => {
-                self.allocator.free(result.stdout);
                 return error.CommandFailed;
             },
         }

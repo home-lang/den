@@ -224,7 +224,7 @@ pub fn builtinType(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 const extension = name[dot_pos + 1 ..];
                 if (shell.suffix_aliases.get(extension)) |suffix_cmd| {
                     // Check if file exists
-                    std.Io.Dir.cwd().access(std.Options.debug_io,name, .{}) catch {
+                    std.Io.Dir.cwd().access(std.Options.debug_io, name, .{}) catch {
                         // File doesn't exist, continue to other checks
                         try IO.print("{s} would use suffix alias (if file existed): {s} {s}\n", .{ name, suffix_cmd, name });
                         continue;
@@ -262,7 +262,7 @@ pub fn builtinType(shell: *Shell, cmd: *types.ParsedCommand) !void {
             var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch continue;
 
-            std.Io.Dir.cwd().access(std.Options.debug_io,full_path, .{}) catch continue;
+            std.Io.Dir.cwd().access(std.Options.debug_io, full_path, .{}) catch continue;
 
             try IO.print("{s} is {s}\n", .{ name, full_path });
             found = true;
@@ -292,7 +292,7 @@ pub fn builtinWhich(shell: *Shell, cmd: *types.ParsedCommand) !void {
             var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch continue;
 
-            std.Io.Dir.cwd().access(std.Options.debug_io,full_path, .{}) catch continue;
+            std.Io.Dir.cwd().access(std.Options.debug_io, full_path, .{}) catch continue;
 
             try IO.print("{s}\n", .{full_path});
             found = true;

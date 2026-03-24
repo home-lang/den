@@ -65,359 +65,359 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
         did_consume_arg = false;
         if (arg_idx >= cmd.args.len and arg_idx > 1) break;
 
-    var i: usize = 0;
-    while (i < format.len) {
-        if (format[i] == '%' and i + 1 < format.len) {
-            // Parse optional flags, width, and precision
-            var j = i + 1;
-            var left_justify = false;
-            var zero_pad = false;
-            var width: usize = 0;
-            var precision: usize = 6; // Default precision for floats
-            var has_precision = false;
+        var i: usize = 0;
+        while (i < format.len) {
+            if (format[i] == '%' and i + 1 < format.len) {
+                // Parse optional flags, width, and precision
+                var j = i + 1;
+                var left_justify = false;
+                var zero_pad = false;
+                var width: usize = 0;
+                var precision: usize = 6; // Default precision for floats
+                var has_precision = false;
 
-            // Parse flags
-            while (j < format.len) {
-                if (format[j] == '-') {
-                    left_justify = true;
-                    j += 1;
-                } else if (format[j] == '0') {
-                    zero_pad = true;
-                    j += 1;
-                } else if (format[j] == '+' or format[j] == ' ' or format[j] == '#') {
-                    j += 1; // Skip unsupported flags
-                } else {
-                    break;
+                // Parse flags
+                while (j < format.len) {
+                    if (format[j] == '-') {
+                        left_justify = true;
+                        j += 1;
+                    } else if (format[j] == '0') {
+                        zero_pad = true;
+                        j += 1;
+                    } else if (format[j] == '+' or format[j] == ' ' or format[j] == '#') {
+                        j += 1; // Skip unsupported flags
+                    } else {
+                        break;
+                    }
                 }
-            }
 
-            // Parse width - support * (take from next argument)
-            if (j < format.len and format[j] == '*') {
-                if (arg_idx < cmd.args.len) {
-                    width = @intCast(@max(std.fmt.parseInt(i64, cmd.args[arg_idx], 10) catch 0, 0));
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                j += 1;
-            } else {
-                while (j < format.len and format[j] >= '0' and format[j] <= '9') {
-                    width = width * 10 + (format[j] - '0');
-                    j += 1;
-                }
-            }
-
-            // Parse precision - support .* (take from next argument)
-            if (j < format.len and format[j] == '.') {
-                j += 1;
-                precision = 0;
-                has_precision = true;
+                // Parse width - support * (take from next argument)
                 if (j < format.len and format[j] == '*') {
                     if (arg_idx < cmd.args.len) {
-                        precision = @intCast(@max(std.fmt.parseInt(i64, cmd.args[arg_idx], 10) catch 0, 0));
+                        width = @intCast(@max(std.fmt.parseInt(i64, cmd.args[arg_idx], 10) catch 0, 0));
                         arg_idx += 1;
                         did_consume_arg = true;
                     }
                     j += 1;
                 } else {
                     while (j < format.len and format[j] >= '0' and format[j] <= '9') {
-                        precision = precision * 10 + (format[j] - '0');
+                        width = width * 10 + (format[j] - '0');
                         j += 1;
                     }
                 }
-            }
 
-            if (j >= format.len) {
-                try IO.print("{c}", .{format[i]});
-                i += 1;
-                continue;
-            }
-
-            const spec = format[j];
-            if (spec == 's') {
-                // String format
-                if (arg_idx < cmd.args.len) {
-                    var str = cmd.args[arg_idx];
-                    // Apply precision (truncate)
-                    if (has_precision and str.len > precision) {
-                        str = str[0..precision];
-                    }
-                    // Apply width (padding)
-                    if (width > 0 and str.len < width) {
-                        const pad = width - str.len;
-                        if (left_justify) {
-                            try IO.print("{s}", .{str});
-                            var p: usize = 0;
-                            while (p < pad) : (p += 1) try IO.print(" ", .{});
-                        } else {
-                            var p: usize = 0;
-                            while (p < pad) : (p += 1) try IO.print(" ", .{});
-                            try IO.print("{s}", .{str});
+                // Parse precision - support .* (take from next argument)
+                if (j < format.len and format[j] == '.') {
+                    j += 1;
+                    precision = 0;
+                    has_precision = true;
+                    if (j < format.len and format[j] == '*') {
+                        if (arg_idx < cmd.args.len) {
+                            precision = @intCast(@max(std.fmt.parseInt(i64, cmd.args[arg_idx], 10) catch 0, 0));
+                            arg_idx += 1;
+                            did_consume_arg = true;
                         }
+                        j += 1;
                     } else {
-                        try IO.print("{s}", .{str});
-                    }
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'd' or spec == 'i') {
-                // Integer format
-                if (arg_idx < cmd.args.len) {
-                    const arg = cmd.args[arg_idx];
-                    const num = parseIntArg(i64, arg);
-                    try printfInt(num, width, zero_pad, left_justify);
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'u') {
-                // Unsigned integer format
-                if (arg_idx < cmd.args.len) {
-                    const arg = cmd.args[arg_idx];
-                    const num = parseIntArg(u64, arg);
-                    try printfUint(num, width, zero_pad, left_justify, 10, false);
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'x') {
-                // Hex lowercase
-                if (arg_idx < cmd.args.len) {
-                    const arg = cmd.args[arg_idx];
-                    const num = parseIntArg(u64, arg);
-                    try printfUint(num, width, zero_pad, left_justify, 16, false);
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'X') {
-                // Hex uppercase
-                if (arg_idx < cmd.args.len) {
-                    const arg = cmd.args[arg_idx];
-                    const num = parseIntArg(u64, arg);
-                    try printfUint(num, width, zero_pad, left_justify, 16, true);
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'o') {
-                // Octal format
-                if (arg_idx < cmd.args.len) {
-                    const arg = cmd.args[arg_idx];
-                    const num = parseIntArg(u64, arg);
-                    try printfUint(num, width, zero_pad, left_justify, 8, false);
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'c') {
-                // Character format
-                if (arg_idx < cmd.args.len) {
-                    const arg = cmd.args[arg_idx];
-                    if (arg.len > 0) {
-                        try IO.print("{c}", .{arg[0]});
-                    }
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'f' or spec == 'F') {
-                // Float format
-                if (arg_idx < cmd.args.len) {
-                    const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
-                    try printfFloat(num, width, precision, left_justify);
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'e' or spec == 'E') {
-                // Scientific notation
-                if (arg_idx < cmd.args.len) {
-                    const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
-                    try printfScientific(num, width, precision, left_justify, spec == 'E');
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'g' or spec == 'G') {
-                // Shortest representation (float or scientific)
-                if (arg_idx < cmd.args.len) {
-                    const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
-                    // Use scientific if exponent < -4 or >= precision
-                    const abs_num = @abs(num);
-                    if (abs_num != 0 and (abs_num < 0.0001 or abs_num >= std.math.pow(f64, 10.0, @floatFromInt(precision)))) {
-                        try printfScientific(num, width, if (precision > 0) precision - 1 else 0, left_justify, spec == 'G');
-                    } else {
-                        try printfFloat(num, width, precision, left_justify);
-                    }
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == '%') {
-                // Escaped %
-                try IO.print("%", .{});
-                i = j + 1;
-            } else if (spec == 'b') {
-                // String with escape interpretation (bash extension)
-                if (arg_idx < cmd.args.len) {
-                    try printWithEscapes(cmd.args[arg_idx]);
-                    arg_idx += 1;
-                    did_consume_arg = true;
-                }
-                i = j + 1;
-            } else if (spec == 'q') {
-                // Shell-quoted string (bash extension)
-                // Escape embedded single quotes as '\'' for safe re-evaluation
-                if (arg_idx < cmd.args.len) {
-                    const arg = cmd.args[arg_idx];
-                    try IO.print("'", .{});
-                    for (arg) |ch| {
-                        if (ch == 0x27) { // single quote
-                            try IO.print("'\\''", .{});
-                        } else {
-                            try IO.print("{c}", .{ch});
+                        while (j < format.len and format[j] >= '0' and format[j] <= '9') {
+                            precision = precision * 10 + (format[j] - '0');
+                            j += 1;
                         }
                     }
-                    try IO.print("'", .{});
-                    arg_idx += 1;
-                    did_consume_arg = true;
                 }
-                i = j + 1;
-            } else {
-                // Unknown format, just print it
-                try IO.print("{c}", .{format[i]});
-                i += 1;
-            }
-        } else if (format[i] == '\\' and i + 1 < format.len) {
-            const esc = format[i + 1];
-            switch (esc) {
-                'n' => try IO.print("\n", .{}),
-                't' => try IO.print("\t", .{}),
-                'r' => try IO.print("\r", .{}),
-                '\\' => try IO.print("\\", .{}),
-                'a' => try IO.print("\x07", .{}),
-                'b' => try IO.print("\x08", .{}),
-                'f' => try IO.print("\x0c", .{}),
-                'v' => try IO.print("\x0b", .{}),
-                'e' => try IO.print("\x1b", .{}),
-                '0' => {
-                    // Octal escape
-                    var val: u8 = 0;
-                    var k: usize = i + 2;
-                    var count: usize = 0;
-                    while (k < format.len and count < 3) : (k += 1) {
-                        if (format[k] >= '0' and format[k] <= '7') {
-                            val = val * 8 + (format[k] - '0');
-                            count += 1;
-                        } else break;
-                    }
-                    try IO.print("{c}", .{val});
-                    i = k;
+
+                if (j >= format.len) {
+                    try IO.print("{c}", .{format[i]});
+                    i += 1;
                     continue;
-                },
-                'x' => {
-                    // Hex escape \xN or \xNN (1-2 hex digits)
-                    var hex_val: u8 = 0;
-                    var hex_count: usize = 0;
-                    var k: usize = i + 2;
-                    while (k < format.len and hex_count < 2) : (k += 1) {
-                        const c = format[k];
-                        const digit: u8 = if (c >= '0' and c <= '9')
-                            c - '0'
-                        else if (c >= 'a' and c <= 'f')
-                            c - 'a' + 10
-                        else if (c >= 'A' and c <= 'F')
-                            c - 'A' + 10
-                        else
-                            break;
-                        hex_val = hex_val * 16 + digit;
-                        hex_count += 1;
-                    }
-                    if (hex_count > 0) {
-                        try IO.print("{c}", .{hex_val});
-                        i = k;
-                        continue;
-                    } else {
-                        try IO.print("{c}", .{format[i]});
-                        i += 1;
-                        continue;
-                    }
-                },
-                'u' => {
-                    // Unicode escape \uHHHH (1-4 hex digits) -> UTF-8
-                    var codepoint: u21 = 0;
-                    var hex_count: usize = 0;
-                    var k: usize = i + 2;
-                    while (k < format.len and hex_count < 4) : (k += 1) {
-                        const c = format[k];
-                        const digit: u21 = if (c >= '0' and c <= '9')
-                            c - '0'
-                        else if (c >= 'a' and c <= 'f')
-                            c - 'a' + 10
-                        else if (c >= 'A' and c <= 'F')
-                            c - 'A' + 10
-                        else
-                            break;
-                        codepoint = codepoint * 16 + digit;
-                        hex_count += 1;
-                    }
-                    if (hex_count > 0) {
-                        var utf8_buf: [4]u8 = undefined;
-                        const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch 0;
-                        if (utf8_len > 0) {
-                            try IO.print("{s}", .{utf8_buf[0..utf8_len]});
+                }
+
+                const spec = format[j];
+                if (spec == 's') {
+                    // String format
+                    if (arg_idx < cmd.args.len) {
+                        var str = cmd.args[arg_idx];
+                        // Apply precision (truncate)
+                        if (has_precision and str.len > precision) {
+                            str = str[0..precision];
                         }
-                        i = k;
-                        continue;
-                    } else {
-                        try IO.print("{c}", .{format[i]});
-                        i += 1;
-                        continue;
-                    }
-                },
-                'U' => {
-                    // Unicode escape \UHHHHHHHH (1-8 hex digits) -> UTF-8
-                    var codepoint: u21 = 0;
-                    var hex_count: usize = 0;
-                    var k: usize = i + 2;
-                    while (k < format.len and hex_count < 8) : (k += 1) {
-                        const c = format[k];
-                        const digit: u32 = if (c >= '0' and c <= '9')
-                            c - '0'
-                        else if (c >= 'a' and c <= 'f')
-                            c - 'a' + 10
-                        else if (c >= 'A' and c <= 'F')
-                            c - 'A' + 10
-                        else
-                            break;
-                        const new_cp = @as(u32, codepoint) * 16 + digit;
-                        if (new_cp > 0x10FFFF) break; // Max Unicode codepoint
-                        codepoint = @intCast(new_cp);
-                        hex_count += 1;
-                    }
-                    if (hex_count > 0) {
-                        var utf8_buf: [4]u8 = undefined;
-                        const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch 0;
-                        if (utf8_len > 0) {
-                            try IO.print("{s}", .{utf8_buf[0..utf8_len]});
+                        // Apply width (padding)
+                        if (width > 0 and str.len < width) {
+                            const pad = width - str.len;
+                            if (left_justify) {
+                                try IO.print("{s}", .{str});
+                                var p: usize = 0;
+                                while (p < pad) : (p += 1) try IO.print(" ", .{});
+                            } else {
+                                var p: usize = 0;
+                                while (p < pad) : (p += 1) try IO.print(" ", .{});
+                                try IO.print("{s}", .{str});
+                            }
+                        } else {
+                            try IO.print("{s}", .{str});
                         }
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'd' or spec == 'i') {
+                    // Integer format
+                    if (arg_idx < cmd.args.len) {
+                        const arg = cmd.args[arg_idx];
+                        const num = parseIntArg(i64, arg);
+                        try printfInt(num, width, zero_pad, left_justify);
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'u') {
+                    // Unsigned integer format
+                    if (arg_idx < cmd.args.len) {
+                        const arg = cmd.args[arg_idx];
+                        const num = parseIntArg(u64, arg);
+                        try printfUint(num, width, zero_pad, left_justify, 10, false);
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'x') {
+                    // Hex lowercase
+                    if (arg_idx < cmd.args.len) {
+                        const arg = cmd.args[arg_idx];
+                        const num = parseIntArg(u64, arg);
+                        try printfUint(num, width, zero_pad, left_justify, 16, false);
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'X') {
+                    // Hex uppercase
+                    if (arg_idx < cmd.args.len) {
+                        const arg = cmd.args[arg_idx];
+                        const num = parseIntArg(u64, arg);
+                        try printfUint(num, width, zero_pad, left_justify, 16, true);
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'o') {
+                    // Octal format
+                    if (arg_idx < cmd.args.len) {
+                        const arg = cmd.args[arg_idx];
+                        const num = parseIntArg(u64, arg);
+                        try printfUint(num, width, zero_pad, left_justify, 8, false);
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'c') {
+                    // Character format
+                    if (arg_idx < cmd.args.len) {
+                        const arg = cmd.args[arg_idx];
+                        if (arg.len > 0) {
+                            try IO.print("{c}", .{arg[0]});
+                        }
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'f' or spec == 'F') {
+                    // Float format
+                    if (arg_idx < cmd.args.len) {
+                        const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
+                        try printfFloat(num, width, precision, left_justify);
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'e' or spec == 'E') {
+                    // Scientific notation
+                    if (arg_idx < cmd.args.len) {
+                        const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
+                        try printfScientific(num, width, precision, left_justify, spec == 'E');
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'g' or spec == 'G') {
+                    // Shortest representation (float or scientific)
+                    if (arg_idx < cmd.args.len) {
+                        const num = std.fmt.parseFloat(f64, cmd.args[arg_idx]) catch 0.0;
+                        // Use scientific if exponent < -4 or >= precision
+                        const abs_num = @abs(num);
+                        if (abs_num != 0 and (abs_num < 0.0001 or abs_num >= std.math.pow(f64, 10.0, @floatFromInt(precision)))) {
+                            try printfScientific(num, width, if (precision > 0) precision - 1 else 0, left_justify, spec == 'G');
+                        } else {
+                            try printfFloat(num, width, precision, left_justify);
+                        }
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == '%') {
+                    // Escaped %
+                    try IO.print("%", .{});
+                    i = j + 1;
+                } else if (spec == 'b') {
+                    // String with escape interpretation (bash extension)
+                    if (arg_idx < cmd.args.len) {
+                        try printWithEscapes(cmd.args[arg_idx]);
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else if (spec == 'q') {
+                    // Shell-quoted string (bash extension)
+                    // Escape embedded single quotes as '\'' for safe re-evaluation
+                    if (arg_idx < cmd.args.len) {
+                        const arg = cmd.args[arg_idx];
+                        try IO.print("'", .{});
+                        for (arg) |ch| {
+                            if (ch == 0x27) { // single quote
+                                try IO.print("'\\''", .{});
+                            } else {
+                                try IO.print("{c}", .{ch});
+                            }
+                        }
+                        try IO.print("'", .{});
+                        arg_idx += 1;
+                        did_consume_arg = true;
+                    }
+                    i = j + 1;
+                } else {
+                    // Unknown format, just print it
+                    try IO.print("{c}", .{format[i]});
+                    i += 1;
+                }
+            } else if (format[i] == '\\' and i + 1 < format.len) {
+                const esc = format[i + 1];
+                switch (esc) {
+                    'n' => try IO.print("\n", .{}),
+                    't' => try IO.print("\t", .{}),
+                    'r' => try IO.print("\r", .{}),
+                    '\\' => try IO.print("\\", .{}),
+                    'a' => try IO.print("\x07", .{}),
+                    'b' => try IO.print("\x08", .{}),
+                    'f' => try IO.print("\x0c", .{}),
+                    'v' => try IO.print("\x0b", .{}),
+                    'e' => try IO.print("\x1b", .{}),
+                    '0' => {
+                        // Octal escape
+                        var val: u8 = 0;
+                        var k: usize = i + 2;
+                        var count: usize = 0;
+                        while (k < format.len and count < 3) : (k += 1) {
+                            if (format[k] >= '0' and format[k] <= '7') {
+                                val = val * 8 + (format[k] - '0');
+                                count += 1;
+                            } else break;
+                        }
+                        try IO.print("{c}", .{val});
                         i = k;
                         continue;
-                    } else {
-                        try IO.print("{c}", .{format[i]});
-                        i += 1;
-                        continue;
-                    }
-                },
-                else => try IO.print("{c}", .{format[i]}),
+                    },
+                    'x' => {
+                        // Hex escape \xN or \xNN (1-2 hex digits)
+                        var hex_val: u8 = 0;
+                        var hex_count: usize = 0;
+                        var k: usize = i + 2;
+                        while (k < format.len and hex_count < 2) : (k += 1) {
+                            const c = format[k];
+                            const digit: u8 = if (c >= '0' and c <= '9')
+                                c - '0'
+                            else if (c >= 'a' and c <= 'f')
+                                c - 'a' + 10
+                            else if (c >= 'A' and c <= 'F')
+                                c - 'A' + 10
+                            else
+                                break;
+                            hex_val = hex_val * 16 + digit;
+                            hex_count += 1;
+                        }
+                        if (hex_count > 0) {
+                            try IO.print("{c}", .{hex_val});
+                            i = k;
+                            continue;
+                        } else {
+                            try IO.print("{c}", .{format[i]});
+                            i += 1;
+                            continue;
+                        }
+                    },
+                    'u' => {
+                        // Unicode escape \uHHHH (1-4 hex digits) -> UTF-8
+                        var codepoint: u21 = 0;
+                        var hex_count: usize = 0;
+                        var k: usize = i + 2;
+                        while (k < format.len and hex_count < 4) : (k += 1) {
+                            const c = format[k];
+                            const digit: u21 = if (c >= '0' and c <= '9')
+                                c - '0'
+                            else if (c >= 'a' and c <= 'f')
+                                c - 'a' + 10
+                            else if (c >= 'A' and c <= 'F')
+                                c - 'A' + 10
+                            else
+                                break;
+                            codepoint = codepoint * 16 + digit;
+                            hex_count += 1;
+                        }
+                        if (hex_count > 0) {
+                            var utf8_buf: [4]u8 = undefined;
+                            const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch 0;
+                            if (utf8_len > 0) {
+                                try IO.print("{s}", .{utf8_buf[0..utf8_len]});
+                            }
+                            i = k;
+                            continue;
+                        } else {
+                            try IO.print("{c}", .{format[i]});
+                            i += 1;
+                            continue;
+                        }
+                    },
+                    'U' => {
+                        // Unicode escape \UHHHHHHHH (1-8 hex digits) -> UTF-8
+                        var codepoint: u21 = 0;
+                        var hex_count: usize = 0;
+                        var k: usize = i + 2;
+                        while (k < format.len and hex_count < 8) : (k += 1) {
+                            const c = format[k];
+                            const digit: u32 = if (c >= '0' and c <= '9')
+                                c - '0'
+                            else if (c >= 'a' and c <= 'f')
+                                c - 'a' + 10
+                            else if (c >= 'A' and c <= 'F')
+                                c - 'A' + 10
+                            else
+                                break;
+                            const new_cp = @as(u32, codepoint) * 16 + digit;
+                            if (new_cp > 0x10FFFF) break; // Max Unicode codepoint
+                            codepoint = @intCast(new_cp);
+                            hex_count += 1;
+                        }
+                        if (hex_count > 0) {
+                            var utf8_buf: [4]u8 = undefined;
+                            const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch 0;
+                            if (utf8_len > 0) {
+                                try IO.print("{s}", .{utf8_buf[0..utf8_len]});
+                            }
+                            i = k;
+                            continue;
+                        } else {
+                            try IO.print("{c}", .{format[i]});
+                            i += 1;
+                            continue;
+                        }
+                    },
+                    else => try IO.print("{c}", .{format[i]}),
+                }
+                i += 2;
+            } else {
+                try IO.print("{c}", .{format[i]});
+                i += 1;
             }
-            i += 2;
-        } else {
-            try IO.print("{c}", .{format[i]});
-            i += 1;
         }
-    }
     } // end outer while (did_consume_arg) loop for format reuse
 
     // For -v flag: read captured output and store in variable

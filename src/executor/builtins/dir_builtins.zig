@@ -20,7 +20,6 @@ fn updatePwdEnvCtx(ctx: *BuiltinContext, old_cwd: []const u8) void {
 }
 
 /// Directory stack builtins: pushd, popd, dirs
-
 pub fn pushd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     const shell_ref = ctx.getShell() catch {
         try IO.eprint("den: pushd: shell context not available\n", .{});

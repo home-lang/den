@@ -2,12 +2,12 @@ const std = @import("std");
 
 /// Hook types that plugins can register
 pub const HookType = enum {
-    pre_command,   // Before command execution
-    post_command,  // After command execution
-    pre_prompt,    // Before showing prompt
-    post_prompt,   // After prompt input
-    shell_init,    // Shell initialization
-    shell_exit,    // Shell exit
+    pre_command, // Before command execution
+    post_command, // After command execution
+    pre_prompt, // Before showing prompt
+    post_prompt, // After prompt input
+    shell_init, // Shell initialization
+    shell_exit, // Shell exit
 };
 
 /// Hook function signature

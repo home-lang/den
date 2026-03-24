@@ -21,7 +21,6 @@ fn readStdinByte(buf: []u8) !usize {
 
 /// Shell builtins that require shell state access
 /// Includes: cd, pwd, read, source, history
-
 pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     // Restricted mode: cd is not allowed
     if (ctx.hasShell()) {

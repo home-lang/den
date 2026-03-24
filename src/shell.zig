@@ -1215,9 +1215,9 @@ pub const Shell = struct {
                     // Check for redirections after }
                     if (after_brace.len > 0 and (after_brace[0] == '>' or after_brace[0] == '<' or
                         (after_brace.len > 1 and after_brace[0] >= '0' and after_brace[0] <= '9' and
-                        (after_brace[1] == '>' or after_brace[1] == '<')) or
+                            (after_brace[1] == '>' or after_brace[1] == '<')) or
                         (after_brace.len > 2 and after_brace[0] >= '0' and after_brace[0] <= '9' and
-                        after_brace[1] == '>' and after_brace[2] == '&')))
+                            after_brace[1] == '>' and after_brace[2] == '&')))
                     {
                         if (comptime builtin.os.tag != .windows) {
                             // Parse and apply redirections
@@ -1375,8 +1375,14 @@ pub const Shell = struct {
             var close_pos: ?usize = null;
             for (fn_trimmed, 0..) |ch, ci| {
                 if (ch == '\\' and ci + 1 < fn_trimmed.len) continue;
-                if (!in_dq and ch == '\'') { in_sq = !in_sq; continue; }
-                if (!in_sq and ch == '"') { in_dq = !in_dq; continue; }
+                if (!in_dq and ch == '\'') {
+                    in_sq = !in_sq;
+                    continue;
+                }
+                if (!in_sq and ch == '"') {
+                    in_dq = !in_dq;
+                    continue;
+                }
                 if (in_sq or in_dq) continue;
                 if (ch == '(') paren_depth += 1;
                 if (ch == ')') {
@@ -1737,7 +1743,7 @@ pub const Shell = struct {
                                             // Strip surrounding quotes from value
                                             const tval = if (tval_raw.len >= 2 and
                                                 ((tval_raw[0] == '"' and tval_raw[tval_raw.len - 1] == '"') or
-                                                (tval_raw[0] == '\'' and tval_raw[tval_raw.len - 1] == '\'')))
+                                                    (tval_raw[0] == '\'' and tval_raw[tval_raw.len - 1] == '\'')))
                                                 tval_raw[1 .. tval_raw.len - 1]
                                             else
                                                 tval_raw;
@@ -2254,84 +2260,84 @@ pub const Shell = struct {
                 // Shell-level builtin with redirections: apply redirections manually
                 // Skip on Windows (fd-level redirections not supported)
                 if (comptime builtin.os.tag != .windows) {
-                var saved_fds: [3]c_int = .{ -1, -1, -1 };
-                var applied = false;
-                for (cmd.redirections) |redir| {
-                    switch (redir.kind) {
-                        .input => {
-                            const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
-                            defer self.allocator.free(path_z);
-                            const fd = std.c.open(path_z, .{}, @as(c_uint, 0));
-                            if (fd >= 0) {
-                                saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
-                                _ = std.c.dup2(fd, std.posix.STDIN_FILENO);
-                                _ = std.c.close(@intCast(fd));
-                                applied = true;
-                            }
-                        },
-                        .output_truncate, .output_append, .output_clobber => {
-                            const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
-                            defer self.allocator.free(path_z);
-                            const flags: std.c.O = if (redir.kind == .output_append)
-                                .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }
-                            else
-                                .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true };
-                            const fd = std.c.open(path_z, flags, @as(c_uint, 0o644));
-                            if (fd >= 0) {
-                                saved_fds[1] = std.c.dup(std.posix.STDOUT_FILENO);
-                                _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);
-                                _ = std.c.close(@intCast(fd));
-                                applied = true;
-                            }
-                        },
-                        .herestring => {
-                            // Create pipe, write herestring content + newline to it, redirect stdin
-                            var pipe_fds: [2]std.posix.fd_t = undefined;
-                            if (std.c.pipe(&pipe_fds) == 0) {
-                                const read_fd = pipe_fds[0];
-                                const write_fd = pipe_fds[1];
-                                // Strip surrounding quotes if present
-                                const target = redir.target;
-                                const unquoted = if (target.len >= 2 and
-                                    ((target[0] == '"' and target[target.len - 1] == '"') or
-                                    (target[0] == '\'' and target[target.len - 1] == '\'')))
-                                    target[1 .. target.len - 1]
+                    var saved_fds: [3]c_int = .{ -1, -1, -1 };
+                    var applied = false;
+                    for (cmd.redirections) |redir| {
+                        switch (redir.kind) {
+                            .input => {
+                                const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
+                                defer self.allocator.free(path_z);
+                                const fd = std.c.open(path_z, .{}, @as(c_uint, 0));
+                                if (fd >= 0) {
+                                    saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
+                                    _ = std.c.dup2(fd, std.posix.STDIN_FILENO);
+                                    _ = std.c.close(@intCast(fd));
+                                    applied = true;
+                                }
+                            },
+                            .output_truncate, .output_append, .output_clobber => {
+                                const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
+                                defer self.allocator.free(path_z);
+                                const flags: std.c.O = if (redir.kind == .output_append)
+                                    .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }
                                 else
-                                    target;
-                                // Write content + newline
-                                const hs_file = std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } };
-                                hs_file.writeStreamingAll(std.Options.debug_io, unquoted) catch {};
-                                hs_file.writeStreamingAll(std.Options.debug_io, "\n") catch {};
-                                _ = std.c.close(write_fd);
-                                // Redirect stdin
-                                saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
-                                _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
-                                _ = std.c.close(read_fd);
-                                applied = true;
-                            }
-                        },
-                        else => {},
-                    }
-                }
-                if (applied) {
-                    const result = shell_mod.dispatchBuiltin(self, cmd) catch .not_builtin;
-                    // Restore saved fds
-                    if (saved_fds[0] >= 0) {
-                        _ = std.c.dup2(saved_fds[0], std.posix.STDIN_FILENO);
-                        _ = std.c.close(@intCast(saved_fds[0]));
-                    }
-                    if (saved_fds[1] >= 0) {
-                        _ = std.c.dup2(saved_fds[1], std.posix.STDOUT_FILENO);
-                        _ = std.c.close(@intCast(saved_fds[1]));
-                    }
-                    if (result == .handled) {
-                        if (self.last_exit_code != 0) {
-                            shell_mod.executeErrTrap(self);
+                                    .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true };
+                                const fd = std.c.open(path_z, flags, @as(c_uint, 0o644));
+                                if (fd >= 0) {
+                                    saved_fds[1] = std.c.dup(std.posix.STDOUT_FILENO);
+                                    _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);
+                                    _ = std.c.close(@intCast(fd));
+                                    applied = true;
+                                }
+                            },
+                            .herestring => {
+                                // Create pipe, write herestring content + newline to it, redirect stdin
+                                var pipe_fds: [2]std.posix.fd_t = undefined;
+                                if (std.c.pipe(&pipe_fds) == 0) {
+                                    const read_fd = pipe_fds[0];
+                                    const write_fd = pipe_fds[1];
+                                    // Strip surrounding quotes if present
+                                    const target = redir.target;
+                                    const unquoted = if (target.len >= 2 and
+                                        ((target[0] == '"' and target[target.len - 1] == '"') or
+                                            (target[0] == '\'' and target[target.len - 1] == '\'')))
+                                        target[1 .. target.len - 1]
+                                    else
+                                        target;
+                                    // Write content + newline
+                                    const hs_file = std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } };
+                                    hs_file.writeStreamingAll(std.Options.debug_io, unquoted) catch {};
+                                    hs_file.writeStreamingAll(std.Options.debug_io, "\n") catch {};
+                                    _ = std.c.close(write_fd);
+                                    // Redirect stdin
+                                    saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
+                                    _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
+                                    _ = std.c.close(read_fd);
+                                    applied = true;
+                                }
+                            },
+                            else => {},
                         }
-                        return;
                     }
-                }
-            } // end !windows
+                    if (applied) {
+                        const result = shell_mod.dispatchBuiltin(self, cmd) catch .not_builtin;
+                        // Restore saved fds
+                        if (saved_fds[0] >= 0) {
+                            _ = std.c.dup2(saved_fds[0], std.posix.STDIN_FILENO);
+                            _ = std.c.close(@intCast(saved_fds[0]));
+                        }
+                        if (saved_fds[1] >= 0) {
+                            _ = std.c.dup2(saved_fds[1], std.posix.STDOUT_FILENO);
+                            _ = std.c.close(@intCast(saved_fds[1]));
+                        }
+                        if (result == .handled) {
+                            if (self.last_exit_code != 0) {
+                                shell_mod.executeErrTrap(self);
+                            }
+                            return;
+                        }
+                    }
+                } // end !windows
             }
         }
 
@@ -2713,7 +2719,7 @@ pub const Shell = struct {
             // Simple literal value - strip surrounding quotes
             const stripped = if (raw_value.len >= 2 and
                 ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
-                (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
+                    (raw_value[0] == '\'' and raw_value[raw_value.len - 1] == '\'')))
                 raw_value[1 .. raw_value.len - 1]
             else
                 raw_value;
@@ -2962,7 +2968,7 @@ pub const Shell = struct {
         // Strip quotes from expanded value
         const value_stripped = if (expanded_value.len >= 2 and
             ((expanded_value[0] == '"' and expanded_value[expanded_value.len - 1] == '"') or
-            (expanded_value[0] == '\'' and expanded_value[expanded_value.len - 1] == '\'')))
+                (expanded_value[0] == '\'' and expanded_value[expanded_value.len - 1] == '\'')))
             expanded_value[1 .. expanded_value.len - 1]
         else
             expanded_value;
@@ -3003,11 +3009,23 @@ pub const Shell = struct {
             const c = if (at_end) @as(u8, 0) else arms_str[ai];
 
             if (!at_end) {
-                if (c == '\'' and !in_dq) { in_sq = !in_sq; continue; }
-                if (c == '"' and !in_sq) { in_dq = !in_dq; continue; }
+                if (c == '\'' and !in_dq) {
+                    in_sq = !in_sq;
+                    continue;
+                }
+                if (c == '"' and !in_sq) {
+                    in_dq = !in_dq;
+                    continue;
+                }
                 if (in_sq or in_dq) continue;
-                if (c == '{') { arm_depth += 1; continue; }
-                if (c == '}') { if (arm_depth > 0) arm_depth -= 1; continue; }
+                if (c == '{') {
+                    arm_depth += 1;
+                    continue;
+                }
+                if (c == '}') {
+                    if (arm_depth > 0) arm_depth -= 1;
+                    continue;
+                }
                 if (c != ',' or arm_depth > 0) continue;
             }
 
@@ -3053,7 +3071,7 @@ pub const Shell = struct {
                 defer if (expanded_pat.ptr != pattern.ptr) self.allocator.free(expanded_pat);
                 const pat_stripped = if (expanded_pat.len >= 2 and
                     ((expanded_pat[0] == '"' and expanded_pat[expanded_pat.len - 1] == '"') or
-                    (expanded_pat[0] == '\'' and expanded_pat[expanded_pat.len - 1] == '\'')))
+                        (expanded_pat[0] == '\'' and expanded_pat[expanded_pat.len - 1] == '\'')))
                     expanded_pat[1 .. expanded_pat.len - 1]
                 else
                     expanded_pat;
@@ -3065,7 +3083,7 @@ pub const Shell = struct {
                 // Literal comparison (strip quotes)
                 const pat_unquoted = if (pattern.len >= 2 and
                     ((pattern[0] == '"' and pattern[pattern.len - 1] == '"') or
-                    (pattern[0] == '\'' and pattern[pattern.len - 1] == '\'')))
+                        (pattern[0] == '\'' and pattern[pattern.len - 1] == '\'')))
                     pattern[1 .. pattern.len - 1]
                 else
                     pattern;
@@ -3700,7 +3718,6 @@ pub const Shell = struct {
         try IO.print("den: trap: registering handler for signals (stub)\n", .{});
         self.last_exit_code = 0;
     }
-
 };
 
 /// Tab completion function for line editor

@@ -4,7 +4,6 @@ const std = @import("std");
 ///
 /// This module provides lightweight regex matching for shell operations
 /// without depending on external regex libraries.
-
 /// Match a regex pattern at a specific position in a string.
 ///
 /// Supports:

@@ -165,7 +165,7 @@ pub const Builder = struct {
 
     /// Append raw text
     pub fn text(self: *Builder, str: []const u8) !void {
-        try self.buffer.appendSlice(self.allocator,str);
+        try self.buffer.appendSlice(self.allocator, str);
     }
 
     /// Set foreground color
@@ -263,87 +263,87 @@ pub const Builder = struct {
 
     /// Move cursor to home position (1,1)
     pub fn cursorHome(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "H");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "H");
     }
 
     /// Move cursor to end
     pub fn cursorEnd(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "F");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "F");
     }
 
     /// Save cursor position
     pub fn saveCursor(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "s");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "s");
     }
 
     /// Restore cursor position
     pub fn restoreCursor(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "u");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "u");
     }
 
     /// Clear screen
     pub fn clearScreen(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "2J");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "2J");
     }
 
     /// Clear screen from cursor to end
     pub fn clearToEnd(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "0J");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "0J");
     }
 
     /// Clear screen from cursor to beginning
     pub fn clearToBegin(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "1J");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "1J");
     }
 
     /// Clear line
     pub fn clearLine(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "2K");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "2K");
     }
 
     /// Clear line from cursor to end
     pub fn clearLineToEnd(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "0K");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "0K");
     }
 
     /// Clear line from cursor to beginning
     pub fn clearLineToBegin(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "1K");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "1K");
     }
 
     /// Hide cursor
     pub fn hideCursor(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "?25l");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "?25l");
     }
 
     /// Show cursor
     pub fn showCursor(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "?25h");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "?25h");
     }
 
     /// Enable alternative screen buffer
     pub fn altScreenEnable(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "?1049h");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "?1049h");
     }
 
     /// Disable alternative screen buffer
     pub fn altScreenDisable(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "?1049l");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "?1049l");
     }
 
     /// Enable mouse tracking
     pub fn mouseTrackingEnable(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "?1000h");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "?1000h");
     }
 
     /// Disable mouse tracking
     pub fn mouseTrackingDisable(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "?1000l");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "?1000l");
     }
 
     /// Request cursor position (response comes via stdin)
     pub fn requestCursorPosition(self: *Builder) !void {
-        try self.buffer.appendSlice(self.allocator,CSI ++ "6n");
+        try self.buffer.appendSlice(self.allocator, CSI ++ "6n");
     }
 
     /// Scroll up

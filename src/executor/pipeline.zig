@@ -6,7 +6,6 @@ const spawn = @import("../utils/spawn.zig");
 
 /// Pipeline execution for connecting multiple commands with pipes.
 /// Handles both POSIX (fork/pipe) and Windows (CreateProcess) implementations.
-
 /// Maximum number of pipes supported in a single pipeline
 pub const MAX_PIPES = 16;
 

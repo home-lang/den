@@ -14,7 +14,6 @@
 /// - macos_builtins: macOS/system utilities (copyssh, reloaddns, emptytrash, show, hide, dotfiles, library)
 /// - http_builtins: HTTP client (http get/post/put/delete/head via curl)
 /// - context: BuiltinContext interface for state-dependent builtins
-
 pub const utilities = @import("utilities.zig");
 pub const file_ops = @import("file_ops.zig");
 pub const test_builtins = @import("test_builtins.zig");

@@ -118,17 +118,17 @@ pub const TypoCorrection = struct {
 
         // Also check shell builtins
         const builtins = [_][]const u8{
-            "cd",      "pwd",    "echo",   "exit",    "export",
-            "unset",   "set",    "alias",  "unalias", "source",
-            "history", "jobs",   "fg",     "bg",      "kill",
-            "wait",    "true",   "false",  "test",    "type",
-            "which",   "read",   "printf", "time",    "times",
-            "ulimit",  "umask",  "trap",   "eval",    "exec",
-            "command", "local",  "declare", "typeset",
-            "let",     "shift",  "getopts", "return", "break",
-            "continue", "logout", "dirs",  "pushd",   "popd",
-            "suspend", "help",   "enable", "shopt",   "complete",
-            "compgen", "compopt", "mapfile", "readarray",
+            "cd",      "pwd",     "echo",      "exit",     "export",
+            "unset",   "set",     "alias",     "unalias",  "source",
+            "history", "jobs",    "fg",        "bg",       "kill",
+            "wait",    "true",    "false",     "test",     "type",
+            "which",   "read",    "printf",    "time",     "times",
+            "ulimit",  "umask",   "trap",      "eval",     "exec",
+            "command", "local",   "declare",   "typeset",  "let",
+            "shift",   "getopts", "return",    "break",    "continue",
+            "logout",  "dirs",    "pushd",     "popd",     "suspend",
+            "help",    "enable",  "shopt",     "complete", "compgen",
+            "compopt", "mapfile", "readarray",
         };
 
         for (builtins) |builtin_cmd| {

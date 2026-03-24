@@ -4,7 +4,6 @@ const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 
 /// Process control builtins - delegated to Shell
-
 pub fn exec(shell: *Shell, cmd: *types.ParsedCommand) !void {
     return shell.builtinExec(cmd);
 }

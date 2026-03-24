@@ -282,11 +282,11 @@ pub fn completeBun(allocator: std.mem.Allocator, prefix: []const u8) ![][]const 
 
     // Bun subcommands
     const bun_commands = [_][]const u8{
-        "run",      "test",      "x",        "repl",
-        "install",  "add",       "remove",   "update",
-        "link",     "unlink",    "pm",       "build",
-        "init",     "create",    "upgrade",  "completions",
-        "discord",  "help",      "outdated",
+        "run",     "test",   "x",        "repl",
+        "install", "add",    "remove",   "update",
+        "link",    "unlink", "pm",       "build",
+        "init",    "create", "upgrade",  "completions",
+        "discord", "help",   "outdated",
     };
 
     // If prefix is empty or matches a subcommand, show subcommands
@@ -393,23 +393,23 @@ pub fn completeNpm(allocator: std.mem.Allocator, prefix: []const u8) ![][]const 
 
     // npm subcommands
     const npm_commands = [_][]const u8{
-        "access",      "adduser",     "audit",       "bin",
-        "bugs",        "cache",       "ci",          "completion",
-        "config",      "dedupe",      "deprecate",   "diff",
-        "dist-tag",    "docs",        "doctor",      "edit",
-        "exec",        "explain",     "explore",     "find-dupes",
-        "fund",        "get",         "help",        "help-search",
-        "hook",        "init",        "install",     "install-ci-test",
-        "install-test", "link",       "ll",          "login",
-        "logout",      "ls",          "org",         "outdated",
-        "owner",       "pack",        "ping",        "pkg",
-        "prefix",      "profile",     "prune",       "publish",
-        "query",       "rebuild",     "repo",        "restart",
-        "root",        "run",         "run-script",  "search",
-        "set",         "shrinkwrap",  "star",        "stars",
-        "start",       "stop",        "team",        "test",
-        "token",       "uninstall",   "unpublish",   "unstar",
-        "update",      "version",     "view",        "whoami",
+        "access",       "adduser",    "audit",      "bin",
+        "bugs",         "cache",      "ci",         "completion",
+        "config",       "dedupe",     "deprecate",  "diff",
+        "dist-tag",     "docs",       "doctor",     "edit",
+        "exec",         "explain",    "explore",    "find-dupes",
+        "fund",         "get",        "help",       "help-search",
+        "hook",         "init",       "install",    "install-ci-test",
+        "install-test", "link",       "ll",         "login",
+        "logout",       "ls",         "org",        "outdated",
+        "owner",        "pack",       "ping",       "pkg",
+        "prefix",       "profile",    "prune",      "publish",
+        "query",        "rebuild",    "repo",       "restart",
+        "root",         "run",        "run-script", "search",
+        "set",          "shrinkwrap", "star",       "stars",
+        "start",        "stop",       "team",       "test",
+        "token",        "uninstall",  "unpublish",  "unstar",
+        "update",       "version",    "view",       "whoami",
     };
 
     // If prefix is empty or matches a subcommand, show subcommands
@@ -452,17 +452,17 @@ pub fn completeYarn(allocator: std.mem.Allocator, input: []const u8, prefix: []c
 
     // yarn subcommands
     const yarn_commands = [_][]const u8{
-        "add",        "audit",       "autoclean",   "bin",
-        "cache",      "check",       "config",      "create",
-        "dedupe",     "generate-lock-entry",        "global",
-        "help",       "import",      "info",        "init",
-        "install",    "licenses",    "link",        "list",
-        "login",      "logout",      "node",        "outdated",
-        "owner",      "pack",        "policies",    "publish",
-        "remove",     "run",         "set",         "tag",
-        "team",       "test",        "unlink",      "unplug",
-        "upgrade",    "upgrade-interactive",        "version",
-        "versions",   "why",         "workspace",   "workspaces",
+        "add",                 "audit",               "autoclean", "bin",
+        "cache",               "check",               "config",    "create",
+        "dedupe",              "generate-lock-entry", "global",    "help",
+        "import",              "info",                "init",      "install",
+        "licenses",            "link",                "list",      "login",
+        "logout",              "node",                "outdated",  "owner",
+        "pack",                "policies",            "publish",   "remove",
+        "run",                 "set",                 "tag",       "team",
+        "test",                "unlink",              "unplug",    "upgrade",
+        "upgrade-interactive", "version",             "versions",  "why",
+        "workspace",           "workspaces",
     };
 
     // If no subcommand yet, show subcommands
@@ -507,16 +507,16 @@ pub fn completePnpm(allocator: std.mem.Allocator, input: []const u8, prefix: []c
 
     // pnpm subcommands
     const pnpm_commands = [_][]const u8{
-        "add",        "audit",       "bin",         "config",
-        "dedupe",     "dlx",         "doctor",      "exec",
-        "fetch",      "i",           "import",      "init",
-        "install",    "install-test", "licenses",   "link",
-        "list",       "ln",          "ls",          "outdated",
-        "pack",       "patch",       "patch-commit", "prune",
-        "publish",    "rebuild",     "remove",      "rm",
-        "root",       "run",         "server",      "setup",
-        "store",      "test",        "uninstall",   "unlink",
-        "update",     "upgrade",     "why",
+        "add",     "audit",        "bin",          "config",
+        "dedupe",  "dlx",          "doctor",       "exec",
+        "fetch",   "i",            "import",       "init",
+        "install", "install-test", "licenses",     "link",
+        "list",    "ln",           "ls",           "outdated",
+        "pack",    "patch",        "patch-commit", "prune",
+        "publish", "rebuild",      "remove",       "rm",
+        "root",    "run",          "server",       "setup",
+        "store",   "test",         "uninstall",    "unlink",
+        "update",  "upgrade",      "why",
     };
 
     // If no subcommand yet, show subcommands
@@ -561,20 +561,20 @@ pub fn completeDocker(allocator: std.mem.Allocator, input: []const u8, prefix: [
 
     // docker subcommands
     const docker_commands = [_][]const u8{
-        "attach",     "build",       "commit",      "compose",
-        "config",     "container",   "context",     "cp",
-        "create",     "diff",        "events",      "exec",
-        "export",     "history",     "image",       "images",
-        "import",     "info",        "inspect",     "kill",
-        "load",       "login",       "logout",      "logs",
-        "manifest",   "network",     "node",        "pause",
-        "plugin",     "port",        "ps",          "pull",
-        "push",       "rename",      "restart",     "rm",
-        "rmi",        "run",         "save",        "search",
-        "secret",     "service",     "stack",       "start",
-        "stats",      "stop",        "swarm",       "system",
-        "tag",        "top",         "trust",       "unpause",
-        "update",     "version",     "volume",      "wait",
+        "attach",   "build",     "commit",  "compose",
+        "config",   "container", "context", "cp",
+        "create",   "diff",      "events",  "exec",
+        "export",   "history",   "image",   "images",
+        "import",   "info",      "inspect", "kill",
+        "load",     "login",     "logout",  "logs",
+        "manifest", "network",   "node",    "pause",
+        "plugin",   "port",      "ps",      "pull",
+        "push",     "rename",    "restart", "rm",
+        "rmi",      "run",       "save",    "search",
+        "secret",   "service",   "stack",   "start",
+        "stats",    "stop",      "swarm",   "system",
+        "tag",      "top",       "trust",   "unpause",
+        "update",   "version",   "volume",  "wait",
     };
 
     // If no subcommand yet, show subcommands
@@ -593,8 +593,9 @@ pub fn completeDocker(allocator: std.mem.Allocator, input: []const u8, prefix: [
 
     // Container-related subcommands
     const container_commands = [_][]const u8{
-        "attach", "exec", "inspect", "kill", "logs", "pause",
-        "port", "restart", "rm", "start", "stop", "top", "unpause",
+        "attach",  "exec",    "inspect", "kill",  "logs", "pause",
+        "port",    "restart", "rm",      "start", "stop", "top",
+        "unpause",
     };
     for (container_commands) |container_cmd| {
         if (std.mem.eql(u8, subcommand.?, container_cmd)) {
@@ -683,10 +684,10 @@ fn getDockerImages(allocator: std.mem.Allocator, prefix: []const u8) ![][]const 
     // Also try to complete from common base images if prefix is short
     if (prefix.len < 3) {
         const common_images = [_][]const u8{
-            "alpine",      "ubuntu",    "debian",    "centos",
-            "node",        "python",    "golang",    "rust",
-            "nginx",       "redis",     "postgres",  "mysql",
-            "mongo",       "busybox",   "httpd",     "php",
+            "alpine", "ubuntu",  "debian",   "centos",
+            "node",   "python",  "golang",   "rust",
+            "nginx",  "redis",   "postgres", "mysql",
+            "mongo",  "busybox", "httpd",    "php",
         };
         for (common_images) |img| {
             if (std.mem.startsWith(u8, img, prefix)) {

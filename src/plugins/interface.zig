@@ -12,36 +12,36 @@ fn getenvFromSlice(key: []const u8) ?[]const u8 {
 
 /// Hook types that plugins can register
 pub const HookType = enum {
-    pre_command,       // Before command execution
-    post_command,      // After command execution
-    pre_prompt,        // Before showing prompt
-    post_prompt,       // After prompt input
-    shell_init,        // Shell initialization
-    shell_exit,        // Shell exit
+    pre_command, // Before command execution
+    post_command, // After command execution
+    pre_prompt, // Before showing prompt
+    post_prompt, // After prompt input
+    shell_init, // Shell initialization
+    shell_exit, // Shell exit
     command_not_found, // When a command is not found (return success from hook to suppress error)
-    env_change,        // When an environment variable changes (especially PWD)
+    env_change, // When an environment variable changes (especially PWD)
 };
 
 /// Custom command hook - triggers on specific command patterns
 pub const CustomHook = struct {
-    name: []const u8,           // Hook name (e.g., "git:push")
-    pattern: []const u8,        // Command pattern to match (e.g., "git push")
-    script: ?[]const u8,        // Script to execute (shell command)
-    function: ?HookFn,          // Function to call (for plugins)
+    name: []const u8, // Hook name (e.g., "git:push")
+    pattern: []const u8, // Command pattern to match (e.g., "git push")
+    script: ?[]const u8, // Script to execute (shell command)
+    function: ?HookFn, // Function to call (for plugins)
     enabled: bool,
-    priority: i32,              // Lower runs first
-    condition: ?HookCondition,  // Optional condition
+    priority: i32, // Lower runs first
+    condition: ?HookCondition, // Optional condition
 };
 
 /// Hook condition types
 pub const HookCondition = union(enum) {
-    file_exists: []const u8,    // Run only if file exists
-    env_set: []const u8,        // Run only if env var is set
-    env_equals: struct {        // Run only if env var equals value
+    file_exists: []const u8, // Run only if file exists
+    env_set: []const u8, // Run only if env var is set
+    env_equals: struct { // Run only if env var equals value
         name: []const u8,
         value: []const u8,
     },
-    always: void,               // Always run
+    always: void, // Always run
 };
 
 /// Custom hook registry

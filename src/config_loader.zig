@@ -867,8 +867,8 @@ fn isValidColor(color: []const u8) bool {
 
     // Check named colors
     const named_colors = [_][]const u8{
-        "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
-        "gray", "grey", "orange", "pink", "purple", "brown", "silver", "gold",
+        "black", "red",  "green",  "yellow", "blue",   "magenta", "cyan",   "white",
+        "gray",  "grey", "orange", "pink",   "purple", "brown",   "silver", "gold",
     };
     for (named_colors) |name| {
         if (std.mem.eql(u8, color, name)) return true;

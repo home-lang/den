@@ -19,38 +19,45 @@ pub const DispatchResult = enum {
 pub fn isShellBuiltin(name: []const u8) bool {
     const shell_builtins = [_][]const u8{
         // Job control
-        "jobs",    "fg",       "bg",       "wait",     "disown",
+        "jobs",      "fg",       "bg",      "wait",     "disown",
         // History and completion
-        "history", "complete", "compgen",
+        "history",   "complete", "compgen",
         // Alias management
-        "alias",   "unalias",
+        "alias",    "unalias",
         // Command type inspection
-        "type",    "which",
+        "type",      "which",
         // Source/eval/command
-        "source",  ".",        "eval",     "command",  "builtin",
+           "source",  ".",        "eval",
+        "command",   "builtin",
         // I/O builtins
-        "read",    "printf",   "mapfile",  "readarray",
+         "read",    "printf",   "mapfile",
+        "readarray",
         // Test/conditionals
-        "test",    "[",        "[[",
+        "test",     "[",       "[[",
         // Directory stack
-        "pushd",   "popd",     "dirs",
+              "pushd",
+        "popd",      "dirs",
         // Trivial builtins
-        "true",    "false",    ":",
+            "true",    "false",    ":",
         // Utility builtins
-        "sleep",   "help",     "clear",
+        "sleep",     "help",     "clear",
         // Path utilities
-        "basename", "dirname", "realpath",
+          "basename", "dirname",
+        "realpath",
         // System info
-        "uname",   "whoami",
+         "uname",    "whoami",
         // Control flow
-        "return",  "break",    "continue", "shift",
+         "return",   "break",
+        "continue",  "shift",
         // Variable declaration
-        "local",   "declare",  "readonly", "typeset",  "let",
+           "local",   "declare",  "readonly",
+        "typeset",   "let",
         // Process control
-        "exec",    "kill",
+             "exec",    "kill",
         // Misc
-        "times",   "time",     "umask",    "hash",     "shopt",
-        "caller",  "enable",
+            "times",
+        "time",      "umask",    "hash",    "shopt",    "caller",
+        "enable",
     };
     for (shell_builtins) |b| {
         if (std.mem.eql(u8, name, b)) return true;

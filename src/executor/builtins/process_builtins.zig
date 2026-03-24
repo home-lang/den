@@ -8,7 +8,6 @@ const utils = @import("../../utils.zig");
 const common = @import("common.zig");
 
 /// Process-related builtins: times, umask, timeout, time, watch
-
 /// times builtin - display accumulated process times
 pub fn times(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;

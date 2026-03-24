@@ -5,7 +5,6 @@ const BuiltinContext = @import("context.zig").BuiltinContext;
 const plugins = @import("../../plugins/interface.zig");
 
 /// State management builtins: trap, bookmark, hook
-
 /// trap - set signal handlers
 pub fn trap(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     // If no arguments, list all traps
@@ -42,10 +41,10 @@ pub fn trap(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     // Handle -l flag (list signal names)
     if (std.mem.eql(u8, command.args[start_idx], "-l") or std.mem.eql(u8, command.args[start_idx], "--list")) {
         const signal_names = [_][]const u8{
-            "HUP", "INT", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE",
-            "KILL", "USR1", "SEGV", "USR2", "PIPE", "ALRM", "TERM",
-            "CHLD", "CONT", "STOP", "TSTP", "TTIN", "TTOU", "URG",
-            "XCPU", "XFSZ", "VTALRM", "PROF", "WINCH", "IO", "SYS",
+            "HUP",    "INT",  "QUIT",  "ILL",  "TRAP", "ABRT", "BUS",  "FPE",
+            "KILL",   "USR1", "SEGV",  "USR2", "PIPE", "ALRM", "TERM", "CHLD",
+            "CONT",   "STOP", "TSTP",  "TTIN", "TTOU", "URG",  "XCPU", "XFSZ",
+            "VTALRM", "PROF", "WINCH", "IO",   "SYS",
         };
         for (signal_names, 0..) |sig, i| {
             try IO.print("{d}) {s}\n", .{ i + 1, sig });

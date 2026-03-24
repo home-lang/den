@@ -7,7 +7,6 @@ const utils = @import("../../utils.zig");
 const common = @import("common.zig");
 
 /// Command lookup and hash builtins: which, type, hash
-
 /// which - locate a command
 pub fn which(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     if (command.args.len == 0) {
@@ -149,10 +148,10 @@ pub fn typeBuiltin(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                 defer ctx.allocator.free(full_path);
 
                 // Check if file exists and is executable
-                std.Io.Dir.accessAbsolute(std.Options.debug_io,full_path, .{}) catch continue;
+                std.Io.Dir.accessAbsolute(std.Options.debug_io, full_path, .{}) catch continue;
 
                 if (builtin.os.tag != .windows) {
-                    const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io,full_path, .{}) catch continue;
+                    const file = std.Io.Dir.openFileAbsolute(std.Options.debug_io, full_path, .{}) catch continue;
                     defer file.close(std.Options.debug_io);
                     const stat = file.stat(std.Options.debug_io) catch continue;
                     if (stat.permissions.toMode() & 0o111 == 0) continue;

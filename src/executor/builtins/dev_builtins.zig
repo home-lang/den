@@ -6,7 +6,6 @@ const common = @import("common.zig");
 
 /// Developer helper builtins: wip, code, pstorm
 /// Note: bookmark remains in executor/mod.zig as it requires shell named_dirs state
-
 /// wip - Quick git add and commit with WIP message
 pub fn wip(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     // Get custom message if provided

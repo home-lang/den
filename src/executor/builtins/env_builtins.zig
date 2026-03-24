@@ -21,7 +21,6 @@ const libc_env = if (builtin.os.tag != .windows) struct {
 } else struct {};
 
 /// Environment builtins: env, export, set, unset, envCmd
-
 pub fn env(ctx: *BuiltinContext) !i32 {
     var iter = ctx.envIterator();
     while (iter.next()) |entry| {

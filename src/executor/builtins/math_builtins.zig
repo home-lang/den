@@ -305,4 +305,3 @@ fn mathLog(args: []const []const u8) !i32 {
     }
     return 0;
 }
-

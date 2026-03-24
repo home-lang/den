@@ -6,7 +6,6 @@ const common = @import("common.zig");
 
 /// macOS-specific and system utility builtins
 /// Includes: copyssh, reloaddns, emptytrash, show, hide, dotfiles, library
-
 /// copyssh - Copy SSH public key to clipboard
 pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
@@ -35,7 +34,7 @@ pub fn copyssh(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         const full_path = std.fmt.bufPrint(&path_buf, "{s}{s}", .{ home, key_suffix }) catch continue;
 
         // Try to open and read the key file
-        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io,full_path, .{}) catch continue;
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, full_path, .{}) catch continue;
         defer file.close(std.Options.debug_io);
 
         const bytes_read = file.readStreaming(std.Options.debug_io, &.{&key_buffer}) catch continue;
@@ -405,7 +404,7 @@ fn libraryList() !i32 {
 
     try IO.print("\x1b[1;33mUser libraries:\x1b[0m {s}\n", .{user_lib_path});
 
-    if (std.Io.Dir.cwd().openDir(std.Options.debug_io,user_lib_path, .{ .iterate = true })) |dir_val| {
+    if (std.Io.Dir.cwd().openDir(std.Options.debug_io, user_lib_path, .{ .iterate = true })) |dir_val| {
         var dir = dir_val;
         defer dir.close(std.Options.debug_io);
         var iter = dir.iterate();
@@ -428,7 +427,7 @@ fn libraryList() !i32 {
     // Check system library directory
     try IO.print("\n\x1b[1;33mSystem libraries:\x1b[0m /usr/local/share/den/lib\n", .{});
 
-    if (std.Io.Dir.cwd().openDir(std.Options.debug_io,"/usr/local/share/den/lib", .{ .iterate = true })) |dir_val| {
+    if (std.Io.Dir.cwd().openDir(std.Options.debug_io, "/usr/local/share/den/lib", .{ .iterate = true })) |dir_val| {
         var dir = dir_val;
         defer dir.close(std.Options.debug_io);
         var iter = dir.iterate();
@@ -487,11 +486,11 @@ fn libraryInfo(name: []const u8) !i32 {
     const user_path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}.den", .{ home, name }) catch return 1;
 
     var lib_path: []const u8 = user_path;
-    var file = std.Io.Dir.cwd().openFile(std.Options.debug_io,user_path, .{}) catch blk: {
+    var file = std.Io.Dir.cwd().openFile(std.Options.debug_io, user_path, .{}) catch blk: {
         // Try with .sh extension
         const user_sh_path = std.fmt.bufPrint(&path_buf, "{s}/.config/den/lib/{s}.sh", .{ home, name }) catch return 1;
         lib_path = user_sh_path;
-        break :blk std.Io.Dir.cwd().openFile(std.Options.debug_io,user_sh_path, .{}) catch {
+        break :blk std.Io.Dir.cwd().openFile(std.Options.debug_io, user_sh_path, .{}) catch {
             try IO.eprint("den: library: '{s}' not found\n", .{name});
             return 1;
         };
@@ -656,7 +655,7 @@ fn libraryCreate(name: []const u8) !i32 {
     var content_buf: [2048]u8 = undefined;
     const content = std.fmt.bufPrint(&content_buf, template, .{ name, name, name }) catch return 1;
 
-    const file = std.Io.Dir.cwd().createFile(std.Options.debug_io,path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().createFile(std.Options.debug_io, path, .{}) catch |err| {
         try IO.eprint("den: library: cannot create file: {}\n", .{err});
         return 1;
     };
@@ -726,7 +725,7 @@ fn dotfilesList() !i32 {
     var config_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const config_path = std.fmt.bufPrint(&config_path_buf, "{s}/.config", .{home}) catch return 0;
 
-    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io,config_path, .{ .iterate = true }) catch return 0;
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, config_path, .{ .iterate = true }) catch return 0;
     defer dir.close(std.Options.debug_io);
 
     try IO.print("\n\x1b[1;33m.config/\x1b[0m\n", .{});
@@ -870,7 +869,7 @@ fn dotfilesUnlink(file: []const u8) !i32 {
         return 1;
     }
 
-    std.Io.Dir.cwd().deleteFile(std.Options.debug_io,target) catch |err| {
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, target) catch |err| {
         try IO.eprint("dotfiles unlink: failed to remove: {}\n", .{err});
         return 1;
     };

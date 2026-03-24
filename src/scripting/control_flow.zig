@@ -922,8 +922,8 @@ pub const ControlFlowParser = struct {
         const first_line = std.mem.trim(u8, lines[start], &std.ascii.whitespace);
         const condition_start = if (std.mem.startsWith(u8, first_line, "if ")) 3 else return error.InvalidIf;
         const condition_end = std.mem.indexOf(u8, first_line[condition_start..], ";") orelse
-                             std.mem.indexOf(u8, first_line[condition_start..], "\n") orelse
-                             first_line[condition_start..].len;
+            std.mem.indexOf(u8, first_line[condition_start..], "\n") orelse
+            first_line[condition_start..].len;
         const condition = try self.allocator.dupe(u8, std.mem.trim(u8, first_line[condition_start..][0..condition_end], &std.ascii.whitespace));
 
         var i = start + 1;
@@ -1115,8 +1115,8 @@ pub const ControlFlowParser = struct {
         if (!std.mem.startsWith(u8, first_line, keyword)) return error.InvalidLoop;
 
         const condition_end = std.mem.indexOf(u8, first_line[keyword_len..], ";") orelse
-                             std.mem.indexOf(u8, first_line[keyword_len..], "\n") orelse
-                             first_line[keyword_len..].len;
+            std.mem.indexOf(u8, first_line[keyword_len..], "\n") orelse
+            first_line[keyword_len..].len;
         const condition = try self.allocator.dupe(u8, std.mem.trim(u8, first_line[keyword_len..][0..condition_end], &std.ascii.whitespace));
 
         var body_buffer: [1000][]const u8 = undefined;
@@ -1134,8 +1134,7 @@ pub const ControlFlowParser = struct {
             if (nest_depth > 0) {
                 if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
                     std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
-                    std.mem.startsWith(u8, line, "case ")) nest_depth += 1
-                else if (isKeyword(line, "fi") or isKeyword(line, "done") or
+                    std.mem.startsWith(u8, line, "case ")) nest_depth += 1 else if (isKeyword(line, "fi") or isKeyword(line, "done") or
                     isKeyword(line, "esac")) nest_depth -= 1;
                 if (nest_len > 0 and nest_len + 2 < nest_buf.len) {
                     nest_buf[nest_len] = ';';
@@ -1281,8 +1280,7 @@ pub const ControlFlowParser = struct {
             if (nest_depth > 0) {
                 if (std.mem.startsWith(u8, line, "if ") or std.mem.startsWith(u8, line, "for ") or
                     std.mem.startsWith(u8, line, "while ") or std.mem.startsWith(u8, line, "until ") or
-                    std.mem.startsWith(u8, line, "case ")) nest_depth += 1
-                else if (isKeyword(line, "fi") or isKeyword(line, "done") or
+                    std.mem.startsWith(u8, line, "case ")) nest_depth += 1 else if (isKeyword(line, "fi") or isKeyword(line, "done") or
                     isKeyword(line, "esac")) nest_depth -= 1;
                 if (nest_len > 0 and nest_len + 2 < nest_buf.len) {
                     nest_buf[nest_len] = ';';

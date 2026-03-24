@@ -7,14 +7,14 @@ pub const SyntaxHighlighter = struct {
     // ANSI color codes
     const Color = struct {
         const RESET = "\x1b[0m";
-        const GREEN = "\x1b[32m";      // Valid commands
-        const BLUE = "\x1b[34m";       // Builtins
-        const CYAN = "\x1b[36m";       // Flags/options
-        const YELLOW = "\x1b[33m";     // Strings
-        const MAGENTA = "\x1b[35m";    // Variables
-        const RED = "\x1b[31m";        // Errors/invalid
-        const RED_BG = "\x1b[41m";     // Error background (for severe errors)
-        const GRAY = "\x1b[90m";       // Comments
+        const GREEN = "\x1b[32m"; // Valid commands
+        const BLUE = "\x1b[34m"; // Builtins
+        const CYAN = "\x1b[36m"; // Flags/options
+        const YELLOW = "\x1b[33m"; // Strings
+        const MAGENTA = "\x1b[35m"; // Variables
+        const RED = "\x1b[31m"; // Errors/invalid
+        const RED_BG = "\x1b[41m"; // Error background (for severe errors)
+        const GRAY = "\x1b[90m"; // Comments
         const BOLD_GREEN = "\x1b[1;32m"; // Commands (bold)
         const UNDERLINE_RED = "\x1b[4;31m"; // Underlined red for syntax errors
     };
@@ -28,22 +28,21 @@ pub const SyntaxHighlighter = struct {
 
     // Shell builtins for highlighting
     const builtins = [_][]const u8{
-        "cd", "pwd", "echo", "exit", "env", "export", "set", "unset",
-        "true", "false", "test", "[", "alias", "unalias", "which",
-        "type", "help", "read", "printf", "source", ".", "history",
-        "pushd", "popd", "dirs", "eval", "exec", "command", "builtin",
-        "jobs", "fg", "bg", "wait", "disown", "kill", "trap", "times",
-        "umask", "getopts", "clear", "time", "hash", "yes", "reload",
-        "watch", "tree", "grep", "find", "calc", "json", "ls",
-        "seq", "date", "parallel", "http", "base64", "uuid",
+        "cd",   "pwd",    "echo",   "exit",    "env",     "export",   "set",     "unset",
+        "true", "false",  "test",   "[",       "alias",   "unalias",  "which",   "type",
+        "help", "read",   "printf", "source",  ".",       "history",  "pushd",   "popd",
+        "dirs", "eval",   "exec",   "command", "builtin", "jobs",     "fg",      "bg",
+        "wait", "disown", "kill",   "trap",    "times",   "umask",    "getopts", "clear",
+        "time", "hash",   "yes",    "reload",  "watch",   "tree",     "grep",    "find",
+        "calc", "json",   "ls",     "seq",     "date",    "parallel", "http",    "base64",
+        "uuid",
     };
 
     // Shell keywords
     const keywords = [_][]const u8{
-        "if", "then", "else", "elif", "fi",
-        "case", "esac",
-        "for", "while", "until", "do", "done",
-        "function", "in",
+        "if",   "then", "else",     "elif",  "fi",
+        "case", "esac", "for",      "while", "until",
+        "do",   "done", "function", "in",
     };
 
     pub fn init(allocator: std.mem.Allocator) SyntaxHighlighter {
