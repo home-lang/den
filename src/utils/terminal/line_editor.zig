@@ -1836,7 +1836,7 @@ pub const LineEditor = struct {
 
         for (completions, 0..) |completion, i| {
             // Strip marker if present
-            const text = if (completion.len > 0 and completion[0] == '\x02')
+            const text = if (completion.len > 0 and (completion[0] == '\x02' or completion[0] == '\x03'))
                 completion[1..]
             else
                 completion;
@@ -1974,7 +1974,7 @@ pub const LineEditor = struct {
                 const typed_word = self.buffer[word_start..self.cursor];
 
                 // Strip marker if present (e.g., \x02 for scripts/commands)
-                const actual_completion = if (completion.len > 0 and completion[0] == '\x02')
+                const actual_completion = if (completion.len > 0 and (completion[0] == '\x02' or completion[0] == '\x03'))
                     completion[1..]
                 else
                     completion;
@@ -2084,7 +2084,7 @@ pub const LineEditor = struct {
         const completion = completions[self.completion_index];
 
         // Strip marker if present
-        const actual_completion = if (completion.len > 0 and completion[0] == '\x02')
+        const actual_completion = if (completion.len > 0 and (completion[0] == '\x02' or completion[0] == '\x03'))
             completion[1..]
         else
             completion;
@@ -2145,7 +2145,7 @@ pub const LineEditor = struct {
         // Find the longest completion
         var max_len: usize = 0;
         for (completions) |completion| {
-            const is_script = completion.len > 0 and completion[0] == '\x02';
+            const is_script = completion.len > 0 and (completion[0] == '\x02' or completion[0] == '\x03');
             const display_text = if (is_script) completion[1..] else completion;
             if (display_text.len > max_len) {
                 max_len = display_text.len;
@@ -2170,19 +2170,22 @@ pub const LineEditor = struct {
 
                 const completion = completions[idx];
                 const is_script = completion.len > 0 and completion[0] == '\x02';
-                const display_text = if (is_script) completion[1..] else completion;
+                const is_branch = completion.len > 0 and completion[0] == '\x03';
+                const display_text = if (is_script or is_branch) completion[1..] else completion;
                 const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
 
                 // Highlight current selection
                 if (idx == self.completion_index) {
                     try self.writeBytes("\x1b[30;47m");
+                } else if (is_branch) {
+                    try self.writeBytes("\x1b[1;35m"); // Bold magenta for branches
                 } else if (is_dir) {
                     try self.writeBytes("\x1b[1;36m");
                 }
 
                 try self.writeBytes(display_text);
 
-                if (idx == self.completion_index or is_dir) {
+                if (idx == self.completion_index or is_dir or is_branch) {
                     try self.writeBytes("\x1b[0m");
                 }
 
@@ -2212,7 +2215,7 @@ pub const LineEditor = struct {
 
         var max_len: usize = 0;
         for (completions) |completion| {
-            const is_script = completion.len > 0 and completion[0] == '\x02';
+            const is_script = completion.len > 0 and (completion[0] == '\x02' or completion[0] == '\x03');
             const display_text = if (is_script) completion[1..] else completion;
             if (display_text.len > max_len) {
                 max_len = display_text.len;
@@ -2233,18 +2236,21 @@ pub const LineEditor = struct {
 
                 const completion = completions[idx];
                 const is_script = completion.len > 0 and completion[0] == '\x02';
-                const display_text = if (is_script) completion[1..] else completion;
+                const is_branch = completion.len > 0 and completion[0] == '\x03';
+                const display_text = if (is_script or is_branch) completion[1..] else completion;
                 const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
 
                 if (idx == self.completion_index) {
                     try self.writeBytes("\x1b[30;47m");
+                } else if (is_branch) {
+                    try self.writeBytes("\x1b[1;35m");
                 } else if (is_dir) {
                     try self.writeBytes("\x1b[1;36m");
                 }
 
                 try self.writeBytes(display_text);
 
-                if (idx == self.completion_index or is_dir) {
+                if (idx == self.completion_index or is_dir or is_branch) {
                     try self.writeBytes("\x1b[0m");
                 }
 

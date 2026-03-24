@@ -197,82 +197,168 @@ pub fn completeGit(allocator: std.mem.Allocator, input: []const u8, prefix: []co
     return &[_][]const u8{};
 }
 
-/// Get git branches for completion
+/// Get git branches for completion by reading .git/refs/ directly
 pub fn getGitBranches(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
     var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
-    // Run: git branch -a --format=%(refname:short)
-    const result = std.process.run(allocator, std.Options.debug_io, .{
-        .argv = &[_][]const u8{ "git", "branch", "-a", "--format=%(refname:short)" },
-    }) catch {
-        return &[_][]const u8{};
-    };
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
+    // Find .git directory
+    const git_dir = findGitDirForCompletion() orelse return &[_][]const u8{};
 
-    if (result.term.exited != 0) {
-        return &[_][]const u8{};
+    // Read local branches from .git/refs/heads/
+    var refs_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const refs_path = std.fmt.bufPrint(&refs_path_buf, "{s}/refs/heads", .{git_dir}) catch return &[_][]const u8{};
+    try collectBranchNames(allocator, refs_path, "", prefix, &results);
+
+    // Read remote branches from .git/refs/remotes/
+    var remotes_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const remotes_path = std.fmt.bufPrint(&remotes_path_buf, "{s}/refs/remotes", .{git_dir}) catch "";
+    if (remotes_path.len > 0) {
+        try collectBranchNames(allocator, remotes_path, "", prefix, &results);
     }
 
-    // Parse output (one branch per line)
-    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    // Also try packed-refs for branches not yet unpacked
+    var packed_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const packed_path = std.fmt.bufPrint(&packed_path_buf, "{s}/packed-refs", .{git_dir}) catch "";
+    if (packed_path.len > 0) {
+        collectPackedBranches(allocator, packed_path, prefix, &results) catch {};
+    }
+
+    // Limit to 10 results
+    const max_branches = 10;
+    const count = @min(results.items.len, max_branches);
+    if (results.items.len > max_branches) {
+        for (results.items[max_branches..]) |item| {
+            allocator.free(item);
+        }
+    }
+
+    const owned = try allocator.alloc([]const u8, count);
+    @memcpy(owned, results.items[0..count]);
+    return owned;
+}
+
+/// Recursively collect branch names from refs/heads/ directory
+fn collectBranchNames(
+    allocator: std.mem.Allocator,
+    dir_path: []const u8,
+    rel_prefix: []const u8,
+    filter_prefix: []const u8,
+    results: *std.ArrayList([]const u8),
+) !void {
+    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(std.Options.debug_io);
+
+    var iter = dir.iterate();
+    while (try iter.next(std.Options.debug_io)) |entry| {
+        var name_buf: [512]u8 = undefined;
+        const full_name = if (rel_prefix.len > 0)
+            std.fmt.bufPrint(&name_buf, "{s}/{s}", .{ rel_prefix, entry.name }) catch continue
+        else
+            entry.name;
+
+        if (entry.kind == .directory) {
+            var sub_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const sub_path = std.fmt.bufPrint(&sub_path_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
+            // Need to dupe rel_prefix for recursive call since full_name borrows name_buf
+            const duped_name = try allocator.dupe(u8, full_name);
+            defer allocator.free(duped_name);
+            try collectBranchNames(allocator, sub_path, duped_name, filter_prefix, results);
+        } else {
+            if (std.mem.startsWith(u8, full_name, filter_prefix)) {
+                const marked = try std.fmt.allocPrint(allocator, "\x03{s}", .{full_name});
+                try results.append(allocator, marked);
+            }
+        }
+    }
+}
+
+/// Collect branches from packed-refs file
+fn collectPackedBranches(
+    allocator: std.mem.Allocator,
+    packed_path: []const u8,
+    prefix: []const u8,
+    results: *std.ArrayList([]const u8),
+) !void {
+    const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, packed_path, .{}) catch return;
+    defer file.close(std.Options.debug_io);
+
+    var buf: [8192]u8 = undefined;
+    var total: usize = 0;
+    while (total < buf.len) {
+        const n = file.readStreaming(std.Options.debug_io, &.{buf[total..]}) catch break;
+        if (n == 0) break;
+        total += n;
+    }
+
+    const refs_prefix = "refs/heads/";
+    var lines = std.mem.splitScalar(u8, buf[0..total], '\n');
     while (lines.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
-        if (trimmed.len == 0) continue;
-
-        // Skip remotes/origin/ prefix for cleaner display
-        var branch_name = trimmed;
-        if (std.mem.startsWith(u8, branch_name, "remotes/origin/")) {
-            branch_name = branch_name[15..];
-        } else if (std.mem.startsWith(u8, branch_name, "origin/")) {
-            branch_name = branch_name[7..];
-        }
-
-        if (std.mem.startsWith(u8, branch_name, prefix)) {
-            const marked_branch = try std.fmt.allocPrint(allocator, "\x03{s}", .{branch_name});
-            try results.append(allocator, marked_branch);
+        if (line.len == 0 or line[0] == '#') continue;
+        // Format: <hash> <ref>
+        var parts = std.mem.splitScalar(u8, line, ' ');
+        _ = parts.next(); // skip hash
+        const ref = parts.next() orelse continue;
+        if (std.mem.startsWith(u8, ref, refs_prefix)) {
+            const branch = ref[refs_prefix.len..];
+            if (std.mem.startsWith(u8, branch, prefix)) {
+                // Check not already in results
+                var already = false;
+                for (results.items) |existing| {
+                    // Skip the \x03 marker byte
+                    if (existing.len > 0 and std.mem.eql(u8, existing[1..], branch)) {
+                        already = true;
+                        break;
+                    }
+                }
+                if (!already) {
+                    const marked = try std.fmt.allocPrint(allocator, "\x03{s}", .{branch});
+                    try results.append(allocator, marked);
+                }
+            }
         }
     }
+}
 
+fn toOwned(allocator: std.mem.Allocator, results: *std.ArrayList([]const u8)) ![][]const u8 {
     const owned = try allocator.alloc([]const u8, results.items.len);
     @memcpy(owned, results.items);
     return owned;
 }
 
-/// Get git modified files for completion
-pub fn getGitModifiedFiles(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8).empty;
-    defer results.deinit(allocator);
-
-    // Run: git status --porcelain
-    const result = std.process.run(allocator, std.Options.debug_io, .{
-        .argv = &[_][]const u8{ "git", "status", "--porcelain" },
-    }) catch {
-        return &[_][]const u8{};
+/// Find .git directory from current working directory
+fn findGitDirForCompletion() ?[]const u8 {
+    // Use a static buffer to avoid allocation
+    const Static = struct {
+        var git_dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     };
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
 
-    if (result.term.exited != 0) {
-        return &[_][]const u8{};
+    const cwd_len = std.process.currentPath(std.Options.debug_io, &Static.path_buf) catch return null;
+    var current = Static.path_buf[0..cwd_len];
+
+    while (true) {
+        var git_head_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const git_head_path = std.fmt.bufPrint(&git_head_buf, "{s}/.git/HEAD", .{current}) catch return null;
+
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, git_head_path, .{}) catch {
+            const parent = std.fs.path.dirname(current) orelse return null;
+            if (parent.len == current.len) return null;
+            current = Static.path_buf[0..parent.len];
+            continue;
+        };
+        file.close(std.Options.debug_io);
+
+        const git_dir = std.fmt.bufPrint(&Static.git_dir_buf, "{s}/.git", .{current}) catch return null;
+        return git_dir;
     }
+}
 
-    // Parse output (format: XY filename)
-    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
-    while (lines.next()) |line| {
-        if (line.len < 4) continue; // At least "XY filename"
-        const filename = std.mem.trim(u8, line[3..], &std.ascii.whitespace);
-        if (filename.len == 0) continue;
-
-        if (std.mem.startsWith(u8, filename, prefix)) {
-            try results.append(allocator, try allocator.dupe(u8, filename));
-        }
-    }
-
-    const owned = try allocator.alloc([]const u8, results.items.len);
-    @memcpy(owned, results.items);
-    return owned;
+/// Get git modified files for completion
+/// Falls back to regular file completion since git status requires process spawning
+pub fn getGitModifiedFiles(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
+    var completion = Completion.init(allocator);
+    return completion.completeFile(prefix);
 }
 
 /// Get completions for bun command
