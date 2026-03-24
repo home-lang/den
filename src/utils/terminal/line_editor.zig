@@ -683,9 +683,15 @@ pub const LineEditor = struct {
                         continue;
                     }
 
-                    // Clear any visible completion list first
+                    // If completion list is showing, just dismiss it and reset the line
                     if (self.completion_list != null) {
-                        try self.clearCompletionDisplay();
+                        self.clearCompletionState();
+                        // Clear current input and show fresh prompt
+                        try self.writeBytes("^C\r\n");
+                        try self.displayPrompt();
+                        self.length = 0;
+                        self.cursor = 0;
+                        continue;
                     }
 
                     // Clear multi-line buffer if in multi-line mode
@@ -2281,7 +2287,18 @@ pub const LineEditor = struct {
     /// Clear the completion list display
     fn clearCompletionDisplay(self: *LineEditor) !void {
         const completions = self.completion_list orelse return;
-        const num_rows = completions.len;
+
+        // Calculate actual display rows (same logic as displayCompletionList)
+        var max_len: usize = 0;
+        for (completions) |completion| {
+            const has_marker = completion.len > 0 and (completion[0] == '\x02' or completion[0] == '\x03');
+            const display_text = if (has_marker) completion[1..] else completion;
+            if (display_text.len > max_len) max_len = display_text.len;
+        }
+        const term_width = if (signals.getWindowSize()) |ws| ws.cols else |_| 80;
+        const col_width = @max(max_len + 2, 1);
+        const num_cols = @max(1, term_width / col_width);
+        const num_rows = (completions.len + num_cols - 1) / num_cols;
 
         try self.writeBytes("\x1b[s");
 
