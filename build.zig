@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    compat_module.link_libc = true;
     den_module.addImport("compat", compat_module);
 
     // Den shell executable
