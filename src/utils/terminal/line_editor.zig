@@ -56,6 +56,8 @@ pub const LineEditor = struct {
     syntax_highlighting: bool = true, // Enable/disable syntax highlighting
     // Prompt refresh callback
     prompt_refresh_fn: ?*const fn (*LineEditor) anyerror!void = null,
+    // User data for callbacks (e.g., pointer to Shell)
+    user_data: ?*anyopaque = null,
     // Reverse search mode (Ctrl+R)
     reverse_search_mode: bool = false,
     reverse_search_query: [256]u8 = undefined,

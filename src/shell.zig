@@ -764,6 +764,7 @@ pub const Shell = struct {
                         editor.setHistory(&self.history, &self.history_count);
                         editor.setCompletionFn(shell_mod.tabCompletionFn);
                         editor.setPromptRefreshFn(refreshPromptCallback);
+                        editor.user_data = @ptrCast(self);
                         // Set transient prompt if enabled in config
                         if (self.config.prompt.transient) {
                             if (self.prompt_renderer) |*renderer| {
@@ -3722,35 +3723,16 @@ pub const Shell = struct {
 
 /// Tab completion function for line editor
 /// Callback to refresh the prompt (e.g., when Cmd+K clears screen)
-/// This updates the prompt to reflect current directory changes
+/// Uses the shell's full prompt renderer for consistent display
 fn refreshPromptCallback(editor: *LineEditor) !void {
-    // Get current directory
-    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const cwd_len = std.process.currentPath(std.Options.debug_io, &cwd_buf) catch 0;
-    const cwd = if (cwd_len > 0) cwd_buf[0..cwd_len] else "/";
+    const shell_ptr: *Shell = @ptrCast(@alignCast(editor.user_data orelse return));
 
-    // Get home directory to abbreviate with ~
-    const home = getenv("HOME");
+    // Use the shell's full prompt renderer
+    const new_prompt = try shell_ptr.getPromptString();
 
-    // Build a simple prompt with current directory
-    var prompt_buf: [4096]u8 = undefined;
-    const prompt = if (home) |h| blk: {
-        if (std.mem.startsWith(u8, cwd, h)) {
-            const relative = cwd[h.len..];
-            if (relative.len == 0) {
-                break :blk std.fmt.bufPrint(&prompt_buf, "den ~> ", .{}) catch "den> ";
-            } else {
-                break :blk std.fmt.bufPrint(&prompt_buf, "den ~{s}> ", .{relative}) catch "den> ";
-            }
-        }
-        break :blk std.fmt.bufPrint(&prompt_buf, "den {s}> ", .{cwd}) catch "den> ";
-    } else std.fmt.bufPrint(&prompt_buf, "den {s}> ", .{cwd}) catch "den> ";
-
-    // Free the old prompt first
+    // Free the old prompt and set the new one
     editor.allocator.free(editor.prompt);
-
-    // Allocate and set new prompt
-    editor.prompt = try editor.allocator.dupe(u8, prompt);
+    editor.prompt = new_prompt;
 }
 
 test "shell initialization" {

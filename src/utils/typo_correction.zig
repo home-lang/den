@@ -177,15 +177,24 @@ pub const TypoCorrection = struct {
     /// Get the best suggestion for a typo (or null if none found)
     pub fn getBestSuggestion(self: *TypoCorrection, typo: []const u8) !?[]const u8 {
         const suggestions = try self.findSuggestions(typo, 1);
+        defer self.allocator.free(suggestions);
         if (suggestions.len > 0 and suggestions[0].similarity >= 0.5) {
-            return suggestions[0].command;
+            // Caller doesn't own this, so dupe it and free the original
+            const result = try self.allocator.dupe(u8, suggestions[0].command);
+            for (suggestions) |s| self.allocator.free(s.command);
+            return result;
         }
+        for (suggestions) |s| self.allocator.free(s.command);
         return null;
     }
 
     /// Format a "did you mean" message
     pub fn formatSuggestionMessage(self: *TypoCorrection, typo: []const u8) !?[]const u8 {
         const suggestions = try self.findSuggestions(typo, 3);
+        defer {
+            for (suggestions) |s| self.allocator.free(s.command);
+            self.allocator.free(suggestions);
+        }
         if (suggestions.len == 0) return null;
 
         // Only show suggestions if the best one is reasonably similar
