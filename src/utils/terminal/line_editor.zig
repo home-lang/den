@@ -2140,6 +2140,8 @@ pub const LineEditor = struct {
     fn displayCompletionList(self: *LineEditor) !void {
         const completions = self.completion_list orelse return;
 
+        // Hide cursor to prevent flicker during redraw
+        try self.writeBytes("\x1b[?25l");
         // Save cursor, show list, restore cursor
         try self.writeBytes("\x1b[s");
         try self.writeBytes("\r\n");
@@ -2206,12 +2208,15 @@ pub const LineEditor = struct {
         }
 
         try self.writeBytes("\x1b[u");
+        // Show cursor again
+        try self.writeBytes("\x1b[?25h");
     }
 
     /// Update the completion list highlight
     fn updateCompletionListHighlight(self: *LineEditor) !void {
         const completions = self.completion_list orelse return;
 
+        try self.writeBytes("\x1b[?25l");
         try self.writeBytes("\x1b[s");
         try self.writeBytes("\r\n");
 
@@ -2270,6 +2275,7 @@ pub const LineEditor = struct {
         }
 
         try self.writeBytes("\x1b[u");
+        try self.writeBytes("\x1b[?25h");
     }
 
     /// Clear the completion list display
