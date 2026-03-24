@@ -40,7 +40,7 @@ pub const AheadBehind = struct {
     behind: usize,
 };
 
-/// Git integration module
+/// Git integration module — reads .git/ files directly (no process spawning)
 pub const GitModule = struct {
     allocator: std.mem.Allocator,
 
@@ -48,189 +48,149 @@ pub const GitModule = struct {
         return .{ .allocator = allocator };
     }
 
-    /// Detect if current directory is in a Git repository
-    /// Walks up parent directories to find .git (like git itself does)
-    pub fn isGitRepository(self: *GitModule, cwd: []const u8) bool {
-        _ = self;
+    /// Get Git information for current directory
+    pub fn getInfo(self: *GitModule, cwd: []const u8) !GitInfo {
+        var info = GitInfo.init(self.allocator);
 
+        // Find the .git directory by walking up from cwd
+        const git_dir = self.findGitDir(cwd) orelse return info;
+        defer self.allocator.free(git_dir);
+
+        // Read branch from .git/HEAD
+        info.branch = self.readBranch(git_dir) catch null;
+
+        // Read commit hash
+        if (info.branch) |_| {
+            info.commit_hash = self.readCommitHash(git_dir) catch null;
+        }
+
+        // Check for stash
+        info.stash_count = self.countStashes(git_dir) catch 0;
+
+        return info;
+    }
+
+    /// Find .git directory by walking up from cwd
+    fn findGitDir(self: *GitModule, cwd: []const u8) ?[]const u8 {
         var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         var current = path_buf[0..cwd.len];
         @memcpy(current, cwd);
 
         while (true) {
-            var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, current, .{}) catch return false;
-            defer dir.close(std.Options.debug_io);
+            // Try to open .git/HEAD to confirm this is a real git dir
+            var git_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const git_head_path = std.fmt.bufPrint(&git_path_buf, "{s}/.git/HEAD", .{current}) catch return null;
 
-            // Check for .git directory or file (for submodules/worktrees)
-            dir.access(std.Options.debug_io, ".git", .{}) catch {
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, git_head_path, .{}) catch {
                 // Go up one level
-                const parent = std.fs.path.dirname(current) orelse return false;
-                if (parent.len == current.len) return false; // at root
+                const parent = std.fs.path.dirname(current) orelse return null;
+                if (parent.len == current.len) return null;
                 current = path_buf[0..parent.len];
                 continue;
             };
+            file.close(std.Options.debug_io);
 
-            return true;
+            // Found it — return path to .git dir
+            const git_dir_path = std.fmt.bufPrint(&git_path_buf, "{s}/.git", .{current}) catch return null;
+            return self.allocator.dupe(u8, git_dir_path) catch null;
         }
     }
 
-    /// Get Git information for current directory
-    pub fn getInfo(self: *GitModule, cwd: []const u8) !GitInfo {
-        var info = GitInfo.init(self.allocator);
+    /// Read current branch name from .git/HEAD
+    fn readBranch(self: *GitModule, git_dir: []const u8) ![]const u8 {
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const head_path = try std.fmt.bufPrint(&path_buf, "{s}/HEAD", .{git_dir});
 
-        // Get branch name (will fail if not in a git repo)
-        info.branch = self.getBranch(cwd) catch null;
+        const content = try self.readFileContent(head_path);
+        defer self.allocator.free(content);
 
-        // If no branch, we're not in a git repo
-        if (info.branch == null) return info;
+        const trimmed = std.mem.trim(u8, content, &std.ascii.whitespace);
 
-        // Get commit hash
-        info.commit_hash = self.getCommitHash(cwd) catch null;
-
-        // Get status
-        const status = self.getStatus(cwd) catch return info;
-        defer self.allocator.free(status);
-
-        self.parseStatus(status, &info);
-
-        // Get ahead/behind counts
-        const ahead_behind = self.getAheadBehind(cwd) catch AheadBehind{ .ahead = 0, .behind = 0 };
-        info.ahead = ahead_behind.ahead;
-        info.behind = ahead_behind.behind;
-
-        // Get stash count
-        info.stash_count = self.getStashCount(cwd) catch 0;
-
-        return info;
-    }
-
-    /// Get current branch name
-    fn getBranch(self: *GitModule, cwd: []const u8) ![]const u8 {
-        const result = try self.runGitCommand(cwd, &[_][]const u8{ "git", "branch", "--show-current" });
-        defer self.allocator.free(result);
-
-        const trimmed = std.mem.trim(u8, result, &std.ascii.whitespace);
-        if (trimmed.len == 0) {
-            // Detached HEAD - try to get the hash
-            return try self.allocator.dupe(u8, "HEAD");
+        // HEAD contains "ref: refs/heads/<branch>" for a normal branch
+        const prefix = "ref: refs/heads/";
+        if (std.mem.startsWith(u8, trimmed, prefix)) {
+            return try self.allocator.dupe(u8, trimmed[prefix.len..]);
         }
 
-        return try self.allocator.dupe(u8, trimmed);
-    }
-
-    /// Get current commit hash (short)
-    fn getCommitHash(self: *GitModule, cwd: []const u8) ![]const u8 {
-        const result = try self.runGitCommand(cwd, &[_][]const u8{ "git", "rev-parse", "--short", "HEAD" });
-        defer self.allocator.free(result);
-
-        const trimmed = std.mem.trim(u8, result, &std.ascii.whitespace);
-        return try self.allocator.dupe(u8, trimmed);
-    }
-
-    /// Get git status output
-    fn getStatus(self: *GitModule, cwd: []const u8) ![]const u8 {
-        return try self.runGitCommand(cwd, &[_][]const u8{ "git", "status", "--porcelain" });
-    }
-
-    /// Parse git status output
-    fn parseStatus(self: *GitModule, status: []const u8, info: *GitInfo) void {
-        _ = self;
-
-        var line_iter = std.mem.splitScalar(u8, status, '\n');
-        while (line_iter.next()) |line| {
-            if (line.len < 3) continue;
-
-            const x = line[0]; // Index status
-            const y = line[1]; // Worktree status
-
-            // Count staged files
-            if (x != ' ' and x != '?') {
-                info.staged_count += 1;
-            }
-
-            // Count unstaged files
-            if (y != ' ' and y != '?') {
-                info.unstaged_count += 1;
-            }
-
-            // Count untracked files
-            if (x == '?' and y == '?') {
-                info.untracked_count += 1;
-            }
+        // Detached HEAD — return short hash
+        if (trimmed.len >= 7) {
+            return try self.allocator.dupe(u8, trimmed[0..7]);
         }
 
-        // Repository is dirty if there are any changes
-        info.is_dirty = info.staged_count > 0 or
-            info.unstaged_count > 0 or
-            info.untracked_count > 0;
+        return error.InvalidHead;
     }
 
-    /// Get ahead/behind counts for current branch
-    fn getAheadBehind(self: *GitModule, cwd: []const u8) !AheadBehind {
-        const result = try self.runGitCommand(cwd, &[_][]const u8{ "git", "rev-list", "--left-right", "--count", "HEAD...@{upstream}" });
-        defer self.allocator.free(result);
+    /// Read current commit hash
+    fn readCommitHash(self: *GitModule, git_dir: []const u8) ![]const u8 {
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const head_path = try std.fmt.bufPrint(&path_buf, "{s}/HEAD", .{git_dir});
 
-        const trimmed = std.mem.trim(u8, result, &std.ascii.whitespace);
+        const head_content = try self.readFileContent(head_path);
+        defer self.allocator.free(head_content);
 
-        // Parse output: "ahead\tbehind"
-        var parts = std.mem.splitScalar(u8, trimmed, '\t');
+        const trimmed = std.mem.trim(u8, head_content, &std.ascii.whitespace);
 
-        const ahead_str = parts.next() orelse return .{ .ahead = 0, .behind = 0 };
-        const behind_str = parts.next() orelse return .{ .ahead = 0, .behind = 0 };
+        // If HEAD is a ref, resolve it
+        const prefix = "ref: ";
+        if (std.mem.startsWith(u8, trimmed, prefix)) {
+            const ref = trimmed[prefix.len..];
+            var ref_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const ref_path = try std.fmt.bufPrint(&ref_path_buf, "{s}/{s}", .{ git_dir, ref });
 
-        const ahead = std.fmt.parseInt(usize, ahead_str, 10) catch 0;
-        const behind = std.fmt.parseInt(usize, behind_str, 10) catch 0;
+            const hash_content = try self.readFileContent(ref_path);
+            defer self.allocator.free(hash_content);
 
-        return .{ .ahead = ahead, .behind = behind };
+            const hash = std.mem.trim(u8, hash_content, &std.ascii.whitespace);
+            if (hash.len >= 7) {
+                return try self.allocator.dupe(u8, hash[0..7]);
+            }
+            return error.InvalidHash;
+        }
+
+        // Detached HEAD — hash is directly in HEAD
+        if (trimmed.len >= 7) {
+            return try self.allocator.dupe(u8, trimmed[0..7]);
+        }
+
+        return error.InvalidHash;
     }
 
-    /// Get stash count
-    fn getStashCount(self: *GitModule, cwd: []const u8) !usize {
-        const result = try self.runGitCommand(cwd, &[_][]const u8{ "git", "stash", "list" });
-        defer self.allocator.free(result);
+    /// Count stash entries from .git/refs/stash or .git/logs/refs/stash
+    fn countStashes(self: *GitModule, git_dir: []const u8) !usize {
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const stash_log_path = try std.fmt.bufPrint(&path_buf, "{s}/logs/refs/stash", .{git_dir});
 
-        // Count lines
+        const content = self.readFileContent(stash_log_path) catch return 0;
+        defer self.allocator.free(content);
+
         var count: usize = 0;
-        var line_iter = std.mem.splitScalar(u8, result, '\n');
-        while (line_iter.next()) |line| {
+        var iter = std.mem.splitScalar(u8, content, '\n');
+        while (iter.next()) |line| {
             if (line.len > 0) count += 1;
         }
-
         return count;
     }
 
-    /// Run a git command and return output
-    fn runGitCommand(self: *GitModule, cwd: []const u8, argv: []const []const u8) ![]const u8 {
-        // Use page_allocator for process spawning to avoid debug allocator limits
-        const page_alloc = std.heap.page_allocator;
-        const result = std.process.run(page_alloc, std.Options.debug_io, .{
-            .argv = argv,
-        }) catch |err| {
-            std.debug.print("DEBUG runGitCommand error: {} argv[0]={s} cwd={s}\n", .{ err, argv[0], cwd });
-            return error.CommandFailed;
-        };
+    /// Read file content into an allocated buffer
+    fn readFileContent(self: *GitModule, path: []const u8) ![]const u8 {
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch return error.FileNotFound;
+        defer file.close(std.Options.debug_io);
 
-        defer page_alloc.free(result.stderr);
-        defer page_alloc.free(result.stdout);
-
-        switch (result.term) {
-            .exited => |code| {
-                if (code == 0) {
-                    return try self.allocator.dupe(u8, result.stdout);
-                }
-                return error.CommandFailed;
-            },
-            else => {
-                return error.CommandFailed;
-            },
+        var buf: [4096]u8 = undefined;
+        var total: usize = 0;
+        while (total < buf.len) {
+            const n = file.readStreaming(std.Options.debug_io, &.{buf[total..]}) catch break;
+            if (n == 0) break;
+            total += n;
         }
+
+        return try self.allocator.dupe(u8, buf[0..total]);
     }
 
     /// Find git repository root from a given path
     pub fn findRepositoryRoot(self: *GitModule, start_path: []const u8) !?[]const u8 {
         var current_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const current_path = blk: {
-            // Use libc realpath (std.fs.realpath removed in Zig 0.16)
             var path_z: [std.Io.Dir.max_path_bytes]u8 = undefined;
             if (start_path.len >= path_z.len) return error.NameTooLong;
             @memcpy(path_z[0..start_path.len], start_path);
@@ -243,12 +203,10 @@ pub const GitModule = struct {
         defer self.allocator.free(path);
 
         while (true) {
-            // Check if .git exists in current directory
             var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, path, .{}) catch break;
             defer dir.close(std.Options.debug_io);
 
             dir.access(std.Options.debug_io, ".git", .{}) catch {
-                // No .git here, go up one level
                 const parent = std.fs.path.dirname(path) orelse break;
                 const parent_copy = try self.allocator.dupe(u8, parent);
                 self.allocator.free(path);
@@ -256,7 +214,6 @@ pub const GitModule = struct {
                 continue;
             };
 
-            // Found it!
             return try self.allocator.dupe(u8, path);
         }
 

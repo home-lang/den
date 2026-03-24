@@ -77,22 +77,11 @@ pub fn updatePromptContext(self: *Shell) !void {
     self.prompt_context.is_root = sysinfo.isRoot();
     self.prompt_context.last_exit_code = self.last_exit_code;
 
-    // Get git info synchronously
+    // Get git info by reading .git/ files directly (no process spawning)
     const GitModule = @import("../prompt/git.zig").GitModule;
     var git_module = GitModule.init(self.allocator);
-    var git_info = git_module.getInfo(cwd) catch |err| {
-        std.debug.print("DEBUG git getInfo error: {}\n", .{err});
-        var empty = @import("../prompt/git.zig").GitInfo.init(self.allocator);
-        if (self.prompt_context.git_branch) |old_branch| {
-            self.allocator.free(old_branch);
-        }
-        self.prompt_context.git_branch = null;
-        empty.deinit();
-        return;
-    };
+    var git_info = try git_module.getInfo(cwd);
     defer git_info.deinit();
-
-    std.debug.print("DEBUG git_info.branch: {?s}\n", .{git_info.branch});
 
     if (self.prompt_context.git_branch) |old_branch| {
         self.allocator.free(old_branch);
