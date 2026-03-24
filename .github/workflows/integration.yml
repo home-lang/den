@@ -87,7 +87,7 @@ jobs:
         run: |
           echo "Testing arithmetic..."
           ./zig-out/bin/den -c "calc 2 + 2"
-          ./zig-out/bin/den -c "calc 10 * 5"
+          ./zig-out/bin/den -c "calc 10 '*' 5"
 
       - name: Test productivity builtins
         run: |
