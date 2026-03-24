@@ -2,6 +2,7 @@
 //! Handles prompt rendering and context updates for the shell
 
 const std = @import("std");
+const compat = @import("compat");
 const IO = @import("../utils/io.zig").IO;
 const PromptRenderer = @import("../prompt/renderer.zig").PromptRenderer;
 const PromptTemplate = @import("../prompt/types.zig").PromptTemplate;
@@ -158,7 +159,7 @@ pub fn updatePromptContext(self: *Shell) !void {
     }
     self.prompt_context.zig_version = shell_mod.detectZigVersion(self.allocator) catch null;
 
-    self.prompt_context.current_time = if (std.time.Instant.now()) |instant| blk: {
+    self.prompt_context.current_time = if (compat.Instant.now()) |instant| blk: {
         break :blk if (@import("builtin").os.tag == .windows)
             @as(i64, @intCast(instant.timestamp / 10_000_000))
         else

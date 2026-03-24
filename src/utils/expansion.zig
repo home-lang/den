@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 const Arithmetic = @import("arithmetic.zig").Arithmetic;
 const env_utils = @import("env.zig");
 
@@ -10,7 +11,7 @@ var global_random_state: ?std.Random.DefaultPrng = null;
 
 fn getRandomValue() u16 {
     if (global_random_state == null) {
-        const seed: u64 = if (std.time.Instant.now()) |inst|
+        const seed: u64 = if (compat.Instant.now()) |inst|
             (if (is_windows)
                 inst.timestamp
             else
@@ -164,7 +165,7 @@ pub const Expansion = struct {
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
-            .shell_start_time = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| 0,
+            .shell_start_time = if (compat.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| 0,
             .skip_tilde = false,
         };
     }
@@ -225,7 +226,7 @@ pub const Expansion = struct {
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
-            .shell_start_time = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| 0,
+            .shell_start_time = if (compat.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| 0,
         };
     }
 
@@ -1452,7 +1453,7 @@ pub const Expansion = struct {
         }
         if (std.mem.eql(u8, content, "SECONDS")) {
             var buf: [16]u8 = undefined;
-            const now = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| @as(i64, 0);
+            const now = if (compat.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| @as(i64, 0);
             const elapsed = now - self.shell_start_time;
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{elapsed}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
@@ -1911,7 +1912,7 @@ pub const Expansion = struct {
         }
         if (std.mem.eql(u8, var_name, "SECONDS")) {
             var buf: [16]u8 = undefined;
-            const now = if (std.time.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| @as(i64, 0);
+            const now = if (compat.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| @as(i64, 0);
             const elapsed = now - self.shell_start_time;
             const result_str = std.fmt.bufPrint(&buf, "{d}", .{elapsed}) catch "0";
             const result = try self.allocator.dupe(u8, result_str);
@@ -2094,8 +2095,8 @@ pub const Expansion = struct {
         // Fork the process
         const fork_ret = std.c.fork();
         if (fork_ret < 0) {
-            std.posix.close(read_end);
-            std.posix.close(write_end);
+            _ = std.c.close(read_end);
+            _ = std.c.close(write_end);
             return error.Unexpected;
         }
         const pid: std.posix.pid_t = @intCast(fork_ret);
@@ -2103,9 +2104,9 @@ pub const Expansion = struct {
         if (pid == 0) {
             // Child process
             // Redirect stdout to pipe write end
-            std.posix.close(read_end);
+            _ = std.c.close(read_end);
             if (std.c.dup2(write_end, std.posix.STDOUT_FILENO) < 0) std.c._exit(1);
-            std.posix.close(write_end);
+            _ = std.c.close(write_end);
 
             // stderr inherits from parent process (like bash)
 
@@ -2137,7 +2138,7 @@ pub const Expansion = struct {
         }
 
         // Parent process - read child's stdout
-        std.posix.close(write_end);
+        _ = std.c.close(write_end);
 
         const max_output: usize = 1024 * 1024;
         var output_buffer = std.ArrayList(u8).empty;
@@ -2150,7 +2151,7 @@ pub const Expansion = struct {
             try output_buffer.appendSlice(self.allocator, read_buf[0..bytes_read]);
             if (output_buffer.items.len >= max_output) break;
         }
-        std.posix.close(read_end);
+        _ = std.c.close(read_end);
 
         // Wait for child to finish and capture exit code for $?
         var wait_status: c_int = 0;
@@ -2587,8 +2588,8 @@ pub const Expansion = struct {
         // Fork a child process
         const fork_ret = std.c.fork();
         if (fork_ret < 0) {
-            std.posix.close(pipe_fds[0]);
-            std.posix.close(pipe_fds[1]);
+            _ = std.c.close(pipe_fds[0]);
+            _ = std.c.close(pipe_fds[1]);
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         }
         const fork_result: std.posix.pid_t = @intCast(fork_ret);
@@ -2598,21 +2599,21 @@ pub const Expansion = struct {
             if (is_input) {
                 // <(cmd) - child writes to pipe, parent reads
                 // Close read end
-                std.posix.close(pipe_fds[0]);
+                _ = std.c.close(pipe_fds[0]);
                 // Redirect stdout to write end of pipe
                 if (std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO) < 0) {
                     std.process.exit(1);
                 }
-                std.posix.close(pipe_fds[1]);
+                _ = std.c.close(pipe_fds[1]);
             } else {
                 // >(cmd) - child reads from pipe, parent writes
                 // Close write end
-                std.posix.close(pipe_fds[1]);
+                _ = std.c.close(pipe_fds[1]);
                 // Redirect stdin to read end of pipe
                 if (std.c.dup2(pipe_fds[0], std.posix.STDIN_FILENO) < 0) {
                     std.process.exit(1);
                 }
-                std.posix.close(pipe_fds[0]);
+                _ = std.c.close(pipe_fds[0]);
             }
 
             // Use the shell's own execution engine to preserve function definitions,
@@ -2651,11 +2652,11 @@ pub const Expansion = struct {
         const child_fd = if (is_input) pipe_fds[1] else pipe_fds[0];
 
         // Close the fd the child is using
-        std.posix.close(child_fd);
+        _ = std.c.close(child_fd);
 
         // Format the /dev/fd/N path
         const fd_path = std.fmt.allocPrint(self.allocator, "/dev/fd/{d}", .{parent_fd}) catch {
-            std.posix.close(parent_fd);
+            _ = std.c.close(parent_fd);
             return ExpansionResult{ .value = "", .consumed = end + 1, .owned = false };
         };
 

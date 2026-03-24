@@ -6,36 +6,40 @@
       "version": "0.15.6",
       "resolved": "registry:bunfig@0.15.6"
     },
-    "@stacksjs/gitlint@0.1.5": {
-      "name": "@stacksjs/gitlint",
-      "version": "0.1.5",
-      "resolved": "registry:@stacksjs/gitlint@0.1.5"
+    "@stacksjs/logsmith@0.1.18": {
+      "name": "@stacksjs/logsmith",
+      "version": "0.1.18",
+      "resolved": "registry:@stacksjs/logsmith@0.1.18"
+    },
+    "bun-git-hooks@0.2.19": {
+      "name": "bun-git-hooks",
+      "version": "0.2.19",
+      "resolved": "registry:bun-git-hooks@0.2.19"
+    },
+    "bun-plugin-dtsx@0.9.5": {
+      "name": "bun-plugin-dtsx",
+      "version": "0.9.5",
+      "resolved": "registry:bun-plugin-dtsx@0.9.5"
     },
     "bun.sh@1.3.11": {
       "name": "bun.sh",
       "version": "1.3.11",
-      "resolved": "registry:bun.sh@1.3.11",
-      "integrity": "sha256:61aefeb2d13032a726efaca2ceff6667342381a393cb6550ded85f0ebb76890d"
+      "resolved": "registry:bun.sh@1.3.11"
+    },
+    "@stacksjs/gitlint@0.1.5": {
+      "name": "@stacksjs/gitlint",
+      "version": "0.1.5",
+      "resolved": "registry:@stacksjs/gitlint@0.1.5"
     },
     "@stacksjs/eslint-config@4.14.0-beta.3": {
       "name": "@stacksjs/eslint-config",
       "version": "4.14.0-beta.3",
       "resolved": "registry:@stacksjs/eslint-config@4.14.0-beta.3"
     },
-    "@stacksjs/logsmith@0.1.18": {
-      "name": "@stacksjs/logsmith",
-      "version": "0.1.18",
-      "resolved": "registry:@stacksjs/logsmith@0.1.18"
-    },
     "@types/bun@1.3.8": {
       "name": "@types/bun",
       "version": "1.3.8",
       "resolved": "registry:@types/bun@1.3.8"
-    },
-    "bun-git-hooks@0.2.19": {
-      "name": "bun-git-hooks",
-      "version": "0.2.19",
-      "resolved": "registry:bun-git-hooks@0.2.19"
     },
     "typescript@5.9.3": {
       "name": "typescript",
@@ -46,11 +50,6 @@
       "name": "@stacksjs/docs",
       "version": "0.70.23",
       "resolved": "registry:@stacksjs/docs@0.70.23"
-    },
-    "bun-plugin-dtsx@0.9.5": {
-      "name": "bun-plugin-dtsx",
-      "version": "0.9.5",
-      "resolved": "registry:bun-plugin-dtsx@0.9.5"
     },
     "@stacksjs/bumpx@0.1.86": {
       "name": "@stacksjs/bumpx",

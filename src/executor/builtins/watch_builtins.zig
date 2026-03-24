@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const common = @import("common.zig");
@@ -172,7 +173,7 @@ fn watchWithKqueue(allocator: std.mem.Allocator, watch_path: []const u8, shell_c
         try IO.eprint("den: watch: cannot open '{s}' for watching\n", .{watch_path});
         return 1;
     }
-    defer std.posix.close(@intCast(watch_fd));
+    defer _ = std.c.close(@intCast(watch_fd));
 
     // Create a kqueue file descriptor
     const kq_fd = c_kq.kqueue();
@@ -181,7 +182,7 @@ fn watchWithKqueue(allocator: std.mem.Allocator, watch_path: []const u8, shell_c
         return error.KqueueFailed;
     }
     const kq: std.posix.fd_t = @intCast(kq_fd);
-    defer std.posix.close(kq);
+    defer _ = std.c.close(kq);
 
     // Register EVFILT_VNODE event for the watched path
     var changelist = [1]Kevent{
@@ -373,7 +374,7 @@ fn getFileSize(path: []const u8) !u64 {
 
 /// Get the current monotonic time in nanoseconds for debounce timing.
 fn getCurrentTimeNs() u64 {
-    const instant = std.time.Instant.now() catch return 0;
+    const instant = compat.Instant.now() catch return 0;
     // Convert the Instant's internal timestamp (sec + nsec) to a single nanosecond value.
     // Use the same approach as async_git.zig but in nanoseconds.
     const sec_ns = @as(i64, instant.timestamp.sec) * 1_000_000_000;

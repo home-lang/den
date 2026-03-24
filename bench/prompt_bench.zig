@@ -16,7 +16,7 @@ fn benchmarkSimplePromptRender(allocator: std.mem.Allocator) !void {
 
 fn benchmarkComplexPromptRender(allocator: std.mem.Allocator) !void {
     // Simulate rendering complex prompt: user@host:path (git-branch) $
-    var buffer = std.ArrayList(u8){ };
+    var buffer = std.ArrayList(u8).empty;
     defer buffer.deinit(allocator);
 
     try buffer.appendSlice(allocator, "user@host:");
@@ -32,7 +32,7 @@ fn benchmarkGitStatusQuery(_: std.mem.Allocator) !void {
 
 fn benchmarkColorFormatting(allocator: std.mem.Allocator) !void {
     // Simulate applying color codes
-    var buffer = std.ArrayList(u8){ };
+    var buffer = std.ArrayList(u8).empty;
     defer buffer.deinit(allocator);
 
     const text = "colored text";
@@ -49,7 +49,7 @@ fn benchmarkPathShortening(allocator: std.mem.Allocator) !void {
     const path = "/home/user/very/long/path/to/current/directory";
 
     var parts = std.mem.splitScalar(u8, path, '/');
-    var shortened = std.ArrayList(u8){ };
+    var shortened = std.ArrayList(u8).empty;
     defer shortened.deinit(allocator);
 
     var count: usize = 0;
@@ -87,7 +87,7 @@ fn benchmarkVariableExpansion(allocator: std.mem.Allocator) !void {
     // Simulate expanding prompt variables
     const template = "{user}@{host}:{cwd} $ ";
 
-    var expanded = std.ArrayList(u8){ };
+    var expanded = std.ArrayList(u8).empty;
     defer expanded.deinit(allocator);
 
     var i: usize = 0;
@@ -119,7 +119,7 @@ fn benchmarkRightPromptRender(allocator: std.mem.Allocator) !void {
 
     const spaces_needed = terminal_width - left_prompt.len - right_prompt.len;
 
-    var buffer = std.ArrayList(u8){ };
+    var buffer = std.ArrayList(u8).empty;
     defer buffer.deinit(allocator);
 
     try buffer.appendSlice(allocator, left_prompt);
@@ -137,7 +137,7 @@ fn benchmarkModuleDetection(allocator: std.mem.Allocator) !void {
     // Simulate detecting which modules to show
     const files = [_][]const u8{ "package.json", "Cargo.toml", ".python-version" };
 
-    var modules = std.ArrayList([]const u8){ };
+    var modules = std.ArrayList([]const u8).empty;
     defer modules.deinit(allocator);
 
     for (files) |file| {

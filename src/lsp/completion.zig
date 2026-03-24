@@ -245,7 +245,7 @@ pub fn getCompletions(
     // Determine what kind of completion to provide based on context
     const ctx = analyzeContext(text_before_cursor);
 
-    var results: std.ArrayList(CompletionItem) = .{ .items = &.{}, .capacity = 0 };
+    var results: std.ArrayList(CompletionItem) = .empty;
     errdefer results.deinit(allocator);
 
     switch (ctx) {

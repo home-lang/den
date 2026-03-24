@@ -553,7 +553,7 @@ pub const ControlFlowExecutor = struct {
         const stdin_file = std.Io.File{ .handle = stdin_handle, .flags = .{ .nonblocking = false } };
         const stderr_file = std.Io.File{ .handle = stderr_handle, .flags = .{ .nonblocking = false } };
         var stdin_buf: [4096]u8 = undefined;
-        var stdin_reader = stdin_file.reader(std.Options.debug_io, &stdin_buf);
+        const stdin_reader = stdin_file.reader(std.Options.debug_io, &stdin_buf);
         var reader = stdin_reader.interface;
         var stderr_buf: [4096]u8 = undefined;
         var stderr_writer = stderr_file.writer(std.Options.debug_io, &stderr_buf);

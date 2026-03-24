@@ -1,22 +1,23 @@
 // Performance profiling infrastructure for Den Shell
 const std = @import("std");
+const compat = @import("compat");
 
 /// Profiling zone for measuring performance
 pub const ProfileZone = struct {
     name: []const u8,
-    start_time: std.time.Instant,
+    start_time: compat.Instant,
     parent: ?*ProfileZone,
 
     pub fn init(name: []const u8, parent: ?*ProfileZone) ProfileZone {
         return .{
             .name = name,
-            .start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant),
+            .start_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant),
             .parent = parent,
         };
     }
 
     pub fn end(self: *const ProfileZone) i64 {
-        const now = std.time.Instant.now() catch return 0;
+        const now = compat.Instant.now() catch return 0;
         return @intCast(now.since(self.start_time));
     }
 
@@ -72,8 +73,8 @@ pub const Profiler = struct {
     events: std.array_list.Managed(ProfileEvent),
     enabled: bool,
     output_file: ?[]const u8,
-    start_time: std.time.Instant,
-    mutex: std.Thread.Mutex,
+    start_time: compat.Instant,
+    mutex: compat.Mutex,
 
     pub fn init(allocator: std.mem.Allocator) !*Profiler {
         const profiler = try allocator.create(Profiler);
@@ -82,7 +83,7 @@ pub const Profiler = struct {
             .events = std.array_list.Managed(ProfileEvent).init(allocator),
             .enabled = false,
             .output_file = null,
-            .start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant),
+            .start_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant),
             .mutex = .{},
         };
         return profiler;
@@ -99,7 +100,7 @@ pub const Profiler = struct {
 
         self.enabled = true;
         self.output_file = output_file;
-        self.start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+        self.start_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
     }
 
     pub fn disable(self: *Profiler) void {
@@ -124,7 +125,7 @@ pub const Profiler = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const now = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+        const now = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
         const event = ProfileEvent{
             .name = name,
             .category = category,
@@ -271,7 +272,7 @@ pub const Profiler = struct {
         defer self.mutex.unlock();
 
         self.events.clearRetainingCapacity();
-        self.start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+        self.start_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
     }
 
     /// Get event count

@@ -52,7 +52,7 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
             if (std.c.pipe(&pipe_fds) == 0) {
                 saved_stdout = std.c.dup(std.posix.STDOUT_FILENO);
                 _ = std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO);
-                std.posix.close(@intCast(pipe_fds[1]));
+                _ = std.c.close(@intCast(pipe_fds[1]));
                 pipe_fds[1] = -1;
             }
         }
@@ -425,13 +425,13 @@ pub fn builtinPrintf(shell: *Shell, cmd: *types.ParsedCommand) !void {
         if (!is_windows and saved_stdout >= 0) {
             // Restore stdout
             _ = std.c.dup2(saved_stdout, std.posix.STDOUT_FILENO);
-            std.posix.close(@intCast(saved_stdout));
+            _ = std.c.close(@intCast(saved_stdout));
 
             // Read captured output from pipe
             if (pipe_fds[0] >= 0) {
                 var result_buf: [4096]u8 = undefined;
                 const n = std.c.read(pipe_fds[0], &result_buf, result_buf.len);
-                std.posix.close(@intCast(pipe_fds[0]));
+                _ = std.c.close(@intCast(pipe_fds[0]));
                 if (n > 0) {
                     const output = result_buf[0..@intCast(n)];
                     // Store in shell variable

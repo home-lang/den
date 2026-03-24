@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 const posix = std.posix;
 
 /// Structured history entry with rich metadata.
@@ -432,7 +433,7 @@ pub const StructuredHistory = struct {
 
     /// Return the current UNIX epoch timestamp in seconds.
     fn getTimestamp() i64 {
-        if (std.time.Instant.now()) |instant| {
+        if (compat.Instant.now()) |instant| {
             return @intCast(instant.timestamp.sec);
         } else |_| {
             return 0;

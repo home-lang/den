@@ -67,7 +67,7 @@ pub const Pipe = struct {
             }
         } else {
             if (self.read != -1) {
-                std.posix.close(self.read);
+                _ = std.c.close(self.read);
                 self.read = -1;
             }
         }
@@ -82,7 +82,7 @@ pub const Pipe = struct {
             }
         } else {
             if (self.write != -1) {
-                std.posix.close(self.write);
+                _ = std.c.close(self.write);
                 self.write = -1;
             }
         }
@@ -210,7 +210,7 @@ pub fn closeHandle(handle: FileHandle) void {
         }
     } else {
         if (handle != -1) {
-            std.posix.close(handle);
+            _ = std.c.close(handle);
         }
     }
 }

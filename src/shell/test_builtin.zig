@@ -382,7 +382,7 @@ pub fn builtinTest(shell: *Shell, cmd: *types.ParsedCommand) !void {
 pub fn matchRegex(string: []const u8, pattern: []const u8) bool {
     // Handle anchors
     var pat = pattern;
-    var str = string;
+    const str = string;
     var anchored_start = false;
     var anchored_end = false;
 

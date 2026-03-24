@@ -329,7 +329,7 @@ pub fn closeFd(fd: std.posix.fd_t) void {
         // Windows: would use CloseHandle
         _ = fd;
     } else {
-        std.posix.close(fd);
+        _ = std.c.close(fd);
     }
 }
 

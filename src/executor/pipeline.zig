@@ -65,8 +65,8 @@ pub fn executePosix(
 
             // Close all pipe fds in child
             for (0..num_pipes) |j| {
-                std.posix.close(pipes_buffer[j][0]);
-                std.posix.close(pipes_buffer[j][1]);
+                _ = std.c.close(pipes_buffer[j][0]);
+                _ = std.c.close(pipes_buffer[j][1]);
             }
 
             // Apply redirections
@@ -88,8 +88,8 @@ pub fn executePosix(
 
     // Parent: close all pipes
     for (0..num_pipes) |i| {
-        std.posix.close(pipes_buffer[i][0]);
-        std.posix.close(pipes_buffer[i][1]);
+        _ = std.c.close(pipes_buffer[i][0]);
+        _ = std.c.close(pipes_buffer[i][1]);
     }
 
     // Wait for all children

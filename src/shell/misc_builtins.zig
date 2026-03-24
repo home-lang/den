@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 const IO = @import("../utils/io.zig").IO;
 const types = @import("../types/mod.zig");
 const parser_mod = @import("../parser/mod.zig");
@@ -198,7 +199,7 @@ pub fn builtinSource(self: *Shell, cmd: *types.ParsedCommand) !void {
                 const has_close_brace = std.mem.indexOf(u8, trimmed, "}") != null;
                 if (!has_close_brace) {
                     if (func_parser.parseFunction(lines, line_num)) |result_val| {
-                        var result = result_val;
+                        const result = result_val;
                         defer {
                             self.allocator.free(result.name);
                             for (result.body) |line| self.allocator.free(line);
@@ -493,7 +494,7 @@ pub fn builtinTime(self: *Shell, cmd: *types.ParsedCommand) !void {
     const command_str = cmd_buf[0..cmd_len];
 
     // Get start time
-    const start_time = std.time.Instant.now() catch {
+    const start_time = compat.Instant.now() catch {
         try IO.eprint("den: time: cannot get time\n", .{});
         self.last_exit_code = 1;
         return;
@@ -527,7 +528,7 @@ pub fn builtinTime(self: *Shell, cmd: *types.ParsedCommand) !void {
     };
 
     // Get end time and calculate duration
-    const end_time = std.time.Instant.now() catch {
+    const end_time = compat.Instant.now() catch {
         self.last_exit_code = exit_code;
         return;
     };

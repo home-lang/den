@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 const env_utils = @import("env.zig");
 const cpu_opt = @import("cpu_opt.zig");
 
@@ -42,7 +43,7 @@ pub const CompletionCache = struct {
 
     fn getCurrentTimeMs() i64 {
         // Use Instant for timestamp since milliTimestamp was removed in Zig 0.16
-        const instant = std.time.Instant.now() catch return 0;
+        const instant = compat.Instant.now() catch return 0;
         // Convert seconds to milliseconds
         if (is_windows) {
             return @as(i64, @intCast(instant.timestamp / 10_000_000)) * 1000;

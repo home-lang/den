@@ -619,7 +619,7 @@ pub const LineEditor = struct {
                     if (isIncomplete(complete_input)) {
                         // Initialize multiline buffer if not already done
                         if (self.multiline_buffer == null) {
-                            self.multiline_buffer = .{};
+                            self.multiline_buffer = .empty;
                             try self.multiline_buffer.?.appendSlice(self.allocator, current_line);
                         }
                         self.in_multiline = true;

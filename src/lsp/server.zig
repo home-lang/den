@@ -177,7 +177,7 @@ pub const LspServer = struct {
     /// Read a single line terminated by \r\n.  Returns the line *without*
     /// the trailing \r\n.
     fn readLine(self: *LspServer) ![]u8 {
-        var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+        var buf: std.ArrayList(u8) = .empty;
         errdefer buf.deinit(self.allocator);
 
         while (true) {
@@ -293,7 +293,7 @@ pub const LspServer = struct {
             \\,"result":{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"completionProvider":{"triggerCharacters":["$"," ","."]},"hoverProvider":true},"serverInfo":{"name":"den-lsp","version":"0.1.0"}}}
         ;
 
-        var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, response);
@@ -312,7 +312,7 @@ pub const LspServer = struct {
             \\,"result":null}
         ;
 
-        var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, response_prefix);
@@ -410,7 +410,7 @@ pub const LspServer = struct {
         defer completion.freeCompletions(items, self.allocator);
 
         // Serialize completion items to JSON
-        var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "[");
@@ -475,7 +475,7 @@ pub const LspServer = struct {
         if (hover_result) |hr| {
             defer hover.freeHoverResult(hr, self.allocator);
 
-            var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+            var buf: std.ArrayList(u8) = .empty;
             defer buf.deinit(self.allocator);
 
             try buf.appendSlice(self.allocator, "{\"contents\":{\"kind\":\"markdown\",\"value\":");
@@ -502,7 +502,7 @@ pub const LspServer = struct {
         const diags = try diagnostics.getDiagnostics(text, self.allocator);
         defer diagnostics.freeDiagnostics(diags, self.allocator);
 
-        var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator,
@@ -536,7 +536,7 @@ pub const LspServer = struct {
     }
 
     fn publishDiagnosticsEmpty(self: *LspServer, uri: []const u8) !void {
-        var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator,
@@ -553,7 +553,7 @@ pub const LspServer = struct {
     // ------------------------------------------------------------------
 
     fn sendResult(self: *LspServer, id: ?std.json.Value, result_json: []const u8) !void {
-        var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator,
@@ -568,7 +568,7 @@ pub const LspServer = struct {
     }
 
     fn sendError(self: *LspServer, id: ?std.json.Value, code: i32, message: []const u8) !void {
-        var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator,
@@ -671,7 +671,7 @@ fn jsonGetInt(val: std.json.Value, key: []const u8) ?i64 {
 // ---------------------------------------------------------------------------
 
 test "writeJsonString escapes special characters" {
-    var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.testing.allocator);
 
     try writeJsonString(&buf, std.testing.allocator, "hello \"world\"\nnewline\\backslash");
@@ -682,7 +682,7 @@ test "writeJsonString escapes special characters" {
 }
 
 test "appendInt formats numbers" {
-    var buf: std.ArrayList(u8) = .{ .items = &.{}, .capacity = 0 };
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.testing.allocator);
 
     try appendInt(&buf, std.testing.allocator, @as(u32, 42));

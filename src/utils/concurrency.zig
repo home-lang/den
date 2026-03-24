@@ -1,5 +1,6 @@
 // Concurrency utilities for Den Shell - Thread pool and lock-free structures
 const std = @import("std");
+const compat = @import("compat");
 
 /// Thread pool for parallel task execution
 pub const ThreadPool = struct {
@@ -118,13 +119,13 @@ pub const ThreadPool = struct {
     const JobQueue = struct {
         allocator: std.mem.Allocator,
         queue: std.ArrayListUnmanaged(JobItem),
-        mutex: std.Thread.Mutex,
-        condition: std.Thread.Condition,
+        mutex: compat.Mutex,
+        condition: compat.Condition,
 
         fn init(allocator: std.mem.Allocator) JobQueue {
             return .{
                 .allocator = allocator,
-                .queue = .{},
+                .queue = .empty,
                 .mutex = .{},
                 .condition = .{},
             };
@@ -263,11 +264,11 @@ pub fn SPSCQueue(comptime T: type, comptime capacity: usize) type {
 
 /// Read-Write lock with reader preference
 pub const RWLock = struct {
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
     readers: usize,
     writer: bool,
-    read_cond: std.Thread.Condition,
-    write_cond: std.Thread.Condition,
+    read_cond: compat.Condition,
+    write_cond: compat.Condition,
 
     pub fn init() RWLock {
         return .{

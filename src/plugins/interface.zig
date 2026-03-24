@@ -52,7 +52,7 @@ pub const CustomHookRegistry = struct {
     pub fn init(allocator: std.mem.Allocator) CustomHookRegistry {
         return .{
             .allocator = allocator,
-            .hooks = .{},
+            .hooks = .empty,
         };
     }
 

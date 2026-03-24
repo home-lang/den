@@ -145,7 +145,7 @@ pub fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]con
 
 /// Get completions for git command (branches, files, subcommands)
 pub fn completeGit(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Parse to find the git subcommand
@@ -199,7 +199,7 @@ pub fn completeGit(allocator: std.mem.Allocator, input: []const u8, prefix: []co
 
 /// Get git branches for completion
 pub fn getGitBranches(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Run: git branch -a --format=%(refname:short)
@@ -242,7 +242,7 @@ pub fn getGitBranches(allocator: std.mem.Allocator, prefix: []const u8) ![][]con
 
 /// Get git modified files for completion
 pub fn getGitModifiedFiles(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Run: git status --porcelain
@@ -277,7 +277,7 @@ pub fn getGitModifiedFiles(allocator: std.mem.Allocator, prefix: []const u8) ![]
 
 /// Get completions for bun command
 pub fn completeBun(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Bun subcommands
@@ -319,7 +319,7 @@ pub fn completeBun(allocator: std.mem.Allocator, prefix: []const u8) ![][]const 
 
 /// Read scripts from package.json
 fn getPackageJsonScripts(allocator: std.mem.Allocator) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     errdefer {
         for (results.items) |item| allocator.free(item);
         results.deinit(allocator);
@@ -388,7 +388,7 @@ fn getPackageJsonScripts(allocator: std.mem.Allocator) ![][]const u8 {
 
 /// Get completions for npm command
 pub fn completeNpm(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // npm subcommands
@@ -442,7 +442,7 @@ pub fn completeNpm(allocator: std.mem.Allocator, prefix: []const u8) ![][]const 
 
 /// Get completions for yarn command
 pub fn completeYarn(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Parse to find if we have a subcommand
@@ -497,7 +497,7 @@ pub fn completeYarn(allocator: std.mem.Allocator, input: []const u8, prefix: []c
 
 /// Get completions for pnpm command
 pub fn completePnpm(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Parse to find if we have a subcommand
@@ -551,7 +551,7 @@ pub fn completePnpm(allocator: std.mem.Allocator, input: []const u8, prefix: []c
 
 /// Get completions for docker command
 pub fn completeDocker(allocator: std.mem.Allocator, input: []const u8, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Parse to find the docker subcommand
@@ -620,7 +620,7 @@ pub fn completeDocker(allocator: std.mem.Allocator, input: []const u8, prefix: [
 
 /// Get docker containers for completion
 fn getDockerContainers(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Run: docker ps -a --format {{.Names}}
@@ -653,7 +653,7 @@ fn getDockerContainers(allocator: std.mem.Allocator, prefix: []const u8) ![][]co
 
 /// Get docker images for completion
 fn getDockerImages(allocator: std.mem.Allocator, prefix: []const u8) ![][]const u8 {
-    var results = std.ArrayList([]const u8){ .items = &[_][]const u8{}, .capacity = 0 };
+    var results = std.ArrayList([]const u8).empty;
     defer results.deinit(allocator);
 
     // Run: docker images --format {{.Repository}}:{{.Tag}}

@@ -434,8 +434,8 @@ pub const Executor = struct {
 
                 // Close all pipe fds in child
                 for (0..num_pipes) |j| {
-                    std.posix.close(pipes_buffer[j][0]);
-                    std.posix.close(pipes_buffer[j][1]);
+                    _ = std.c.close(pipes_buffer[j][0]);
+                    _ = std.c.close(pipes_buffer[j][1]);
                 }
 
                 // Execute the command
@@ -490,8 +490,8 @@ pub const Executor = struct {
 
         // Parent: close all pipes
         for (0..num_pipes) |i| {
-            std.posix.close(pipes_buffer[i][0]);
-            std.posix.close(pipes_buffer[i][1]);
+            _ = std.c.close(pipes_buffer[i][0]);
+            _ = std.c.close(pipes_buffer[i][1]);
         }
 
         // Wait for all children and collect PIPESTATUS
@@ -682,21 +682,21 @@ pub const Executor = struct {
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(c_uint, 0o644));
                                 if (fd < 0) return 1;
-                                std.posix.close(@intCast(fd));
+                                _ = std.c.close(@intCast(fd));
                             },
                             .output_append => {
                                 const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, @as(c_uint, 0o644));
                                 if (fd < 0) return 1;
-                                std.posix.close(@intCast(fd));
+                                _ = std.c.close(@intCast(fd));
                             },
                             .input => {
                                 const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{}, @as(c_uint, 0));
                                 if (fd < 0) return 1;
-                                std.posix.close(@intCast(fd));
+                                _ = std.c.close(@intCast(fd));
                             },
                             else => {},
                         }
@@ -1492,7 +1492,7 @@ pub const Executor = struct {
 
     fn executeExternalWindows(self: *Executor, command: *types.ParsedCommand) !i32 {
         // Build argv list
-        var argv_list: std.ArrayList([]const u8) = .{};
+        var argv_list: std.ArrayList([]const u8) = .empty;
         defer argv_list.deinit(self.allocator);
 
         try argv_list.append(self.allocator, command.name);
@@ -1712,7 +1712,7 @@ pub const Executor = struct {
 
     fn executeCommandBackgroundWindows(self: *Executor, command: *types.ParsedCommand) !void {
         // Build argv list
-        var argv_list: std.ArrayList([]const u8) = .{};
+        var argv_list: std.ArrayList([]const u8) = .empty;
         defer argv_list.deinit(self.allocator);
 
         try argv_list.append(self.allocator, command.name);

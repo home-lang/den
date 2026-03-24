@@ -13,7 +13,7 @@ const HistoryEntry = struct {
 
 fn benchmarkLinearSearch(allocator: std.mem.Allocator) !void {
     // Create 10000 history entries
-    var history = std.ArrayList(HistoryEntry){ };
+    var history = std.ArrayList(HistoryEntry).empty;
     defer {
         for (history.items) |entry| {
             allocator.free(entry.command);
@@ -41,7 +41,7 @@ fn benchmarkLinearSearch(allocator: std.mem.Allocator) !void {
 
 fn benchmarkPrefixSearch(allocator: std.mem.Allocator) !void {
     // Create history entries
-    var history = std.ArrayList(HistoryEntry){ };
+    var history = std.ArrayList(HistoryEntry).empty;
     defer {
         for (history.items) |entry| {
             allocator.free(entry.command);
@@ -60,7 +60,7 @@ fn benchmarkPrefixSearch(allocator: std.mem.Allocator) !void {
 
     // Search for prefix
     const prefix = "git commit";
-    var matches = std.ArrayList(*HistoryEntry){ };
+    var matches = std.ArrayList(*HistoryEntry).empty;
     defer matches.deinit(allocator);
 
     for (history.items) |*entry| {
@@ -72,7 +72,7 @@ fn benchmarkPrefixSearch(allocator: std.mem.Allocator) !void {
 
 fn benchmarkSubstringSearch(allocator: std.mem.Allocator) !void {
     // Create history entries
-    var history = std.ArrayList(HistoryEntry){ };
+    var history = std.ArrayList(HistoryEntry).empty;
     defer {
         for (history.items) |entry| {
             allocator.free(entry.command);
@@ -91,7 +91,7 @@ fn benchmarkSubstringSearch(allocator: std.mem.Allocator) !void {
 
     // Search for substring
     const substring = "pattern";
-    var matches = std.ArrayList(*HistoryEntry){ };
+    var matches = std.ArrayList(*HistoryEntry).empty;
     defer matches.deinit(allocator);
 
     for (history.items) |*entry| {
@@ -103,7 +103,7 @@ fn benchmarkSubstringSearch(allocator: std.mem.Allocator) !void {
 
 fn benchmarkDuplicateRemoval(allocator: std.mem.Allocator) !void {
     // Create history with duplicates
-    var history = std.ArrayList(HistoryEntry){ };
+    var history = std.ArrayList(HistoryEntry).empty;
     defer {
         for (history.items) |entry| {
             allocator.free(entry.command);
@@ -126,7 +126,7 @@ fn benchmarkDuplicateRemoval(allocator: std.mem.Allocator) !void {
     var seen = std.StringHashMap(void).init(allocator);
     defer seen.deinit();
 
-    var unique = std.ArrayList(HistoryEntry){ };
+    var unique = std.ArrayList(HistoryEntry).empty;
     defer unique.deinit(allocator);
 
     for (history.items) |entry| {
@@ -139,7 +139,7 @@ fn benchmarkDuplicateRemoval(allocator: std.mem.Allocator) !void {
 
 fn benchmarkTimeRangeFilter(allocator: std.mem.Allocator) !void {
     // Create history entries
-    var history = std.ArrayList(HistoryEntry){ };
+    var history = std.ArrayList(HistoryEntry).empty;
     defer {
         for (history.items) |entry| {
             allocator.free(entry.command);
@@ -160,7 +160,7 @@ fn benchmarkTimeRangeFilter(allocator: std.mem.Allocator) !void {
     const start_time: i64 = 100000;
     const end_time: i64 = 500000;
 
-    var filtered = std.ArrayList(*HistoryEntry){ };
+    var filtered = std.ArrayList(*HistoryEntry).empty;
     defer filtered.deinit(allocator);
 
     for (history.items) |*entry| {
@@ -172,7 +172,7 @@ fn benchmarkTimeRangeFilter(allocator: std.mem.Allocator) !void {
 
 fn benchmarkHistoryPersistence(allocator: std.mem.Allocator) !void {
     // Simulate writing history to file
-    var buffer = std.ArrayList(u8){ };
+    var buffer = std.ArrayList(u8).empty;
     defer buffer.deinit(allocator);
 
     var i: usize = 0;
@@ -187,7 +187,7 @@ fn benchmarkHistoryLoad(allocator: std.mem.Allocator) !void {
     // Simulate loading history from buffer
     const data = "1000:git commit\n2000:git push\n3000:ls -la\n4000:cd /tmp\n";
 
-    var history = std.ArrayList(HistoryEntry){ };
+    var history = std.ArrayList(HistoryEntry).empty;
     defer {
         for (history.items) |entry| {
             allocator.free(entry.command);

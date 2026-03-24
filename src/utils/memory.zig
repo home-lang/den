@@ -160,7 +160,7 @@ pub const StringBuilder = struct {
             self.len = new_len;
         } else {
             if (self.heap_buf == null) {
-                var buf: std.ArrayListUnmanaged(u8) = .{};
+                var buf: std.ArrayListUnmanaged(u8) = .empty;
                 try buf.ensureTotalCapacity(self.allocator, new_len);
                 try buf.appendSlice(self.allocator, self.stack_buf[0..self.len]);
                 self.heap_buf = buf;
@@ -198,8 +198,8 @@ pub const CommandMemoryPool = struct {
         return .{
             .allocator = alloc,
             .command_arena = ShellArena.init(alloc),
-            .arg_buffer = .{},
-            .env_buffer = .{},
+            .arg_buffer = .empty,
+            .env_buffer = .empty,
         };
     }
 

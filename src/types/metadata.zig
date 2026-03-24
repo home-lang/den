@@ -1,4 +1,5 @@
 const std = @import("std");
+const c_lib = std.c;
 
 /// Content type of pipeline data, used for format detection and conversion.
 pub const ContentType = enum {
@@ -61,7 +62,8 @@ pub const PipelineMetadata = struct {
 
     /// Obtain the current wall-clock time as seconds since the Unix epoch.
     fn currentTimestamp() i64 {
-        const ts = std.posix.clock_gettime(.REALTIME) catch return 0;
+        var ts: c_lib.timespec = undefined;
+        if (c_lib.clock_gettime(.REALTIME, &ts) != 0) return 0;
         return ts.sec;
     }
 

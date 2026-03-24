@@ -8,7 +8,7 @@ const BenchmarkSuite = profiling.BenchmarkSuite;
 // Mock completion generation
 fn benchmarkCommandCompletion(allocator: std.mem.Allocator) !void {
     // Simulate completing from 100 available commands
-    var completions = std.ArrayList([]const u8){ };
+    var completions = std.ArrayList([]const u8).empty;
     defer {
         for (completions.items) |completion| {
             allocator.free(completion);
@@ -29,7 +29,7 @@ fn benchmarkCommandCompletion(allocator: std.mem.Allocator) !void {
 
 fn benchmarkFileCompletion(allocator: std.mem.Allocator) !void {
     // Simulate file path completion with 50 files
-    var completions = std.ArrayList([]const u8){ };
+    var completions = std.ArrayList([]const u8).empty;
     defer {
         for (completions.items) |completion| {
             allocator.free(completion);
@@ -51,7 +51,7 @@ fn benchmarkFileCompletion(allocator: std.mem.Allocator) !void {
 
 fn benchmarkPathSearch(allocator: std.mem.Allocator) !void {
     // Simulate PATH search for executables
-    var executables = std.ArrayList([]const u8){ };
+    var executables = std.ArrayList([]const u8).empty;
     defer {
         for (executables.items) |exe| {
             allocator.free(exe);
@@ -81,7 +81,7 @@ fn benchmarkFuzzyMatch(allocator: std.mem.Allocator) !void {
         "grep-color",
     };
 
-    var matches = std.ArrayList([]const u8){ };
+    var matches = std.ArrayList([]const u8).empty;
     defer {
         for (matches.items) |match| {
             allocator.free(match);
@@ -113,7 +113,7 @@ fn benchmarkCompletionRanking(allocator: std.mem.Allocator) !void {
         score: i32,
     };
 
-    var completions: std.ArrayList(Completion) = .{};
+    var completions: std.ArrayList(Completion) = .empty;
     defer completions.deinit(allocator);
 
     // Add 100 completions with random scores

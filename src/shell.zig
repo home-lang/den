@@ -474,8 +474,8 @@ pub const Shell = struct {
     pub fn deinit(self: *Shell) void {
         // Clean up coprocess
         if (comptime builtin.os.tag != .windows) {
-            if (self.coproc_read_fd) |fd| std.posix.close(fd);
-            if (self.coproc_write_fd) |fd| std.posix.close(fd);
+            if (self.coproc_read_fd) |fd| _ = std.c.close(fd);
+            if (self.coproc_write_fd) |fd| _ = std.c.close(fd);
             if (self.coproc_pid) |pid| {
                 _ = std.posix.kill(pid, std.posix.SIG.HUP) catch {};
                 var ws: c_int = 0;
@@ -1168,24 +1168,24 @@ pub const Shell = struct {
 
                                 const fork_ret = std.c.fork();
                                 if (fork_ret < 0) {
-                                    std.posix.close(read_fd);
-                                    std.posix.close(write_fd);
+                                    _ = std.c.close(read_fd);
+                                    _ = std.c.close(write_fd);
                                     return error.Unexpected;
                                 }
                                 if (fork_ret == 0) {
-                                    std.posix.close(read_fd);
+                                    _ = std.c.close(read_fd);
                                     _ = std.c.dup2(write_fd, std.posix.STDOUT_FILENO);
-                                    std.posix.close(write_fd);
+                                    _ = std.c.close(write_fd);
                                     self.executeCommand(inner) catch {
                                         std.c._exit(1);
                                     };
                                     std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
                                     unreachable;
                                 }
-                                std.posix.close(write_fd);
+                                _ = std.c.close(write_fd);
                                 const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
                                 _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
-                                std.posix.close(read_fd);
+                                _ = std.c.close(read_fd);
 
                                 var wait_status_bg: c_int = 0;
                                 _ = std.c.waitpid(@intCast(fork_ret), &wait_status_bg, 0);
@@ -1195,7 +1195,7 @@ pub const Shell = struct {
 
                                 if (saved_stdin >= 0) {
                                     _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                                    std.posix.close(@intCast(saved_stdin));
+                                    _ = std.c.close(@intCast(saved_stdin));
                                 }
                             } else {
                                 self.executeCommand(inner) catch {};
@@ -1275,7 +1275,7 @@ pub const Shell = struct {
                                     .dup_out, .dup_in => {
                                         // >&N or <&N
                                         if (std.mem.eql(u8, target, "-")) {
-                                            std.posix.close(src_fd);
+                                            _ = std.c.close(src_fd);
                                         } else if (std.fmt.parseInt(std.posix.fd_t, target, 10)) |dest_fd| {
                                             _ = std.c.dup2(dest_fd, src_fd);
                                         } else |_| {
@@ -1299,7 +1299,7 @@ pub const Shell = struct {
                                         const fd = std.c.open(path_z, flags, @as(std.c.mode_t, 0o644));
                                         if (fd >= 0) {
                                             _ = std.c.dup2(fd, src_fd);
-                                            std.posix.close(@intCast(fd));
+                                            _ = std.c.close(@intCast(fd));
                                         } else {
                                             redir_ok = false;
                                         }
@@ -1317,7 +1317,7 @@ pub const Shell = struct {
                                         const fd = std.c.open(path_z, .{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
                                         if (fd >= 0) {
                                             _ = std.c.dup2(fd, src_fd);
-                                            std.posix.close(@intCast(fd));
+                                            _ = std.c.close(@intCast(fd));
                                         } else {
                                             redir_ok = false;
                                         }
@@ -1332,7 +1332,7 @@ pub const Shell = struct {
                                     for (saved_fds, 0..) |sfd, fi| {
                                         if (sfd != -1) {
                                             _ = std.c.dup2(sfd, @intCast(fi));
-                                            std.posix.close(@intCast(sfd));
+                                            _ = std.c.close(@intCast(sfd));
                                         }
                                     }
                                     return err;
@@ -1343,7 +1343,7 @@ pub const Shell = struct {
                             for (saved_fds, 0..) |sfd, fi| {
                                 if (sfd != -1) {
                                     _ = std.c.dup2(sfd, @intCast(fi));
-                                    std.posix.close(@intCast(sfd));
+                                    _ = std.c.close(@intCast(sfd));
                                 }
                             }
                             return;
@@ -1409,15 +1409,15 @@ pub const Shell = struct {
 
                             const fork_ret = std.c.fork();
                             if (fork_ret < 0) {
-                                std.posix.close(read_fd);
-                                std.posix.close(write_fd);
+                                _ = std.c.close(read_fd);
+                                _ = std.c.close(write_fd);
                                 return error.Unexpected;
                             }
                             if (fork_ret == 0) {
                                 // Child: redirect stdout to pipe, execute subshell
-                                std.posix.close(read_fd);
+                                _ = std.c.close(read_fd);
                                 _ = std.c.dup2(write_fd, std.posix.STDOUT_FILENO);
-                                std.posix.close(write_fd);
+                                _ = std.c.close(write_fd);
                                 self.executeCommand(inner) catch {
                                     std.c._exit(1);
                                 };
@@ -1425,10 +1425,10 @@ pub const Shell = struct {
                                 unreachable;
                             }
                             // Parent: pipe child stdout to the pipe command
-                            std.posix.close(write_fd);
+                            _ = std.c.close(write_fd);
                             const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
                             _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
-                            std.posix.close(read_fd);
+                            _ = std.c.close(read_fd);
 
                             var wait_status_sub: c_int = 0;
                             _ = std.c.waitpid(@intCast(fork_ret), &wait_status_sub, 0);
@@ -1438,7 +1438,7 @@ pub const Shell = struct {
 
                             if (saved_stdin >= 0) {
                                 _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                                std.posix.close(@intCast(saved_stdin));
+                                _ = std.c.close(@intCast(saved_stdin));
                             }
                         } else {
                             const fork_ret = std.c.fork();
@@ -2258,7 +2258,7 @@ pub const Shell = struct {
                             if (fd >= 0) {
                                 saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
                                 _ = std.c.dup2(fd, std.posix.STDIN_FILENO);
-                                std.posix.close(@intCast(fd));
+                                _ = std.c.close(@intCast(fd));
                                 applied = true;
                             }
                         },
@@ -2273,7 +2273,7 @@ pub const Shell = struct {
                             if (fd >= 0) {
                                 saved_fds[1] = std.c.dup(std.posix.STDOUT_FILENO);
                                 _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);
-                                std.posix.close(@intCast(fd));
+                                _ = std.c.close(@intCast(fd));
                                 applied = true;
                             }
                         },
@@ -2295,11 +2295,11 @@ pub const Shell = struct {
                                 const hs_file = std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } };
                                 hs_file.writeStreamingAll(std.Options.debug_io, unquoted) catch {};
                                 hs_file.writeStreamingAll(std.Options.debug_io, "\n") catch {};
-                                std.posix.close(write_fd);
+                                _ = std.c.close(write_fd);
                                 // Redirect stdin
                                 saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
                                 _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
-                                std.posix.close(read_fd);
+                                _ = std.c.close(read_fd);
                                 applied = true;
                             }
                         },
@@ -2311,11 +2311,11 @@ pub const Shell = struct {
                     // Restore saved fds
                     if (saved_fds[0] >= 0) {
                         _ = std.c.dup2(saved_fds[0], std.posix.STDIN_FILENO);
-                        std.posix.close(@intCast(saved_fds[0]));
+                        _ = std.c.close(@intCast(saved_fds[0]));
                     }
                     if (saved_fds[1] >= 0) {
                         _ = std.c.dup2(saved_fds[1], std.posix.STDOUT_FILENO);
-                        std.posix.close(@intCast(saved_fds[1]));
+                        _ = std.c.close(@intCast(saved_fds[1]));
                     }
                     if (result == .handled) {
                         if (self.last_exit_code != 0) {
@@ -2538,32 +2538,32 @@ pub const Shell = struct {
 
                 const fork_ret = std.c.fork();
                 if (fork_ret < 0) {
-                    std.posix.close(read_fd);
-                    std.posix.close(write_fd);
+                    _ = std.c.close(read_fd);
+                    _ = std.c.close(write_fd);
                     return null;
                 }
                 if (fork_ret == 0) {
                     // Child: write content and exit
-                    std.posix.close(read_fd);
+                    _ = std.c.close(read_fd);
                     const content_with_nl = std.fmt.allocPrint(self.allocator, "{s}\n", .{heredoc_content}) catch {
                         std.c._exit(1);
                         unreachable;
                     };
                     (std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } }).writeStreamingAll(std.Options.debug_io, content_with_nl) catch {};
-                    std.posix.close(write_fd);
+                    _ = std.c.close(write_fd);
                     std.c._exit(0);
                     unreachable;
                 }
 
                 // Parent: redirect stdin to read end of pipe
-                std.posix.close(write_fd);
+                _ = std.c.close(write_fd);
                 const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
                 if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) {
-                    std.posix.close(read_fd);
-                    if (saved_stdin >= 0) std.posix.close(@intCast(saved_stdin));
+                    _ = std.c.close(read_fd);
+                    if (saved_stdin >= 0) _ = std.c.close(@intCast(saved_stdin));
                     return null;
                 }
-                std.posix.close(read_fd);
+                _ = std.c.close(read_fd);
 
                 // Wait for writer to finish
                 var wait_status_heredoc: c_int = 0;
@@ -2575,7 +2575,7 @@ pub const Shell = struct {
                 // Restore stdin
                 if (saved_stdin >= 0) {
                     _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                    std.posix.close(@intCast(saved_stdin));
+                    _ = std.c.close(@intCast(saved_stdin));
                 }
 
                 // Execute any trailing content after the delimiter line
@@ -2943,7 +2943,7 @@ pub const Shell = struct {
         };
 
         // The match value is everything before {
-        var match_value = std.mem.trim(u8, after_match[0..brace_pos], &std.ascii.whitespace);
+        const match_value = std.mem.trim(u8, after_match[0..brace_pos], &std.ascii.whitespace);
 
         // Expand the match value (handle $var, $(cmd), etc.)
         var expander = Expansion.init(self.allocator, &self.environment, self.last_exit_code);
@@ -3227,16 +3227,16 @@ pub const Shell = struct {
 
                 const fork_ret = std.c.fork();
                 if (fork_ret < 0) {
-                    std.posix.close(read_fd);
-                    std.posix.close(write_fd);
+                    _ = std.c.close(read_fd);
+                    _ = std.c.close(write_fd);
                     return error.Unexpected;
                 }
 
                 if (fork_ret == 0) {
                     // Child: redirect stdout to write end, execute control flow
-                    std.posix.close(read_fd);
+                    _ = std.c.close(read_fd);
                     _ = std.c.dup2(write_fd, std.posix.STDOUT_FILENO);
-                    std.posix.close(write_fd);
+                    _ = std.c.close(write_fd);
 
                     var cf_parser = ControlFlowParser.init(self.allocator);
                     var cf_executor = ControlFlowExecutor.init(self);
@@ -3246,10 +3246,10 @@ pub const Shell = struct {
                 }
 
                 // Parent: redirect stdin to read end, execute pipe command
-                std.posix.close(write_fd);
+                _ = std.c.close(write_fd);
                 const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
                 _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
-                std.posix.close(read_fd);
+                _ = std.c.close(read_fd);
 
                 // Wait for control flow child to finish writing
                 var wait_status_cf: c_int = 0;
@@ -3264,7 +3264,7 @@ pub const Shell = struct {
                 // Restore stdin
                 if (saved_stdin >= 0) {
                     _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                    std.posix.close(@intCast(saved_stdin));
+                    _ = std.c.close(@intCast(saved_stdin));
                 }
                 return;
             } else {
@@ -3382,26 +3382,26 @@ pub const Shell = struct {
 
             const fork_ret = std.c.fork();
             if (fork_ret < 0) {
-                std.posix.close(fds[0]);
-                std.posix.close(fds[1]);
+                _ = std.c.close(fds[0]);
+                _ = std.c.close(fds[1]);
                 return false;
             }
             const pid: std.posix.pid_t = @intCast(fork_ret);
 
             if (pid == 0) {
                 // Child: execute left side, stdout -> pipe write end
-                std.posix.close(fds[0]);
+                _ = std.c.close(fds[0]);
                 _ = std.c.dup2(fds[1], std.posix.STDOUT_FILENO);
-                std.posix.close(fds[1]);
+                _ = std.c.close(fds[1]);
                 self.executeCommand(left) catch {};
                 std.c._exit(@intCast(if (self.last_exit_code >= 0) @as(u32, @intCast(self.last_exit_code)) else 1));
             }
 
             // Parent: execute right side (control flow) with stdin <- pipe read end
-            std.posix.close(fds[1]);
+            _ = std.c.close(fds[1]);
             const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
             _ = std.c.dup2(fds[0], std.posix.STDIN_FILENO);
-            std.posix.close(fds[0]);
+            _ = std.c.close(fds[0]);
 
             // Execute the control flow command
             self.executeCommand(right) catch {};
@@ -3409,7 +3409,7 @@ pub const Shell = struct {
             // Restore stdin
             if (saved_stdin >= 0) {
                 _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                std.posix.close(saved_stdin);
+                _ = std.c.close(saved_stdin);
             }
 
             // Wait for child

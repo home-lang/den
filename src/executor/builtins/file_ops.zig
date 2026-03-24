@@ -22,7 +22,7 @@ fn printTree(allocator: std.mem.Allocator, dir_path: []const u8, prefix: []const
     defer dir.close(std.Options.debug_io);
 
     var iter = dir.iterate();
-    var entries: std.ArrayList(std.Io.Dir.Entry) = .{};
+    var entries: std.ArrayList(std.Io.Dir.Entry) = .empty;
     defer entries.deinit(allocator);
 
     while (try iter.next(std.Options.debug_io)) |entry| {

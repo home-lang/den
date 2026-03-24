@@ -100,7 +100,7 @@ fn benchmarkStringBuilder(allocator: std.mem.Allocator) !void {
 }
 
 fn benchmarkStringConcat(allocator: std.mem.Allocator) !void {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     defer result.deinit(allocator);
 
     try result.appendSlice(allocator, "Hello ");
@@ -146,7 +146,7 @@ fn benchmarkStackArrayList(_: std.mem.Allocator) !void {
 }
 
 fn benchmarkHeapArrayList(allocator: std.mem.Allocator) !void {
-    var list: std.ArrayListUnmanaged(i32) = .{};
+    var list: std.ArrayListUnmanaged(i32) = .empty;
     defer list.deinit(allocator);
 
     var i: i32 = 0;

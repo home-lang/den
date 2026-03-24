@@ -345,8 +345,8 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     }
     var pipe_from_coproc: [2]std.posix.fd_t = undefined;
     if (std.c.pipe(&pipe_from_coproc) != 0) {
-        std.posix.close(pipe_to_coproc[0]);
-        std.posix.close(pipe_to_coproc[1]);
+        _ = std.c.close(pipe_to_coproc[0]);
+        _ = std.c.close(pipe_to_coproc[1]);
         try IO.eprint("coproc: failed to create pipe\n", .{});
         return 1;
     }
@@ -354,10 +354,10 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     // Fork to create coprocess
     const fork_ret = std.c.fork();
     if (fork_ret < 0) {
-        std.posix.close(pipe_to_coproc[0]);
-        std.posix.close(pipe_to_coproc[1]);
-        std.posix.close(pipe_from_coproc[0]);
-        std.posix.close(pipe_from_coproc[1]);
+        _ = std.c.close(pipe_to_coproc[0]);
+        _ = std.c.close(pipe_to_coproc[1]);
+        _ = std.c.close(pipe_from_coproc[0]);
+        _ = std.c.close(pipe_from_coproc[1]);
         try IO.eprint("coproc: failed to fork\n", .{});
         return 1;
     }
@@ -366,16 +366,16 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     if (pid == 0) {
         // Child process (coprocess)
         // Close parent's ends
-        std.posix.close(pipe_to_coproc[1]);
-        std.posix.close(pipe_from_coproc[0]);
+        _ = std.c.close(pipe_to_coproc[1]);
+        _ = std.c.close(pipe_from_coproc[0]);
 
         // Redirect stdin from pipe_to_coproc[0]
         if (std.c.dup2(pipe_to_coproc[0], std.posix.STDIN_FILENO) < 0) std.process.exit(1);
-        std.posix.close(pipe_to_coproc[0]);
+        _ = std.c.close(pipe_to_coproc[0]);
 
         // Redirect stdout to pipe_from_coproc[1]
         if (std.c.dup2(pipe_from_coproc[1], std.posix.STDOUT_FILENO) < 0) std.process.exit(1);
-        std.posix.close(pipe_from_coproc[1]);
+        _ = std.c.close(pipe_from_coproc[1]);
 
         // Execute the command
         const cmd_name = cmd.args[cmd_start];
@@ -411,8 +411,8 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
 
     // Parent process
     // Close child's ends
-    std.posix.close(pipe_to_coproc[0]);
-    std.posix.close(pipe_from_coproc[1]);
+    _ = std.c.close(pipe_to_coproc[0]);
+    _ = std.c.close(pipe_from_coproc[1]);
 
     // Set up variables:
     // NAME_0 = fd for reading from coproc (pipe_from_coproc[0])

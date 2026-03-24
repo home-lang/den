@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
@@ -303,7 +304,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     // Parent process - wait with timeout
     const child_pid = fork_result;
     const timeout_ns: u64 = @intFromFloat(duration_secs * 1_000_000_000);
-    const start_time = std.time.Instant.now() catch {
+    const start_time = compat.Instant.now() catch {
         // Can't get time, just wait normally
         var wait_status_fallback: c_int = 0;
         if (comptime builtin.os.tag != .windows) {
@@ -332,7 +333,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         }
 
         // Check timeout
-        const now = std.time.Instant.now() catch break;
+        const now = compat.Instant.now() catch break;
         if (now.since(start_time) >= timeout_ns) {
             // Timeout - send signal
             std.posix.kill(child_pid, sig) catch {};
@@ -487,7 +488,7 @@ pub fn time(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     }
 
     // Time the execution of an external command
-    const start_time = std.time.Instant.now() catch return 1;
+    const start_time = compat.Instant.now() catch return 1;
 
     var new_cmd = types.ParsedCommand{
         .name = cmd.args[arg_start],
@@ -498,7 +499,7 @@ pub fn time(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     // Execute as external command
     const exit_code = try ctx.executeExternalCmd(&new_cmd);
 
-    const end_time = std.time.Instant.now() catch return exit_code;
+    const end_time = compat.Instant.now() catch return exit_code;
     const elapsed_ns = end_time.since(start_time);
     const elapsed_s = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000_000.0;
     const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;

@@ -46,7 +46,7 @@ pub fn getDiagnostics(
     document_text: []const u8,
     allocator: std.mem.Allocator,
 ) ![]Diagnostic {
-    var results: std.ArrayList(Diagnostic) = .{ .items = &.{}, .capacity = 0 };
+    var results: std.ArrayList(Diagnostic) = .empty;
     errdefer {
         for (results.items) |d| {
             if (d.owned) allocator.free(d.message);
@@ -162,7 +162,7 @@ fn checkUnmatchedBrackets(
     allocator: std.mem.Allocator,
     results: *std.ArrayList(Diagnostic),
 ) !void {
-    var stack: std.ArrayList(BracketEntry) = .{ .items = &.{}, .capacity = 0 };
+    var stack: std.ArrayList(BracketEntry) = .empty;
     defer stack.deinit(allocator);
 
     var line: u32 = 0;
@@ -276,7 +276,7 @@ fn checkUnclosedBlocks(
         pos: Position,
     };
 
-    var stack: std.ArrayList(BlockEntry) = .{ .items = &.{}, .capacity = 0 };
+    var stack: std.ArrayList(BlockEntry) = .empty;
     defer stack.deinit(allocator);
 
     var line: u32 = 0;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 const types = @import("types.zig");
 
 const ModuleInfo = types.ModuleInfo;
@@ -95,7 +96,7 @@ pub const ModuleRegistry = struct {
         }
 
         // Check cache
-        const now_instant = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+        const now_instant = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
         const now = now_instant.timestamp.sec;
         if (self.cache.get(name)) |entry| {
             if (now - entry.timestamp < self.cache_ttl_seconds) {

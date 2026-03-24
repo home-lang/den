@@ -1,5 +1,6 @@
 // Parallel module and plugin discovery for Den Shell
 const std = @import("std");
+const compat = @import("compat");
 const concurrency = @import("concurrency");
 
 /// Parallel directory scanner for plugin/module discovery
@@ -7,13 +8,13 @@ pub const ParallelScanner = struct {
     allocator: std.mem.Allocator,
     thread_pool: *concurrency.ThreadPool,
     results: std.ArrayListUnmanaged([]const u8),
-    results_mutex: std.Thread.Mutex,
+    results_mutex: compat.Mutex,
 
     pub fn init(allocator: std.mem.Allocator, thread_pool: *concurrency.ThreadPool) ParallelScanner {
         return .{
             .allocator = allocator,
             .thread_pool = thread_pool,
-            .results = .{},
+            .results = .empty,
             .results_mutex = .{},
         };
     }
@@ -150,7 +151,7 @@ pub fn ConcurrentHashMap(comptime K: type, comptime V: type, comptime shard_coun
         const Self = @This();
         const Shard = struct {
             map: std.StringHashMapUnmanaged(V),
-            mutex: std.Thread.Mutex,
+            mutex: compat.Mutex,
 
             fn init() Shard {
                 return .{
@@ -248,7 +249,7 @@ pub const BatchProcessor = struct {
     allocator: std.mem.Allocator,
     thread_pool: *concurrency.ThreadPool,
     work_queue: std.ArrayListUnmanaged(WorkItem),
-    queue_mutex: std.Thread.Mutex,
+    queue_mutex: compat.Mutex,
 
     pub fn init(allocator: std.mem.Allocator, thread_pool: *concurrency.ThreadPool) Self {
         return .{

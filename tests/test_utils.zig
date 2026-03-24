@@ -5,8 +5,9 @@ const std = @import("std");
 
 /// Helper to get millisecond timestamp for Zig 0.16 compatibility
 fn getMilliTimestamp() i64 {
-    const now = std.time.Instant.now() catch return 0;
-    return @intCast(now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000));
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
 }
 
 /// Temporary directory manager for tests

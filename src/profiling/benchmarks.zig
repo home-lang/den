@@ -1,5 +1,6 @@
 // Benchmark suite for Den Shell performance testing
 const std = @import("std");
+const compat = @import("compat");
 const Profiler = @import("profiler.zig").Profiler;
 const ProfileEvent = @import("profiler.zig").ProfileEvent;
 
@@ -77,9 +78,9 @@ pub const Benchmark = struct {
 
         i = 0;
         while (i < self.iterations) : (i += 1) {
-            const start = std.time.Instant.now() catch unreachable;
+            const start = compat.Instant.now() catch unreachable;
             _ = try @call(.auto, func, args);
-            const end = std.time.Instant.now() catch unreachable;
+            const end = compat.Instant.now() catch unreachable;
             const duration = end.since(start);
             const duration_i64 = @as(i64, @intCast(duration));
 
@@ -136,7 +137,7 @@ pub const BenchmarkSuite = struct {
         return .{
             .allocator = allocator,
             .name = name,
-            .results = .{},
+            .results = std.ArrayList(BenchmarkResult).empty,
             .profiler = null,
         };
     }
@@ -207,7 +208,7 @@ test "BenchmarkSuite usage" {
 
     try suite.addResult(result);
 
-    var buffer: std.ArrayList(u8) = .{};
+    var buffer: std.ArrayList(u8) = .empty;
     defer buffer.deinit(allocator);
 
     var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &buffer);

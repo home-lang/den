@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 const types = @import("types.zig");
 
 /// Cross-platform handle read helper
@@ -78,7 +79,7 @@ pub const TestRunner = struct {
     fn runTestModule(self: *TestRunner, module_name: []const u8) !TestResult {
         var result = try TestResult.init(self.allocator, module_name);
 
-        const start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+        const start_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
 
         // Build test command
         var cmd_args = std.ArrayList([]const u8).empty;
@@ -98,7 +99,7 @@ pub const TestRunner = struct {
             .stdout = .pipe,
             .stderr = .pipe,
         }) catch |err| {
-            const end_time = std.time.Instant.now() catch start_time;
+            const end_time = compat.Instant.now() catch start_time;
             const duration = end_time.since(start_time);
             const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to spawn test: {any}", .{err});
             try result.setFailed(duration, error_msg);
@@ -135,7 +136,7 @@ pub const TestRunner = struct {
         const stderr = stderr_buf.items;
 
         const term = child.wait(std.Options.debug_io) catch |err| {
-            const end_time = std.time.Instant.now() catch start_time;
+            const end_time = compat.Instant.now() catch start_time;
             const duration = end_time.since(start_time);
             const error_msg = try std.fmt.allocPrint(self.allocator, "Failed to wait for test: {any}", .{err});
             try result.setFailed(duration, error_msg);
@@ -143,7 +144,7 @@ pub const TestRunner = struct {
             return result;
         };
 
-        const end_time = std.time.Instant.now() catch start_time;
+        const end_time = compat.Instant.now() catch start_time;
         const duration = end_time.since(start_time);
 
         switch (term) {

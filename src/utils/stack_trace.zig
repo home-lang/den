@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 
 /// Stack trace configuration
 pub const Config = struct {
@@ -150,7 +151,7 @@ fn writeStderr(msg: []const u8) void {
 
 /// Helper to get milliseconds since some reference point
 fn getMilliTimestamp() i64 {
-    const now = std.time.Instant.now() catch return 0;
+    const now = compat.Instant.now() catch return 0;
     return @intCast(@divFloor(now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000), 1));
 }
 

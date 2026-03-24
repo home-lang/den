@@ -1,5 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
+const compat = @import("compat");
 const types = @import("types.zig");
 const builtin = @import("builtin");
 
@@ -437,7 +438,7 @@ pub fn detectOS(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
 pub fn detectTime(allocator: std.mem.Allocator, _: []const u8) !?ModuleInfo {
     var info = ModuleInfo.init("time");
 
-    const now = std.time.Instant.now() catch return null;
+    const now = compat.Instant.now() catch return null;
     const timestamp = now.timestamp.sec;
     const seconds_in_day = @mod(timestamp, 86400);
     const hours = @divFloor(seconds_in_day, 3600);

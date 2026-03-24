@@ -43,7 +43,7 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection, n
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
-        std.posix.close(sock);
+        _ = std.c.close(sock);
     } else {
         const path_z = try allocator.dupeZ(u8, redir.target);
         defer allocator.free(path_z);
@@ -52,7 +52,7 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection, n
         if (noclobber and !std.mem.startsWith(u8, redir.target, "/dev/")) {
             const check_fd = std.c.open(path_z, .{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
             if (check_fd >= 0) {
-                std.posix.close(check_fd);
+                _ = std.c.close(check_fd);
                 try IO.eprint("den: {s}: cannot overwrite existing file\n", .{redir.target});
                 std.c._exit(1);
             }
@@ -70,7 +70,7 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection, n
         }
 
         if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
-        std.posix.close(fd);
+        _ = std.c.close(fd);
     }
 }
 
@@ -79,7 +79,7 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
-        std.posix.close(sock);
+        _ = std.c.close(sock);
     } else {
         // Open file for appending
         const path_z = try allocator.dupeZ(u8, redir.target);
@@ -96,7 +96,7 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
         }
 
         if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
-        std.posix.close(fd);
+        _ = std.c.close(fd);
     }
 }
 
@@ -105,7 +105,7 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
-        std.posix.close(sock);
+        _ = std.c.close(sock);
     } else {
         // Open file for reading
         const path_z = try allocator.dupeZ(u8, redir.target);
@@ -122,7 +122,7 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
         }
 
         if (std.c.dup2(fd, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
-        std.posix.close(fd);
+        _ = std.c.close(fd);
     }
 }
 
@@ -131,7 +131,7 @@ fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !voi
     // <> opens file for both reading and writing
     if (networking.openDevNet(redir.target)) |sock| {
         if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
-        std.posix.close(sock);
+        _ = std.c.close(sock);
     } else {
         const path_z = try allocator.dupeZ(u8, redir.target);
         defer allocator.free(path_z);
@@ -148,7 +148,7 @@ fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !voi
         }
 
         if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
-        std.posix.close(fd);
+        _ = std.c.close(fd);
     }
 }
 
@@ -189,16 +189,16 @@ fn applyHeredocOrHerestring(
     const writer_pid: std.posix.pid_t = @intCast(fork_ret);
     if (writer_pid == 0) {
         // Child: write content and exit
-        std.posix.close(read_fd);
+        _ = std.c.close(read_fd);
         (std.Io.File{ .handle = write_fd, .flags = .{ .nonblocking = false } }).writeStreamingAll(std.Options.debug_io, content) catch {};
-        std.posix.close(write_fd);
+        _ = std.c.close(write_fd);
         std.c._exit(0);
     }
 
     // Parent: close write end and dup read end to stdin
-    std.posix.close(write_fd);
+    _ = std.c.close(write_fd);
     if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
-    std.posix.close(read_fd);
+    _ = std.c.close(read_fd);
 
     // Wait for writer to finish
     {
@@ -256,21 +256,21 @@ pub const SavedFds = struct {
         // Restore stdin
         if (self.stdin_save) |fd| {
             _ = std.c.dup2(fd, std.posix.STDIN_FILENO);
-            std.posix.close(fd);
+            _ = std.c.close(fd);
             self.stdin_save = null;
         }
 
         // Restore stdout
         if (self.stdout_save) |fd| {
             _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);
-            std.posix.close(fd);
+            _ = std.c.close(fd);
             self.stdout_save = null;
         }
 
         // Restore stderr
         if (self.stderr_save) |fd| {
             _ = std.c.dup2(fd, std.posix.STDERR_FILENO);
-            std.posix.close(fd);
+            _ = std.c.close(fd);
             self.stderr_save = null;
         }
     }
@@ -281,15 +281,15 @@ pub const SavedFds = struct {
     pub fn discard(self: *SavedFds) void {
         if (comptime builtin.os.tag == .windows) return;
         if (self.stdin_save) |fd| {
-            std.posix.close(fd);
+            _ = std.c.close(fd);
             self.stdin_save = null;
         }
         if (self.stdout_save) |fd| {
-            std.posix.close(fd);
+            _ = std.c.close(fd);
             self.stdout_save = null;
         }
         if (self.stderr_save) |fd| {
-            std.posix.close(fd);
+            _ = std.c.close(fd);
             self.stderr_save = null;
         }
     }

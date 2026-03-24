@@ -1,22 +1,23 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 
 /// High-precision timer for performance measurement
 pub const Timer = struct {
-    start_time: std.time.Instant,
+    start_time: compat.Instant,
     name: []const u8,
 
     /// Start a new timer
     pub fn start(name: []const u8) Timer {
         return .{
-            .start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant),
+            .start_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant),
             .name = name,
         };
     }
 
     /// Get elapsed time in nanoseconds
     pub fn elapsed(self: *const Timer) u64 {
-        const now = std.time.Instant.now() catch return 0;
+        const now = compat.Instant.now() catch return 0;
         return now.since(self.start_time);
     }
 
@@ -72,7 +73,7 @@ pub const Timer = struct {
 
     /// Reset the timer
     pub fn reset(self: *Timer) void {
-        self.start_time = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+        self.start_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
     }
 
     /// Lap time - returns elapsed time and resets

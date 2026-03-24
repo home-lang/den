@@ -3,6 +3,21 @@ const std = @import("std");
 const builtin = @import("builtin");
 const profiling = @import("profiling");
 const Benchmark = profiling.Benchmark;
+
+/// Simple spinlock mutex for benchmarking (replaces removed std.Thread.Mutex)
+const SimpleMutex = struct {
+    state: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    pub fn lock(self: *SimpleMutex) void {
+        while (self.state.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    pub fn unlock(self: *SimpleMutex) void {
+        self.state.store(0, .release);
+    }
+};
 const BenchmarkSuite = profiling.BenchmarkSuite;
 
 const concurrency = @import("concurrency");
@@ -65,7 +80,7 @@ fn benchmarkSPSCQueue(_: std.mem.Allocator) !void {
 }
 
 fn benchmarkArrayList(allocator: std.mem.Allocator) !void {
-    var list: std.ArrayListUnmanaged(i32) = .{};
+    var list: std.ArrayListUnmanaged(i32) = .empty;
     defer list.deinit(allocator);
 
     var i: i32 = 0;
@@ -132,7 +147,7 @@ fn benchmarkParallelDiscovery(allocator: std.mem.Allocator) !void {
 }
 
 fn benchmarkSequentialDiscovery(allocator: std.mem.Allocator) !void {
-    var results: std.ArrayListUnmanaged([]const u8) = .{};
+    var results: std.ArrayListUnmanaged([]const u8) = .empty;
     defer {
         for (results.items) |path| {
             allocator.free(path);
@@ -188,7 +203,7 @@ fn benchmarkRWLock(_: std.mem.Allocator) !void {
 }
 
 fn benchmarkMutex(_: std.mem.Allocator) !void {
-    var mutex = std.Thread.Mutex{};
+    var mutex = SimpleMutex{};
     var counter: usize = 0;
     var sum: usize = 0;
 
@@ -228,7 +243,7 @@ fn benchmarkAtomicCounter(_: std.mem.Allocator) !void {
 }
 
 fn benchmarkMutexCounter(_: std.mem.Allocator) !void {
-    var mutex = std.Thread.Mutex{};
+    var mutex = SimpleMutex{};
     var counter: usize = 0;
 
     var i: usize = 0;

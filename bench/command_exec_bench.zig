@@ -42,7 +42,7 @@ fn benchmarkVariableExpansion(allocator: std.mem.Allocator) !void {
 
 fn benchmarkGlobExpansion(allocator: std.mem.Allocator) !void {
     // Simulate glob pattern expansion
-    var matches = std.ArrayList([]const u8){ };
+    var matches = std.ArrayList([]const u8).empty;
     defer {
         for (matches.items) |match| {
             allocator.free(match);

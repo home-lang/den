@@ -131,13 +131,13 @@ fn captureOutputPosix(allocator: std.mem.Allocator, opts: SpawnOptions) !Capture
     // (matching the pattern from expansion.zig)
 
     const pid = forkAndExecPosix(allocator, modified_opts) catch |err| {
-        posix.close(read_end);
-        posix.close(write_end);
+        _ = std.c.close(read_end);
+        _ = std.c.close(write_end);
         return err;
     };
 
     // Parent: close write end, read from read end
-    posix.close(write_end);
+    _ = std.c.close(write_end);
 
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
@@ -148,7 +148,7 @@ fn captureOutputPosix(allocator: std.mem.Allocator, opts: SpawnOptions) !Capture
         if (n == 0) break;
         try output.appendSlice(allocator, buf[0..n]);
     }
-    posix.close(read_end);
+    _ = std.c.close(read_end);
 
     // Wait for child
     var wait_status: c_int = 0;
@@ -202,15 +202,15 @@ fn forkAndExecPosix(allocator: std.mem.Allocator, opts: SpawnOptions) !posix.pid
         // Child process: apply redirections
         if (opts.stdin_fd) |fd| {
             if (std.c.dup2(fd, posix.STDIN_FILENO) < 0) std.c._exit(1);
-            posix.close(fd);
+            _ = std.c.close(fd);
         }
         if (opts.stdout_fd) |fd| {
             if (std.c.dup2(fd, posix.STDOUT_FILENO) < 0) std.c._exit(1);
-            posix.close(fd);
+            _ = std.c.close(fd);
         }
         if (opts.stderr_fd) |fd| {
             if (std.c.dup2(fd, posix.STDERR_FILENO) < 0) std.c._exit(1);
-            posix.close(fd);
+            _ = std.c.close(fd);
         }
 
         // Change cwd if requested
@@ -369,8 +369,8 @@ fn spawnPipelinePosix(allocator: std.mem.Allocator, commands: []const SpawnOptio
 
     // Parent: close all pipe fds
     for (0..num_pipes) |i| {
-        posix.close(pipes_buffer[i][0]);
-        posix.close(pipes_buffer[i][1]);
+        _ = std.c.close(pipes_buffer[i][0]);
+        _ = std.c.close(pipes_buffer[i][1]);
     }
 
     // Wait for all children

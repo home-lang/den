@@ -2,6 +2,7 @@
 // Debug-only allocator wrappers that track allocations
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 
 /// Memory leak detection allocator for debug builds
 /// Wraps another allocator and tracks all allocations
@@ -19,7 +20,7 @@ pub const LeakDetector = struct {
     peak_usage: usize,
     allocation_count: usize,
     free_count: usize,
-    mutex: std.Thread.Mutex,
+    mutex: compat.Mutex,
 
     pub fn init(backing_allocator: std.mem.Allocator) LeakDetector {
         return .{
@@ -246,10 +247,10 @@ pub const DebugAllocator = struct {
 
 // Tests
 test "LeakDetector basic operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var debug_allocator = std.heap.DebugAllocator(.{}).init;
+    defer _ = debug_allocator.deinit();
 
-    var detector = LeakDetector.init(gpa.allocator());
+    var detector = LeakDetector.init(debug_allocator.allocator());
     defer detector.deinit();
 
     const alloc = detector.allocator();
@@ -268,10 +269,10 @@ test "LeakDetector basic operations" {
 }
 
 test "LeakDetector detects leaks" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var debug_allocator = std.heap.DebugAllocator(.{}).init;
+    defer _ = debug_allocator.deinit();
 
-    var detector = LeakDetector.init(gpa.allocator());
+    var detector = LeakDetector.init(debug_allocator.allocator());
     defer detector.deinit();
 
     const alloc = detector.allocator();

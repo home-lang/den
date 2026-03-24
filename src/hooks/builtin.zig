@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 pub const interface_mod = @import("interface.zig");
 
 const HookType = interface_mod.HookType;
@@ -171,7 +172,7 @@ pub const HistoryHookData = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, command: []const u8) !HistoryHookData {
-        const now = std.time.Instant.now() catch std.mem.zeroes(std.time.Instant);
+        const now = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
         return .{
             .command = try allocator.dupe(u8, command),
             .timestamp = now.timestamp.sec,

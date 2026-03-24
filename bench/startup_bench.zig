@@ -20,7 +20,7 @@ fn benchmarkConfigLoad(allocator: std.mem.Allocator) !void {
 
 fn benchmarkHistoryLoad(allocator: std.mem.Allocator) !void {
     // Simulate loading 1000 history entries
-    var list = std.ArrayList([]const u8){ };
+    var list = std.ArrayList([]const u8).empty;
     defer list.deinit(allocator);
 
     var i: usize = 0;

@@ -141,7 +141,7 @@ fn benchmarkHistoryIndex(allocator: std.mem.Allocator) !void {
 
 fn benchmarkLinearHistorySearch(allocator: std.mem.Allocator) !void {
     // Simulate linear array search
-    var history: std.ArrayListUnmanaged([]const u8) = .{};
+    var history: std.ArrayListUnmanaged([]const u8) = .empty;
     defer {
         for (history.items) |item| {
             allocator.free(item);

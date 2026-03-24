@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const builtin = @import("builtin");
@@ -65,7 +66,7 @@ pub fn uuid(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     _ = command;
 
     const seed: u64 = blk: {
-        const instant = std.time.Instant.now() catch break :blk 0;
+        const instant = compat.Instant.now() catch break :blk 0;
         break :blk if (builtin.os.tag == .windows) @intCast(instant.timestamp / 10_000_000) else @intCast(instant.timestamp.sec);
     };
     var rng = std.Random.DefaultPrng.init(seed);
@@ -273,7 +274,7 @@ pub fn seq(command: *types.ParsedCommand) !i32 {
 pub fn date(command: *types.ParsedCommand) !i32 {
     _ = command;
 
-    const instant = std.time.Instant.now() catch {
+    const instant = compat.Instant.now() catch {
         try IO.eprint("den: date: unable to get current time\n", .{});
         return 1;
     };

@@ -1,12 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 const git_mod = @import("git.zig");
 const GitInfo = git_mod.GitInfo;
 const GitModule = git_mod.GitModule;
 
 /// Helper to get milliseconds since some reference point
 fn getMilliTimestamp() i64 {
-    const now = std.time.Instant.now() catch return 0;
+    const now = compat.Instant.now() catch return 0;
     if (builtin.os.tag == .windows) {
         return @intCast(now.timestamp / 10_000); // Windows: 100ns ticks to ms
     } else {
@@ -21,7 +22,7 @@ pub const AsyncGitFetcher = struct {
 
     // Cache
     cached_info: ?CachedGitInfo,
-    cache_mutex: std.Thread.Mutex,
+    cache_mutex: compat.Mutex,
 
     // Background fetch state
     fetch_thread: ?std.Thread,

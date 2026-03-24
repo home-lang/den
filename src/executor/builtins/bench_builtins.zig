@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const common = @import("common.zig");
@@ -58,7 +59,7 @@ pub fn bench(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     var max_ns: u64 = 0;
 
     for (0..rounds) |round| {
-        const start = std.time.Instant.now() catch {
+        const start = compat.Instant.now() catch {
             try IO.eprint("bench: timer not available\n", .{});
             return 1;
         };
@@ -70,7 +71,7 @@ pub fn bench(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             return 1;
         };
 
-        const end = std.time.Instant.now() catch {
+        const end = compat.Instant.now() catch {
             try IO.eprint("bench: timer not available\n", .{});
             return 1;
         };

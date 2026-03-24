@@ -10,17 +10,22 @@ const WARMUP_ITERATIONS = 100;
 
 /// Timer utility for benchmarking
 const Timer = struct {
-    start_time: std.time.Instant,
+    start_time: std.c.timespec,
 
     pub fn start() Timer {
-        return .{
-            .start_time = std.time.Instant.now() catch unreachable,
-        };
+        var ts: std.c.timespec = undefined;
+        _ = std.c.clock_gettime(.MONOTONIC, &ts);
+        return .{ .start_time = ts };
     }
 
     pub fn elapsed(self: Timer) u64 {
-        const end = std.time.Instant.now() catch unreachable;
-        return end.since(self.start_time);
+        var ts: std.c.timespec = undefined;
+        _ = std.c.clock_gettime(.MONOTONIC, &ts);
+        const sec_diff = ts.sec - self.start_time.sec;
+        const nsec_diff = ts.nsec - self.start_time.nsec;
+        const total_ns = @as(i128, sec_diff) * 1_000_000_000 + @as(i128, nsec_diff);
+        if (total_ns < 0) return 0;
+        return @intCast(@as(u128, @bitCast(total_ns)));
     }
 };
 

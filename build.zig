@@ -17,6 +17,14 @@ pub fn build(b: *std.Build) void {
         .strip = strip,
     });
 
+    // Compat module (Mutex, Condition, Instant replacements for Zig 0.16)
+    const compat_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/compat.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    den_module.addImport("compat", compat_module);
+
     // Den shell executable
     const exe = b.addExecutable(.{
         .name = "den",
@@ -115,6 +123,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    test_runner_module.addImport("compat", compat_module);
 
     const test_runner_exe = b.addExecutable(.{
         .name = "den-test",
@@ -847,6 +856,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    profiling_cli_module.addImport("compat", compat_module);
+
     const profiling_cli = b.addExecutable(.{
         .name = "den-profile",
         .root_module = profiling_cli_module,
@@ -862,6 +873,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseFast,
     });
+    profiling_module.addImport("compat", compat_module);
 
     // Startup benchmark
     const startup_bench_module = b.createModule(.{
@@ -995,6 +1007,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseFast,
     });
+    concurrency_module.addImport("compat", compat_module);
 
     const parallel_discovery_module = b.createModule(.{
         .root_source_file = b.path("src/utils/parallel_discovery.zig"),
@@ -1002,6 +1015,7 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseFast,
     });
     parallel_discovery_module.addImport("concurrency", concurrency_module);
+    parallel_discovery_module.addImport("compat", compat_module);
 
     const concurrency_bench_module = b.createModule(.{
         .root_source_file = b.path("bench/concurrency_bench.zig"),
@@ -1093,6 +1107,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/utils.zig"),
         .target = target,
     });
+    utils_module.addImport("compat", compat_module);
 
     // Logging example
     const logging_example_module = b.createModule(.{
