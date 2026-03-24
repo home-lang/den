@@ -54,7 +54,7 @@ jobs:
           total=0
           for i in {1..10}; do
             start=$(date +%s%N)
-            echo "exit" | ./zig-out/bin/den 2>/dev/null
+            ./zig-out/bin/den -c "exit" 2>/dev/null
             end=$(date +%s%N)
             elapsed=$((($end - $start) / 1000000))
             total=$(($total + $elapsed))
