@@ -31,6 +31,7 @@ pub const PromptRenderer = struct {
     }
 
     pub fn deinit(self: *PromptRenderer) void {
+        self.template.deinit(self.allocator);
         self.registry.deinit();
     }
 

@@ -125,6 +125,21 @@ pub const PromptContext = struct {
     }
 
     pub fn deinit(self: *PromptContext) void {
+        if (self.current_dir.len > 0) self.allocator.free(self.current_dir);
+        if (self.home_dir) |v| self.allocator.free(v);
+        if (self.git_branch) |v| self.allocator.free(v);
+        if (self.username.len > 0) self.allocator.free(self.username);
+        if (self.hostname.len > 0) self.allocator.free(self.hostname);
+        if (self.node_version) |v| self.allocator.free(v);
+        if (self.bun_version) |v| self.allocator.free(v);
+        if (self.deno_version) |v| self.allocator.free(v);
+        if (self.zig_version) |v| self.allocator.free(v);
+        if (self.python_version) |v| self.allocator.free(v);
+        if (self.ruby_version) |v| self.allocator.free(v);
+        if (self.go_version) |v| self.allocator.free(v);
+        if (self.rust_version) |v| self.allocator.free(v);
+        if (self.package_version) |v| self.allocator.free(v);
+
         var iter = self.custom_data.iterator();
         while (iter.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);

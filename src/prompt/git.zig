@@ -49,17 +49,29 @@ pub const GitModule = struct {
     }
 
     /// Detect if current directory is in a Git repository
+    /// Walks up parent directories to find .git (like git itself does)
     pub fn isGitRepository(self: *GitModule, cwd: []const u8) bool {
         _ = self;
 
-        // Try to open .git directory
-        var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, cwd, .{}) catch return false;
-        defer dir.close(std.Options.debug_io);
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        var current = path_buf[0..cwd.len];
+        @memcpy(current, cwd);
 
-        // Check for .git directory or file (for submodules/worktrees)
-        dir.access(std.Options.debug_io, ".git", .{}) catch return false;
+        while (true) {
+            var dir = std.Io.Dir.openDirAbsolute(std.Options.debug_io, current, .{}) catch return false;
+            defer dir.close(std.Options.debug_io);
 
-        return true;
+            // Check for .git directory or file (for submodules/worktrees)
+            dir.access(std.Options.debug_io, ".git", .{}) catch {
+                // Go up one level
+                const parent = std.fs.path.dirname(current) orelse return false;
+                if (parent.len == current.len) return false; // at root
+                current = path_buf[0..parent.len];
+                continue;
+            };
+
+            return true;
+        }
     }
 
     /// Get Git information for current directory

@@ -53,7 +53,10 @@ pub fn updatePromptContext(self: *Shell) !void {
     const hostname = try sysinfo.getHostname();
     defer self.allocator.free(hostname);
 
-    // Update context
+    // Update context - free old current_dir if it was heap-allocated
+    if (self.prompt_context.current_dir.len > 0) {
+        self.allocator.free(self.prompt_context.current_dir);
+    }
     self.prompt_context.current_dir = try self.allocator.dupe(u8, cwd);
     if (self.prompt_context.home_dir) |old_home| {
         self.allocator.free(old_home);

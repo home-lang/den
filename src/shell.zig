@@ -497,6 +497,13 @@ pub const Shell = struct {
 
         // Clean up line editor
         if (self.line_editor) |*editor| {
+            // Free the prompt string we allocated via getPromptString
+            if (editor.prompt.len > 0) {
+                self.allocator.free(editor.prompt);
+            }
+            if (editor.transient_prompt) |tp| {
+                self.allocator.free(tp);
+            }
             editor.deinit();
         }
 
