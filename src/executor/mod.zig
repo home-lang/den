@@ -1399,6 +1399,32 @@ pub const Executor = struct {
                 }
             }
 
+            // Auto-cd: if command name is a directory, cd into it
+            if (self.shell) |shell| {
+                if (shell.shopt_autocd) {
+                    var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, command.name, .{}) catch null;
+                    if (dir) |*d| {
+                        d.close(std.Options.debug_io);
+                        // Save OLDPWD, change directory, update PWD
+                        var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+                        const cwd_len = std.process.currentPath(std.Options.debug_io, &cwd_buf) catch 0;
+                        if (cwd_len > 0) {
+                            shell.environment.put("OLDPWD", cwd_buf[0..cwd_len]) catch {};
+                        }
+                        std.process.setCurrentPath(std.Options.debug_io, command.name) catch {
+                            try IO.eprint("den: cd: {s}: No such file or directory\n", .{command.name});
+                            return 1;
+                        };
+                        // Update PWD
+                        const new_len = std.process.currentPath(std.Options.debug_io, &cwd_buf) catch 0;
+                        if (new_len > 0) {
+                            shell.environment.put("PWD", cwd_buf[0..new_len]) catch {};
+                        }
+                        return 0;
+                    }
+                }
+            }
+
             try IO.eprint("den: {s}: command not found\n", .{command.name});
 
             // Try to provide typo correction suggestions

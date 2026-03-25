@@ -424,7 +424,7 @@ pub const Shell = struct {
             .shopt_checkwinsize = true,
             .shopt_histappend = false,
             .shopt_cmdhist = true,
-            .shopt_autocd = false,
+            .shopt_autocd = true,
             .call_stack = [_]CallFrame{CallFrame{ .line_number = 0, .function_name = "", .source_file = "" }} ** 64,
             .call_stack_depth = 0,
             .loadable_builtins = LoadableBuiltins.init(allocator),
