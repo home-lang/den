@@ -163,12 +163,12 @@ fn expandSymbol(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]cons
     }
 
     if (ctx.last_exit_code != 0) {
-        // Red ❯ for error
-        return try allocator.dupe(u8, "\x1b[91m\xE2\x9D\xAF\x1b[0m ");
+        // Red ➜ for error
+        return try allocator.dupe(u8, "\x1b[91m\xE2\x9E\x9C\x1b[0m ");
     }
 
-    // Green ❯ for success
-    return try allocator.dupe(u8, "\x1b[92m\xE2\x9D\xAF\x1b[0m ");
+    // Green ➜ for success
+    return try allocator.dupe(u8, "\x1b[92m\xE2\x9E\x9C\x1b[0m ");
 }
 
 fn expandTime(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
