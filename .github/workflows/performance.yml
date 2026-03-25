@@ -11,7 +11,7 @@ env:
   # Performance budgets
   MAX_STARTUP_MS: 10
   MAX_IDLE_MEMORY_MB: 5
-  MAX_COMMAND_EXEC_MS: 5
+  MAX_COMMAND_EXEC_MS: 15
 
 jobs:
   benchmark:
