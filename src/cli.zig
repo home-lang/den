@@ -307,6 +307,12 @@ fn runInteractiveShell(allocator: std.mem.Allocator, config_path: ?[]const u8, n
         try shell.Shell.initWithConfig(allocator, config_path);
     defer den_shell.deinit();
     if (restricted) den_shell.option_restricted = true;
+
+    // Source ~/.denrc if it exists (like .zshrc)
+    if (!norc) {
+        den_shell.sourceRcFile() catch {};
+    }
+
     try den_shell.run();
 }
 

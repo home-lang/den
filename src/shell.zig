@@ -3621,6 +3621,42 @@ pub const Shell = struct {
         );
     }
 
+    /// Source ~/.denrc at startup (like .zshrc)
+    pub fn sourceRcFile(self: *Shell) !void {
+        const home = std.c.getenv("HOME") orelse return;
+        const home_str = std.mem.span(@as([*:0]const u8, @ptrCast(home)));
+
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const rc_path = std.fmt.bufPrint(&path_buf, "{s}/.denrc", .{home_str}) catch return;
+
+        // Open the file — silently return if it doesn't exist
+        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, rc_path, .{}) catch return;
+        defer file.close(std.Options.debug_io);
+
+        const max_size: usize = 1024 * 1024; // 1MB max
+        const file_size = (file.stat(std.Options.debug_io) catch return).size;
+        const read_size: usize = @min(file_size, max_size);
+        const buffer = self.allocator.alloc(u8, read_size) catch return;
+        defer self.allocator.free(buffer);
+
+        var total_read: usize = 0;
+        while (total_read < read_size) {
+            const n = file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]}) catch break;
+            if (n == 0) break;
+            total_read += n;
+        }
+        const content = buffer[0..total_read];
+
+        // Execute each line as a shell command
+        var lines = std.mem.splitScalar(u8, content, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+            if (trimmed.len == 0) continue;
+            if (trimmed[0] == '#') continue; // Skip comments
+            self.executeCommand(trimmed) catch continue;
+        }
+    }
+
     /// Load aliases from configuration
     pub fn loadAliasesFromConfig(self: *Shell) !void {
         // Check if aliases are enabled in config
