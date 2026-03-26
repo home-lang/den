@@ -48,4 +48,20 @@
   "grammarly.files.exclude": [
     "**/dictionary.txt"
   ]
+,
+  "[stx]": {
+    "editor.defaultFormatter": "pickier.pickier-vscode"
+  },
+  // Shell
+  "[shellscript]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format"
+  },
+  // Markdown
+  "[markdown]": {
+    "editor.defaultFormatter": "DavidAnson.vscode-markdownlint",
+    "editor.formatOnSave": true
+  },
+  "[dockerfile]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format"
+  }
 }
