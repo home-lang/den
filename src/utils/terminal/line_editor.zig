@@ -701,6 +701,14 @@ pub const LineEditor = struct {
                         self.in_multiline = false;
                     }
 
+                    // If no input was typed, just show a fresh prompt
+                    // (avoids duplicate prompt after Ctrl+C'ing an external command)
+                    if (self.length == 0) {
+                        try self.writeBytes("\r\n");
+                        try self.displayPrompt();
+                        continue;
+                    }
+
                     try self.writeBytes("^C\r\n");
                     try self.terminal.disableRawMode();
                     return error.Interrupted;

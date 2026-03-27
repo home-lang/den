@@ -105,6 +105,15 @@ fn getenv(key: []const u8) ?[]const u8 {
     return env_utils.getEnv(key);
 }
 
+/// Flush any pending bytes from stdin (non-blocking)
+extern "c" fn tcflush(fd: c_int, queue_selector: c_int) c_int;
+const TCIFLUSH = 1;
+
+fn flushStdin() void {
+    if (comptime builtin.os.tag == .windows) return;
+    _ = tcflush(std.posix.STDIN_FILENO, TCIFLUSH);
+}
+
 /// Call stack frame for caller builtin
 pub const CallFrame = struct {
     line_number: usize,
@@ -873,6 +882,17 @@ pub const Shell = struct {
 
             // Execute command
             try self.executeCommand(command);
+
+            // Clear any pending SIGINT from child process termination
+            _ = signals.checkSignal();
+
+            // After external commands, clean up the terminal line:
+            // move to column 0 and clear the line to remove any stale
+            // output left by the child process (e.g., Claude Code's prompt)
+            if (self.is_interactive) {
+                flushStdin();
+                try IO.print("\r\x1b[K", .{});
+            }
         }
 
         // Fire EXIT trap before leaving
