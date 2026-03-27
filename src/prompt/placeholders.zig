@@ -518,7 +518,6 @@ fn expandRuntimes(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]co
 fn expandBattery(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
     if (ctx.battery_percent) |pct| {
         if (pct < 10) {
-            // 🪫 7% in bold red — only show when critically low
             return try std.fmt.allocPrint(allocator, " \x1b[1;91m\xF0\x9F\xAA\xAB {d}%\x1b[0m", .{pct});
         }
     }
