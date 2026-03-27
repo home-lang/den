@@ -86,6 +86,17 @@ pub const SystemInfo = struct {
         return std.c.geteuid() == 0;
     }
 
+    /// Get battery percentage (null if no battery or can't detect)
+    pub fn getBatteryPercent(self: *SystemInfo) ?u8 {
+        _ = self;
+        if (comptime @import("builtin").os.tag.isDarwin()) {
+            return getBatteryDarwin();
+        } else if (comptime @import("builtin").os.tag == .linux) {
+            return getBatteryLinux();
+        }
+        return null;
+    }
+
     /// Abbreviate path with home directory (~)
     pub fn abbreviatePath(self: *SystemInfo, path: []const u8) ![]const u8 {
         const home = try self.getHomeDir() orelse return try self.allocator.dupe(u8, path);
@@ -229,3 +240,64 @@ pub const RuntimeModules = struct {
         if (self.deno_version) |v| self.allocator.free(v);
     }
 };
+
+const FILE = opaque {};
+extern "c" fn popen(command: [*:0]const u8, mode: [*:0]const u8) ?*FILE;
+extern "c" fn pclose(stream: *FILE) c_int;
+extern "c" fn fgetc(stream: *FILE) c_int;
+
+/// Read battery percentage on macOS via popen("pmset -g batt")
+fn getBatteryDarwin() ?u8 {
+    const pipe = popen("pmset -g batt", "r") orelse return null;
+    defer _ = pclose(pipe);
+
+    var buf: [512]u8 = undefined;
+    var total: usize = 0;
+
+    while (total < buf.len) {
+        const ch = fgetc(pipe);
+        if (ch < 0) break; // EOF
+        buf[total] = @intCast(@as(u32, @bitCast(ch)));
+        total += 1;
+    }
+
+    // Parse output like: "InternalBattery-0 (id=...) 42%; charging..."
+    // Look for a number followed by %
+    const output = buf[0..total];
+    var i: usize = 0;
+    while (i < output.len) : (i += 1) {
+        if (output[i] == '%') {
+            // Walk back to find the number
+            const end = i;
+            var start = end;
+            while (start > 0 and output[start - 1] >= '0' and output[start - 1] <= '9') {
+                start -= 1;
+            }
+            if (start < end) {
+                return std.fmt.parseInt(u8, output[start..end], 10) catch null;
+            }
+        }
+    }
+    return null;
+}
+
+/// Read battery percentage on Linux from /sys/class/power_supply/
+fn getBatteryLinux() ?u8 {
+    const file = std.Io.Dir.cwd().openFile(
+        std.Options.debug_io,
+        "/sys/class/power_supply/BAT0/capacity",
+        .{},
+    ) catch return null;
+    defer file.close(std.Options.debug_io);
+
+    var buf: [8]u8 = undefined;
+    var total: usize = 0;
+    while (total < buf.len) {
+        const n = file.readStreaming(std.Options.debug_io, &.{buf[total..]}) catch break;
+        if (n == 0) break;
+        total += n;
+    }
+
+    const trimmed = std.mem.trim(u8, buf[0..total], &std.ascii.whitespace);
+    return std.fmt.parseInt(u8, trimmed, 10) catch null;
+}

@@ -164,6 +164,9 @@ pub fn updatePromptContext(self: *Shell) !void {
     }
     self.prompt_context.zig_version = shell_mod.detectZigVersion(self.allocator) catch null;
 
+    // Detect battery level
+    self.prompt_context.battery_percent = sysinfo.getBatteryPercent();
+
     self.prompt_context.current_time = if (compat.Instant.now()) |instant| blk: {
         break :blk if (@import("builtin").os.tag == .windows)
             @as(i64, @intCast(instant.timestamp / 10_000_000))

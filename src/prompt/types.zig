@@ -84,6 +84,9 @@ pub const PromptContext = struct {
     // Package info
     package_version: ?[]const u8,
 
+    // Battery
+    battery_percent: ?u8,
+
     // Time
     current_time: i64,
 
@@ -118,6 +121,7 @@ pub const PromptContext = struct {
             .go_version = null,
             .rust_version = null,
             .package_version = null,
+            .battery_percent = null,
             .current_time = 0, // Will be updated when needed
             .custom_data = std.StringHashMap([]const u8).init(allocator),
             .allocator = allocator,
@@ -181,7 +185,7 @@ pub const PromptTemplate = struct {
         // via ↯ v0.15.1 in bold yellow (zig)
         // > in green/red based on exit code
         return .{
-            .left_format = try allocator.dupe(u8, "\x1b[1;96m{path}\x1b[0m{git}{pkg}{runtimes} {symbol}"),
+            .left_format = try allocator.dupe(u8, "\x1b[1;96m{path}\x1b[0m{git}{pkg}{runtimes}{battery} {symbol}"),
             .right_format = null,
             .transient_enabled = false,
             .transient_format = null,

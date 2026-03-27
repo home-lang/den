@@ -57,6 +57,7 @@ pub const PlaceholderRegistry = struct {
         try self.register("rust", expandRust);
         try self.register("zig", expandZig);
         try self.register("runtimes", expandRuntimes);
+        try self.register("battery", expandBattery);
     }
 };
 
@@ -512,4 +513,14 @@ fn expandRuntimes(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]co
     }
 
     return try result.toOwnedSlice(allocator);
+}
+
+fn expandBattery(ctx: *const PromptContext, allocator: std.mem.Allocator) ![]const u8 {
+    if (ctx.battery_percent) |pct| {
+        if (pct < 10) {
+            // 🪫 7% in bold red — only show when critically low
+            return try std.fmt.allocPrint(allocator, " \x1b[1;91m\xF0\x9F\xAA\xAB {d}%\x1b[0m", .{pct});
+        }
+    }
+    return try allocator.dupe(u8, "");
 }
