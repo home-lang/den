@@ -916,9 +916,18 @@ pub const Shell = struct {
             // Clear any pending SIGINT from child process termination
             _ = signals.checkSignal();
 
+            // Only reset terminal after external commands (not builtins like cd)
+            // External commands may leave the terminal in a bad state
             if (self.is_interactive) {
-                flushStdin();
-                resetTerminalAfterChild();
+                const first_word = blk: {
+                    var iter = std.mem.tokenizeAny(u8, command, " \t");
+                    break :blk iter.next() orelse command;
+                };
+                // Check if it was an external command (not a builtin)
+                if (!executor_mod.Executor.isBuiltinName(first_word) and !self.aliases.contains(first_word)) {
+                    flushStdin();
+                    resetTerminalAfterChild();
+                }
             }
         }
 
