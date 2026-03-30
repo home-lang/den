@@ -185,7 +185,7 @@ pub const PromptTemplate = struct {
         // via ↯ v0.15.1 in bold yellow (zig)
         // > in green/red based on exit code
         return .{
-            .left_format = try allocator.dupe(u8, "\x1b[1;96m{path}\x1b[0m{git}{pkg}{runtimes}{battery} {symbol}"),
+            .left_format = try allocator.dupe(u8, "{symbol}\x1b[1;96m{path}\x1b[0m{git}{pkg}{runtimes}{battery} "),
             .right_format = null,
             .transient_enabled = false,
             .transient_format = null,
