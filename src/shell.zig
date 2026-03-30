@@ -114,6 +114,36 @@ fn flushStdin() void {
     _ = tcflush(std.posix.STDIN_FILENO, TCIFLUSH);
 }
 
+/// Ensure terminal is ready for prompt after a child process exits.
+/// Resets terminal attributes and moves to a fresh line.
+fn resetTerminalAfterChild() void {
+    if (comptime builtin.os.tag == .windows) return;
+
+    const stdout_fd = std.posix.STDOUT_FILENO;
+    const stdin_fd: std.posix.fd_t = std.posix.STDIN_FILENO;
+
+    // Restore sane terminal settings (child may have left raw mode, etc.)
+    var termios = std.posix.tcgetattr(stdin_fd) catch return;
+    termios.lflag = .{
+        .ECHO = true,
+        .ICANON = true,
+        .ISIG = true,
+        .IEXTEN = true,
+        .ECHOE = true,
+        .ECHOK = true,
+        .ECHOCTL = true,
+        .ECHOKE = true,
+    };
+    termios.iflag.ICRNL = true;
+    termios.oflag.OPOST = true;
+    termios.oflag.ONLCR = true;
+    std.posix.tcsetattr(stdin_fd, .NOW, termios) catch {};
+
+    // Move to a new line and clear it — ensures prompt appears
+    // below any child output, not on top of it
+    _ = std.c.write(stdout_fd, "\n\r\x1b[K", 5);
+}
+
 /// Call stack frame for caller builtin
 pub const CallFrame = struct {
     line_number: usize,
@@ -886,12 +916,9 @@ pub const Shell = struct {
             // Clear any pending SIGINT from child process termination
             _ = signals.checkSignal();
 
-            // After external commands, clean up the terminal line:
-            // move to column 0 and clear the line to remove any stale
-            // output left by the child process (e.g., Claude Code's prompt)
             if (self.is_interactive) {
                 flushStdin();
-                try IO.print("\r\x1b[K", .{});
+                resetTerminalAfterChild();
             }
         }
 
