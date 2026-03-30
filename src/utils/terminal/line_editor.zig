@@ -489,6 +489,9 @@ pub const LineEditor = struct {
 
     /// Read a line with editing support
     pub fn readLine(self: *LineEditor) !?[]u8 {
+        // Clear current line to remove any stale output from child processes
+        try self.writeBytes("\r\x1b[K");
+
         // Display prompt BEFORE entering raw mode so ANSI codes work
         try self.displayPrompt();
 
