@@ -176,7 +176,17 @@ pub const Completion = struct {
     /// Higher-scoring matches appear first. Prefix matches get highest scores.
     pub fn rankByFuzzyScore(self: *Completion, completions: [][]const u8, query: []const u8) void {
         _ = self;
-        if (completions.len <= 1 or query.len == 0) return;
+        if (completions.len <= 1) return;
+
+        if (query.len == 0) {
+            // No query — sort alphabetically
+            std.mem.sort([]const u8, completions, {}, struct {
+                fn cmp(_: void, a: []const u8, b: []const u8) bool {
+                    return std.mem.order(u8, a, b) == .lt;
+                }
+            }.cmp);
+            return;
+        }
 
         std.mem.sort([]const u8, completions, SortContext{ .query = query }, fuzzyCompare);
     }

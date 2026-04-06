@@ -2192,20 +2192,23 @@ pub const LineEditor = struct {
                 const is_branch = completion.len > 0 and completion[0] == '\x03';
                 const display_text = if (is_script or is_branch) completion[1..] else completion;
                 const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
+                const name_part = if (is_dir) display_text[0 .. display_text.len - 1] else display_text;
 
                 // Highlight current selection
                 if (idx == self.completion_index) {
                     try self.writeBytes("\x1b[30;47m");
+                    try self.writeBytes(display_text);
+                    try self.writeBytes("\x1b[0m");
                 } else if (is_branch) {
-                    try self.writeBytes("\x1b[1;35m"); // Bold magenta for branches
+                    try self.writeBytes("\x1b[1;35m");
+                    try self.writeBytes(display_text);
+                    try self.writeBytes("\x1b[0m");
                 } else if (is_dir) {
                     try self.writeBytes("\x1b[1;36m");
-                }
-
-                try self.writeBytes(display_text);
-
-                if (idx == self.completion_index or is_dir or is_branch) {
-                    try self.writeBytes("\x1b[0m");
+                    try self.writeBytes(name_part);
+                    try self.writeBytes("\x1b[0m/");
+                } else {
+                    try self.writeBytes(display_text);
                 }
 
                 // Add padding
@@ -2261,19 +2264,22 @@ pub const LineEditor = struct {
                 const is_branch = completion.len > 0 and completion[0] == '\x03';
                 const display_text = if (is_script or is_branch) completion[1..] else completion;
                 const is_dir = display_text.len > 0 and display_text[display_text.len - 1] == '/';
+                const name_part = if (is_dir) display_text[0 .. display_text.len - 1] else display_text;
 
                 if (idx == self.completion_index) {
                     try self.writeBytes("\x1b[30;47m");
+                    try self.writeBytes(display_text);
+                    try self.writeBytes("\x1b[0m");
                 } else if (is_branch) {
                     try self.writeBytes("\x1b[1;35m");
+                    try self.writeBytes(display_text);
+                    try self.writeBytes("\x1b[0m");
                 } else if (is_dir) {
                     try self.writeBytes("\x1b[1;36m");
-                }
-
-                try self.writeBytes(display_text);
-
-                if (idx == self.completion_index or is_dir or is_branch) {
-                    try self.writeBytes("\x1b[0m");
+                    try self.writeBytes(name_part);
+                    try self.writeBytes("\x1b[0m/");
+                } else {
+                    try self.writeBytes(display_text);
                 }
 
                 if (col < num_cols - 1 and idx < completions.len - 1) {
