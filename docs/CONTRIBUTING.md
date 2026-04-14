@@ -26,6 +26,7 @@ We are committed to providing a welcoming and inclusive environment for all cont
 ### Our Standards
 
 **Positive behaviors**:
+
 - Using welcoming and inclusive language
 - Being respectful of differing viewpoints
 - Gracefully accepting constructive criticism
@@ -33,6 +34,7 @@ We are committed to providing a welcoming and inclusive environment for all cont
 - Showing empathy towards others
 
 **Unacceptable behaviors**:
+
 - Harassment, insults, or derogatory comments
 - Public or private harassment
 - Publishing others' private information
@@ -97,7 +99,7 @@ git checkout -b feature/my-feature
 # Zig Language Server (for IDE support)
 # See: https://github.com/zigtools/zls
 
-# Recommended editors:
+# Recommended editors
 # - VSCode with Zig extension
 # - Neovim with zig.vim
 # - Emacs with zig-mode
@@ -201,6 +203,7 @@ git commit -m "feat(builtins): add my_builtin command
 - Implements XYZ functionality
 - Adds tests
 - Updates documentation"
+
 ```
 
 ### Commit Message Format
@@ -216,6 +219,7 @@ Use conventional commits:
 ```
 
 **Types**:
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation only
@@ -388,7 +392,7 @@ test "cd builtin changes directory" {
 ```bash
 # Add test scripts in test/
 cat > test/test_myfeature.sh << 'EOF'
-#!/usr/bin/env bash
+# !/usr/bin/env bash
 
 # Test my feature
 den -c "my_command arg1 arg2"
@@ -480,6 +484,7 @@ vim README.md
 ### Before Submitting
 
 **Checklist**:
+
 - [ ] Code builds without errors
 - [ ] All tests pass
 - [ ] Code is formatted (`zig fmt`)
@@ -497,6 +502,7 @@ Brief description of changes
 Why is this change needed?
 
 ## Changes
+
 - Added X
 - Fixed Y
 - Removed Z
@@ -505,6 +511,7 @@ Why is this change needed?
 How was this tested?
 
 ## Checklist
+
 - [ ] Tests pass
 - [ ] Documentation updated
 - [ ] Code formatted
@@ -546,6 +553,7 @@ Clear description of the bug
 
 **To Reproduce**
 Steps to reproduce:
+
 1. Run command: `den -c "..."`
 2. Observe error
 
@@ -556,6 +564,7 @@ What should happen
 What actually happens
 
 **Environment**
+
 - OS: macOS 14.0
 - Zig version: 0.16-dev
 - Den version: 0.1.0
@@ -626,13 +635,14 @@ zig build bench
 ### Adding a Builtin Command
 
 1. Create file in `src/builtins/`:
+
 ```zig
 // src/builtins/mycommand.zig
 const std = @import("std");
 const Shell = @import("../shell.zig").Shell;
 
 pub fn myCommand(
-    shell: *Shell,
+    shell: _Shell,
     args: []const []const u8,
     stdout: anytype,
 ) !i32 {
@@ -649,8 +659,9 @@ test "mycommand basic" {
 ```
 
 2. Register in `src/builtins/mod.zig`:
+
 ```zig
-pub const BUILTINS = std.ComptimeStringMap(*const BuiltinFn, .{
+pub const BUILTINS = std.ComptimeStringMap(_const BuiltinFn, .{
     // ... existing builtins
     .{ "mycommand", myCommand },
 });
@@ -669,6 +680,7 @@ pub const BUILTINS = std.ComptimeStringMap(*const BuiltinFn, .{
 ### Adding a Plugin
 
 1. Create plugin file in `src/plugins/`:
+
 ```zig
 // src/plugins/my_plugin.zig
 const std = @import("std");
@@ -685,11 +697,11 @@ pub const MyPlugin = interface.Plugin{
     },
 };
 
-fn init(ctx: *interface.PluginContext) !void {
+fn init(ctx: _interface.PluginContext) !void {
     // Initialize
 }
 
-fn deinit(ctx: *interface.PluginContext) void {
+fn deinit(ctx: _interface.PluginContext) void {
     // Cleanup
 }
 
@@ -727,6 +739,7 @@ fn preCommand(ctx: *interface.HookContext) !void {
 ## Recognition
 
 Contributors are recognized in:
+
 - CONTRIBUTORS.md (if it exists)
 - Release notes
 - Project README

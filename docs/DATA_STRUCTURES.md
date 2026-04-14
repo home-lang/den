@@ -80,6 +80,7 @@ pub const Shell = struct {
 ```
 
 **Memory Layout**:
+
 - Total size: ~100KB (dominated by history and job arrays)
 - Environment: Dynamic HashMap (grows as needed)
 - History: Fixed 1000-entry array
@@ -129,6 +130,7 @@ pub const JobStatus = enum {
 ```
 
 **Lifecycle**:
+
 1. Created when command ends with `&`
 2. Tracked in `Shell.background_jobs` array
 3. Status updated on SIGCHLD
@@ -254,14 +256,14 @@ pub const Pipeline = struct {
 };
 
 pub const Conditional = struct {
-    condition: *ASTNode,
-    then_branch: *ASTNode,
-    else_branch: ?*ASTNode,
+    condition: _ASTNode,
+    then_branch: _ASTNode,
+    else_branch: ?_ASTNode,
 };
 
 pub const Loop = struct {
     type: LoopType,
-    condition: *ASTNode,
+    condition: _ASTNode,
     body: *ASTNode,
     iterator: ?[]const u8, // For 'for' loops
 };
@@ -275,6 +277,7 @@ pub const LoopType = enum {
 ```
 
 **Memory Layout**:
+
 - AST nodes are heap-allocated
 - Parser owns AST (freed after execution)
 - Typical AST size: 100-1000 bytes per command
@@ -318,6 +321,7 @@ pub const RedirectType = enum {
 ```
 
 **Examples**:
+
 - `< input.txt`: `Redirect{ .type = .input, .fd = 0, .target = "input.txt" }`
 - `> output.txt`: `Redirect{ .type = .output, .fd = 1, .target = "output.txt" }`
 - `2>&1`: `Redirect{ .type = .fd_dup, .fd = 2, .target = "1" }`
@@ -374,10 +378,10 @@ var ctx = PipelineContext{
 defer ctx.deinit();
 
 // Create pipes
-for (ctx.pipes) |*pipe| {
+for (ctx.pipes) |_pipe| {
     var fds: [2]std.posix.fd_t = undefined;
     try std.posix.pipe(&fds);
-    pipe.* = Pipe{ .read_fd = fds[0], .write_fd = fds[1] };
+    pipe._ = Pipe{ .read_fd = fds[0], .write_fd = fds[1] };
 }
 
 // Spawn processes with appropriate redirections
@@ -396,15 +400,15 @@ pub const Plugin = struct {
     version: []const u8,
     description: []const u8,
 
-    init: *const fn (*PluginContext) anyerror!void,
-    deinit: *const fn (*PluginContext) void,
+    init: _const fn (_PluginContext) anyerror!void,
+    deinit: _const fn (_PluginContext) void,
 
     hooks: []const HookRegistration,
 };
 
 pub const HookRegistration = struct {
     hook_type: HookType,
-    handler: *const fn (*HookContext) anyerror!void,
+    handler: _const fn (_HookContext) anyerror!void,
 };
 
 pub const HookType = enum {
@@ -426,9 +430,9 @@ Context passed to plugin functions.
 ```zig
 pub const PluginContext = struct {
     allocator: std.mem.Allocator,
-    shell: *Shell,
-    config: *DenConfig,
-    user_data: ?*anyopaque,
+    shell: _Shell,
+    config: _DenConfig,
+    user_data: ?_anyopaque,
 };
 ```
 
@@ -440,17 +444,18 @@ Context passed to hook handlers.
 pub const HookContext = struct {
     hook_type: HookType,
     allocator: std.mem.Allocator,
-    data: ?*anyopaque,       // Hook-specific data
+    data: ?_anyopaque,       // Hook-specific data
     user_data: ?*anyopaque,  // Plugin-specific data
 };
 ```
 
 **Hook Data Types**:
-- `pre_command`: `*Command` (can modify)
-- `post_command`: `*CommandResult`
+
+- `pre_command`: `_Command` (can modify)
+- `post_command`: `_CommandResult`
 - `pre_prompt`: null
-- `post_prompt`: `*[]const u8` (prompt string)
-- `completion`: `*CompletionRequest`
+- `post_prompt`: `_[]const u8` (prompt string)
+- `completion`: `_CompletionRequest`
 
 ### PluginRegistry (src/plugins/interface.zig)
 
@@ -479,13 +484,14 @@ pub const ThreadPool = struct {
     active_jobs: std.atomic.Value(usize),
 
     pub fn init(allocator: std.mem.Allocator, thread_count: usize) !ThreadPool;
-    pub fn deinit(self: *ThreadPool) void;
-    pub fn submit(self: *ThreadPool, comptime func: anytype, args: anytype) !void;
+    pub fn deinit(self: _ThreadPool) void;
+    pub fn submit(self: _ThreadPool, comptime func: anytype, args: anytype) !void;
     pub fn waitIdle(self: *ThreadPool) void;
 };
 ```
 
 **Memory Layout**:
+
 - Thread handles: `N * sizeof(std.Thread)` (~8 bytes each)
 - Job queue: Dynamic ArrayList
 - Total overhead: ~1KB for 8 threads
@@ -512,10 +518,10 @@ pub const AtomicCounter = struct {
     value: std.atomic.Value(usize),
 
     pub fn init() AtomicCounter;
-    pub fn increment(self: *AtomicCounter) usize;
-    pub fn decrement(self: *AtomicCounter) usize;
-    pub fn get(self: *const AtomicCounter) usize;
-    pub fn set(self: *AtomicCounter, val: usize) void;
+    pub fn increment(self: _AtomicCounter) usize;
+    pub fn decrement(self: _AtomicCounter) usize;
+    pub fn get(self: _const AtomicCounter) usize;
+    pub fn set(self: _AtomicCounter, val: usize) void;
 };
 ```
 
@@ -533,15 +539,16 @@ pub fn SPSCQueue(comptime T: type, comptime capacity: usize) type {
         write_pos: std.atomic.Value(usize),
 
         pub fn init() Self;
-        pub fn push(self: *Self, item: T) bool;
-        pub fn pop(self: *Self) ?T;
-        pub fn isEmpty(self: *const Self) bool;
-        pub fn isFull(self: *const Self) bool;
+        pub fn push(self: _Self, item: T) bool;
+        pub fn pop(self: _Self) ?T;
+        pub fn isEmpty(self: _const Self) bool;
+        pub fn isFull(self: _const Self) bool;
     };
 }
 ```
 
 **Properties**:
+
 - Zero locks (uses atomic operations only)
 - Fixed capacity (ring buffer)
 - Single producer, single consumer only
@@ -573,14 +580,15 @@ pub const RWLock = struct {
     write_cond: std.Thread.Condition,
 
     pub fn init() RWLock;
-    pub fn lockRead(self: *RWLock) void;
-    pub fn unlockRead(self: *RWLock) void;
-    pub fn lockWrite(self: *RWLock) void;
-    pub fn unlockWrite(self: *RWLock) void;
+    pub fn lockRead(self: _RWLock) void;
+    pub fn unlockRead(self: _RWLock) void;
+    pub fn lockWrite(self: _RWLock) void;
+    pub fn unlockWrite(self: _RWLock) void;
 };
 ```
 
 **Use Cases**:
+
 - Configuration data (many reads, few writes)
 - Cached data
 - Lookup tables
@@ -605,16 +613,17 @@ pub fn ConcurrentHashMap(
         };
 
         pub fn init(allocator: std.mem.Allocator) Self;
-        pub fn deinit(self: *Self) void;
-        pub fn put(self: *Self, key: K, value: V) !void;
-        pub fn get(self: *Self, key: K) ?V;
-        pub fn remove(self: *Self, key: K) bool;
+        pub fn deinit(self: _Self) void;
+        pub fn put(self: _Self, key: K, value: V) !void;
+        pub fn get(self: _Self, key: K) ?V;
+        pub fn remove(self: _Self, key: K) bool;
         pub fn count(self: *Self) usize;
     };
 }
 ```
 
 **Properties**:
+
 - N shards = N times less contention
 - Hash-based distribution
 - Per-shard locking
@@ -665,7 +674,7 @@ pub const GlobPattern = struct {
 
 **Usage**:
 ```zig
-var pattern = try GlobPattern.compile("*.txt", allocator);
+var pattern = try GlobPattern.compile("_.txt", allocator);
 defer pattern.deinit();
 
 if (pattern.matches("file.txt")) {
@@ -682,7 +691,7 @@ pub const ExpansionResult = struct {
     values: [][]const u8,
     allocator: std.mem.Allocator,
 
-    pub fn deinit(self: *ExpansionResult) void {
+    pub fn deinit(self: _ExpansionResult) void {
         for (self.values) |value| {
             self.allocator.free(value);
         }
@@ -702,7 +711,7 @@ shell.environment.put("VAR", try allocator.dupe(u8, "value"));
 // Shell frees in deinit
 var iter = shell.environment.iterator();
 while (iter.next()) |entry| {
-    allocator.free(entry.value_ptr.*);
+    allocator.free(entry.value_ptr._);
 }
 ```
 
@@ -751,7 +760,7 @@ Typical memory footprint of major structures:
 | Plugin | 100 bytes | Plus state |
 | ThreadPool | ~1KB | Plus N threads |
 | AtomicCounter | 8 bytes | Single atomic value |
-| SPSCQueue | capacity * sizeof(T) | Fixed-size buffer |
+| SPSCQueue | capacity _ sizeof(T) | Fixed-size buffer |
 
 ## Performance Characteristics
 
@@ -763,7 +772,7 @@ Typical memory footprint of major structures:
 | Job lookup | O(n) | Small N (max 16) |
 | Token generation | O(n) | Linear scan |
 | AST building | O(n) | Recursive descent |
-| Glob matching | O(n*m) | Pattern * filename |
+| Glob matching | O(n_m) | Pattern _ filename |
 | Thread pool submit | O(1) | Lock + append |
 | Atomic counter | O(1) | Lock-free |
 | SPSC queue push/pop | O(1) | Lock-free |

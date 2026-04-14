@@ -30,12 +30,14 @@ cat s/m/c<TAB>    → cat src/main/config.zig
 ## Behavior
 
 ### Unique Matches
+
 When each path segment has exactly one match, expansion happens automatically:
 ```bash
 /u/l/b<TAB> → /usr/local/bin/  # if all segments are unique
 ```
 
 ### Ambiguous Segments with Lookahead
+
 When a segment matches multiple directories, Den uses **multi-segment lookahead** to resolve ambiguity:
 ```bash
 # /u/l is ambiguous (/usr/lib or /usr/local)
@@ -47,6 +49,7 @@ When a segment matches multiple directories, Den uses **multi-segment lookahead*
 ```
 
 **How lookahead works:**
+
 1. Den finds all matches for current segment (e.g., `/u/l` → `lib`, `local`)
 2. For each match, tries to expand the remaining segments
 3. If exactly ONE path successfully expands through all segments → expand!
@@ -59,6 +62,7 @@ When a segment matches multiple directories, Den uses **multi-segment lookahead*
 ```
 
 ### Partial Expansion
+
 If expansion cannot be uniquely determined, Den shows all possible matches:
 ```bash
 # If /usr is unique but /usr/l matches both "lib" and "local"
@@ -79,6 +83,7 @@ The mid-word completion feature is implemented in `src/utils/completion.zig`:
 ### Algorithm
 
 **Simple Expansion (no lookahead needed):**
+
 1. Split the path by `/` into segments
 2. For each segment:
    - Skip special directories (`.`, `..`)
@@ -88,6 +93,7 @@ The mid-word completion feature is implemented in `src/utils/completion.zig`:
 3. Return the maximally expanded path
 
 **Lookahead Algorithm (for ambiguous segments):**
+
 1. Find all directory matches for current segment
 2. If 0 matches: fail
 3. If 1 match: expand and continue to next segment
@@ -109,9 +115,11 @@ Step 1: Expand 'u' in '/'
 Step 2: Expand 'l' in '/usr'
   → Matches: 'lib', 'libexec', 'local' (ambiguous!)
   → Lookahead with remaining segment 'b':
+
     - Try /usr/lib + 'b': no match
     - Try /usr/libexec + 'b': no match
     - Try /usr/local + 'b': matches 'bin' ✓
+
   → Only ONE path succeeded
   → Current: /usr/local/bin
 
@@ -129,6 +137,7 @@ Step 3: No more segments
 ## Configuration
 
 Mid-word completion is enabled by default and works automatically in all path contexts:
+
 - File arguments
 - Directory navigation (`cd`, `pushd`)
 - Command completion with paths
@@ -138,6 +147,7 @@ Mid-word completion is enabled by default and works automatically in all path co
 Den's implementation provides the core functionality of zsh's mid-word completion with some enhancements:
 
 **What Den does (like zsh):**
+
 - ✅ Expands unambiguous abbreviated path segments
 - ✅ Multi-segment lookahead to resolve ambiguity
 - ✅ Works with both absolute and relative paths
@@ -146,11 +156,13 @@ Den's implementation provides the core functionality of zsh's mid-word completio
 - ✅ **Text replacement** (replaces abbreviation, doesn't append)
 
 **What Den does differently:**
+
 - ✅ Simpler, more predictable behavior
 - ✅ Single unique path expansion (not multiple candidates)
 - ✅ Clear success/failure semantics
 
 **What zsh additionally does:**
+
 - Multiple ambiguous path expansions (shows all possible full paths)
 - Fuzzy matching with approximate completion
 - More sophisticated matching heuristics
@@ -170,16 +182,19 @@ Potential improvements for mid-word completion:
 ## Technical Notes
 
 ### Safety
+
 - Validates paths don't contain null bytes
 - Uses bounded buffers to prevent overflows
 - Gracefully handles inaccessible directories
 
 ### Memory Management
+
 - Uses stack buffers where possible (`std.fs.max_path_bytes`)
 - Allocates only for final results
 - Properly cleans up temporary allocations
 
 ### Edge Cases
+
 - Empty paths: returns null (no expansion)
 - Single-component paths: no expansion needed
 - Paths ending in `/`: treated as complete, no expansion

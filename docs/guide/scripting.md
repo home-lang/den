@@ -5,7 +5,7 @@ Den supports shell scripting with POSIX-compatible syntax, allowing you to autom
 ## Basic Script Structure
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Comments start with #
 # This is a basic Den script
@@ -31,7 +31,7 @@ EMPTY=""
 # Command substitution
 CURRENT_DIR=$(pwd)
 DATE=$(date +%Y-%m-%d)
-FILES=$(ls *.txt)
+FILES=$(ls _.txt)
 
 # Environment variables
 export PATH="$HOME/bin:$PATH"
@@ -68,13 +68,13 @@ echo "${#NAME}"              # String length
 | `$0` | Script name |
 | `$1-$9` | Positional parameters |
 | `$@` | All positional parameters (as separate words) |
-| `$*` | All positional parameters (as single string) |
+| `$_` | All positional parameters (as single string) |
 | `$#` | Number of positional parameters |
 
 ### Example: Using Special Variables
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 echo "Script: $0"
 echo "First arg: $1"
@@ -90,7 +90,7 @@ echo "Exit status: $?"
 ### If Statements
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Basic if statement
 if test -f "config.txt"; then
@@ -174,7 +174,7 @@ fi
 ### For Loops
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Iterate over list
 for name in Alice Bob Charlie; do
@@ -182,13 +182,13 @@ for name in Alice Bob Charlie; do
 done
 
 # Iterate over files
-for file in *.txt; do
+for file in _.txt; do
     echo "Processing $file"
     cat "$file"
 done
 
 # Iterate over command output
-for dir in $(ls -d */); do
+for dir in $(ls -d _/); do
     echo "Directory: $dir"
 done
 
@@ -206,7 +206,7 @@ done
 ### While Loops
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Counter loop
 COUNT=0
@@ -232,7 +232,7 @@ done
 ### Arithmetic Expansion
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Basic arithmetic
 echo $((1 + 2))       # 3
@@ -246,7 +246,7 @@ echo $((2 ** 8))      # 256
 X=10
 Y=3
 echo $((X + Y))       # 13
-echo $((X * Y))       # 30
+echo $((X _ Y))       # 30
 
 # Increment
 COUNT=0
@@ -257,7 +257,7 @@ echo $COUNT           # 1
 ## Command Substitution
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Capture command output
 CURRENT_DATE=$(date)
@@ -279,7 +279,7 @@ mkdir "backup-$(date +%Y%m%d)"
 ### Reading Input
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Read a line
 echo "Enter your name:"
@@ -299,7 +299,7 @@ echo "Hello, $FIRST $LAST"
 ### Output
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Standard output
 echo "Normal message"
@@ -315,7 +315,7 @@ command > /dev/null 2>&1
 ## Error Handling
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Check command success
 if ! mkdir /tmp/mydir 2>/dev/null; then
@@ -343,7 +343,7 @@ echo "Backup successful"
 ### Build Script
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 # build.sh - Build project
 
 echo "Building project..."
@@ -371,7 +371,7 @@ echo "Build complete!"
 ### Deployment Script
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 # deploy.sh - Deploy to server
 
 SERVER="user@server.com"
@@ -386,7 +386,7 @@ fi
 echo "Deploying to $SERVER..."
 
 # Upload files
-scp -r build/* "$SERVER:$REMOTE_PATH/"
+scp -r build/_ "$SERVER:$REMOTE_PATH/"
 
 # Restart service
 ssh "$SERVER" "sudo systemctl restart myapp"
@@ -397,7 +397,7 @@ echo "Deployment complete!"
 ### Log Rotation Script
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 # rotate-logs.sh - Rotate log files
 
 LOG_DIR="/var/log/myapp"
@@ -419,8 +419,8 @@ if test -f "app.log"; then
 fi
 
 # Remove old logs
-for file in app.log.*; do
-    NUM="${file##*.}"
+for file in app.log._; do
+    NUM="${file##_.}"
     if test "$NUM" -gt "$MAX_LOGS"; then
         rm "$file"
     fi

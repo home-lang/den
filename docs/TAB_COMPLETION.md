@@ -35,6 +35,7 @@ den> cd /usr/l<TAB>
 ```
 
 **Cycling through suggestions:**
+
 - Press `TAB` repeatedly to cycle through all available options
 - The current selection is **highlighted** in the list
 - The highlighted completion is automatically inserted into your command line
@@ -44,7 +45,7 @@ den> cd /usr/l<TAB>
 # Type and press TAB
 den> cd /usr/l<TAB>
 
-# First suggestion appears, list shows:
+# First suggestion appears, list shows
 # > lib/        libexec/        local/
 den> cd /usr/lib/
 
@@ -70,6 +71,7 @@ den> cd /usr/local/bin/
 ```
 
 **How it works:**
+
 - Each segment can be abbreviated to its first letter(s)
 - Den resolves ambiguous segments using lookahead
 - Only expands if a unique path can be determined
@@ -134,10 +136,10 @@ Executable files and scripts are highlighted differently in completion lists:
 
 ```bash
 den> ./<TAB>
-script.sh*    data.json    build.sh*    README.md
+script.sh_    data.json    build.sh_    README.md
 ```
 
-*(Scripts and executables are marked with special colors)*
+_(Scripts and executables are marked with special colors)_
 
 ## Keyboard Shortcuts
 
@@ -178,7 +180,7 @@ If no completions are available, Den emits a subtle bell sound (system beep) and
 
 ```bash
 den> cd /nonexistent<TAB>
-# *beep* - no changes
+# _beep_ - no changes
 ```
 
 ## Completion Types
@@ -186,6 +188,7 @@ den> cd /nonexistent<TAB>
 Den provides different completion strategies based on context:
 
 ### File Completion
+
 - Completes files and directories in the current path
 - Adds `/` to directories
 - Filters hidden files (starting with `.`) unless you type `.` first
@@ -196,11 +199,13 @@ den> cat .<TAB>
 ```
 
 ### Directory Completion (cd, pushd, etc.)
+
 - Only shows directories
 - Includes hidden directories if you start with `.`
 - Performs mid-word path expansion
 
 ### Command Completion
+
 - Searches `PATH` for executable commands
 - Includes built-in shell commands
 - Filters based on prefix match
@@ -227,6 +232,7 @@ den> cat .<TAB>
 ### Display Format
 
 Completions are displayed in a multi-column layout:
+
 - **4 columns** maximum for readability
 - **Color-coded** by type (directories, files, executables)
 - **Highlighted** current selection
@@ -244,6 +250,7 @@ Completions are displayed in a multi-column layout:
 Den's tab completion implements many popular zsh features:
 
 **What Den does (like zsh):**
+
 - ✅ Mid-word path expansion (`/u/l/b` → `/usr/local/bin/`)
 - ✅ Multi-segment lookahead for ambiguity resolution
 - ✅ Cycling through suggestions with Tab
@@ -253,6 +260,7 @@ Den's tab completion implements many popular zsh features:
 - ✅ Smart slash handling for directories
 
 **zsh features not yet in Den:**
+
 - Arrow key navigation through suggestions
 - Fuzzy matching (e.g., `doc/proj` matches `Documents/Projects`)
 - Menu selection mode
@@ -267,6 +275,7 @@ Tab completion is enabled by default and requires no configuration. All features
 ### Customization (Future)
 
 Planned configuration options:
+
 - Completion style (cycling vs menu)
 - Number of columns in display
 - Color scheme for completions
@@ -325,6 +334,7 @@ den> cat .<TAB>
 **Symptom:** Pressing TAB does nothing
 
 **Solutions:**
+
 1. Make sure you've typed at least one character (TAB on empty line = 4 spaces)
 2. Check if the directory/file actually exists
 3. Verify file permissions - Den can't complete files it can't read
@@ -335,10 +345,10 @@ den> cat .<TAB>
 
 **Solution:** Type more characters to narrow down:
 ```bash
-# Instead of:
+# Instead of
 den> cd D<TAB>  # Shows: Desktop/ Documents/ Downloads/
 
-# Type more:
+# Type more
 den> cd Doc<TAB>  # Shows: Documents/
 ```
 
@@ -353,6 +363,7 @@ den> cd Doc<TAB>  # Shows: Documents/
 **Symptom:** `/u/l/b<TAB>` doesn't expand
 
 **Possible causes:**
+
 1. Path doesn't exist or isn't unique
 2. Permissions prevent reading directories
 3. Typing error in abbreviation
@@ -367,26 +378,29 @@ den complete "/u/l/b"
 ## Performance Tips
 
 1. **Be specific:** More characters = faster completion
+
    ```bash
-   # Faster:
+# Faster
    den> cd Doc<TAB>
 
-   # Slower (scans more files):
+# Slower (scans more files)
    den> cd D<TAB>
    ```
 
 2. **Use mid-word expansion for deep paths:**
+
    ```bash
-   # Efficient:
+# Efficient
    den> cd /u/l/s/a/j<TAB>
 
-   # Less efficient:
+# Less efficient
    den> cd /u<TAB>sr<TAB>loc<TAB>sha<TAB>app<TAB>jav<TAB>
    ```
 
 3. **Avoid completions on huge directories:**
+
    ```bash
-   # May be slow:
+# May be slow
    den> ls /usr/bin/<TAB>  # Thousands of files
    ```
 
@@ -411,12 +425,14 @@ den complete "/u/l/b"
 ### State Management
 
 Den maintains completion state between TAB presses:
+
 - `completion_list`: Array of available completions
 - `completion_index`: Current position in cycling
 - `completion_word_start`: Buffer position where completion began
 - `completion_path_prefix`: Saved directory prefix for cycling
 
 This state is cleared when:
+
 - User types any character
 - User moves cursor
 - User cancels with Esc
@@ -425,6 +441,7 @@ This state is cleared when:
 ### Memory Management
 
 All completion strings are:
+
 - Allocated using the line editor's allocator
 - Freed when completion state is cleared
 - Managed safely to prevent leaks
@@ -443,6 +460,7 @@ All completion strings are:
 ## Contributing
 
 To improve tab completion:
+
 1. Source code: `src/utils/completion.zig` and `src/utils/terminal.zig`
 2. Tests: Add test cases for new features
 3. Documentation: Update this file with new capabilities

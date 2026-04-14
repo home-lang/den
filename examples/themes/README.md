@@ -5,11 +5,13 @@ This directory contains example themes demonstrating how to customize Den Shell'
 ## Available Themes
 
 ### 1. default.jsonc
+
 **Description:** Balanced theme with good readability and modern colors.
 
 **Best for:** General use, balanced aesthetics
 
 **Features:**
+
 - One Dark inspired color scheme
 - Clear visual hierarchy
 - Git status colors
@@ -21,11 +23,13 @@ user@host ~/projects/den main ✗ ➜
 ```
 
 ### 2. minimal.jsonc
+
 **Description:** Clean, distraction-free theme optimized for focus.
 
 **Best for:** Minimal distractions, fast rendering, low-resource systems
 
 **Features:**
+
 - Monochrome color scheme
 - Simple prompt format
 - Minimal visual elements
@@ -37,11 +41,13 @@ user@host ~/projects/den main ✗ ➜
 ```
 
 ### 3. powerline.jsonc
+
 **Description:** Powerline-inspired theme with segment-based design.
 
 **Best for:** Visual information density, status monitoring
 
 **Features:**
+
 - Segment-based prompt
 - Powerline symbols
 - Background colors for segments
@@ -54,11 +60,13 @@ user@host ~/projects/den main ✗ ➜
 ```
 
 ### 4. ocean.jsonc
+
 **Description:** Cool blue ocean-inspired color palette.
 
 **Best for:** Night coding, reduced eye strain
 
 **Features:**
+
 - Blue/cyan color scheme
 - Calm, easy on eyes
 - Subtle contrast
@@ -71,11 +79,13 @@ user@host ~/projects/den main ✗ ➜
 ```
 
 ### 5. tokyo-night.jsonc
+
 **Description:** Tokyo Night color scheme - popular dark theme.
 
 **Best for:** Modern aesthetics, high contrast
 
 **Features:**
+
 - Tokyo Night colors
 - High contrast
 - Vibrant accents
@@ -87,11 +97,13 @@ user@host ~/projects/den main ✗ ➜
 ```
 
 ### 6. gruvbox.jsonc
+
 **Description:** Gruvbox color scheme - warm retro groove.
 
 **Best for:** Warm color preference, retro aesthetics
 
 **Features:**
+
 - Gruvbox color palette
 - Warm, earthy tones
 - Good contrast
@@ -166,6 +178,7 @@ Themes are defined in JSONC format with the following structure:
 ## Using Themes
 
 ### Method 1: Reference by Name
+
 ```jsonc
 {
   "theme": {
@@ -175,6 +188,7 @@ Themes are defined in JSONC format with the following structure:
 ```
 
 ### Method 2: Inline Theme
+
 ```jsonc
 {
   "theme": {
@@ -188,6 +202,7 @@ Themes are defined in JSONC format with the following structure:
 ```
 
 ### Method 3: Extend Existing Theme
+
 ```jsonc
 {
   "theme": {
@@ -279,7 +294,9 @@ Set `colorScheme: "auto"` to automatically detect light/dark mode:
 ## Terminal Compatibility
 
 ### True Color (24-bit)
+
 Most modern terminals support true color:
+
 - iTerm2
 - Alacritty
 - WezTerm
@@ -288,13 +305,17 @@ Most modern terminals support true color:
 - Konsole
 
 ### 256 Colors
+
 Den Shell automatically downgrades for 256-color terminals:
+
 - tmux (with `set -g default-terminal "screen-256color"`)
 - screen
 - xterm-256color
 
 ### 16 Colors
+
 Basic fallback for limited terminals:
+
 - Linux console
 - Basic xterm
 - SSH sessions with color limitations

@@ -85,7 +85,7 @@ const PluginAPI = api_mod.PluginAPI;
 var my_state: usize = 0;
 
 // Hook function
-pub fn myPreCommand(ctx: *HookContext) !void {
+pub fn myPreCommand(ctx: _HookContext) !void {
     if (ctx.getCommand()) |cmd| {
         std.debug.print("About to run: {s}\n", .{cmd});
     }
@@ -120,7 +120,7 @@ pub fn myCompletion(input: []const u8, allocator: std.mem.Allocator) ![][]const 
 Register your plugin components using the PluginAPI:
 
 ```zig
-pub fn registerPlugin(api: *PluginAPI) !void {
+pub fn registerPlugin(api: _PluginAPI) !void {
     // Register hooks
     try api.registerHook(.pre_command, myPreCommand, 10);
 
@@ -154,19 +154,19 @@ pub fn registerPlugin(api: *PluginAPI) !void {
 ```zig
 pub const PluginInterface = struct {
     /// Called once after loading
-    init_fn: ?*const fn (config: *PluginConfig) anyerror!void,
+    init_fn: ?_const fn (config: _PluginConfig) anyerror!void,
 
     /// Called when plugin is activated
-    start_fn: ?*const fn (config: *PluginConfig) anyerror!void,
+    start_fn: ?_const fn (config: _PluginConfig) anyerror!void,
 
     /// Called when plugin is deactivated
-    stop_fn: ?*const fn () anyerror!void,
+    stop_fn: ?_const fn () anyerror!void,
 
     /// Called before unloading
-    shutdown_fn: ?*const fn () anyerror!void,
+    shutdown_fn: ?_const fn () anyerror!void,
 
     /// Execute plugin command
-    execute_fn: ?*const fn (args: []const []const u8) anyerror!i32,
+    execute_fn: ?_const fn (args: []const []const u8) anyerror!i32,
 };
 ```
 
@@ -199,7 +199,7 @@ Hooks allow your plugin to run code at specific points in the shell's execution.
 ### Hook Function Signature
 
 ```zig
-pub const HookFn = *const fn (context: *HookContext) anyerror!void;
+pub const HookFn = _const fn (context: _HookContext) anyerror!void;
 ```
 
 ### Hook Context
@@ -207,18 +207,18 @@ pub const HookFn = *const fn (context: *HookContext) anyerror!void;
 ```zig
 pub const HookContext = struct {
     hook_type: HookType,
-    data: ?*anyopaque,        // Hook-specific data
-    user_data: ?*anyopaque,   // Your plugin's data
+    data: ?_anyopaque,        // Hook-specific data
+    user_data: ?_anyopaque,   // Your plugin's data
     allocator: std.mem.Allocator,
 
     /// Get command string (for pre/post_command hooks)
-    pub fn getCommand(self: *HookContext) ?[]const u8;
+    pub fn getCommand(self: _HookContext) ?[]const u8;
 
     /// Set user data
-    pub fn setUserData(self: *HookContext, data: *anyopaque) void;
+    pub fn setUserData(self: _HookContext, data: _anyopaque) void;
 
     /// Get user data
-    pub fn getUserData(self: *HookContext) ?*anyopaque;
+    pub fn getUserData(self: _HookContext) ?_anyopaque;
 };
 ```
 
@@ -237,12 +237,12 @@ try api.registerHook(.pre_command, otherHook, 10); // Runs second
 ```zig
 var timer_start: i64 = 0;
 
-pub fn timerPreCommand(ctx: *HookContext) !void {
+pub fn timerPreCommand(ctx: _HookContext) !void {
     _ = ctx;
     timer_start = std.time.milliTimestamp();
 }
 
-pub fn timerPostCommand(ctx: *HookContext) !void {
+pub fn timerPostCommand(ctx: _HookContext) !void {
     const elapsed = std.time.milliTimestamp() - timer_start;
     if (ctx.getCommand()) |cmd| {
         std.debug.print("[timer] '{s}' took {}ms\n", .{ cmd, elapsed });
@@ -259,7 +259,7 @@ Plugins can register custom commands that users can invoke.
 ### Command Function Signature
 
 ```zig
-pub const CommandFn = *const fn (args: []const []const u8) anyerror!i32;
+pub const CommandFn = _const fn (args: []const []const u8) anyerror!i32;
 ```
 
 The function receives command arguments and returns an exit code (0 for success).
@@ -312,7 +312,7 @@ Plugins can provide custom tab completion suggestions.
 ### Completion Function Signature
 
 ```zig
-pub const CompletionFn = *const fn (
+pub const CompletionFn = _const fn (
     input: []const u8,
     allocator: std.mem.Allocator
 ) anyerror![][]const u8;
@@ -361,7 +361,7 @@ The PluginAPI provides access to shell functionality.
 pub fn init(
     allocator: std.mem.Allocator,
     plugin_name: []const u8,
-    registry: *PluginRegistry
+    registry: _PluginRegistry
 ) !PluginAPI;
 ```
 
@@ -370,14 +370,14 @@ pub fn init(
 ```zig
 /// Register a hook
 pub fn registerHook(
-    self: *PluginAPI,
+    self: _PluginAPI,
     hook_type: HookType,
     function: HookFn,
     priority: i32,
 ) !void;
 
 /// Unregister all hooks for this plugin
-pub fn unregisterHooks(self: *PluginAPI) void;
+pub fn unregisterHooks(self: _PluginAPI) void;
 ```
 
 ### Command Registration
@@ -385,14 +385,14 @@ pub fn unregisterHooks(self: *PluginAPI) void;
 ```zig
 /// Register a command
 pub fn registerCommand(
-    self: *PluginAPI,
+    self: _PluginAPI,
     name: []const u8,
     description: []const u8,
     function: CommandFn,
 ) !void;
 
 /// Unregister all commands for this plugin
-pub fn unregisterCommands(self: *PluginAPI) void;
+pub fn unregisterCommands(self: _PluginAPI) void;
 ```
 
 ### Completion Registration
@@ -400,41 +400,41 @@ pub fn unregisterCommands(self: *PluginAPI) void;
 ```zig
 /// Register a completion provider
 pub fn registerCompletion(
-    self: *PluginAPI,
+    self: _PluginAPI,
     prefix: []const u8,
     function: CompletionFn,
 ) !void;
 
 /// Unregister all completions for this plugin
-pub fn unregisterCompletions(self: *PluginAPI) void;
+pub fn unregisterCompletions(self: _PluginAPI) void;
 ```
 
 ### Shell State Access
 
 ```zig
 /// Get an environment variable
-pub fn getEnvironmentVar(self: *PluginAPI, name: []const u8) ?[]const u8;
+pub fn getEnvironmentVar(self: _PluginAPI, name: []const u8) ?[]const u8;
 
 /// Get all environment variables
-pub fn getAllEnvironmentVars(self: *PluginAPI) ![][2][]const u8;
+pub fn getAllEnvironmentVars(self: _PluginAPI) ![][2][]const u8;
 
 /// Get current working directory
-pub fn getCurrentDirectory(self: *PluginAPI) ?[]const u8;
+pub fn getCurrentDirectory(self: _PluginAPI) ?[]const u8;
 
 /// Get command history
-pub fn getHistory(self: *PluginAPI) ![][]const u8;
+pub fn getHistory(self: _PluginAPI) ![][]const u8;
 
 /// Get last exit code
-pub fn getLastExitCode(self: *PluginAPI) i32;
+pub fn getLastExitCode(self: _PluginAPI) i32;
 
 /// Get a shell alias
-pub fn getAlias(self: *PluginAPI, name: []const u8) ?[]const u8;
+pub fn getAlias(self: _PluginAPI, name: []const u8) ?[]const u8;
 
 /// Get all aliases
-pub fn getAllAliases(self: *PluginAPI) ![][2][]const u8;
+pub fn getAllAliases(self: _PluginAPI) ![][2][]const u8;
 
 /// Check if shell access is available
-pub fn hasShellAccess(self: *PluginAPI) bool;
+pub fn hasShellAccess(self: _PluginAPI) bool;
 ```
 
 ### Logging
@@ -444,32 +444,32 @@ pub fn hasShellAccess(self: *PluginAPI) bool;
 pub const LogLevel = enum { debug, info, warn, err };
 
 /// Log at different levels
-pub fn logDebug(self: *PluginAPI, comptime format: []const u8, args: anytype) !void;
-pub fn logInfo(self: *PluginAPI, comptime format: []const u8, args: anytype) !void;
-pub fn logWarn(self: *PluginAPI, comptime format: []const u8, args: anytype) !void;
-pub fn logError(self: *PluginAPI, comptime format: []const u8, args: anytype) !void;
+pub fn logDebug(self: _PluginAPI, comptime format: []const u8, args: anytype) !void;
+pub fn logInfo(self: _PluginAPI, comptime format: []const u8, args: anytype) !void;
+pub fn logWarn(self: _PluginAPI, comptime format: []const u8, args: anytype) !void;
+pub fn logError(self: _PluginAPI, comptime format: []const u8, args: anytype) !void;
 ```
 
 ### Utility Functions
 
 ```zig
 /// Split a string by delimiter
-pub fn splitString(self: *PluginAPI, string: []const u8, delimiter: u8) ![][]const u8;
+pub fn splitString(self: _PluginAPI, string: []const u8, delimiter: u8) ![][]const u8;
 
 /// Join strings with delimiter
-pub fn joinStrings(self: *PluginAPI, strings: []const []const u8, delimiter: []const u8) ![]const u8;
+pub fn joinStrings(self: _PluginAPI, strings: []const []const u8, delimiter: []const u8) ![]const u8;
 
 /// Trim whitespace from string
-pub fn trimString(self: *PluginAPI, string: []const u8) ![]const u8;
+pub fn trimString(self: _PluginAPI, string: []const u8) ![]const u8;
 
 /// Check if string starts with prefix
-pub fn startsWith(self: *PluginAPI, string: []const u8, prefix: []const u8) bool;
+pub fn startsWith(self: _PluginAPI, string: []const u8, prefix: []const u8) bool;
 
 /// Check if string ends with suffix
-pub fn endsWith(self: *PluginAPI, string: []const u8, suffix: []const u8) bool;
+pub fn endsWith(self: _PluginAPI, string: []const u8, suffix: []const u8) bool;
 
 /// Get current timestamp in milliseconds
-pub fn timestamp(self: *PluginAPI) i64;
+pub fn timestamp(self: _PluginAPI) i64;
 ```
 
 ---
@@ -487,10 +487,10 @@ pub const PluginConfig = struct {
     config_data: std.StringHashMap([]const u8),
 
     /// Set configuration value
-    pub fn set(self: *PluginConfig, key: []const u8, value: []const u8) !void;
+    pub fn set(self: _PluginConfig, key: []const u8, value: []const u8) !void;
 
     /// Get configuration value
-    pub fn get(self: *PluginConfig, key: []const u8) ?[]const u8;
+    pub fn get(self: _PluginConfig, key: []const u8) ?[]const u8;
 };
 ```
 
@@ -498,16 +498,16 @@ pub const PluginConfig = struct {
 
 ```zig
 /// Set a configuration value
-pub fn setConfig(self: *PluginAPI, key: []const u8, value: []const u8) !void;
+pub fn setConfig(self: _PluginAPI, key: []const u8, value: []const u8) !void;
 
 /// Get a configuration value
-pub fn getConfig(self: *PluginAPI, key: []const u8) ?[]const u8;
+pub fn getConfig(self: _PluginAPI, key: []const u8) ?[]const u8;
 
 /// Get with default
-pub fn getConfigOr(self: *PluginAPI, key: []const u8, default: []const u8) []const u8;
+pub fn getConfigOr(self: _PluginAPI, key: []const u8, default: []const u8) []const u8;
 
 /// Check if key exists
-pub fn hasConfig(self: *PluginAPI, key: []const u8) bool;
+pub fn hasConfig(self: _PluginAPI, key: []const u8) bool;
 ```
 
 ---
@@ -532,20 +532,20 @@ pub const PluginErrorStats = struct {
 
 ```zig
 /// Get error stats for a plugin
-pub fn getPluginErrors(self: *PluginRegistry, plugin_name: []const u8) ?PluginErrorStats;
+pub fn getPluginErrors(self: _PluginRegistry, plugin_name: []const u8) ?PluginErrorStats;
 
 /// Get all plugin errors
-pub fn getAllErrors(self: *PluginRegistry) ![]PluginErrorStats;
+pub fn getAllErrors(self: _PluginRegistry) ![]PluginErrorStats;
 
 /// Clear errors for a plugin
-pub fn clearPluginErrors(self: *PluginRegistry, plugin_name: []const u8) void;
+pub fn clearPluginErrors(self: _PluginRegistry, plugin_name: []const u8) void;
 ```
 
 ### Error Verbosity
 
 ```zig
 /// Enable/disable verbose error printing
-pub fn setVerboseErrors(self: *PluginRegistry, verbose: bool) void;
+pub fn setVerboseErrors(self: _PluginRegistry, verbose: bool) void;
 ```
 
 ---
@@ -566,12 +566,12 @@ const PluginAPI = api_mod.PluginAPI;
 var command_count: usize = 0;
 
 // Hooks
-pub fn preCommand(ctx: *HookContext) !void {
+pub fn preCommand(ctx: _HookContext) !void {
     _ = ctx;
     command_count += 1;
 }
 
-pub fn postCommand(ctx: *HookContext) !void {
+pub fn postCommand(ctx: _HookContext) !void {
     if (ctx.getCommand()) |cmd| {
         std.debug.print("[counter] Command #{}: {s}\n", .{ command_count, cmd });
     }
@@ -592,7 +592,7 @@ pub fn resetCount(args: []const []const u8) !i32 {
 }
 
 // Registration
-pub fn register(api: *PluginAPI) !void {
+pub fn register(api: _PluginAPI) !void {
     try api.registerHook(.pre_command, preCommand, 10);
     try api.registerHook(.post_command, postCommand, 10);
     try api.registerCommand("cmdcount", "Show command count", getCount);

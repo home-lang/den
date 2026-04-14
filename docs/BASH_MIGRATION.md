@@ -85,7 +85,7 @@ for i in 1 2 3; do
     echo $i
 done
 
-for file in *.txt; do
+for file in _.txt; do
     cat "$file"
 done
 
@@ -98,7 +98,7 @@ done
 case "$var" in
     pattern1) echo "matched 1" ;;
     pattern2) echo "matched 2" ;;
-    *) echo "default" ;;
+    _) echo "default" ;;
 esac
 ```
 

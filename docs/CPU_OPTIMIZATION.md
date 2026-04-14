@@ -18,12 +18,14 @@ Den Shell implements multiple CPU optimization strategies to minimize computatio
 Based on benchmark results:
 
 ### LRU Cache
+
 - **With Cache (100 ops, 16 slots)**: 0.003ms
 - **Without Cache (100 ops)**: 0.000ms
 
 **Use when**: Results are expensive to compute and frequently reused (path resolution, glob expansion)
 
 ### Fast String Matching
+
 - **FastStringMatcher (5 searches)**: 0.000ms (instant)
 - **std.mem.indexOf (5 searches)**: 0.000ms (instant)
 
@@ -32,6 +34,7 @@ Based on benchmark results:
 **Use when**: Searching for patterns in long strings (file contents, large outputs)
 
 ### Optimized Prefix Matching
+
 - **Optimized Prefix (5 checks)**: 0.000ms (instant)
 - **std.mem.startsWith (5 checks)**: 0.000ms (instant)
 
@@ -40,17 +43,20 @@ Based on benchmark results:
 **Use when**: Checking prefixes for completion matching
 
 ### Fuzzy Score
+
 - **Fuzzy Score (7 candidates)**: 0.000ms (instant)
 
 **Use when**: Ranking completion candidates or command suggestions
 
 ### History Search
+
 - **History Index (20 searches)**: 0.011ms
 - **Linear Search (20 searches)**: 0.013ms (~15% slower)
 
 **Use when**: Searching command history (O(1) hash lookup vs O(n) linear scan)
 
 ### Optimized Parser
+
 - **Optimized Parser (5 commands)**: 0.000ms (instant)
 - **Streaming Tokenizer (5 commands)**: 0.000ms (instant)
 
@@ -127,6 +133,7 @@ for (candidates) |candidate| {
 ```
 
 **Scoring Algorithm**:
+
 - Base score: 10 points per matched character
 - Consecutive matches: +2 points per character in sequence
 - Match at start of string: +15 points
@@ -393,19 +400,19 @@ pub const History = struct {
         };
     }
 
-    pub fn add(self: *History, command: []const u8) !void {
+    pub fn add(self: _History, command: []const u8) !void {
         try self.index.add(command);
     }
 
-    pub fn search(self: *const History, query: []const u8) ?[]const u8 {
+    pub fn search(self: _const History, query: []const u8) ?[]const u8 {
         return self.index.search(query);
     }
 
-    pub fn searchPrefix(self: *const History, prefix: []const u8) ?[]const u8 {
+    pub fn searchPrefix(self: _const History, prefix: []const u8) ?[]const u8 {
         return self.index.prefixSearch(prefix);
     }
 
-    pub fn deinit(self: *History) void {
+    pub fn deinit(self: _History) void {
         self.index.deinit();
     }
 };
@@ -464,6 +471,7 @@ zig build bench
 ```
 
 This will benchmark:
+
 - LRU cache vs no cache
 - FastStringMatcher vs std.mem.indexOf
 - Optimized prefix vs std.mem.startsWith
@@ -486,4 +494,4 @@ This will benchmark:
 - Benchmark results: `bench/cpu_bench.zig`
 - Implementation: `src/utils/cpu_opt.zig`
 - Optimized parser: `src/parser/optimized_parser.zig`
-- Boyer-Moore-Horspool: https://en.wikipedia.org/wiki/Boyer%E2%80%93Moore%E2%80%93Horspool_algorithm
+- Boyer-Moore-Horspool: <https://en.wikipedia.org/wiki/Boyer%E2%80%93Moore%E2%80%93Horspool_algorithm>

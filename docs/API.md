@@ -22,6 +22,7 @@ pub fn init(allocator: std.mem.Allocator) !Shell
 ```
 
 **Parameters**:
+
 - `allocator`: Memory allocator for shell lifetime
 
 **Returns**: Initialized `Shell` instance
@@ -46,6 +47,7 @@ pub fn deinit(self: *Shell) void
 ```
 
 **Cleanup**:
+
 - Frees environment variables
 - Frees command history
 - Frees background jobs
@@ -63,6 +65,7 @@ pub fn run(self: *Shell) !void
 **Errors**: I/O errors, allocation errors
 
 **Behavior**:
+
 - Displays prompt
 - Reads user input
 - Parses and executes commands
@@ -78,6 +81,7 @@ pub fn executeCommand(self: *Shell, command: []const u8) !i32
 ```
 
 **Parameters**:
+
 - `command`: Command string to execute
 
 **Returns**: Exit code (0 for success)
@@ -96,6 +100,7 @@ pub fn setVariable(self: *Shell, name: []const u8, value: []const u8) !void
 ```
 
 **Parameters**:
+
 - `name`: Variable name
 - `value`: Variable value
 
@@ -113,6 +118,7 @@ pub fn getVariable(self: *Shell, name: []const u8) ?[]const u8
 ```
 
 **Parameters**:
+
 - `name`: Variable name
 
 **Returns**: Variable value or null if not found
@@ -135,6 +141,7 @@ pub fn init(input: []const u8) Tokenizer
 ```
 
 **Parameters**:
+
 - `input`: Input string to tokenize
 
 **Example**:
@@ -170,6 +177,7 @@ pub fn init(allocator: std.mem.Allocator, tokens: []Token) Parser
 ```
 
 **Parameters**:
+
 - `allocator`: Allocator for AST nodes
 - `tokens`: Token array from tokenizer
 
@@ -178,12 +186,13 @@ pub fn init(allocator: std.mem.Allocator, tokens: []Token) Parser
 Parse tokens into AST.
 
 ```zig
-pub fn parse(self: *Parser) !*ASTNode
+pub fn parse(self: _Parser) !_ASTNode
 ```
 
 **Returns**: Root AST node
 
 **Errors**:
+
 - `SyntaxError`: Invalid syntax
 - `OutOfMemory`: Allocation failure
 
@@ -202,7 +211,7 @@ defer parser.deinit();
 Free all AST nodes.
 
 ```zig
-pub fn deinit(self: *Parser) void
+pub fn deinit(self: _Parser) void
 ```
 
 ## Executor API
@@ -212,10 +221,11 @@ pub fn deinit(self: *Parser) void
 Create executor instance.
 
 ```zig
-pub fn init(allocator: std.mem.Allocator, shell: *Shell) Executor
+pub fn init(allocator: std.mem.Allocator, shell: _Shell) Executor
 ```
 
 **Parameters**:
+
 - `allocator`: Memory allocator
 - `shell`: Shell instance for state access
 
@@ -224,10 +234,11 @@ pub fn init(allocator: std.mem.Allocator, shell: *Shell) Executor
 Execute an AST node.
 
 ```zig
-pub fn execute(self: *Executor, node: *ASTNode) !i32
+pub fn execute(self: _Executor, node: _ASTNode) !i32
 ```
 
 **Parameters**:
+
 - `node`: AST node to execute
 
 **Returns**: Exit code
@@ -249,6 +260,7 @@ pub fn executePipeline(self: *Executor, commands: []Command) !i32
 ```
 
 **Parameters**:
+
 - `commands`: Array of commands to pipe
 
 **Returns**: Exit code of last command
@@ -275,6 +287,7 @@ pub fn executeBuiltin(
 ```
 
 **Parameters**:
+
 - `name`: Builtin name (cd, echo, export, etc.)
 - `args`: Command arguments
 
@@ -292,8 +305,8 @@ pub const Plugin = struct {
     version: []const u8,
     description: []const u8,
 
-    init: *const fn (*PluginContext) anyerror!void,
-    deinit: *const fn (*PluginContext) void,
+    init: _const fn (_PluginContext) anyerror!void,
+    deinit: _const fn (_PluginContext) void,
 
     hooks: []const HookRegistration,
 };
@@ -315,21 +328,21 @@ pub const MyPlugin = Plugin{
     },
 };
 
-fn init(ctx: *PluginContext) !void {
+fn init(ctx: _PluginContext) !void {
     // Initialize plugin
 }
 
-fn deinit(ctx: *PluginContext) void {
+fn deinit(ctx: _PluginContext) void {
     // Cleanup plugin
 }
 
-fn preCommand(ctx: *HookContext) !void {
-    const command = @as(*Command, @ptrCast(@alignCast(ctx.data)));
+fn preCommand(ctx: _HookContext) !void {
+    const command = @as(_Command, @ptrCast(@alignCast(ctx.data)));
     // Modify or inspect command
 }
 
-fn postCommand(ctx: *HookContext) !void {
-    const result = @as(*CommandResult, @ptrCast(@alignCast(ctx.data)));
+fn postCommand(ctx: _HookContext) !void {
+    const result = @as(_CommandResult, @ptrCast(@alignCast(ctx.data)));
     // Handle result
 }
 ```
@@ -343,6 +356,7 @@ pub fn register(self: *PluginRegistry, plugin: Plugin) !void
 ```
 
 **Parameters**:
+
 - `plugin`: Plugin to register
 
 **Errors**: `OutOfMemory`, `PluginExists`
@@ -353,13 +367,14 @@ Execute hooks for an event.
 
 ```zig
 pub fn executeHooks(
-    self: *PluginRegistry,
+    self: _PluginRegistry,
     hook_type: HookType,
-    context: *HookContext,
+    context: _HookContext,
 ) !void
 ```
 
 **Parameters**:
+
 - `hook_type`: Type of hook to execute
 - `context`: Hook context with event data
 
@@ -405,6 +420,7 @@ pub fn expandVariables(
 ```
 
 **Parameters**:
+
 - `input`: String with variables ($VAR, ${VAR})
 - `allocator`: Memory allocator
 - `env`: Environment variable map
@@ -430,6 +446,7 @@ pub fn match(pattern: []const u8, text: []const u8) bool
 ```
 
 **Parameters**:
+
 - `pattern`: Glob pattern (*, ?, [abc])
 - `text`: String to test
 
@@ -454,6 +471,7 @@ pub fn expand(
 ```
 
 **Parameters**:
+
 - `pattern`: Glob pattern
 - `allocator`: Memory allocator
 
@@ -461,7 +479,7 @@ pub fn expand(
 
 **Example**:
 ```zig
-const files = try Glob.expand("src/*.zig", allocator);
+const files = try Glob.expand("src/_.zig", allocator);
 defer {
     for (files) |file| allocator.free(file);
     allocator.free(files);
@@ -477,11 +495,12 @@ pub fn complete(
     prefix: []const u8,
     type: CompletionType,
     allocator: std.mem.Allocator,
-    shell: *Shell,
+    shell: _Shell,
 ) ![]Completion
 ```
 
 **Parameters**:
+
 - `prefix`: Prefix to complete
 - `type`: Completion type (command, file, etc.)
 - `allocator`: Memory allocator
@@ -512,6 +531,7 @@ pub fn expand(
 ```
 
 **Parameters**:
+
 - `input`: String with braces ({a,b,c}, {1..10})
 - `allocator`: Memory allocator
 
@@ -541,6 +561,7 @@ pub fn init(allocator: std.mem.Allocator, thread_count: usize) !ThreadPool
 ```
 
 **Parameters**:
+
 - `allocator`: Memory allocator
 - `thread_count`: Number of threads (0 = auto-detect CPUs)
 
@@ -565,6 +586,7 @@ pub fn submit(
 ```
 
 **Parameters**:
+
 - `func`: Function to execute
 - `args`: Function arguments (struct)
 
@@ -601,10 +623,10 @@ Lock-free counter.
 ```zig
 pub const AtomicCounter = struct {
     pub fn init() AtomicCounter;
-    pub fn increment(self: *AtomicCounter) usize;
-    pub fn decrement(self: *AtomicCounter) usize;
-    pub fn get(self: *const AtomicCounter) usize;
-    pub fn set(self: *AtomicCounter, val: usize) void;
+    pub fn increment(self: _AtomicCounter) usize;
+    pub fn decrement(self: _AtomicCounter) usize;
+    pub fn get(self: _const AtomicCounter) usize;
+    pub fn set(self: _AtomicCounter, val: usize) void;
 };
 ```
 
@@ -643,8 +665,8 @@ Parallel directory scanning.
 
 ```zig
 pub const ParallelScanner = struct {
-    pub fn init(allocator: std.mem.Allocator, pool: *ThreadPool) ParallelScanner;
-    pub fn deinit(self: *ParallelScanner) void;
+    pub fn init(allocator: std.mem.Allocator, pool: _ThreadPool) ParallelScanner;
+    pub fn deinit(self: _ParallelScanner) void;
 
     pub fn scanDirectories(
         self: *ParallelScanner,
@@ -751,6 +773,7 @@ pool.waitIdle();
 This API documentation is for Den Shell v0.1.0 using Zig 0.16-dev.
 
 Breaking changes will be noted in:
+
 - Major version increments
 - CHANGELOG.md
 - Migration guides

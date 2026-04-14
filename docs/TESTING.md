@@ -28,13 +28,15 @@ Den Shell aims for 100% test coverage across all modules. This guide covers test
 ```
         /\        E2E Tests (10%)
        /  \       - Full shell integration
-      /____\      - Real-world scenarios
+      /****\      - Real-world scenarios
      /      \     Integration Tests (30%)
     /        \    - Module interactions
-   /__________\   - Multi-component tests
+   /**********\   - Multi-component tests
   /            \  Unit Tests (60%)
- /______________\ - Individual functions
+ /******________\ - Individual functions
+
                   - Edge cases
+
 ```
 
 ## Test Structure
@@ -155,7 +157,7 @@ open coverage/index.html
 | Builtins | 89% | 3,412 | 124 |
 | Plugins | 100% | 234 | 28 |
 | Utils | 96% | 567 | 42 |
-| **Total** | **94%** | **9,518** | **487** |
+| **Total**|**94%**|**9,518**|**487** |
 
 ### Coverage Goals
 
@@ -339,7 +341,7 @@ test "regression: issue #42 - glob with spaces" {
     var globber = try Glob.init(allocator);
     defer globber.deinit();
 
-    const pattern = "src/**/*.zig";
+    const pattern = "src/**/_.zig";
     const matches = try globber.match(pattern);
     defer allocator.free(matches);
 
@@ -388,18 +390,23 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+
       - uses: actions/checkout@v3
       - uses: goto-bus-stop/setup-zig@v2
+
         with:
           version: 0.16-dev
 
       - name: Run tests
+
         run: zig build test
 
       - name: Check coverage
+
         run: zig build test-coverage
 
       - name: Upload coverage
+
         uses: codecov/codecov-action@v3
 ```
 
@@ -407,7 +414,7 @@ jobs:
 
 ```bash
 # .git/hooks/pre-commit
-#!/bin/bash
+# !/bin/bash
 zig build test || {
     echo "Tests failed. Commit aborted."
     exit 1
@@ -417,6 +424,7 @@ zig build test || {
 ### Coverage Requirements
 
 Pull requests must:
+
 - [ ] Pass all existing tests
 - [ ] Add tests for new code
 - [ ] Maintain or improve coverage
@@ -459,7 +467,7 @@ pub const TestAllocator = struct {
         };
     }
 
-    pub fn deinit(self: *TestAllocator) !void {
+    pub fn deinit(self: _TestAllocator) !void {
         const leaked = self.gpa.deinit();
         if (leaked == .leak) return error.MemoryLeak;
     }
@@ -477,11 +485,11 @@ pub const MockIO = struct {
         return .{ .output = std.ArrayList(u8).init(allocator) };
     }
 
-    pub fn print(self: *MockIO, comptime fmt: []const u8, args: anytype) !void {
+    pub fn print(self: _MockIO, comptime fmt: []const u8, args: anytype) !void {
         try self.output.writer().print(fmt, args);
     }
 
-    pub fn getOutput(self: *MockIO) []const u8 {
+    pub fn getOutput(self: _MockIO) []const u8 {
         return self.output.items;
     }
 };
@@ -591,6 +599,7 @@ test "parser: invalid syntax returns error" {
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to contribute tests.
 
 When adding a new feature:
+
 1. Write tests first (TDD)
 2. Implement feature
 3. Ensure all tests pass

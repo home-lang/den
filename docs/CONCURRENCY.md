@@ -18,15 +18,18 @@ Den Shell implements a comprehensive concurrency framework to maximize performan
 Based on design targets:
 
 ### Thread Pool Benefits
+
 - **CPU Utilization**: Uses all available CPU cores
 - **Task Overhead**: Minimal overhead for task submission (~nanoseconds)
 - **Work Stealing**: Automatic load balancing across threads
 
 ### Parallel Discovery
+
 - **Module Detection**: 2-4x faster with 4 threads on multi-directory scans
 - **Scalability**: Linear speedup with number of CPUs
 
 ### Lock-Free Structures
+
 - **SPSC Queue**: Zero-lock single producer/consumer communication
 - **Atomic Counter**: Lock-free increment/decrement operations
 - **Reduced Contention**: No mutex overhead for simple operations
@@ -55,6 +58,7 @@ pool.waitIdle();
 ```
 
 **Key Features**:
+
 - Automatic CPU count detection (pass 0 for thread_count)
 - Work queue with condition variable for efficient waiting
 - Automatic memory management for task arguments
@@ -83,6 +87,7 @@ std.debug.print("Found {} plugins\n", .{plugins.len});
 ```
 
 **Optimizations**:
+
 - Single directory: Direct scan (no thread pool overhead)
 - Multiple directories: Parallel scan across threads
 - Thread-safe result collection with mutex protection
@@ -103,6 +108,7 @@ counter.set(100); // Set to specific value
 ```
 
 **Use Cases**:
+
 - Metrics collection across threads
 - Reference counting
 - Progress tracking
@@ -132,6 +138,7 @@ if (queue.pop()) |value| {
 ```
 
 **Characteristics**:
+
 - **Zero locks**: Uses atomic operations only
 - **Single producer, single consumer**: Design constraint for lock-freedom
 - **Fixed capacity**: Ring buffer implementation
@@ -158,6 +165,7 @@ const total = map.count(); // Sum across all shards
 ```
 
 **Design**:
+
 - **Sharding**: Hash-based distribution across N maps
 - **Per-shard locks**: Only contend within same shard
 - **Scalability**: Scales with number of shards
@@ -182,6 +190,7 @@ lock.unlockWrite();
 ```
 
 **Best For**:
+
 - Read-heavy workloads
 - Configuration data
 - Cache lookups
@@ -209,6 +218,7 @@ try processor.processFiles(&files, struct {
 ```
 
 **Optimizations**:
+
 - Small file counts (< 4): Sequential processing
 - Large file counts: Automatic chunking across threads
 - Error resilience: Continues on individual file errors
@@ -231,7 +241,7 @@ fn loadModules(allocator: Allocator, paths: [][]const u8) ![]Module {
 }
 
 // GOOD: Parallel module loading
-fn loadModules(allocator: Allocator, pool: *ThreadPool, paths: [][]const u8) ![]Module {
+fn loadModules(allocator: Allocator, pool: _ThreadPool, paths: [][]const u8) ![]Module {
     var results = std.ArrayList(Module).init(allocator);
     var mutex = std.Thread.Mutex{};
 
@@ -275,7 +285,7 @@ fn discoverPlugins(allocator: Allocator) ![]PluginPath {
 }
 
 // GOOD: Parallel directory scanning
-fn discoverPlugins(allocator: Allocator, pool: *ThreadPool) ![][]const u8 {
+fn discoverPlugins(allocator: Allocator, pool: _ThreadPool) ![][]const u8 {
     var scanner = ParallelScanner.init(allocator, pool);
     defer scanner.deinit();
 
@@ -390,6 +400,7 @@ zig build bench
 ```
 
 Expected results:
+
 - Thread pool overhead: ~microseconds per task
 - Parallel discovery: 2-4x speedup on multi-directory scans
 - Atomic counter: 10-100x faster than mutex
@@ -427,7 +438,7 @@ pub fn initializeShell(allocator: Allocator) !Shell {
 ```zig
 pub fn getCompletions(
     prefix: []const u8,
-    pool: *ThreadPool,
+    pool: _ThreadPool,
     sources: []CompletionSource,
 ) ![]Completion {
     var results = std.ArrayList(Completion).init(allocator);
@@ -438,7 +449,7 @@ pub fn getCompletions(
         const Args = struct {
             source: CompletionSource,
             prefix: []const u8,
-            results: *std.ArrayList(Completion),
+            results: _std.ArrayList(Completion),
             mutex: *std.Thread.Mutex,
         };
 
@@ -477,4 +488,4 @@ pub fn getCompletions(
 - Implementation: `src/utils/concurrency.zig`
 - Parallel discovery: `src/utils/parallel_discovery.zig`
 - Benchmarks: `bench/concurrency_bench.zig`
-- Zig threading: https://ziglang.org/documentation/master/std/#std.Thread
+- Zig threading: <https://ziglang.org/documentation/master/std/#std.Thread>

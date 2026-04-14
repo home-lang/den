@@ -163,7 +163,7 @@ echo ${VERSION}
 $?      # Exit status of last command
 $$      # Current shell PID
 $!      # PID of last background job
-$_      # Last argument of previous command
+$*      # Last argument of previous command
 $0      # Script name
 $1-$9   # Positional parameters
 $@      # All positional parameters (separate)
@@ -244,7 +244,7 @@ file[0-9]   # file0 through file9
 
 ```bash
 # Start background job
-long_process &
+long*process &
 
 # List all jobs
 jobs
@@ -319,7 +319,7 @@ echo $HOM<Tab>           # Completes to $HOME
 Use arrow keys to search history by substring:
 
 ```bash
-# Type partial command, then:
+# Type partial command, then
 # Up arrow: Search backwards
 # Down arrow: Search forwards
 ```
@@ -444,7 +444,7 @@ done
 
 ```bash
 # Define in script
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 setup() {
     mkdir -p build

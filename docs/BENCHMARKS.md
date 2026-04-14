@@ -40,13 +40,13 @@ Den Shell is designed for maximum performance. This document provides comprehens
 
 | Metric | Den | Bash | Zsh | Fish | Den Advantage |
 |--------|-----|------|-----|------|---------------|
-| **Startup Time** | 5ms | 25ms | 35ms | 45ms | **5-9x faster** |
+| **Startup Time**| 5ms | 25ms | 35ms | 45ms |**5-9x faster** |
 | **Binary Size** | 1.8MB | 1.2MB | 700KB | 3.5MB | Comparable |
-| **Memory (Idle)** | 2MB | 4MB | 6MB | 8MB | **2-4x less** |
-| **Memory (Active)** | 8MB | 15MB | 20MB | 25MB | **2-3x less** |
-| **Command Exec** | 0.8ms | 2.1ms | 2.5ms | 3.2ms | **2.5-4x faster** |
+| **Memory (Idle)**| 2MB | 4MB | 6MB | 8MB |**2-4x less** |
+| **Memory (Active)**| 8MB | 15MB | 20MB | 25MB |**2-3x less** |
+| **Command Exec**| 0.8ms | 2.1ms | 2.5ms | 3.2ms |**2.5-4x faster** |
 | **Builtin Commands** | 54 | 62 | 84 | 90+ | Feature-rich |
-| **Dependencies** | 0 | libc | libc | Multiple | **Zero deps** |
+| **Dependencies**| 0 | libc | libc | Multiple |**Zero deps** |
 
 ### Performance Comparison Chart
 
@@ -85,12 +85,12 @@ time (shell -c "exit")
 
 | Shell | Min | Median | Max | Std Dev |
 |-------|-----|--------|-----|---------|
-| **Den** | 4.2ms | **5.0ms** | 6.8ms | 0.4ms |
+| **Den**| 4.2ms |**5.0ms** | 6.8ms | 0.4ms |
 | Bash | 22ms | 25ms | 28ms | 1.2ms |
 | Zsh | 32ms | 35ms | 40ms | 1.8ms |
 | Fish | 42ms | 45ms | 52ms | 2.1ms |
 
-**Winner**: Den is **5-9x faster** than other shells.
+**Winner**: Den is**5-9x faster** than other shells.
 
 ### Startup Components
 
@@ -105,7 +105,7 @@ Breaking down Den's 5ms startup:
 | Prompt init | 0.3ms | 6% |
 | Environment | 0.7ms | 14% |
 | Other | 0.5ms | 10% |
-| **Total** | **5.0ms** | **100%** |
+| **Total**|**5.0ms**|**100%** |
 
 ### Startup with Configuration
 
@@ -133,7 +133,7 @@ Testing `echo "hello"` execution:
 | Zsh | 2.5ms | 400 |
 | Fish | 3.2ms | 312 |
 
-**Winner**: Den is **2.5-4x faster**.
+**Winner**: Den is**2.5-4x faster**.
 
 ### External Commands
 
@@ -159,7 +159,7 @@ Testing `echo "test" | wc -l`:
 | Zsh | 6.1ms | 164 ops/s |
 | Fish | 7.2ms | 139 ops/s |
 
-**Winner**: Den is **70-125% faster**.
+**Winner**: Den is**70-125% faster**.
 
 ## Memory Usage
 
@@ -179,7 +179,7 @@ ps -o rss= -p $SHELL_PID
 | Zsh | 6.1MB | 7.5MB | 4.2MB |
 | Fish | 8.3MB | 10MB | 6.5MB |
 
-**Winner**: Den uses **2-4x less memory**.
+**Winner**: Den uses**2-4x less memory**.
 
 ### Active Memory
 
@@ -192,7 +192,7 @@ Memory usage during heavy workload (1000 commands):
 | Zsh | 20.3MB | 35,678 | 35,402 | 276 |
 | Fish | 25.1MB | 42,890 | 42,498 | 392 |
 
-**Winner**: Den has **zero leaks** and uses **2-3x less memory**.
+**Winner**: Den has**zero leaks**and uses**2-3x less memory**.
 
 ### Memory Efficiency
 
@@ -218,7 +218,7 @@ Searching 10,000 history entries:
 | Zsh | 12ms | 6ms |
 | Fish | 18ms | 10ms |
 
-**Winner**: Den's trie-based indexing is **10-20x faster**.
+**Winner**: Den's trie-based indexing is**10-20x faster**.
 
 ### Tab Completion
 
@@ -231,7 +231,7 @@ Completing a path with 1,000 files:
 | Zsh | 65ms | 1,000 |
 | Fish | 120ms | 100 (limited) |
 
-**Winner**: Den is **5-10x faster**.
+**Winner**: Den is**5-10x faster**.
 
 ### Glob Expansion
 
@@ -244,7 +244,7 @@ Expanding `**/*.zig` (500 matches):
 | Zsh | 20ms | 25,000 |
 | Fish | 30ms | 16,667 |
 
-**Winner**: Den is **2.5-4x faster**.
+**Winner**: Den is**2.5-4x faster**.
 
 ### Variable Expansion
 
@@ -264,7 +264,7 @@ Complex expansion with 100 variables:
 Running a 100-line script with loops and conditions:
 
 ```bash
-#!/usr/bin/env shell
+# !/usr/bin/env shell
 for i in {1..100}; do
     if test $((i % 2)) -eq 0; then
         echo "Even: $i"
@@ -279,7 +279,7 @@ done
 | Zsh | 150ms | 667 |
 | Fish | 210ms | 476 |
 
-**Winner**: Den is **3-5x faster**.
+**Winner**: Den is**3-5x faster**.
 
 ### Git Repository Operations
 
@@ -297,7 +297,7 @@ cd linux && ls -la && git status && cd ..
 | Zsh | 320ms | 188 |
 | Fish | 380ms | 158 |
 
-**Winner**: Den is **2-3x faster**.
+**Winner**: Den is**2-3x faster**.
 
 ### Concurrent Job Management
 
@@ -317,7 +317,7 @@ wait
 | Zsh | 160ms | 60ms |
 | Fish | 180ms | 80ms |
 
-**Winner**: Den's job control is **most efficient**.
+**Winner**: Den's job control is**most efficient**.
 
 ### Interactive Responsiveness
 
@@ -330,7 +330,7 @@ Key press to command execution (perceived latency):
 | Zsh | 30ms | 33 keys/s |
 | Fish | 35ms | 29 keys/s |
 
-**Winner**: Den feels **3-4x more responsive**.
+**Winner**: Den feels**3-4x more responsive**.
 
 ## Throughput Benchmarks
 
@@ -369,7 +369,7 @@ Performance with varying history sizes:
 | Zsh | 6ms | 65ms | 1,800ms |
 | Fish | 10ms | 120ms | 3,500ms |
 
-**Winner**: Den scales **linearly** while others degrade significantly.
+**Winner**: Den scales**linearly** while others degrade significantly.
 
 ### Many Environment Variables
 
@@ -482,6 +482,7 @@ Historical benchmark data is available in the `benchmarks/` directory:
 ### Trade-offs
 
 Den prioritizes:
+
 - ✅ **Performance**: Fastest startup and execution
 - ✅ **Memory Efficiency**: Minimal footprint
 - ✅ **Safety**: No memory leaks or crashes
@@ -530,6 +531,7 @@ Den Shell delivers exceptional performance across all metrics:
 - **Production-ready** performance
 
 Perfect for:
+
 - Interactive daily use (instant response)
 - CI/CD pipelines (fast script execution)
 - Resource-constrained environments (low memory)

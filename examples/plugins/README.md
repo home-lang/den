@@ -5,10 +5,12 @@ This directory contains example plugins demonstrating how to extend Den Shell fu
 ## Available Examples
 
 ### 1. notify.zig
+
 **Language:** Zig
 **Description:** Sends desktop notifications for commands that exceed a time threshold.
 
 **Features:**
+
 - Configurable time threshold
 - Cross-platform notifications (Linux/macOS)
 - Hooks into post-command execution
@@ -35,10 +37,12 @@ cp notify.zig ~/.config/den/plugins/
 ```
 
 ### 2. weather.sh
+
 **Language:** Shell Script
 **Description:** Displays current weather in the prompt using wttr.in API.
 
 **Features:**
+
 - Caching to reduce API calls
 - Customizable location and format
 - Async updates
@@ -63,6 +67,7 @@ export WEATHER_FORMAT="%c%t"  # icon + temperature
 ### Plugin Structure
 
 Plugins can be written in:
+
 - **Zig** - Full integration with Den Shell internals
 - **Shell Scripts** - Simple, portable plugins
 - **Any language** - Via executable interface
@@ -73,18 +78,19 @@ All plugins must implement:
 
 ```zig
 pub const Plugin = struct {
-    impl: *anyopaque,
-    getName: *const fn (*anyopaque) []const u8,
-    getVersion: *const fn (*anyopaque) []const u8,
-    getDescription: *const fn (*anyopaque) []const u8,
-    onHook: *const fn (*anyopaque, HookType, *HookContext) anyerror!void,
-    deinit: *const fn (*anyopaque) void,
+    impl: _anyopaque,
+    getName: _const fn (_anyopaque) []const u8,
+    getVersion: _const fn (_anyopaque) []const u8,
+    getDescription: _const fn (_anyopaque) []const u8,
+    onHook: _const fn (_anyopaque, HookType, _HookContext) anyerror!void,
+    deinit: _const fn (_anyopaque) void,
 };
 ```
 
 ### Hook Types
 
 Available hooks:
+
 - `pre_command` - Before command execution
 - `post_command` - After command execution
 - `directory_change` - When directory changes
@@ -102,31 +108,31 @@ const Plugin = @import("../../src/plugins/interface.zig").Plugin;
 pub const MyPlugin = struct {
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) !*MyPlugin {
+    pub fn init(allocator: std.mem.Allocator) !_MyPlugin {
         var plugin = try allocator.create(MyPlugin);
-        plugin.* = MyPlugin{ .allocator = allocator };
+        plugin._ = MyPlugin{ .allocator = allocator };
         return plugin;
     }
 
-    pub fn getName(self: *MyPlugin) []const u8 {
+    pub fn getName(self: _MyPlugin) []const u8 {
         _ = self;
         return "my-plugin";
     }
 
-    pub fn getVersion(self: *MyPlugin) []const u8 {
+    pub fn getVersion(self: _MyPlugin) []const u8 {
         _ = self;
         return "1.0.0";
     }
 
-    pub fn getDescription(self: *MyPlugin) []const u8 {
+    pub fn getDescription(self: _MyPlugin) []const u8 {
         _ = self;
         return "My awesome plugin";
     }
 
     pub fn onHook(
-        self: *MyPlugin,
+        self: _MyPlugin,
         hook_type: HookType,
-        context: *HookContext
+        context: _HookContext
     ) !void {
         // Handle hook events
         if (hook_type == .pre_command) {
@@ -134,7 +140,7 @@ pub const MyPlugin = struct {
         }
     }
 
-    pub fn deinit(self: *MyPlugin) void {
+    pub fn deinit(self: _MyPlugin) void {
         self.allocator.destroy(self);
     }
 };

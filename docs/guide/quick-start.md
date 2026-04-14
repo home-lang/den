@@ -144,7 +144,7 @@ den> den script.sh
 Create a file `hello.sh`:
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 echo "Hello from Den!"
 echo "Current directory: $(pwd)"

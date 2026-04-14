@@ -7,9 +7,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ### System & Backup
 
 #### 1. backup.sh
+
 **Description:** Automated backup script with compression and rotation.
 
 **Features:**
+
 - Incremental and full backups
 - Automatic rotation (keep last N backups)
 - Compression (tar.gz)
@@ -23,9 +25,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ```
 
 #### 2. system-info.sh
+
 **Description:** Comprehensive system information display.
 
 **Features:**
+
 - OS and kernel info
 - CPU and memory usage
 - Disk space
@@ -41,9 +45,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ### Development Workflows
 
 #### 3. git-workflow.sh
+
 **Description:** Git workflow automation scripts.
 
 **Features:**
+
 - Branch management
 - Commit helpers
 - PR creation
@@ -58,9 +64,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ```
 
 #### 4. dev-setup.sh
+
 **Description:** Development environment setup.
 
 **Features:**
+
 - Project initialization
 - Dependency installation
 - Git hooks setup
@@ -77,9 +85,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ### Deployment
 
 #### 5. deploy.sh
+
 **Description:** Application deployment script.
 
 **Features:**
+
 - Multi-environment support
 - Pre-deployment checks
 - Rollback capability
@@ -94,9 +104,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ```
 
 #### 6. docker-manager.sh
+
 **Description:** Docker container management.
 
 **Features:**
+
 - Build and push images
 - Container lifecycle management
 - Log streaming
@@ -114,9 +126,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ### Utilities
 
 #### 7. env-manager.sh
+
 **Description:** Environment variable management.
 
 **Features:**
+
 - Load/save environment configs
 - Environment switching
 - Secret management
@@ -132,9 +146,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ```
 
 #### 8. log-analyzer.sh
+
 **Description:** Log file analysis and monitoring.
 
 **Features:**
+
 - Error detection
 - Pattern matching
 - Statistics generation
@@ -149,9 +165,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ```
 
 #### 9. performance-monitor.sh
+
 **Description:** System and application performance monitoring.
 
 **Features:**
+
 - CPU/Memory tracking
 - Process monitoring
 - Alert thresholds
@@ -168,9 +186,11 @@ This directory contains example scripts demonstrating various Den Shell features
 ### Den Shell Specific
 
 #### 10. plugin-manager.sh
+
 **Description:** Den Shell plugin management.
 
 **Features:**
+
 - Plugin installation
 - Plugin updates
 - Plugin removal
@@ -188,18 +208,20 @@ This directory contains example scripts demonstrating various Den Shell features
 ## Script Conventions
 
 ### Shebang
+
 All scripts use:
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 ```
 
 Or for shell-compatible scripts:
 ```bash
-#!/bin/bash
+# !/bin/bash
 # Compatible with Den Shell
 ```
 
 ### Exit Codes
+
 - `0` - Success
 - `1` - General error
 - `2` - Misuse of command
@@ -208,6 +230,7 @@ Or for shell-compatible scripts:
 - `130` - Script terminated by Ctrl+C
 
 ### Error Handling
+
 ```bash
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
@@ -222,28 +245,32 @@ error_handler() {
 ```
 
 ### Logging
+
 ```bash
 log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $_"
 }
 
 log_error() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $_" >&2
 }
 
 log_success() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] SUCCESS: $*"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] SUCCESS: $_"
 }
 ```
 
 ### Configuration
+
 Scripts should support configuration via:
+
 1. Command-line arguments
 2. Environment variables
 3. Configuration files (`.config/den/scripts/script-name.conf`)
 4. Sensible defaults
 
 ### Help Text
+
 All scripts should provide help:
 ```bash
 show_help() {
@@ -272,29 +299,34 @@ EOF
 ## Best Practices
 
 ### 1. Portability
+
 - Use POSIX-compliant features when possible
 - Test on multiple systems
 - Handle platform differences gracefully
 
 ### 2. Security
+
 - Never hardcode credentials
 - Use proper file permissions (600 for sensitive files)
 - Validate and sanitize inputs
 - Avoid eval with user input
 
 ### 3. Performance
+
 - Avoid unnecessary subshells
 - Use built-in commands when possible
 - Cache expensive operations
 - Stream large files instead of loading into memory
 
 ### 4. User Experience
+
 - Provide clear progress indicators
 - Confirm destructive operations
 - Support dry-run mode (`--dry-run`)
 - Colorize output for clarity
 
 ### 5. Testing
+
 - Include test cases
 - Test error conditions
 - Use shellcheck for linting
@@ -319,6 +351,7 @@ echo -e "${YELLOW}Warning${NC}"
 ## Progress Indicators
 
 ### Simple spinner
+
 ```bash
 spinner() {
     local pid=$1
@@ -336,12 +369,13 @@ spinner() {
 ```
 
 ### Progress bar
+
 ```bash
 progress_bar() {
     local current=$1
     local total=$2
     local width=50
-    local percentage=$((current * 100 / total))
+    local percentage=$((current _ 100 / total))
     local completed=$((width * current / total))
 
     printf "\r["
@@ -354,20 +388,22 @@ progress_bar() {
 ## Integration with Den Shell
 
 ### Hook Integration
+
 ```bash
 # Register with Den Shell hooks
 if [ -n "$DEN_SHELL" ]; then
-    # Running in Den Shell
+# Running in Den Shell
     den hook register pre_command ./script.sh
 fi
 ```
 
 ### Config Integration
+
 ```bash
 # Read from Den Shell config
 DEN_CONFIG="${DEN_CONFIG:-$HOME/.config/den/config.jsonc}"
 if [ -f "$DEN_CONFIG" ]; then
-    # Parse config (requires jq or similar)
+# Parse config (requires jq or similar)
     SETTING=$(jq -r '.scripts.my_setting' "$DEN_CONFIG")
 fi
 ```

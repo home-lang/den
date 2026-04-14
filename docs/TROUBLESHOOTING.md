@@ -27,18 +27,21 @@ This guide helps you diagnose and fix common issues with Den Shell.
 **Solutions:**
 
 1. **Check Zig version:**
+
    ```bash
    zig version
    ```
    Den requires Zig 0.16-dev.
 
 2. **Clean build cache:**
+
    ```bash
    rm -rf .zig-cache zig-out
    zig build
    ```
 
 3. **Update Zig:**
+
    Download the latest version from [ziglang.org](https://ziglang.org/download/).
 
 ### Permission Denied
@@ -77,19 +80,22 @@ sudo pacman -S base-devel
 **Solutions:**
 
 1. **Check for errors:**
+
    ```bash
    ./zig-out/bin/den 2>&1
    ```
 
 2. **Run with minimal config:**
+
    ```bash
    ./zig-out/bin/den --no-config
    ```
 
 3. **Check config file syntax:**
+
    ```bash
    cat ~/.config/den/den.jsonc
-   # Look for JSON syntax errors
+# Look for JSON syntax errors
    ```
 
 ### Slow Startup
@@ -99,9 +105,11 @@ sudo pacman -S base-devel
 **Solutions:**
 
 1. **Check config file size:**
+
    Large alias lists or history can slow startup.
 
 2. **Disable plugins temporarily:**
+
    ```jsonc
    {
      "plugins": {
@@ -111,6 +119,7 @@ sudo pacman -S base-devel
    ```
 
 3. **Profile startup:**
+
    ```bash
    time ./zig-out/bin/den -c "exit"
    ```
@@ -136,18 +145,21 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check PATH length:**
+
    ```bash
    echo $PATH | tr ':' '\n' | wc -l
    ```
    Very long PATH can slow command lookup.
 
 2. **Check for recursive aliases:**
+
    ```bash
    alias
-   # Look for aliases that reference themselves
+# Look for aliases that reference themselves
    ```
 
 3. **Disable unused features:**
+
    ```jsonc
    {
      "features": {
@@ -164,9 +176,11 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check for infinite loops in config:**
+
    Review any custom scripts or functions.
 
 2. **Disable completion temporarily:**
+
    ```jsonc
    {
      "completion": {
@@ -176,6 +190,7 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 3. **Check background jobs:**
+
    ```bash
    jobs
    ```
@@ -187,6 +202,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Disable syntax highlighting:**
+
    ```jsonc
    {
      "syntax_highlighting": false
@@ -194,6 +210,7 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **Reduce completion candidates:**
+
    ```jsonc
    {
      "completion": {
@@ -215,17 +232,20 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check PATH:**
+
    ```bash
    echo $PATH
    which <command>
    ```
 
 2. **Rehash command cache:**
+
    ```bash
    hash -r
    ```
 
 3. **Check command exists:**
+
    ```bash
    ls -la $(which <command>)
    ```
@@ -254,16 +274,18 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check immediately after command:**
+
    ```bash
    false; echo $?  # Should be 1
    ```
 
 2. **Don't use in pipeline:**
+
    ```bash
-   # Wrong - gets exit of last command
+# Wrong - gets exit of last command
    command | grep pattern; echo $?
 
-   # Right - use PIPESTATUS or check separately
+# Right - use PIPESTATUS or check separately
    command
    echo $?
    ```
@@ -275,17 +297,19 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check syntax:**
+
    ```bash
-   # Correct
+# Correct
    cat file | grep pattern
 
-   # Wrong (no space)
+# Wrong (no space)
    cat file|grep pattern
    ```
 
 2. **Check for buffering issues:**
+
    ```bash
-   # Force line buffering
+# Force line buffering
    command | stdbuf -oL grep pattern
    ```
 
@@ -300,6 +324,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check completion is enabled:**
+
    ```jsonc
    {
      "completion": {
@@ -309,13 +334,15 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **Check terminal settings:**
+
    ```bash
    stty -a | grep -i tab
    ```
 
 3. **Test basic completion:**
+
    ```bash
-   # Type partial command and press Tab
+# Type partial command and press Tab
    ec<TAB>  # Should complete to "echo"
    ```
 
@@ -326,11 +353,13 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Clear completion cache:**
+
    ```bash
    hash -r
    ```
 
 2. **Check for conflicting aliases:**
+
    ```bash
    alias | grep <command>
    ```
@@ -342,17 +371,20 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Verify in git repository:**
+
    ```bash
    git rev-parse --git-dir
    ```
 
 2. **Check git is installed:**
+
    ```bash
    which git
    git --version
    ```
 
 3. **Enable git completion:**
+
    ```jsonc
    {
      "completion": {
@@ -372,19 +404,23 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check config location:**
+
    ```bash
    ls -la ~/.config/den/den.jsonc
    ls -la ~/.denrc
    ```
 
 2. **Validate JSON syntax:**
+
    ```bash
-   # Use jq to validate (strips comments first)
+# Use jq to validate (strips comments first)
    grep -v '//' ~/.config/den/den.jsonc | jq .
    ```
 
 3. **Check for typos:**
+
    Common mistakes:
+
    - Missing commas
    - Trailing commas (not allowed in strict JSON)
    - Unquoted keys
@@ -396,6 +432,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Enable hot reload:**
+
    ```jsonc
    {
      "hot_reload": true
@@ -403,11 +440,13 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **Manual reload:**
+
    ```bash
    reload
    ```
 
 3. **Check file permissions:**
+
    ```bash
    ls -la ~/.config/den/den.jsonc
    ```
@@ -419,12 +458,14 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check alias definition:**
+
    ```bash
    alias
    alias <name>
    ```
 
 2. **Verify syntax in config:**
+
    ```jsonc
    {
      "aliases": {
@@ -435,6 +476,7 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 3. **Check for conflicts:**
+
    ```bash
    which <alias_name>
    type <alias_name>
@@ -451,17 +493,20 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check terminal color support:**
+
    ```bash
    echo $TERM
    echo $COLORTERM
    ```
 
 2. **Test true color:**
+
    ```bash
    printf '\033[38;2;255;0;0mRed\033[0m\n'
    ```
 
 3. **Enable colors in config:**
+
    ```jsonc
    {
      "colors": true
@@ -475,6 +520,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check theme path:**
+
    ```jsonc
    {
      "theme": "~/.config/den/themes/mytheme.jsonc"
@@ -482,11 +528,13 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **Verify theme file exists:**
+
    ```bash
    ls -la ~/.config/den/themes/
    ```
 
 3. **Check theme syntax:**
+
    ```bash
    cat ~/.config/den/themes/mytheme.jsonc
    ```
@@ -498,6 +546,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check prompt format:**
+
    ```jsonc
    {
      "prompt": {
@@ -507,9 +556,11 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **Check for special characters:**
+
    Some terminals don't support Unicode.
 
 3. **Use simple prompt:**
+
    ```jsonc
    {
      "prompt": {
@@ -529,11 +580,13 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Verify in git repo:**
+
    ```bash
    git status
    ```
 
 2. **Enable git integration:**
+
    ```jsonc
    {
      "git": {
@@ -545,6 +598,7 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 3. **Check git is accessible:**
+
    ```bash
    which git
    ```
@@ -556,6 +610,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Disable status checks:**
+
    ```jsonc
    {
      "git": {
@@ -565,6 +620,7 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **For large repos, disable in repo:**
+
    ```bash
    git config --local den.enabled false
    ```
@@ -580,6 +636,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check plugin is enabled:**
+
    ```jsonc
    {
      "plugins": {
@@ -590,11 +647,13 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **Check plugin path:**
+
    ```bash
    ls -la ~/.config/den/plugins/
    ```
 
 3. **Check for errors:**
+
    Plugin errors are logged to stderr.
 
 ### Plugin Crashes Shell
@@ -604,6 +663,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Disable plugin:**
+
    ```jsonc
    {
      "plugins": {
@@ -613,6 +673,7 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **Run with verbose errors:**
+
    ```bash
    DEN_DEBUG=1 den
    ```
@@ -630,11 +691,13 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Use release build:**
+
    ```bash
    zig build -Doptimize=ReleaseFast
    ```
 
 2. **Report persistent leaks:**
+
    File an issue with reproduction steps.
 
 ### High Memory Usage
@@ -644,6 +707,7 @@ echo '{}' > ~/.config/den/den.jsonc
 **Solutions:**
 
 1. **Check history size:**
+
    ```jsonc
    {
      "history": {
@@ -653,6 +717,7 @@ echo '{}' > ~/.config/den/den.jsonc
    ```
 
 2. **Clear history:**
+
    ```bash
    history -c
    ```
@@ -693,6 +758,7 @@ cat ~/.config/den/den.jsonc
 ### Reporting Bugs
 
 Include:
+
 - Den version and Zig version
 - Operating system and version
 - Steps to reproduce

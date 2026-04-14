@@ -5,6 +5,7 @@ A quick reference guide for Den's interactive features and keyboard shortcuts.
 ## Tab Completion
 
 ### Basic Completion
+
 ```bash
 # Complete commands
 git st<TAB>      → git status
@@ -17,6 +18,7 @@ cd Doc<TAB>      → cd Documents/
 ```
 
 ### Multiple Suggestions
+
 ```bash
 cd /usr/l<TAB>
 # Shows:  lib/  libexec/  local/
@@ -26,18 +28,20 @@ cd /usr/l<TAB>
 ```
 
 ### Mid-Word Path Expansion (zsh-style)
+
 ```bash
 # Type abbreviations, get full paths
 /u/l/b<TAB>           → /usr/local/bin/
 ~/D/P/d<TAB>          → ~/Documents/Projects/den/
 ./s/u/c<TAB>          → ./src/utils/completion.zig
 
-# Works even with ambiguous segments!
+# Works even with ambiguous segments
 /u/l/s<TAB>           → /usr/local/share/
 # (even though /usr/l matches lib, libexec, local)
 ```
 
 ### Git Command Completion
+
 ```bash
 # Complete git subcommands
 git st<TAB>           → git status
@@ -51,7 +55,7 @@ git merge main<TAB>   → git merge main
 git add <TAB>         → Shows modified/untracked files
 git diff src/<TAB>    → Shows modified files in src/
 
-# Supported commands:
+# Supported commands
 # Branches: checkout, branch, merge, rebase, switch, cherry-pick
 # Files: add, diff, restore, reset
 ```
@@ -61,12 +65,14 @@ For complete details, see [Git Completion Guide](GIT_COMPLETION.md).
 ## History Navigation
 
 ### Basic History
+
 ```bash
 Up Arrow     # Previous command
 Down Arrow   # Next command
 ```
 
 ### History Substring Search
+
 ```bash
 # Type part of a command, then press Up/Down
 # to filter history by substring
@@ -81,12 +87,14 @@ den> docker ps -a
 ```
 
 **Features:**
+
 - Matches substring anywhere in command (not just at start)
 - Press Up/Down to navigate through matches
 - Press Down past last match to return to search query
 - Type any character to exit search mode
 
 ### Reverse Incremental Search (Ctrl+R)
+
 ```bash
 # Press Ctrl+R to enter reverse search mode
 den>
@@ -105,6 +113,7 @@ den> docker build -t myapp .
 ```
 
 **Features:**
+
 - Real-time incremental search as you type
 - Searches backwards from most recent
 - Press Ctrl+R repeatedly to cycle through matches
@@ -115,6 +124,7 @@ den> docker build -t myapp .
 ## Keyboard Shortcuts
 
 ### Line Editing
+
 | Key | Action |
 |-----|--------|
 | `Ctrl+A` | Move to beginning of line |
@@ -129,6 +139,7 @@ den> docker build -t myapp .
 | `Ctrl+D` | Exit shell (if line is empty) |
 
 ### Cursor Movement
+
 | Key | Action |
 |-----|--------|
 | `Left Arrow` | Move cursor left one character |
@@ -139,6 +150,7 @@ den> docker build -t myapp .
 | `End` / `Ctrl+E` | Move to end of line |
 
 ### History
+
 | Key | Action |
 |-----|--------|
 | `Up Arrow` | Previous history / Previous match (if searching) |
@@ -146,6 +158,7 @@ den> docker build -t myapp .
 | `Ctrl+R` | Reverse incremental search |
 
 ### Completion
+
 | Key | Action |
 |-----|--------|
 | `TAB` | Complete / Cycle through suggestions |
@@ -154,6 +167,7 @@ den> docker build -t myapp .
 ## Advanced Line Editing
 
 ### Word Navigation
+
 Navigate by words instead of characters for faster editing:
 
 ```bash
@@ -173,6 +187,7 @@ den> git commit -m "Add new feature to the authentication system"
 **Pro tip:** Use word navigation to quickly fix mistakes in the middle of long commands!
 
 ### Delete Word Forward (Alt+D)
+
 Delete from cursor to end of next word:
 
 ```bash
@@ -191,6 +206,7 @@ den> git commit -m "fix  in function"
 **Use case:** Quickly remove words without backspacing or selecting.
 
 ### Transpose Characters (Ctrl+T)
+
 Fix common typos instantly by swapping characters:
 
 ```bash
@@ -216,10 +232,11 @@ den> echo hello world
 **Pro tip:** Ctrl+T is the fastest way to fix transposed letters. Much faster than backspace!
 
 ### Clear Screen (Ctrl+L)
+
 Clear the terminal and get a fresh prompt without losing your current command:
 
 ```bash
-# After lots of output...
+# After lots of output
 den> ls -la
 total 48
 drwxr-xr-x  12 user  staff   384 Nov  9 10:30 .
@@ -227,7 +244,7 @@ drwxr-xr-x   8 user  staff   256 Nov  8 15:22 ..
 [... many more lines ...]
 
 den> git status
-# More output...
+# More output
 
 # Press Ctrl+L - screen clears and you get fresh prompt
 den> _
@@ -238,37 +255,42 @@ den> _
 ## Quick Tips
 
 ### Tip 1: Fast Directory Navigation
+
 ```bash
-# Instead of:
+# Instead of
 cd /usr/local/share/
-# Type:
+# Type
 cd /u/l/s<TAB>
 ```
 
 ### Tip 2: Find Commands in History
+
 ```bash
-# Instead of pressing Up repeatedly, type part of the command:
+# Instead of pressing Up repeatedly, type part of the command
 den> docker<Up>
 # Instantly shows matching docker commands
 ```
 
 ### Tip 3: Cycle Through Suggestions
+
 ```bash
-# Don't memorize paths - cycle through options:
+# Don't memorize paths - cycle through options
 cd Documents/<TAB><TAB><TAB>
-# Cycles: Projects/ → Work/ → Personal/ → ...
+# Cycles: Projects/ → Work/ → Personal/ →
 ```
 
 ### Tip 4: Complete Hidden Files
+
 ```bash
-# Start with dot to show hidden files:
+# Start with dot to show hidden files
 ls .<TAB>
 # Shows: .bashrc  .gitignore  .config/
 ```
 
 ### Tip 5: Search by Arguments
+
 ```bash
-# Find commands by their flags:
+# Find commands by their flags
 den> --verbose<Up>
 # Shows all commands you ran with --verbose
 ```
@@ -276,6 +298,7 @@ den> --verbose<Up>
 ## Feature Comparison with Other Shells
 
 ### vs Bash
+
 | Feature | Bash | Den |
 |---------|------|-----|
 | Tab completion | ✓ | ✓ |
@@ -285,6 +308,7 @@ den> --verbose<Up>
 | Lookahead path resolution | ✗ | ✓ |
 
 ### vs Zsh
+
 | Feature | Zsh | Den |
 |---------|-----|-----|
 | Tab completion | ✓ | ✓ |
@@ -295,6 +319,7 @@ den> --verbose<Up>
 | Menu selection | ✓ | Coming soon |
 
 ### vs Fish
+
 | Feature | Fish | Den |
 |---------|------|-----|
 | Tab completion | ✓ | ✓ |
@@ -305,6 +330,7 @@ den> --verbose<Up>
 ## Common Workflows
 
 ### Workflow 1: Exploring a New Project
+
 ```bash
 # Navigate quickly
 cd /u/l/s/app/j<TAB>  → cd /usr/local/share/applications/java/
@@ -318,6 +344,7 @@ vim sr<TAB>  → vim src/
 ```
 
 ### Workflow 2: Repeating Commands
+
 ```bash
 # Find that complex docker command
 den> docker run<Up>
@@ -329,6 +356,7 @@ den> --name myapp<Up>
 ```
 
 ### Workflow 3: File Operations
+
 ```bash
 # Quick copy with completion
 cp ~/D/P/d/R<TAB>  →  cp ~/Documents/Projects/den/README.md
@@ -340,6 +368,7 @@ mv /t/d/f<TAB> ./  →  mv /tmp/downloads/file.txt ./
 ## Environment
 
 ### Current Directory
+
 ```bash
 pwd                  # Print working directory
 cd -                # Go to previous directory
@@ -360,6 +389,7 @@ mkdir <TAB>         # No completion (you're creating a new dir)
 ## Advanced Examples
 
 ### Example 1: Complex Path Navigation
+
 ```bash
 # Navigate to deep directory in one step
 cd /u/l/s/f/t/d/c<TAB>
@@ -367,21 +397,23 @@ cd /u/l/s/f/t/d/c<TAB>
 ```
 
 ### Example 2: Finding Old Commands
+
 ```bash
 # You remember running a curl command with specific headers
 den> Content-Type<Up>
-# Shows: curl -H "Content-Type: application/json" ...
+# Shows: curl -H "Content-Type: application/json"
 ```
 
 ### Example 3: Exploring Command Options
+
 ```bash
-# What git commands have I used?
+# What git commands have I used
 git <TAB>
 # Shows all git subcommands
 
 # Cycle through to remind yourself
 git <TAB><TAB><TAB>
-# Cycles through: status → commit → push → pull → ...
+# Cycles through: status → commit → push → pull →
 ```
 
 ## Customization (Coming Soon)
@@ -407,17 +439,20 @@ Future configuration options:
 
 ## Troubleshooting
 
-### Completion not working?
+### Completion not working
+
 1. Type more characters to narrow down options
 2. Check file/directory permissions
 3. Verify path exists: `ls /u/l/b`
 
-### History search not finding commands?
+### History search not finding commands
+
 1. Check spelling (search is case-sensitive)
 2. Make sure command is in history: `history | grep docker`
 3. Verify substring exists in command
 
-### Mid-word expansion not working?
+### Mid-word expansion not working
+
 1. Path must be unique through all segments
 2. Test with: `den complete "/u/l/b"`
 3. Check directory permissions
@@ -464,6 +499,7 @@ Up / Down                History navigation
 ```
 
 **Remember:**
+
 - TAB is your friend - use it everywhere!
 - Type less, complete more
 - Search history with Ctrl+R or substring search

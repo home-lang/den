@@ -6,7 +6,7 @@ Den now supports **zsh-style history substring search**, one of the most popular
 
 ## How It Works
 
-When you type a few characters and press **Up** or **Down** arrow, Den will only show history entries that **contain** those characters anywhere in the command, not just at the beginning.
+When you type a few characters and press **Up**or**Down**arrow, Den will only show history entries that**contain** those characters anywhere in the command, not just at the beginning.
 
 ### Basic Usage
 
@@ -34,7 +34,7 @@ den> git
 # Type the search term
 den> docker
 
-# Press Up to cycle through matches:
+# Press Up to cycle through matches
 den> docker ps -a
 den> docker build -t myapp .
 den> docker run -p 8080:8080 myapp
@@ -46,7 +46,7 @@ den> sudo docker system prune -f
 # Search for any command that modified config files
 den> config
 
-# Cycle through:
+# Cycle through
 den> vi ~/.config/den/config.json
 den> cat src/config_loader.zig
 den> cp config.template config.prod
@@ -57,7 +57,7 @@ den> cp config.template config.prod
 # Find all commands using the -rf flag
 den> -rf
 
-# Shows:
+# Shows
 den> rm -rf node_modules
 den> cp -rf dist/ backup/
 ```
@@ -65,10 +65,11 @@ den> cp -rf dist/ backup/
 ## Features
 
 ### Substring Matching
+
 Unlike basic history navigation (which matches from the start), substring search finds matches anywhere in the command:
 
 ```bash
-# Searching for "main" will find:
+# Searching for "main" will find
 git push origin main
 cd ~/Documents/main_project
 vim src/main.zig
@@ -77,13 +78,16 @@ vim src/main.zig
 ### Smart Behavior
 
 **Empty Line Navigation:**
+
 - If you press Up/Down with an empty line, it behaves like traditional history browsing (shows all commands in order)
 
 **Locked Search:**
+
 - Once you start searching with a query, Up/Down will only show matching entries
 - The search query is locked until you modify the line or press Enter/Esc
 
 **Return to Original:**
+
 - Pressing Down past the last match returns you to your original search query
 - You can then modify it and search again
 
@@ -111,6 +115,7 @@ The history substring search is implemented in `src/utils/terminal.zig`:
 ### Algorithm
 
 ```
+
 1. User types: "git"
 2. User presses Up
    - Save "git" as search query
@@ -125,6 +130,7 @@ The history substring search is implemented in `src/utils/terminal.zig`:
 5. User types any character
    - Clear search state
    - Insert character normally
+
 ```
 
 ### Memory Management
@@ -139,6 +145,7 @@ The history substring search is implemented in `src/utils/terminal.zig`:
 Den's implementation provides the core functionality of zsh's history substring search:
 
 **What Den does (like zsh):**
+
 - ✅ Substring matching anywhere in the command
 - ✅ Up/Down arrow navigation through matches
 - ✅ Return to original query when reaching the end
@@ -146,6 +153,7 @@ Den's implementation provides the core functionality of zsh's history substring 
 - ✅ Traditional history browsing with empty line
 
 **zsh additional features (not yet in Den):**
+
 - Incremental search with Ctrl+R
 - Highlighting of search matches in the displayed command
 - Case-insensitive search option
@@ -155,14 +163,16 @@ Den's implementation provides the core functionality of zsh's history substring 
 ## Usage Tips
 
 ### 1. **Be Specific**
+
 Search for distinctive parts of commands:
 ```bash
-# Instead of searching "git", search for:
+# Instead of searching "git", search for
 den> rebase      # finds git rebase commands
 den> origin      # finds git remote operations
 ```
 
 ### 2. **Search by flags**
+
 Find commands by their arguments:
 ```bash
 den> --verbose
@@ -171,12 +181,14 @@ den> --help
 ```
 
 ### 3. **Search by file extensions**
+
 ```bash
 den> .zig        # finds all commands operating on Zig files
 den> .json       # finds JSON file operations
 ```
 
 ### 4. **Partial paths**
+
 ```bash
 den> src/        # finds commands in src directory
 den> test/       # finds test-related commands
@@ -187,6 +199,7 @@ den> test/       # finds test-related commands
 History substring search is enabled by default and works automatically. No configuration needed!
 
 The feature integrates seamlessly with:
+
 - History persistence (`~/.den_history`)
 - History size limits (1000 entries)
 - History deduplication
@@ -194,16 +207,19 @@ The feature integrates seamlessly with:
 ## Troubleshooting
 
 **Search not finding commands:**
+
 - Remember it's substring search - check your spelling
 - The search is case-sensitive
 - Make sure the command is actually in your history
 
 **Search feels stuck:**
+
 - You might have reached the end of matches
 - Press Down to return to your search query
 - Type a new character to exit search mode
 
 **Want to exit search mode:**
+
 - Type any character to modify the line
 - Press Ctrl+C to cancel
 - Press Enter to execute current command
@@ -211,6 +227,7 @@ The feature integrates seamlessly with:
 ## Performance
 
 History substring search is highly efficient:
+
 - **O(n)** search through history entries
 - Only searches when you press Up/Down
 - No background processing
@@ -231,29 +248,32 @@ Potential improvements for history substring search:
 ## Examples in Practice
 
 ### Finding long commands
+
 ```bash
 # You remember you ran a complex docker command
 den> docker run
 
-# Cycle through to find the exact one:
+# Cycle through to find the exact one
 den> docker run -d -p 8080:8080 --name myapp --restart=always myimage:latest
 ```
 
 ### Reusing flags
+
 ```bash
 # Find that curl command with all the right flags
 den> curl
 
-# Found it:
+# Found it
 den> curl -X POST -H "Content-Type: application/json" -d '{"key":"value"}' https://api.example.com
 ```
 
 ### Directory navigation
+
 ```bash
 # Find when you cd'd to a project
 den> Documents
 
-# Shows:
+# Shows
 den> cd ~/Documents/Projects/den
 ```
 

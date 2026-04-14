@@ -65,7 +65,7 @@ For more complex commands, create shell scripts.
 ### Creating a Den Script
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # ~/bin/project-setup.sh
 # Script to initialize a new project
@@ -95,7 +95,7 @@ popd
 ### Script Best Practices
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Always include error handling
 set -e  # Exit on error (if supported)
@@ -209,7 +209,7 @@ Create wrappers to add functionality to existing commands.
 ### Git Wrapper Example
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 # ~/bin/g - Smart git wrapper
 
 # Handle common typos and shortcuts
@@ -226,7 +226,7 @@ elif test "$1" = "p"; then
 elif test "$1" = "l"; then
     git log --oneline -10
 else
-    # Pass through to git
+# Pass through to git
     git "$@"
 fi
 ```
@@ -234,7 +234,7 @@ fi
 ### Docker Wrapper
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 # ~/bin/d - Docker shortcuts
 
 if test "$1" = "ps"; then

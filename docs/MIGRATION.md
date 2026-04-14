@@ -78,9 +78,9 @@ PS1='\u@\h:\w\$ '
 Most Bash scripts work directly:
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 # or
-#!/path/to/den
+# !/path/to/den
 
 # Standard Bash syntax works
 for file in *.txt; do
@@ -322,8 +322,9 @@ The Zig version offers significant performance improvements:
 ### Migration Steps
 
 1. **Install the Zig version**:
+
    ```bash
-   # Build from source
+# Build from source
    git clone https://github.com/anthropics/den.git
    cd den
    zig build -Doptimize=ReleaseFast
@@ -331,11 +332,12 @@ The Zig version offers significant performance improvements:
    ```
 
 2. **Convert configuration**:
+
    ```bash
-   # Move old config
+# Move old config
    mv ~/.config/den/config.ts ~/.config/den/config.ts.bak
 
-   # Create new config
+# Create new config
    touch ~/.config/den/den.jsonc
    ```
 
@@ -354,7 +356,7 @@ The Zig version offers significant performance improvements:
 Create a script to help migrate your configuration:
 
 ```bash
-#!/usr/bin/env bash
+# !/usr/bin/env bash
 # migrate-config.sh
 
 OLD_CONFIG="$HOME/.bashrc"
@@ -365,8 +367,8 @@ echo '{'
 echo '  "aliases": {'
 
 grep "^alias " "$OLD_CONFIG" | while read -r line; do
-    name=$(echo "$line" | sed 's/alias \([^=]*\)=.*/\1/')
-    value=$(echo "$line" | sed "s/alias [^=]*='\(.*\)'/\1/" | sed 's/alias [^=]*="\(.*\)"/\1/')
+    name=$(echo "$line" | sed 's/alias \([^=]_\)=._/\1/')
+    value=$(echo "$line" | sed "s/alias [^=]_='\(._\)'/\1/" | sed 's/alias [^=]_="\(._\)"/\1/')
     echo "    \"$name\": \"$value\","
 done
 
@@ -516,6 +518,7 @@ echo $TERM  # Should be xterm-256color or similar
 **Problem**: Shell takes time to start.
 
 **Solution**:
+
 1. Check config file size
 2. Disable unused features
 3. Use release build
@@ -531,7 +534,7 @@ zig build -Doptimize=ReleaseFast
 
 - **Documentation**: See [docs/](./README.md)
 - **Troubleshooting**: See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
-- **Issues**: Report at https://github.com/anthropics/den/issues
+- **Issues**: Report at <https://github.com/anthropics/den/issues>
 - **Discussions**: Ask questions in GitHub Discussions
 
 ---
@@ -582,6 +585,7 @@ Den prioritizes:
 5. **Performance**: Features shouldn't impact startup or runtime
 
 If you need an unsupported feature, consider:
+
 - Writing a function that achieves the same goal
 - Using a Den plugin
 - Using standard Unix tools in combination
@@ -678,6 +682,7 @@ Quick mapping for common Fish workflows:
 ### Autosuggestions
 
 Fish's autosuggestions are built into Den:
+
 - Suggestions appear inline (dimmed)
 - Press Right Arrow or End to accept
 - Configure in `completion` section

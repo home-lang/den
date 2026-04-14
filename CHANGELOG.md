@@ -22,12 +22,12 @@
   - Smooth, snappy prompt experience like modern zsh!
 
 - **Extended Glob Patterns** - Advanced file matching patterns (zsh-style) ([src/utils/glob.zig:78-179](src/utils/glob.zig))
-  - `*.txt~*.log` - Exclusion patterns (match *.txt but exclude *.log files)
-  - `*.(sh|zsh)` - Alternation (match multiple extensions in one pattern)
-  - `*.(.)` - File type qualifiers (match only regular files)
-  - `*(/)` - Directory qualifier (match only directories)
-  - `*(*)` - Executable qualifier (match only executable files)
-  - `*(@)` - Symlink qualifier (match only symbolic links)
+  - `_.txt~_.log` - Exclusion patterns (match _.txt but exclude _.log files)
+  - `_.(sh|zsh)` - Alternation (match multiple extensions in one pattern)
+  - `_.(.)` - File type qualifiers (match only regular files)
+  - `_(/)` - Directory qualifier (match only directories)
+  - `_(_)` - Executable qualifier (match only executable files)
+  - `_(@)` - Symlink qualifier (match only symbolic links)
   - Powerful file filtering for scripts and command line!
 
 - **Arrays** - Full array support for shell scripting (zsh/bash-style) ([src/shell.zig:102, 2743-2837](src/shell.zig), [src/utils/expansion.zig:303-362](src/utils/expansion.zig), [src/types/variable.zig](src/types/variable.zig))

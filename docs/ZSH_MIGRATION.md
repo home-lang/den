@@ -112,7 +112,7 @@ for i in 1 2 3; do
     echo $i
 done
 
-for file in *.txt; do
+for file in _.txt; do
     cat "$file"
 done
 
@@ -125,7 +125,7 @@ done
 case "$var" in
     pattern1) echo "matched 1" ;;
     pattern2) echo "matched 2" ;;
-    *) echo "default" ;;
+    _) echo "default" ;;
 esac
 ```
 
@@ -161,7 +161,7 @@ add() {
 
 ```bash
 # These work identically
-*.txt           # Match .txt files
+_.txt           # Match .txt files
 file?.txt       # Match single character
 [abc].txt       # Match character class
 ```
@@ -173,7 +173,7 @@ file?.txt       # Match single character
 shopt -s extglob
 
 # Extended patterns
-*(pattern)      # Zero or more
+_(pattern)      # Zero or more
 +(pattern)      # One or more
 ?(pattern)      # Zero or one
 @(pattern)      # Exactly one
@@ -184,10 +184,10 @@ shopt -s extglob
 
 | Zsh Glob | Status | Alternative |
 |----------|--------|-------------|
-| `**/*.txt` | Supported | Use `shopt -s globstar` |
-| `*(.)` files only | Not supported | Use `find` |
-| `*(/)` dirs only | Not supported | Use `find -type d` |
-| `*(@)` symlinks | Not supported | Use `find -type l` |
+| `**/_.txt` | Supported | Use `shopt -s globstar` |
+| `_(.)` files only | Not supported | Use `find` |
+| `_(/)` dirs only | Not supported | Use `find -type d` |
+| `_(@)` symlinks | Not supported | Use `find -type l` |
 | `^pattern` negation | Not supported | Use `!(pattern)` |
 | `(#i)` case-insensitive | Not supported | Use `find -iname` |
 | `<1-10>` numeric range | Not supported | Use brace expansion |
@@ -331,7 +331,7 @@ Convert your Zsh theme to Den prompt format:
     "git": {
       "enabled": true,
       "format": "({branch}{status})",
-      "dirty": "*",
+      "dirty": "_",
       "clean": ""
     }
   }
@@ -355,7 +355,7 @@ Functions work identically:
 
 ```bash
 # Copy function definitions to ~/.denrc
-grep -A 10 "^[a-z_]*() {" ~/.zshrc >> ~/.denrc
+grep -A 10 "^[a-z_]_() {" ~/.zshrc >> ~/.denrc
 ```
 
 ### 3. Update Array Indexing
@@ -390,9 +390,9 @@ Replace Zsh-specific globs:
 
 | Zsh | Den Alternative |
 |-----|-----------------|
-| `*(.)` | `find . -type f` |
-| `*(/)` | `find . -type d` |
-| `^*.txt` | `!(*.txt)` with `shopt -s extglob` |
+| `_(.)` | `find . -type f` |
+| `_(/)` | `find . -type d` |
+| `^_.txt` | `!(_.txt)` with `shopt -s extglob` |
 
 ### 6. Test Your Scripts
 

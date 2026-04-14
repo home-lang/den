@@ -33,6 +33,7 @@ Input: "echo 'hello world' | grep pattern"
 4. Create token with type and position
 5. Advance position
 6. Repeat until EOF
+
 ```
 
 **Output**: Token stream
@@ -48,8 +49,9 @@ Input: "echo 'hello world' | grep pattern"
 ```
 
 **Key Features**:
+
 - Handles escaping: `\$`, `\"`, `\\`
-- Quote types: single (`'`), double (`"`), backticks (`` ` ``)
+- Quote types: single (`'`), double (`"`), backticks (`````)
 - Operator recognition: `|`, `||`, `&&`, `;`, `&`, `<`, `>`, `>>`
 - Position tracking for error messages
 
@@ -118,14 +120,15 @@ function tokenize(input: string) -> []Token:
 program        → statement_list
 statement_list → statement (';' | '\n' | '&') statement_list | statement
 statement      → pipeline | conditional | loop | function_def
-pipeline       → command ('|' command)*
-command        → word word* redirect*
+pipeline       → command ('|' command)_
+command        → word word_ redirect_
 conditional    → 'if' pipeline 'then' statement_list ('else' statement_list)? 'fi'
 loop           → 'while' pipeline 'do' statement_list 'done'
-               | 'for' word 'in' word* 'do' statement_list 'done'
+               | 'for' word 'in' word_ 'do' statement_list 'done'
 ```
 
 **Operator Precedence** (highest to lowest):
+
 1. Redirections (`<`, `>`, `>>`)
 2. Pipes (`|`)
 3. Logical AND (`&&`)
@@ -184,6 +187,7 @@ function parse_command() -> Command:
 ```
 
 **Error Recovery**:
+
 - Panic mode: Skip to next statement boundary
 - Position tracking: Report line and column
 - Context-aware messages: "Expected 'then' after 'if' condition"
@@ -240,6 +244,7 @@ Input: "Hello $USER, your home is $HOME"
 3. Look up variable in environment
 4. Replace with value
 5. Continue scanning
+
 ```
 
 **Pseudocode**:
@@ -278,6 +283,7 @@ function expand_variables(input: string, env: Environment) -> string:
 ```
 
 **Special Variables**:
+
 - `$?`: Last exit code
 - `$#`: Argument count
 - `$@`: All arguments
@@ -301,6 +307,7 @@ Input: "Files: $(ls *.txt)"
 3. Execute command, capture stdout
 4. Replace with output
 5. Strip trailing newlines
+
 ```
 
 **Pseudocode**:
@@ -350,6 +357,7 @@ function expand_command_substitution(input: string) -> string:
 **Time Complexity**: O(n * m) where n is input length, m is number of expansions
 
 **Examples**:
+
 - `{a,b,c}` → `a b c`
 - `file{1,2,3}.txt` → `file1.txt file2.txt file3.txt`
 - `{a,b}{1,2}` → `a1 a2 b1 b2`
@@ -424,10 +432,12 @@ Output: ["file1.txt", "file1.log", "file2.txt", "file2.log", "file3.txt", "file3
 **Algorithm**: Recursive backtracking with optimization
 
 **Time Complexity**: O(n * m) worst case, O(n + m) average case
+
 - n = pattern length
 - m = string length
 
 **Wildcard Support**:
+
 - `*`: Matches any number of characters (including zero)
 - `?`: Matches exactly one character
 - `[abc]`: Matches one of a, b, or c
@@ -526,6 +536,7 @@ Input: "src/**/*.zig"
    - If literal → Validate path exists
 3. Recurse into subdirectories for **
 4. Combine results
+
 ```
 
 **Pseudocode**:
@@ -576,6 +587,7 @@ function glob_recursive(segments, index, base_path) -> []string:
 Command: cat file | grep pattern | wc -l
 
 1. Create N-1 pipes for N commands
+
    pipe1: [read_fd1, write_fd1]
    pipe2: [read_fd2, write_fd2]
 
@@ -596,6 +608,7 @@ Command: cat file | grep pattern | wc -l
 
 5. Parent closes all pipe ends
 6. Wait for all children
+
 ```
 
 **Pseudocode**:
@@ -662,6 +675,7 @@ Command: sleep 100 &
 6. On SIGCHLD:
    - Check all background jobs
    - Update status of completed jobs
+
 ```
 
 **Pseudocode**:
@@ -701,6 +715,7 @@ function signal_handler_SIGCHLD():
 **Algorithm**: Multi-source prefix matching with ranking
 
 **Sources**:
+
 1. Builtins
 2. Commands in PATH
 3. Aliases
@@ -781,6 +796,7 @@ function rank(completion: Completion) -> int:
 Input: "src/par"
 
 1. Split into directory and prefix
+
    dir = "src/"
    prefix = "par"
 
@@ -788,6 +804,7 @@ Input: "src/par"
 3. Filter by prefix
 4. Add directory indicator for dirs
 5. Sort (dirs first, then files)
+
 ```
 
 **Pseudocode**:
@@ -913,12 +930,12 @@ function glob_parallel(pattern: string) -> []string:
 |-----------|------|-------|-------|
 | Tokenization | O(n) | O(n) | Linear scan |
 | Parsing | O(n) | O(n) | Recursive descent |
-| Variable expansion | O(n*m) | O(n) | n=input, m=avg var len |
-| Brace expansion | O(n*m) | O(n*m) | Combinatorial |
-| Glob matching | O(n*m) | O(1) | n=pattern, m=string |
-| File globbing | O(N*M) | O(N) | N=files, M=pattern |
+| Variable expansion | O(n_m) | O(n) | n=input, m=avg var len |
+| Brace expansion | O(n_m) | O(n_m) | Combinatorial |
+| Glob matching | O(n_m) | O(1) | n=pattern, m=string |
+| File globbing | O(N_M) | O(N) | N=files, M=pattern |
 | Pipeline execution | O(n) | O(n) | n=commands |
-| Completion | O(N*log N) | O(N) | With sorting |
+| Completion | O(N_log N) | O(N) | With sorting |
 
 ## Related Documentation
 

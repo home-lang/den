@@ -249,6 +249,7 @@ Customize your shell prompt:
 ```
 
 **Available prompt variables:**
+
 - `{user}`: Current username
 - `{host}`: Hostname
 - `{cwd}`: Current working directory

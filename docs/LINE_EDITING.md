@@ -49,6 +49,7 @@ den> git commit -m "Add new feature"
 ### Examples
 
 #### Example 1: Navigate Backward
+
 ```bash
 den> git commit -m "fix authentication bug"
                                           ^cursor at end
@@ -67,6 +68,7 @@ den> git commit -m "fix authentication bug"
 ```
 
 #### Example 2: Navigate Forward
+
 ```bash
 den> git commit -m "update dependencies"
      ^cursor at start
@@ -81,6 +83,7 @@ den> git commit -m "update dependencies"
 ```
 
 #### Example 3: Fix Mistakes Quickly
+
 ```bash
 # Oops, wrong command in the middle
 den> git commit -m "fix bug in authentication"
@@ -169,8 +172,9 @@ den> echo  three four five six
 ### Delete vs Kill
 
 Den implements true deletion:
-- **Ctrl+W** / **Alt+D**: Delete text (no clipboard)
-- **Ctrl+U** / **Ctrl+K**: Kill text (may support yank in future)
+
+- **Ctrl+W**/**Alt+D**: Delete text (no clipboard)
+- **Ctrl+U**/**Ctrl+K**: Kill text (may support yank in future)
 
 ---
 
@@ -194,6 +198,7 @@ Ctrl+T swaps the character before the cursor with the character at the cursor. P
 ### Examples
 
 #### Example 1: Fix "teh" → "the"
+
 ```bash
 den> echo teh world
           ^h cursor after 'h'
@@ -204,6 +209,7 @@ den> echo the world
 ```
 
 #### Example 2: Fix at End of Line
+
 ```bash
 den> echo hello wordl
                      ^cursor at end
@@ -214,6 +220,7 @@ den> echo hello world
 ```
 
 #### Example 3: Multiple Transpositions
+
 ```bash
 # Multiple typos
 den> echo hte owrld
@@ -272,7 +279,7 @@ Clears the terminal screen and redraws the prompt with your current command inta
 ### Example
 
 ```bash
-# After running many commands...
+# After running many commands
 den> ls -la
 total 128
 drwxr-xr-x  15 user  staff   480 Nov  9 10:30 .
@@ -290,7 +297,7 @@ den> git commit -m "work in progress"
 
 # Press Ctrl+L - screen clears instantly
 
-# New clean screen:
+# New clean screen
 den> git commit -m "work in progress"
                                ^cursor position preserved
 ```
@@ -375,18 +382,21 @@ den> docker run -d --name web nginx
 ### Advanced Usage
 
 #### Search by Arguments
+
 ```bash
 # Find all commands with specific flag
 (reverse-i-search)`--verbose': npm run build --verbose
 ```
 
 #### Search by Command
+
 ```bash
 # Find specific git command
 (reverse-i-search)`git commit': git commit -m "feat: add feature"
 ```
 
 #### Refine Search
+
 ```bash
 # Start with broad search
 (reverse-i-search)`docker': docker run nginx
@@ -479,7 +489,7 @@ den> git status && git pull && git  -m "test"
 # Type "push"
 den> git status && git pull && git push -m "test"
                                         ^
-# Fixed in seconds!
+# Fixed in seconds
 ```
 
 ### Workflow 2: Clean Up a Messy Command
@@ -574,6 +584,7 @@ den> docker run -d --name myapp -p 8080:80
 ### Emacs Compatibility
 
 Den follows Emacs keybindings:
+
 - `Ctrl+B/F` - Character movement (coming soon)
 - `Ctrl+P/N` - Line movement (coming soon)
 - `Alt+B/F` - Word movement ✓
@@ -585,23 +596,29 @@ Den follows Emacs keybindings:
 ## Tips for Maximum Efficiency
 
 ### 1. Learn Word Navigation First
+
 Most impactful feature. Start using Ctrl+Left/Right today.
 
 ### 2. Use Ctrl+T for Typos
+
 Faster than backspace for transposed letters.
 
 ### 3. Combine Commands
+
 - Navigate with Ctrl+Left/Right
 - Delete with Ctrl+W or Alt+D
 - Fix with Ctrl+T
 
 ### 4. Use Ctrl+R for History
+
 Better than Up arrow for finding old commands.
 
 ### 5. Keep Screen Clean
+
 Ctrl+L before important output keeps terminal readable.
 
 ### 6. Practice the Patterns
+
 - Jump backward, delete word (Ctrl+Left, Ctrl+W)
 - Jump forward, delete word (Ctrl+Right, Alt+D)
 - Fix typo in place (Navigate, Ctrl+T)
@@ -611,26 +628,31 @@ Ctrl+L before important output keeps terminal readable.
 ## Common Patterns
 
 ### Pattern 1: Delete Middle Word
+
 ```
 Ctrl+Left (to word) → Ctrl+W (delete it)
 ```
 
 ### Pattern 2: Replace Middle Word
+
 ```
 Ctrl+Left (to word) → Ctrl+W (delete) → type new word
 ```
 
 ### Pattern 3: Fix Typo
+
 ```
 Ctrl+Left/Right (to typo) → Ctrl+T (swap)
 ```
 
 ### Pattern 4: Clean and Search
+
 ```
 Ctrl+L (clear) → Ctrl+R (search)
 ```
 
 ### Pattern 5: Delete Rest of Line
+
 ```
 Ctrl+Left/Right (to position) → Ctrl+K (kill to end)
 ```
@@ -639,29 +661,33 @@ Ctrl+Left/Right (to position) → Ctrl+K (kill to end)
 
 ## Troubleshooting
 
-### Ctrl+Left/Right Not Working?
+### Ctrl+Left/Right Not Working
 
 Some terminals send different escape sequences. Try:
+
 - Use `Alt+B` / `Alt+F` instead
 - Check terminal settings for "Option as Meta key"
 - Verify terminal emulation is correct
 
-### Alt+D Not Working?
+### Alt+D Not Working
 
 MacOS issue - Option key might not be set as Meta:
+
 - iTerm2: Preferences → Profiles → Keys → Set Option as Meta
 - Terminal.app: Preferences → Profiles → Keyboard → Use Option as Meta
 
-### Ctrl+R Shows Nothing?
+### Ctrl+R Shows Nothing
 
 History might be empty:
+
 - Run some commands first
 - Check history file exists
 - Verify history is being saved
 
-### Transpose Not Working as Expected?
+### Transpose Not Working as Expected
 
 Cursor position matters:
+
 - Must be after at least one character
 - At end of line: swaps last two chars
 - In middle: swaps char before and at cursor
@@ -698,9 +724,10 @@ Completion:
 
 ---
 
-## What's Next?
+## What's Next
 
 Future line editing features planned:
+
 - Kill ring with Ctrl+Y (yank)
 - Multiple cursors
 - Visual selection mode

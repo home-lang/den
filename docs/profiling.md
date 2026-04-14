@@ -307,7 +307,9 @@ den
 Benchmarks run automatically in CI:
 
 ```yaml
+
 - name: Run Benchmarks
+
   run: |
     zig build bench
     den-profile all > benchmark-results.txt
@@ -358,6 +360,7 @@ diff baseline.txt current.txt
 ### High Variance
 
 If benchmarks show high variance:
+
 - Increase iteration count
 - Close background processes
 - Check for thermal throttling
@@ -366,6 +369,7 @@ If benchmarks show high variance:
 ### Unexpected Results
 
 If results don't match expectations:
+
 - Verify correct build mode (ReleaseFast)
 - Check for debug assertions
 - Profile in realistic conditions
@@ -374,6 +378,7 @@ If results don't match expectations:
 ### Memory Issues
 
 If profiling causes memory issues:
+
 - Reduce event buffer size
 - Clear profiler periodically
 - Use sampling instead of tracing

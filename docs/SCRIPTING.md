@@ -43,7 +43,7 @@ echo "Count is: ${count}"
 | `$0` | Script name |
 | `$1-$9` | Positional parameters |
 | `$@` | All positional parameters (as separate words) |
-| `$*` | All positional parameters (as single word) |
+| `$_` | All positional parameters (as single word) |
 | `$#` | Number of positional parameters |
 
 ### Parameter Expansion
@@ -58,9 +58,9 @@ echo ${var:?error msg}    # Error if var is unset or empty
 # String manipulation
 name="hello world"
 echo ${name#he}           # Remove shortest prefix "he" -> "llo world"
-echo ${name##*o}          # Remove longest prefix "*o" -> "rld"
+echo ${name##_o}          # Remove longest prefix "_o" -> "rld"
 echo ${name%ld}           # Remove shortest suffix "ld" -> "hello wor"
-echo ${name%%o*}          # Remove longest suffix "o*" -> "hell"
+echo ${name%%o_}          # Remove longest suffix "o_" -> "hell"
 
 # Length and substring
 echo ${#name}             # Length: 11
@@ -105,7 +105,7 @@ else
 fi
 
 # Extended test with [[
-if [[ $name == "den"* ]]; then
+if [[ $name == "den"_ ]]; then
     echo "Name starts with 'den'"
 fi
 
@@ -159,7 +159,7 @@ case $option in
     restart)
         echo "Restarting service..."
         ;;
-    *)
+    _)
         echo "Unknown option: $option"
         ;;
 esac
@@ -265,7 +265,7 @@ for ((i=0; i<5; i++)); do
 done
 
 # Iterate over files
-for file in *.txt; do
+for file in _.txt; do
     echo "Processing: $file"
 done
 
@@ -320,7 +320,7 @@ select opt in "Start" "Stop" "Restart" "Quit"; do
         Stop)    echo "Stopping..."; break ;;
         Restart) echo "Restarting..."; break ;;
         Quit)    echo "Goodbye!"; break ;;
-        *)       echo "Invalid option" ;;
+        _)       echo "Invalid option" ;;
     esac
 done
 ```
@@ -405,7 +405,7 @@ done
 # Basic operations
 echo $((5 + 3))           # 8
 echo $((10 - 4))          # 6
-echo $((6 * 7))           # 42
+echo $((6 _ 7))           # 42
 echo $((15 / 3))          # 5
 echo $((17 % 5))          # 2
 echo $((2 ** 10))         # 1024 (power)
@@ -415,7 +415,7 @@ count=5
 ((count++))               # Increment
 ((count--))               # Decrement
 ((count += 10))           # Add 10
-((count *= 2))            # Multiply by 2
+((count _= 2))            # Multiply by 2
 
 # Comparison (returns 0=true, 1=false)
 ((5 > 3)) && echo "true"
@@ -444,7 +444,7 @@ echo $((0b1010))          # Binary: 10
 calc "2 + 2"              # 4
 calc "sqrt(16)"           # 4
 calc "sin(3.14159/2)"     # ~1
-calc "(10 + 5) * 2"       # 30
+calc "(10 + 5) _ 2"       # 30
 ```
 
 ---
@@ -474,8 +474,8 @@ echo ${str,,}             # hello, world!
 
 # Remove pattern
 path="/home/user/file.txt"
-echo ${path##*/}          # file.txt (basename)
-echo ${path%/*}           # /home/user (dirname)
+echo ${path##_/}          # file.txt (basename)
+echo ${path%/_}           # /home/user (dirname)
 ```
 
 ### String Comparison
@@ -490,7 +490,7 @@ if [ "$str1" = "$str2" ]; then
 fi
 
 # Pattern matching with [[
-if [[ $str1 == h* ]]; then
+if [[ $str1 == h_ ]]; then
     echo "Starts with h"
 fi
 
@@ -636,7 +636,7 @@ trap cleanup ERR           # Run on error (with set -e)
 
 # Create temp file
 echo "data" > /tmp/tempfile.$$
-# ... do work ...
+# ... do work
 # cleanup runs automatically on exit
 ```
 
@@ -663,7 +663,7 @@ die() {
 ### Script Header
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 # Description: Brief description of the script
 # Usage: script.sh [options] <args>
 # Author: Your Name
@@ -698,7 +698,7 @@ main() {
 }
 
 parse_args() {
-    # Parse command-line arguments
+# Parse command-line arguments
     while getopts "hv" opt; do
         case $opt in
             h) show_help; exit 0 ;;
@@ -741,7 +741,7 @@ echo "data" > "$tmpfile"
 ```bash
 # Simple logging
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $_"
 }
 
 log_error() {

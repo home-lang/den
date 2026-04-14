@@ -35,5 +35,3 @@ features:
     icon: "📊"
     details: "Continuous performance monitoring. 2-4x less memory than alternatives."
 ---
-
-<Home />

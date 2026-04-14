@@ -16,6 +16,7 @@ Den has **zero runtime dependencies** beyond:
    - Cross-platform abstractions in `src/utils/platform.zig`
 
 That's it. No:
+
 - Runtime interpreters (no Node.js, Python, Ruby, etc.)
 - Shared libraries that need separate installation
 - External binaries that must be in PATH
@@ -48,11 +49,12 @@ Den uses Zig's module system for some functionality:
 | `zig-config` | JSONC configuration parsing | [zig-config](https://github.com/chrisbreuer/zig-config) |
 
 These modules are:
+
 - **Vendored at build time**: Downloaded and cached by Zig's build system
 - **Compiled into the binary**: No runtime dependency
 - **Version-locked**: Reproducible builds via `build.zig.zon`
 
-## Why This Approach?
+## Why This Approach
 
 ### Pros
 
@@ -101,7 +103,7 @@ Den aims to stay under 3MB for release builds:
 | Config | ~100KB |
 | Line Editor | ~200KB |
 | Standard Library | ~400KB |
-| **Total** | **~1.8MB** |
+| **Total**|**~1.8MB** |
 
 To check current size:
 
@@ -132,7 +134,7 @@ To verify Den has no unexpected runtime dependencies:
 ```bash
 # Check dynamic libraries
 ldd ./zig-out/bin/den
-# Should show only libc, libm, libpthread, etc.
+# Should show only libc, libm, libpthread, etc
 
 # Check for dlopen calls (should be none)
 objdump -d ./zig-out/bin/den | grep -c dlopen

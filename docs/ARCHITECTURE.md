@@ -87,10 +87,12 @@ Den Shell follows a layered architecture with clear separation between component
 **Purpose**: Entry point and command-line argument handling
 
 **Key Components**:
+
 - `main.zig`: Program entry point with GPA allocator setup
 - `cli.zig`: Command parsing and subcommand dispatch
 
 **Responsibilities**:
+
 - Parse command-line arguments
 - Route to appropriate subcommands (shell, exec, complete, setup, etc.)
 - Initialize allocator and shell instance
@@ -101,6 +103,7 @@ Den Shell follows a layered architecture with clear separation between component
 **Purpose**: Central state management and coordination
 
 **Key Components**:
+
 - `Shell` struct: Main shell state
 - Environment variables management
 - History tracking
@@ -110,6 +113,7 @@ Den Shell follows a layered architecture with clear separation between component
 - Thread pool for concurrency
 
 **Responsibilities**:
+
 - Initialize and manage shell state
 - Coordinate between subsystems
 - Execute hooks at lifecycle events
@@ -139,10 +143,12 @@ pub const Shell = struct {
 **Purpose**: Centralized background job management
 
 **Key Components**:
+
 - `job_manager.zig`: Job tracking, status monitoring, builtin implementations
 - `mod.zig`: Module exports
 
 **Responsibilities**:
+
 - Track background jobs (add, remove, status)
 - Non-blocking job completion checks
 - Implement job builtins (jobs, fg, bg, disown, wait)
@@ -153,6 +159,7 @@ pub const Shell = struct {
 **Purpose**: Centralized shell option management
 
 **Key Components**:
+
 - `SetOptions`: POSIX set options (-e, -u, -x, etc.)
 - `ShoptOptions`: Bash-style shopt options
 - `ShellOptions`: Combined options with accessor methods
@@ -160,6 +167,7 @@ pub const Shell = struct {
 ### 2.3 Utility Modules (src/utils/)
 
 **Key Modules**:
+
 - `regex.zig`: Simple regex matching for shell patterns
 - `config_watch.zig`: File modification tracking for hot-reload
 - `io.zig`: Cross-platform I/O utilities
@@ -170,7 +178,9 @@ pub const Shell = struct {
 - `platform.zig`: Platform abstraction layer for cross-platform support
 
 #### Platform Abstraction (src/utils/platform.zig)
+
 Provides unified API for platform-specific operations:
+
 - **Process Management**: `waitProcess`, `killProcess`, `continueProcess`
 - **Process Groups**: `setProcessGroup`, `getProcessGroup`, `setForegroundProcessGroup`
 - **Terminal Detection**: `isTty`, `getTerminalSize`
@@ -185,12 +195,14 @@ Provides unified API for platform-specific operations:
 **Purpose**: Interactive command-line interface
 
 **Key Components**:
+
 - `editor.zig`: Line editing with history navigation
 - Completion engine (src/completion/)
 - Syntax highlighting (plugins)
 - Auto-suggestions (plugins)
 
 **Responsibilities**:
+
 - Read user input with editing capabilities
 - Provide completions for commands, files, variables
 - Highlight syntax in real-time
@@ -209,23 +221,27 @@ Input String → Tokenizer → Parser → AST → Expansion → Command Tree
 **Key Components**:
 
 #### Tokenizer (src/parser/tokenizer.zig)
+
 - Breaks input into tokens
 - Handles quotes, escapes, operators
 - Tracks token positions for error reporting
 
 **Token Types**:
+
 - Words (commands, arguments)
 - Operators (|, ||, &&, ;, &, <, >, >>)
 - Special characters ($, `, \)
 - Keywords (if, while, for, function)
 
 #### Parser (src/parser/parser.zig)
+
 - Builds AST from tokens
 - Handles operator precedence
 - Validates syntax
 - Supports complex constructs (pipelines, conditionals, loops)
 
 **AST Node Types**:
+
 - Command: Simple command with arguments
 - Pipeline: Commands connected with pipes
 - Conditional: if/elif/else statements
@@ -234,10 +250,11 @@ Input String → Tokenizer → Parser → AST → Expansion → Command Tree
 - Compound: Grouped commands ({})
 
 #### Expansion (src/expansion/)
+
 - Parameter expansion ($VAR, ${VAR})
 - Command substitution ($(cmd), `cmd`)
 - Arithmetic expansion ($((expr)))
-- Glob expansion (*.txt, [a-z]*)
+- Glob expansion (_.txt, [a-z]_)
 - Brace expansion ({a,b,c}, {1..10})
 - Tilde expansion (~, ~/dir)
 
@@ -248,12 +265,14 @@ Input String → Tokenizer → Parser → AST → Expansion → Command Tree
 **Key Components**:
 
 #### Command Executor (src/executor/executor.zig)
+
 - Routes commands to builtins or external processes
 - Handles pipelines with proper file descriptor management
 - Manages redirections (<, >, >>, 2>&1)
 - Implements job control (fg, bg, jobs)
 
 #### Builtin Commands (src/builtins/)
+
 The builtins system is organized into logical modules:
 
 - **Registry** (`mod.zig`): `BuiltinRegistry` interface for registering and executing builtins
@@ -265,6 +284,7 @@ The builtins system is organized into logical modules:
 - **Misc** (`misc.zig`): `sleep`, `help`, `clear`, `uname`, `whoami`, `umask`, `time`, `caller`
 
 Core builtins include:
+
 - `cd`: Change directory with CDPATH support
 - `echo`: Print text with escape sequences
 - `export`: Set environment variables
@@ -273,24 +293,28 @@ Core builtins include:
 - `exit`: Exit shell with status code
 
 #### Process Management (src/executor/process.zig)
+
 - Fork/exec for external commands
 - Process group management
 - Signal handling (SIGINT, SIGTERM, SIGCHLD)
 - Background job tracking
 
 #### I/O Redirection (src/executor/redirect.zig)
+
 - File descriptor manipulation
 - Pipe creation and management
 - Here-document implementation
 - File mode handling (read, write, append)
 
 #### Network Path Handling (src/executor/networking.zig)
+
 - `/dev/tcp/host/port` support for TCP connections
 - `/dev/udp/host/port` support for UDP connections
 - Detailed error messages for malformed paths
 - IPv4 and IPv6 address validation
 
 #### Memory Pools (src/executor/memory_pool.zig)
+
 - `CommandMemoryPool`: Arena allocator for command execution
 - `PipelineMemoryPool`: Arena allocator for pipeline management
 - `ExpansionMemoryPool`: Arena allocator for variable expansion
@@ -303,12 +327,13 @@ Core builtins include:
 **Key Components**:
 
 #### Plugin Interface (src/plugins/interface.zig)
+
 ```zig
 pub const Plugin = struct {
     name: []const u8,
     version: []const u8,
-    init: *const fn (*PluginContext) anyerror!void,
-    deinit: *const fn (*PluginContext) void,
+    init: _const fn (_PluginContext) anyerror!void,
+    deinit: _const fn (_PluginContext) void,
     hooks: []const HookRegistration,
 };
 
@@ -323,17 +348,20 @@ pub const HookType = enum {
 ```
 
 #### Plugin Manager (src/plugins/manager.zig)
+
 - Load plugins from directories
 - Manage plugin lifecycle
 - Handle plugin dependencies
 - Provide isolation between plugins
 
 #### Builtin Plugins (src/plugins/builtin_plugins_advanced.zig)
+
 - AutoSuggest: History-based suggestions
 - Highlight: Syntax highlighting
 - ScriptSuggester: Script completion
 
 **Hook Points**:
+
 - `shell_init`: After shell initialization
 - `shell_exit`: Before shell cleanup
 - `pre_command`: Before command execution
@@ -348,11 +376,13 @@ pub const HookType = enum {
 **Key Components**:
 
 #### Script Manager (src/scripting/script_manager.zig)
+
 - Load and execute script files
 - Track script state and variables
 - Handle script errors
 
 #### Function Manager (src/scripting/functions.zig)
+
 - Define shell functions
 - Store function bodies
 - Execute functions with arguments
@@ -365,11 +395,13 @@ pub const HookType = enum {
 **Key Components**:
 
 #### Config Loader (src/config_loader.zig)
+
 - Multi-source configuration loading
 - JSONC parsing with comment support
 - Configuration validation
 
 **Configuration Search Order**:
+
 1. Custom path (via `--config` flag)
 2. `./den.jsonc`
 3. `./package.jsonc` (extracts "den" key)
@@ -399,11 +431,13 @@ pub const ConfigLoadResult = struct {
 ```
 
 **Features**:
+
 - **Hot Reload**: Set `hot_reload: true` in config for automatic reload
 - **Validation**: Comprehensive validation with warnings and errors
 - **package.jsonc Support**: Embed Den config in package.jsonc under "den" key
 
 #### Config Types (src/types/config.zig)
+
 ```zig
 pub const DenConfig = struct {
     verbose: bool = false,
@@ -425,6 +459,7 @@ pub const DenConfig = struct {
 **Purpose**: Shared functionality and helpers
 
 **Key Modules**:
+
 - `io.zig`: I/O utilities, terminal handling
 - `path.zig`: Path manipulation and resolution
 - `completion.zig`: Completion engine
@@ -547,7 +582,9 @@ cat file.txt | grep "pattern" | wc -l
 1. **Tokenize**: `[cat] [file.txt] [|] [grep] ["pattern"] [|] [wc] [-l]`
 2. **Parse**: `Pipeline{[Command(cat), Command(grep), Command(wc)]}`
 3. **Execute Pipeline**:
+
    ```
+
    - Create pipe1: cat → grep
    - Create pipe2: grep → wc
    - Fork cat: stdout → pipe1
@@ -555,6 +592,7 @@ cat file.txt | grep "pattern" | wc -l
    - Fork wc: stdin ← pipe2
    - Close all pipe ends in parent
    - Wait for all processes
+
    ```
 
 ### Variable Expansion
@@ -601,16 +639,19 @@ Create ThreadPool (auto CPU count)
 ### Concurrent Operations
 
 **Plugin Discovery**:
+
 - Scan multiple directories in parallel
 - Each directory assigned to worker thread
 - Results collected with mutex protection
 
 **File Globbing** (potential):
+
 - Parallel directory traversal
 - Concurrent pattern matching
 - Merge results
 
 **Completion** (potential):
+
 - Query multiple sources concurrently
 - Merge completion results
 - Return sorted/deduplicated list
@@ -670,6 +711,7 @@ pub fn main() !void {
 ### Memory Optimization Techniques
 
 See [MEMORY_OPTIMIZATION.md](MEMORY_OPTIMIZATION.md) for details:
+
 - Arena allocators for parser
 - String interning for common values
 - Fixed-size arrays for bounded collections
@@ -683,7 +725,7 @@ Add new builtins by implementing in `src/builtins/`:
 
 ```zig
 pub fn myBuiltin(
-    shell: *Shell,
+    shell: _Shell,
     args: []const []const u8,
     stdout: anytype,
 ) !i32 {
@@ -700,11 +742,11 @@ Create plugins by implementing the `Plugin` interface:
 
 ```zig
 pub const MyPlugin = struct {
-    pub fn init(ctx: *PluginContext) !void {
+    pub fn init(ctx: _PluginContext) !void {
         // Initialize plugin
     }
 
-    pub fn deinit(ctx: *PluginContext) void {
+    pub fn deinit(ctx: _PluginContext) void {
         // Cleanup
     }
 
@@ -712,7 +754,7 @@ pub const MyPlugin = struct {
         .{ .hook_type = .pre_command, .handler = preCommand },
     };
 
-    fn preCommand(ctx: *HookContext) !void {
+    fn preCommand(ctx: _HookContext) !void {
         // Handle pre-command event
     }
 };
@@ -748,27 +790,32 @@ pub fn expandMyPattern(
 ## Design Principles
 
 ### 1. Separation of Concerns
+
 - Clear boundaries between components
 - Single responsibility per module
 - Minimal coupling
 
 ### 2. Fail Fast
+
 - Early validation
 - Descriptive error messages
 - Proper error propagation
 
 ### 3. Performance
+
 - Lazy initialization
 - Minimize allocations
 - Cache where beneficial
 - Parallel operations where possible
 
 ### 4. Compatibility
+
 - POSIX compliance for core features
 - Bash-like syntax for familiarity
 - Cross-platform (Linux, macOS)
 
 ### 5. Testability
+
 - Pure functions where possible
 - Dependency injection
 - Comprehensive test coverage

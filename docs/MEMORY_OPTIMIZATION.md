@@ -17,30 +17,35 @@ Den Shell implements multiple memory optimization strategies to minimize allocat
 Based on benchmark results:
 
 ### Object Pool vs Direct Allocation
+
 - **Object Pool (100 items)**: 0.000ms (277x faster)
 - **Direct Allocation (100 items)**: 0.277ms
 
 **Use when**: Frequently allocating/deallocating same-sized objects (tokens, AST nodes)
 
 ### Stack Buffer vs Heap Allocation
+
 - **Stack Buffer (10x64 bytes)**: 0.000ms (instantaneous)
 - **Heap Allocation (10x64 bytes)**: 0.004ms
 
 **Use when**: Working with small, temporary buffers (< 1KB)
 
 ### StringBuilder vs String Concatenation
+
 - **StringBuilder**: 0.000ms (uses stack for small strings)
 - **String Concatenation**: 0.005ms
 
 **Use when**: Building strings incrementally
 
 ### Arena Allocator Performance
+
 - **Arena Allocator (100x64 bytes)**: 0.017ms
 - **Individual Allocs (100x64 bytes)**: 0.006ms
 
 **Note**: Arena is slower for allocation but instant for deallocation. Use for command execution where you allocate many objects then free them all at once.
 
 ### Stack Array List vs Heap Array List
+
 - **StackArrayList (50 items)**: 0.000ms (instantaneous)
 - **Heap ArrayList (50 items)**: 0.008ms
 
@@ -111,11 +116,11 @@ const memory = @import("utils/memory.zig");
 var arena = memory.ShellArena.init(allocator);
 defer arena.deinit();
 
-const arena_alloc = arena.allocator();
+const arena*alloc = arena.allocator();
 
 // Make many allocations
-var items = try arena_alloc.alloc(Item, 100);
-var strings = try arena_alloc.alloc([]u8, 50);
+var items = try arena*alloc.alloc(Item, 100);
+var strings = try arena*alloc.alloc([]u8, 50);
 // ... more allocations ...
 
 // Free everything at once (instant)
@@ -131,8 +136,8 @@ var pool = memory.CommandMemoryPool.init(allocator);
 defer pool.deinit();
 
 // Use arena for command execution
-const arena_alloc = pool.getArenaAllocator();
-var args = try arena_alloc.alloc([]const u8, 10);
+const arena*alloc = pool.getArenaAllocator();
+var args = try arena*alloc.alloc([]const u8, 10);
 
 // After command completes, free everything
 pool.reset();
@@ -170,9 +175,9 @@ fn tokenize(allocator: Allocator, input: []const u8) ![]Token {
 fn tokenize(allocator: Allocator, input: []const u8, pool: *TokenPool) ![]Token {
     var tokens = StackArrayList(Token, 256).init();
 
-    while (nextToken(input)) |token_data| {
+    while (nextToken(input)) |token*data| {
         if (pool.acquire()) |token| {
-            token.* = token_data;
+            token.* = token*data;
             try tokens.append(token);
         }
     }
@@ -186,12 +191,12 @@ fn tokenize(allocator: Allocator, input: []const u8, pool: *TokenPool) ![]Token 
 ```zig
 // BAD: Many individual allocations
 fn executeCommand(allocator: Allocator, args: [][]const u8) !void {
-    var expanded_args = std.ArrayList([]const u8).init(allocator);
-    defer expanded_args.deinit();
+    var expanded*args = std.ArrayList([]const u8).init(allocator);
+    defer expanded*args.deinit();
 
     for (args) |arg| {
         const expanded = try expandVariables(allocator, arg);
-        try expanded_args.append(expanded);
+        try expanded*args.append(expanded);
     }
     // ... execute ...
 }
@@ -200,10 +205,10 @@ fn executeCommand(allocator: Allocator, args: [][]const u8) !void {
 fn executeCommand(pool: *CommandMemoryPool, args: [][]const u8) !void {
     const arena = pool.getArenaAllocator();
 
-    var expanded_args = std.ArrayList([]const u8).init(arena);
+    var expanded*args = std.ArrayList([]const u8).init(arena);
     for (args) |arg| {
         const expanded = try expandVariables(arena, arg);
-        try expanded_args.append(expanded);
+        try expanded*args.append(expanded);
     }
     // ... execute ...
 
@@ -248,15 +253,16 @@ Den Shell already uses fixed-size arrays for common operations:
 pub const Shell = struct {
     // Fixed-size arrays (no dynamic resizing)
     history: [1000]?[]const u8,           // History entries
-    background_jobs: [16]?BackgroundJob,  // Background jobs
-    dir_stack: [32]?[]const u8,           // Directory stack
-    positional_params: [64]?[]const u8,   // Positional parameters
+    background*jobs: [16]?BackgroundJob,  // Background jobs
+    dir*stack: [32]?[]const u8,           // Directory stack
+    positional*params: [64]?[]const u8,   // Positional parameters
 
     // ... other fields ...
 };
 ```
 
 This provides:
+
 - **Predictable memory usage**: No surprise allocations
 - **Cache-friendly**: Contiguous memory layout
 - **Fast access**: Array indexing vs pointer chasing
@@ -296,10 +302,11 @@ Run memory benchmarks:
 
 ```bash
 zig build bench
-./zig-cache/o/.../memory_bench
+./zig-cache/o/.../memory*bench
 ```
 
 Compare different approaches:
+
 - Object pooling vs direct allocation
 - Stack buffers vs heap allocation
 - Arena allocators vs individual frees
@@ -318,4 +325,4 @@ Compare different approaches:
 
 - Benchmark results: `bench/memory_bench.zig`
 - Implementation: `src/utils/memory.zig`
-- Zig allocator documentation: https://ziglang.org/documentation/master/std/#std.mem.Allocator
+- Zig allocator documentation: <https://ziglang.org/documentation/master/std/#std.mem.Allocator>

@@ -90,6 +90,7 @@ den completion fish | source
 After installation, test the completions:
 
 ### Bash/Zsh
+
 ```bash
 den <TAB>           # Should show: shell, exec, complete, completion, etc.
 den completion <TAB> # Should show: bash, zsh, fish
@@ -97,6 +98,7 @@ den exec ls <TAB>   # Should show files in current directory
 ```
 
 ### Fish
+
 ```fish
 den <TAB>           # Should show subcommands with descriptions
 den completion <TAB> # Should show shell types with descriptions
@@ -117,12 +119,14 @@ src/
 ### Code Organization
 
 The `ShellCompletion` struct in `src/shell_completion.zig` provides:
+
 - `generateBash()`: Generates Bash completion script
 - `generateZsh()`: Generates Zsh completion script
 - `generateFish()`: Generates Fish completion script
 - `generate(shell_type)`: Dispatcher method
 
 Each completion script includes:
+
 1. Installation instructions as comments
 2. Static completion for Den subcommands
 3. Dynamic completion using `den complete`
@@ -131,17 +135,20 @@ Each completion script includes:
 ### Shell-Specific Features
 
 #### Bash
+
 - Uses `complete -F` with `_den_completions` function
 - Leverages `compgen` for word matching
 - Parses JSON output from `den complete`
 
 #### Zsh
+
 - Uses `#compdef` magic comment
 - Provides descriptions for subcommands
 - Uses `_arguments` for sophisticated parsing
 - Supports context-sensitive completion
 
 #### Fish
+
 - Uses declarative `complete` syntax
 - Provides rich descriptions for all options
 - Uses `__fish_use_subcommand` for context detection
@@ -152,30 +159,33 @@ Each completion script includes:
 ### Completions Not Working
 
 1. **Verify installation**:
+
    ```bash
-   # Bash
+# Bash
    ls -la ~/.local/share/bash-completion/completions/den
 
-   # Zsh
+# Zsh
    ls -la ~/.zsh/completions/_den
 
-   # Fish
+# Fish
    ls -la ~/.config/fish/completions/den.fish
    ```
 
 2. **Check if completion is loaded**:
+
    ```bash
-   # Bash
+# Bash
    complete -p den
 
-   # Zsh
+# Zsh
    which _den
 
-   # Fish
+# Fish
    complete -c den
    ```
 
 3. **Reload shell**:
+
    ```bash
    exec $SHELL
    ```
@@ -183,6 +193,7 @@ Each completion script includes:
 ### JSON Parsing Issues
 
 If you see raw JSON instead of completions, the shell script may need adjustment. Check:
+
 - `den complete` is in your PATH
 - JSON output is valid: `den complete ls`
 
@@ -215,6 +226,7 @@ To add completions for a new shell:
 ### Testing Completions
 
 Manual testing checklist:
+
 - [ ] `den <TAB>` shows all subcommands
 - [ ] `den completion <TAB>` shows bash/zsh/fish
 - [ ] `den exec <TAB>` shows commands from PATH

@@ -227,7 +227,7 @@ complete -d cmd     # Directory completion
 
 ## Scripting Commands
 
-### source / .
+### source /
 
 Execute commands from a file in the current shell.
 

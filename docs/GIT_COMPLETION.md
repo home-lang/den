@@ -51,7 +51,7 @@ If there's only one match, it will auto-complete:
 
 ```bash
 $ git chec<TAB>
-# Becomes:
+# Becomes
 $ git checkout
 ```
 
@@ -60,6 +60,7 @@ $ git checkout
 For branch-related subcommands, Den will show you available branches when you press Tab:
 
 **Supported commands:**
+
 - `git checkout <TAB>` - Switch to a branch
 - `git branch <TAB>` - Manage branches
 - `git merge <TAB>` - Merge a branch
@@ -77,6 +78,7 @@ origin/bugfix/login-issue
 ```
 
 **How it works:**
+
 - Shows both local and remote branches
 - Runs `git branch -a --format=%(refname:short)` under the hood
 - Filters out duplicate remote tracking branches
@@ -87,6 +89,7 @@ origin/bugfix/login-issue
 For file-related subcommands, Den will show you files that have been modified according to `git status`:
 
 **Supported commands:**
+
 - `git add <TAB>` - Stage files
 - `git diff <TAB>` - View changes in files
 - `git restore <TAB>` - Restore files
@@ -94,7 +97,7 @@ For file-related subcommands, Den will show you files that have been modified ac
 
 **Example:**
 ```bash
-# After modifying some files:
+# After modifying some files
 $ git add <TAB>
 src/shell.zig
 src/utils/terminal.zig
@@ -102,6 +105,7 @@ docs/GIT_COMPLETION.md
 ```
 
 **How it works:**
+
 - Runs `git status --porcelain` to get modified files
 - Parses the output to extract filenames
 - Shows only files that match your current prefix (if any)
@@ -109,46 +113,50 @@ docs/GIT_COMPLETION.md
 ## Usage Examples
 
 ### Example 1: Switching Branches
+
 ```bash
 $ git checkout f<TAB>
 feature/new-ui
 feature/dark-mode
 
-# Press Tab again to cycle through options, or type more:
+# Press Tab again to cycle through options, or type more
 $ git checkout feature/n<TAB>
-# Auto-completes to:
+# Auto-completes to
 $ git checkout feature/new-ui
 ```
 
 ### Example 2: Staging Modified Files
+
 ```bash
 $ git add s<TAB>
 src/shell.zig
 src/utils/terminal.zig
 
-# Continue typing to narrow down:
+# Continue typing to narrow down
 $ git add src/s<TAB>
-# Auto-completes to:
+# Auto-completes to
 $ git add src/shell.zig
 ```
 
 ### Example 3: Using Partial Subcommand Matching
+
 ```bash
 $ git st<TAB>
 stash
 status
 
-# Type more to disambiguate:
+# Type more to disambiguate
 $ git sta<TAB>
 stash
 status
 
 $ git stat<TAB>
-# Auto-completes to:
+# Auto-completes to
 $ git status
 ```
 
 ### Example 4: Merging a Remote Branch
+
 ```bash
 $ git merge origin/<TAB>
 origin/main
@@ -156,13 +164,14 @@ origin/feature/new-ui
 origin/bugfix/login-issue
 
 $ git merge origin/f<TAB>
-# Auto-completes to:
+# Auto-completes to
 $ git merge origin/feature/new-ui
 ```
 
 ## Visual Feedback
 
 When multiple completions are available:
+
 - Completions are displayed one per line below your input
 - The currently selected completion is highlighted with a gray background
 - Press Tab repeatedly to cycle through available completions

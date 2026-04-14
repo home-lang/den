@@ -120,18 +120,20 @@ FAILED
 ```
 ok - tokenizer
 not ok - parser
-  # Expected 5 tokens, got 3
+# Expected 5 tokens, got 3
 1..2
 ```
 
 ## Test Discovery
 
 The framework automatically discovers tests in:
-- `src/**/*test*.zig`
-- `test/**/*.zig`
+
+- `src/**/_test_.zig`
+- `test/**/_.zig`
 
 Test files should follow naming conventions:
-- `test_*.zig` (e.g., `test_parser.zig`)
+
+- `test__.zig` (e.g., `test_parser.zig`)
 - `*_test.zig` (e.g., `parser_test.zig`)
 
 ## CI Integration
@@ -177,6 +179,7 @@ test "example test" {
 ## Performance
 
 The test framework includes:
+
 - Nanosecond-precision timing
 - Memory-efficient result storage
 - Optional parallel execution

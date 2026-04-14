@@ -89,7 +89,7 @@ ls [OPTIONS] [PATH]
 **Basic listing (multi-column format):**
 ```bash
 ls
-# Output (columns adapt to terminal width):
+# Output (columns adapt to terminal width)
 # build.zig    examples     package.json  scripts      zig-out
 # docs         lib          README.md     src
 ```
@@ -97,13 +97,13 @@ ls
 **Show all files including hidden:**
 ```bash
 ls -a
-# Output includes .git, .gitignore, etc.
+# Output includes .git, .gitignore, etc
 ```
 
 **Long format with detailed information:**
 ```bash
 ls -l
-# Output:
+# Output
 # total 5560
 # -rw-r--r--  1 user  staff  12911 Nov  5 19:35 CHANGELOG.md
 # -rw-r--r--  1 user  staff   1442 Nov 10 21:20 Dockerfile
@@ -113,7 +113,7 @@ ls -l
 **Long format with human-readable sizes:**
 ```bash
 ls -lh
-# Output:
+# Output
 # total 5560
 # -rw-r--r--  1 user  staff   12K Nov  5 19:35 CHANGELOG.md
 # -rw-r--r--  1 user  staff    1K Nov 10 21:20 Dockerfile
@@ -141,6 +141,7 @@ ls -R
 #### Output Format
 
 **Multi-column format** (default):
+
 - Automatically calculates optimal column width based on terminal size
 - Entries are arranged in column-major order (down then across)
 - Directories are highlighted in cyan
@@ -227,8 +228,8 @@ tree [OPTIONS] [PATH]
 
 ```bash
 tree
-# Output:
-# .
+# Output
+#
 # ├── src
 # │   ├── main.zig
 # │   └── shell.zig
@@ -272,7 +273,7 @@ ft [OPTIONS] PATTERN
 ```bash
 ft main
 # Find files matching "main"
-# Output:
+# Output
 # src/main.zig (score: 100)
 # docs/main.md (score: 80)
 
@@ -289,6 +290,7 @@ ft -n 10 -p src mod
 #### Scoring Algorithm
 
 The fuzzy matcher uses a scoring system:
+
 - **Exact match**: 100 points
 - **Prefix match**: 90 points
 - **Substring match**: 70 points
@@ -325,7 +327,7 @@ grep [OPTIONS] PATTERN FILE...
 
 ```bash
 grep fn src/main.zig
-# Output with highlighted matches:
+# Output with highlighted matches
 # pub fn main() !void {
 
 grep -n TODO src/*.zig
@@ -469,7 +471,7 @@ seq [FIRST [INCREMENT]] LAST
 
 ```bash
 seq 5
-# Output:
+# Output
 # 1
 # 2
 # 3
@@ -477,14 +479,14 @@ seq 5
 # 5
 
 seq 2 5
-# Output:
+# Output
 # 2
 # 3
 # 4
 # 5
 
 seq 1 2 10
-# Output:
+# Output
 # 1
 # 3
 # 5
@@ -492,7 +494,7 @@ seq 1 2 10
 # 9
 
 seq 10 -2 0
-# Output:
+# Output
 # 10
 # 8
 # 6
@@ -568,7 +570,7 @@ base64 'User:Password123!'
 **Decoding back:**
 ```bash
 base64 -d 'VXNlcjpQYXNzd29yZDEyMyE='
-# Output: User:Password123!
+# Output: User:Password123
 ```
 
 #### Use Cases
@@ -608,7 +610,7 @@ uuid
 **Generate multiple UUIDs:**
 ```bash
 uuid && uuid && uuid
-# Output:
+# Output
 # a3c2f9b1-4d7e-4a8c-9f1b-2e5d8a7c3f4b
 # 7f8e2c4d-9a1b-4c5e-8d3f-6a9b2c7e4f1d
 # 2b9c7e4f-1d8a-4f3e-9c2b-5a8d3f7e1c4b
@@ -616,8 +618,8 @@ uuid && uuid && uuid
 
 **Use in scripts:**
 ```bash
-export SESSION_ID=$(uuid)
-echo "Session ID: $SESSION_ID"
+export SESSION*ID=$(uuid)
+echo "Session ID: $SESSION*ID"
 ```
 
 #### Use Cases
@@ -664,9 +666,9 @@ json [OPTIONS] [FILE]
 
 ```bash
 echo '{"name":"den"}' | json -p
-# Output:
+# Output
 # {
-#   "name": "den"
+# "name": "den"
 # }
 
 json -q '.name' data.json
@@ -847,10 +849,10 @@ net-check [OPTIONS] [HOST]
 ```bash
 net-check
 # Check connectivity to google.com (default)
-# Output:
+# Output
 # === Network Connectivity Check ===
 # Connectivity Check: google.com
-#   ✓ Host is reachable
+# ✓ Host is reachable
 # Network is reachable
 
 net-check example.com
@@ -858,12 +860,12 @@ net-check example.com
 
 net-check -p 443 example.com
 # Check if port 443 is open on example.com
-# Output:
+# Output
 # === Network Connectivity Check ===
 # Connectivity Check: example.com
-#   ✓ Host is reachable
+# ✓ Host is reachable
 # Port Check: example.com:443
-#   ✓ Port 443 is open
+# ✓ Port 443 is open
 # Network is reachable
 
 net-check -q google.com && echo "Online" || echo "Offline"
@@ -899,33 +901,33 @@ sys-stats
 
 ```bash
 sys-stats
-# Output:
+# Output
 # === System Statistics ===
 #
-# CPU Info:
-#   Architecture: arm64
+# CPU Info
+# Architecture: arm64
 #
-# Memory Info:
-#   Total: 16.00 GB
-#   Used: 12.34 GB
-#   Free: 3.66 GB
-#   Usage: 77.1%
+# Memory Info
+# Total: 16.00 GB
+# Used: 12.34 GB
+# Free: 3.66 GB
+# Usage: 77.1%
 #
-# Disk Info:
-#   Total: 500.00 GB
-#   Free: 125.00 GB
-#   Used: 375.00 GB
-#   Usage: 75.0%
+# Disk Info
+# Total: 500.00 GB
+# Free: 125.00 GB
+# Used: 375.00 GB
+# Usage: 75.0%
 #
-# System:
-#   Uptime: 5 days, 3 hours, 45 minutes
+# System
+# Uptime: 5 days, 3 hours, 45 minutes
 ```
 
 #### Information Displayed
 
 | Section | Details |
 |---------|---------|
-| **CPU Info** | Architecture (arm64, x86_64, etc.) |
+| **CPU Info** | Architecture (arm64, x86*64, etc.) |
 | **Memory Info** | Total, used, free RAM and usage percentage |
 | **Disk Info** | Total, used, free disk space for root volume |
 | **System** | System uptime in human-readable format |
@@ -946,18 +948,18 @@ netstats
 
 ```bash
 netstats
-# Output:
+# Output
 # === Network Statistics ===
 #
-# Network Interfaces:
-#   lo0: 127.0.0.1
-#   en0: 192.168.1.100
-#   en1: 10.0.0.50
+# Network Interfaces
+# lo0: 127.0.0.1
+# en0: 192.168.1.100
+# en1: 10.0.0.50
 #
-# Active Connections (TCP):
-#   State: ESTABLISHED - Count: 15
-#   State: LISTEN - Count: 8
-#   State: TIME_WAIT - Count: 3
+# Active Connections (TCP)
+# State: ESTABLISHED - Count: 15
+# State: LISTEN - Count: 8
+# State: TIME*WAIT - Count: 3
 #
 # Total TCP Connections: 26
 ```
@@ -1287,7 +1289,7 @@ export NAME="VALUE WITH SPACES"
 ```bash
 export PATH="/usr/local/bin:$PATH"
 export EDITOR=vim
-export NODE_ENV=production
+export NODE*ENV=production
 ```
 
 ---
@@ -1338,7 +1340,7 @@ reload
 # Output: Configuration reloaded
 
 reload -v
-# Output:
+# Output
 # Configuration loaded from: den.jsonc (den.jsonc)
 # Aliases reloaded from configuration
 # Reload complete
@@ -1358,7 +1360,7 @@ reload --aliases
 
 #### Hot Reload
 
-Set `"hot_reload": true` in your config to automatically reload when the config file changes.
+Set `"hot*reload": true` in your config to automatically reload when the config file changes.
 
 ---
 
@@ -1380,7 +1382,7 @@ copyssh
 
 ```bash
 copyssh
-# Copies ~/.ssh/id_rsa.pub to clipboard
+# Copies ~/.ssh/id*rsa.pub to clipboard
 # Output: SSH key copied to clipboard
 ```
 
@@ -1592,6 +1594,7 @@ library <command> [args]
 #### Library Locations
 
 Libraries are searched in the following locations:
+
 - `~/.config/den/lib/` - User libraries
 - `/usr/local/share/den/lib/` - System libraries
 
@@ -1603,11 +1606,11 @@ library list
 # === Shell Libraries ===
 #
 # User libraries: /Users/you/.config/den/lib
-#   • git-helpers.den
-#   • docker-utils.sh
+# • git-helpers.den
+# • docker-utils.sh
 #
 # System libraries: /usr/local/share/den/lib
-#   (none)
+# (none)
 ```
 
 **Show library search paths:**
@@ -1625,10 +1628,10 @@ library path
 library create my-utils
 # ✓ Created library: /Users/you/.config/den/lib/my-utils.den
 #
-# Next steps:
-#   1. Edit: dotfiles edit /Users/you/.config/den/lib/my-utils.den
-#   2. Load: source /Users/you/.config/den/lib/my-utils.den
-#   3. Use:  my-utils_hello
+# Next steps
+# 1. Edit: dotfiles edit /Users/you/.config/den/lib/my-utils.den
+# 2. Load: source /Users/you/.config/den/lib/my-utils.den
+# 3. Use:  my-utils*hello
 ```
 
 **Show library info:**
@@ -1639,14 +1642,14 @@ library info git-helpers
 # Path: /Users/you/.config/den/lib/git-helpers.den
 # Size: 1234 bytes
 #
-# Description:
-#   git-helpers - Den Shell Library
-#   Git workflow helper functions
+# Description
+# git-helpers - Den Shell Library
+# Git workflow helper functions
 #
-# Functions:
-#   • git_checkout_branch
-#   • git_delete_merged
-#   • git_rebase_main
+# Functions
+# • git*checkout*branch
+# • git*delete*merged
+# • git*rebase*main
 ```
 
 **Load a library:**
@@ -1698,17 +1701,17 @@ hook list
 # === Registered Hooks ===
 #
 # ● git:push
-#     Pattern: git push
-#     Script:  echo 'Pushing to remote...'
+# Pattern: git push
+# Script:  echo 'Pushing to remote...'
 ```
 
 **Test which hooks match a command:**
 ```bash
 hook test "git push origin main"
-# Hooks matching 'git push origin main':
+# Hooks matching 'git push origin main'
 #
-#   ✓ git:push
-#       → echo 'Pushing to remote...'
+# ✓ git:push
+# → echo 'Pushing to remote...'
 ```
 
 **Disable a hook temporarily:**
@@ -1729,9 +1732,10 @@ hook remove git:push
 #### Hook Conditions
 
 Hooks support conditional execution based on:
-- **file_exists**: Run only if a file exists
-- **env_set**: Run only if an environment variable is set
-- **env_equals**: Run only if an env var equals a specific value
+
+- **file*exists**: Run only if a file exists
+- **env*set**: Run only if an environment variable is set
+- **env*equals**: Run only if an env var equals a specific value
 
 Note: Conditions are configured programmatically through the plugin API.
 
@@ -1739,7 +1743,7 @@ Note: Conditions are configured programmatically through the plugin API.
 
 ### shrug - Copy Shrug Emoji
 
-Copy the shrug emoji ¯\_(ツ)_/¯ to clipboard.
+Copy the shrug emoji ¯\*(ツ)*/¯ to clipboard.
 
 #### Syntax
 
@@ -1751,7 +1755,7 @@ shrug
 
 ```bash
 shrug
-# Copies ¯\_(ツ)_/¯ to clipboard
+# Copies ¯\*(ツ)*/¯ to clipboard
 ```
 
 ---
@@ -1767,7 +1771,7 @@ shrug
 
 2. **File Statistics**
    - Uses native `stat()` system calls for accurate metadata
-   - Actual block count calculation using `st_blocks` field
+   - Actual block count calculation using `st*blocks` field
    - Efficient single-pass directory iteration
 
 3. **Memory Management**
@@ -1784,6 +1788,7 @@ shrug
 ### Signal Handling
 
 The shell properly handles POSIX signals:
+
 - **SIGINT** (Ctrl+C): Gracefully interrupt current command
 - **SIGTERM**: Clean shutdown
 - **SIGWINCH**: Automatic terminal resize detection

@@ -126,11 +126,13 @@ If you have an older version, download the latest from [ziglang.org](https://zig
 If you encounter build errors:
 
 1. Clean the build cache:
+
    ```bash
    rm -rf zig-cache zig-out
    ```
 
 2. Rebuild:
+
    ```bash
    zig build
    ```

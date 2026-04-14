@@ -37,7 +37,7 @@ This document aggregates improvement ideas from the codebase and docs (`ARCHITEC
 
 Architecture docs describe layers: CLI → Shell Core → REPL → Parser/Expansion → Executor, plus cross-cutting features.
 
-- [ ] Audit each public function in `Shell` and tag it as **core state**, **REPL integration**, **parsing**, **execution**, **history**, **jobs**, or **plugin hooks**.
+- [ ] Audit each public function in `Shell` and tag it as **core state**,**REPL integration**,**parsing**,**execution**,**history**,**jobs**, or**plugin hooks**.
 - [ ] For each tag that doesn’t belong to the core, move into the corresponding layer/module while keeping API surface stable.
 - [ ] Make sure `src/mod.zig` (if used as an entry module elsewhere) and `docs/ARCHITECTURE.md` reference the same module graph and naming.
 
@@ -200,7 +200,7 @@ Currently history is stored in a fixed-size array in `Shell`.
 - [ ] Explore **visual selection mode** (zsh/fish-like) if it can be done without significant complexity.
 - [ ] Evaluate feasibility of **multiple cursors** / advanced editing while preserving performance and low complexity.
 - [ ] Ensure all new features are configurable (enable/disable) via `DenConfig.keybindings` or similar.
-- [ ] Implement Emacs-style **character movement** (`Ctrl+B`/`Ctrl+F`) and **line movement** (`Ctrl+P`/`Ctrl+N`) where it doesn’t conflict with existing bindings.
+- [ ] Implement Emacs-style **character movement**(`Ctrl+B`/`Ctrl+F`) and**line movement** (`Ctrl+P`/`Ctrl+N`) where it doesn’t conflict with existing bindings.
 - [ ] Add a simple **macro recording/playback** facility (e.g. record sequence of edits and replay) for advanced users, gated behind configuration.
 
 ### 4.4 Robust terminal behavior
@@ -302,7 +302,7 @@ Currently history is stored in a fixed-size array in `Shell`.
 
 ---
 
-## 6. Plugins & Modules (`src/plugins/*`, `src/modules/*`)
+## 6. Plugins & Modules (`src/plugins/_`, `src/modules/_`)
 
 ### 6.1 Plugin lifecycle, isolation, and error handling
 
@@ -331,7 +331,7 @@ Docs describe a rich `PluginAPI`, `PluginRegistry`, and error stats.
 
 ---
 
-## 7. Configuration, Themes & Prompt (`src/config_loader.zig`, `src/prompt/*`, `src/theme/*`)
+## 7. Configuration, Themes & Prompt (`src/config_loader.zig`, `src/prompt/_`, `src/theme/_`)
 
 ### 7.1 Config validation coverage & user feedback
 
@@ -414,7 +414,7 @@ From `docs/profiling.md`:
 
 ---
 
-## 9. Testing, CI & Tooling (`tests/*`, `.github/workflows/*`, `docs/TESTING.md`)
+## 9. Testing, CI & Tooling (`tests/_`, `.github/workflows/_`, `docs/TESTING.md`)
 
 ### 9.1 Coverage goals & enforcement
 

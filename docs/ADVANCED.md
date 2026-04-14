@@ -33,8 +33,8 @@ echo ${FILES[0]}          # First file
 echo ${#FILES[@]}         # Number of files
 
 # Indirect expansion
-VAR_NAME="HOME"
-echo ${!VAR_NAME}         # Value of $HOME
+VAR*NAME="HOME"
+echo ${!VAR*NAME}         # Value of $HOME
 ```
 
 ### Advanced Arithmetic
@@ -60,19 +60,19 @@ echo $((10 == 5))         # 0 (false)
 ### Error Handling Patterns
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 
 # Exit on error with cleanup
 trap cleanup EXIT
-trap 'error_handler $? $LINENO' ERR
+trap 'error*handler $? $LINENO' ERR
 
 cleanup() {
     echo "Cleaning up..."
-    # Remove temporary files
+# Remove temporary files
     rm -f /tmp/script.$$.*
 }
 
-error_handler() {
+error*handler() {
     echo "Error $1 on line $2"
     exit $1
 }
@@ -130,11 +130,11 @@ function deploy() {
 }
 
 # Return values
-function get_version() {
+function get*version() {
     cat VERSION
 }
 
-VERSION=$(get_version)
+VERSION=$(get*version)
 
 # Function with defaults
 function build() {
@@ -203,17 +203,17 @@ hash npm
 
 # Cache heavy computations
 if test ! -f .cache/result; then
-    expensive_computation > .cache/result
+    expensive*computation > .cache/result
 fi
 RESULT=$(cat .cache/result)
 
 # Cache file lists
-FILE_LIST=/tmp/files.$$
-ls -1 *.zig > $FILE_LIST
+FILE*LIST=/tmp/files.$$
+ls -1 *.zig > $FILE*LIST
 while read file; do
     process "$file"
-done < $FILE_LIST
-rm $FILE_LIST
+done < $FILE*LIST
+rm $FILE*LIST
 ```
 
 ## Memory Management
@@ -223,28 +223,28 @@ rm $FILE_LIST
 ```bash
 # Stream large files instead of loading
 # Bad (loads entire file)
-CONTENT=$(cat large_file.txt)
+CONTENT=$(cat large*file.txt)
 echo "$CONTENT" | grep pattern
 
 # Good (streams)
-grep pattern large_file.txt
+grep pattern large*file.txt
 
 # Process line by line
 while IFS= read -r line; do
     process "$line"
-done < large_file.txt
+done < large*file.txt
 ```
 
 ### Resource Cleanup
 
 ```bash
 # Ensure cleanup with trap
-TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
+TEMP*DIR=$(mktemp -d)
+trap "rm -rf $TEMP*DIR" EXIT
 
 # Use the temp directory
-cd $TEMP_DIR
-# ... do work ...
+cd $TEMP*DIR
+# ... do work
 # Cleanup happens automatically
 ```
 
@@ -252,19 +252,19 @@ cd $TEMP_DIR
 
 ```bash
 # Limit concurrent jobs
-MAX_JOBS=4
-JOB_COUNT=0
+MAX*JOBS=4
+JOB*COUNT=0
 
 for file in *.zig; do
-    # Wait if at limit
-    while test $JOB_COUNT -ge $MAX_JOBS; do
+# Wait if at limit
+    while test $JOB*COUNT -ge $MAX*JOBS; do
         wait -n  # Wait for any job
-        JOB_COUNT=$((JOB_COUNT - 1))
+        JOB*COUNT=$((JOB*COUNT - 1))
     done
 
-    # Start background job
+# Start background job
     process "$file" &
-    JOB_COUNT=$((JOB_COUNT + 1))
+    JOB*COUNT=$((JOB*COUNT + 1))
 done
 
 # Wait for remaining jobs
@@ -292,6 +292,7 @@ cat list.txt | parallel -j4 process
 ### Thread Pool Usage
 
 Den automatically uses thread pools for:
+
 - History indexing
 - Tab completion generation
 - Plugin operations
@@ -323,7 +324,7 @@ fi
 
 # Good (atomic test-and-set)
 if ln -s $$ lock 2>/dev/null; then
-    # Got lock
+# Got lock
     trap "rm -f lock" EXIT
 fi
 ```
@@ -333,7 +334,7 @@ fi
 ### Creating a Plugin
 
 ```zig
-// src/plugins/my_plugin.zig
+// src/plugins/my*plugin.zig
 const std = @import("std");
 const plugin = @import("../plugins/interface.zig");
 
@@ -381,6 +382,7 @@ pub const MyPlugin = struct {
 ### Plugin Hooks
 
 Available hooks:
+
 - `onCommand`: Before command execution
 - `onComplete`: During tab completion
 - `onPrompt`: Before displaying prompt
@@ -429,7 +431,7 @@ bind-key d split-window -h "den"
 
 ```bash
 # Enable debug output
-export DEN_DEBUG=1
+export DEN*DEBUG=1
 den script.sh
 
 # Trace execution
@@ -470,8 +472,8 @@ bench command "ls -la"
 
 # Compare implementations
 bench parallel "
-    process_v1 file
-    process_v2 file
+    process*v1 file
+    process*v2 file
 "
 ```
 
@@ -481,32 +483,32 @@ bench parallel "
 
 ```bash
 # Complete function
-_my_command_complete() {
-    local current="${COMP_WORDS[COMP_CWORD]}"
+*my*command*complete() {
+    local current="${COMP*WORDS[COMP*CWORD]}"
     local suggestions="start stop restart status"
 
     COMPREPLY=($(compgen -W "$suggestions" -- "$current"))
 }
 
-complete -F _my_command_complete my_command
+complete -F *my*command*complete my*command
 ```
 
 ### Advanced Completion
 
 ```bash
 # Context-aware completion
-_git_like_complete() {
-    local cmd="${COMP_WORDS[1]}"
+*git*like*complete() {
+    local cmd="${COMP*WORDS[1]}"
 
     case "$cmd" in
         commit)
-            # Complete file names
-            COMPREPLY=($(compgen -f -- "${COMP_WORDS[COMP_CWORD]}"))
+# Complete file names
+            COMPREPLY=($(compgen -f -- "${COMP*WORDS[COMP*CWORD]}"))
             ;;
         checkout)
-            # Complete branch names
+# Complete branch names
             local branches=$(git branch | cut -c3-)
-            COMPREPLY=($(compgen -W "$branches" -- "${COMP_WORDS[COMP_CWORD]}"))
+            COMPREPLY=($(compgen -W "$branches" -- "${COMP*WORDS[COMP*CWORD]}"))
             ;;
     esac
 }
@@ -516,9 +518,9 @@ _git_like_complete() {
 
 ```bash
 # Generate completions dynamically
-_dynamic_complete() {
-    local current="${COMP_WORDS[COMP_CWORD]}"
-    local suggestions=$(my_command --list-options)
+*dynamic*complete() {
+    local current="${COMP*WORDS[COMP*CWORD]}"
+    local suggestions=$(my*command --list-options)
 
     COMPREPLY=($(compgen -W "$suggestions" -- "$current"))
 }
@@ -530,7 +532,7 @@ _dynamic_complete() {
 
 ```bash
 # Set job priority
-nice -n 10 long_process &
+nice -n 10 long*process &
 
 # Adjust running job
 renice +5 -p $!
@@ -540,7 +542,7 @@ renice +5 -p $!
 
 ```bash
 # Monitor job status
-watch_job() {
+watch*job() {
     local pid=$1
     while kill -0 $pid 2>/dev/null; do
         echo "Job $pid still running..."
@@ -549,22 +551,22 @@ watch_job() {
     echo "Job $pid completed"
 }
 
-long_process &
-watch_job $!
+long*process &
+watch*job $!
 ```
 
 ### Job Synchronization
 
 ```bash
 # Wait for specific jobs
-JOB1_PID=$(job1 &)
-JOB2_PID=$(job2 &)
+JOB1*PID=$(job1 &)
+JOB2*PID=$(job2 &)
 
-wait $JOB1_PID || echo "Job1 failed"
-wait $JOB2_PID || echo "Job2 failed"
+wait $JOB1*PID || echo "Job1 failed"
+wait $JOB2*PID || echo "Job2 failed"
 
 # Wait with timeout
-timeout 30 wait $JOB1_PID || echo "Timeout"
+timeout 30 wait $JOB1*PID || echo "Timeout"
 ```
 
 ## Security Best Practices
@@ -582,20 +584,20 @@ if echo "$filename" | grep -q '[;&|]'; then
 fi
 
 # Sanitize input
-filename=$(echo "$filename" | tr -cd '[:alnum:]._-')
+filename=$(echo "$filename" | tr -cd '[:alnum:].*-')
 ```
 
 ### Secure Temporary Files
 
 ```bash
 # Use mktemp for secure temp files
-TEMP_FILE=$(mktemp)
-trap "rm -f $TEMP_FILE" EXIT
+TEMP*FILE=$(mktemp)
+trap "rm -f $TEMP*FILE" EXIT
 
 # Secure temp directory
-TEMP_DIR=$(mktemp -d)
-chmod 700 $TEMP_DIR
-trap "rm -rf $TEMP_DIR" EXIT
+TEMP*DIR=$(mktemp -d)
+chmod 700 $TEMP*DIR
+trap "rm -rf $TEMP*DIR" EXIT
 ```
 
 ### Environment Variable Safety
@@ -611,10 +613,10 @@ command "${args[@]}"
 
 # Prevent code injection
 # Bad
-eval "echo $USER_INPUT"
+eval "echo $USER*INPUT"
 
 # Good
-echo "$USER_INPUT"
+echo "$USER*INPUT"
 ```
 
 ### Privilege Management
@@ -627,9 +629,9 @@ if test $(id -u) -eq 0; then
 fi
 
 # Drop privileges when needed
-if test -n "$SUDO_USER"; then
-    # Running under sudo, drop to original user
-    su -c "command" $SUDO_USER
+if test -n "$SUDO*USER"; then
+# Running under sudo, drop to original user
+    su -c "command" $SUDO*USER
 fi
 ```
 
@@ -638,7 +640,7 @@ fi
 ### Script Structure
 
 ```bash
-#!/usr/bin/env den
+# !/usr/bin/env den
 # Script description
 # Author: Your Name
 # Date: 2024-01-01
@@ -646,13 +648,13 @@ fi
 set -euo pipefail  # Strict mode
 
 # Constants
-readonly SCRIPT_DIR=$(dirname "$0")
-readonly SCRIPT_NAME=$(basename "$0")
+readonly SCRIPT*DIR=$(dirname "$0")
+readonly SCRIPT*NAME=$(basename "$0")
 
 # Functions
 usage() {
     cat <<EOF
-Usage: $SCRIPT_NAME [OPTIONS] ARGS
+Usage: $SCRIPT*NAME [OPTIONS] ARGS
 
 Options:
     -h, --help     Show this help
@@ -664,7 +666,7 @@ EOF
 main() {
     local verbose=0
 
-    # Parse arguments
+# Parse arguments
     while test $# -gt 0; do
         case "$1" in
             -h|--help) usage ;;
@@ -674,12 +676,12 @@ main() {
         shift
     done
 
-    # Main logic
-    # ...
+# Main logic
+#
 }
 
 # Run main if script is executed directly
-if test "${BASH_SOURCE[0]}" = "${0}"; then
+if test "${BASH*SOURCE[0]}" = "${0}"; then
     main "$@"
 fi
 ```
