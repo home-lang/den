@@ -6,6 +6,7 @@ const IO = @import("../../utils/io.zig").IO;
 const BuiltinContext = @import("context.zig").BuiltinContext;
 const utils = @import("../../utils.zig");
 const common = @import("common.zig");
+const process_util = @import("../../utils/process.zig");
 
 /// Process-related builtins: times, umask, timeout, time, watch
 /// times builtin - display accumulated process times
@@ -307,7 +308,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         // Can't get time, just wait normally
         var wait_status_fallback: c_int = 0;
         if (comptime builtin.os.tag != .windows) {
-            _ = std.c.waitpid(child_pid, &wait_status_fallback, 0);
+            _ = process_util.waitpidIntr(child_pid, &wait_status_fallback, 0);
         }
         return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status_fallback))));
     };
@@ -357,7 +358,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             // Wait for child to actually exit
             var final_wait_status: c_int = 0;
             if (comptime builtin.os.tag != .windows) {
-                _ = std.c.waitpid(child_pid, &final_wait_status, 0);
+                _ = process_util.waitpidIntr(child_pid, &final_wait_status, 0);
             }
             const final_status_u32: u32 = @bitCast(final_wait_status);
             if (preserve_status) {

@@ -3,6 +3,7 @@ const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 const builtin = @import("builtin");
 const spawn = @import("../utils/spawn.zig");
+const process_util = @import("../utils/process.zig");
 
 /// Pipeline execution for connecting multiple commands with pipes.
 /// Handles both POSIX (fork/pipe) and Windows (CreateProcess) implementations.
@@ -113,12 +114,7 @@ pub fn executePosix(
         if (comptime builtin.os.tag != .windows) {
             // Retry on EINTR so that incoming signals don't leave children as
             // zombies or cause us to read uninitialized wait_status.
-            while (true) {
-                const r = std.c.waitpid(pid, &wait_status, 0);
-                if (r >= 0) break;
-                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                break;
-            }
+            _ = process_util.waitpidIntr(pid, &wait_status, 0);
         }
         const raw_status: u32 = @bitCast(wait_status);
         var status: i32 = undefined;

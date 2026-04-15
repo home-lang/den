@@ -4,6 +4,7 @@ const parser_mod = @import("parser/mod.zig");
 const executor_mod = @import("executor/mod.zig");
 const IO = @import("utils/io.zig").IO;
 const redirection = @import("executor/redirection.zig");
+const process_util = @import("utils/process.zig");
 
 fn getEnvOwned(allocator: std.mem.Allocator, key: [*:0]const u8) ?[]u8 {
     const raw = std.c.getenv(key) orelse return null;
@@ -306,8 +307,18 @@ pub const Shell = struct {
         // Get initial mtime for hot-reload
         const config_mtime = getConfigMtime(config_source.path);
 
-        // Initialize environment from system - inherit all parent environment variables
+        // Initialize environment from system - inherit all parent environment variables.
+        // env owns its keys and values; if any subsequent step in init fails, this
+        // errdefer drains every populated entry so they don't leak.
         var env = std.StringHashMap([]const u8).init(allocator);
+        errdefer {
+            var env_it = env.iterator();
+            while (env_it.next()) |entry| {
+                allocator.free(entry.key_ptr.*);
+                allocator.free(entry.value_ptr.*);
+            }
+            env.deinit();
+        }
 
         // Inherit all environment variables from parent process
         if (builtin.os.tag != .windows) {
@@ -388,9 +399,11 @@ pub const Shell = struct {
         else
             config_history_file;
         const history_path_owned = try allocator.dupe(u8, history_path);
+        errdefer allocator.free(history_path_owned);
 
         // Initialize thread pool with automatic CPU detection
-        const thread_pool = try concurrency.ThreadPool.init(allocator, 0);
+        var thread_pool = try concurrency.ThreadPool.init(allocator, 0);
+        errdefer thread_pool.deinit();
 
         // Install signal handlers
         signals.installHandlers() catch |err| {
@@ -1263,12 +1276,7 @@ pub const Shell = struct {
                                 _ = std.c.close(read_fd);
 
                                 var wait_status_bg: c_int = 0;
-                                while (true) {
-                                    const r = std.c.waitpid(@intCast(fork_ret), &wait_status_bg, 0);
-                                    if (r >= 0) break;
-                                    if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                                    break;
-                                }
+                                _ = process_util.waitpidIntr(@intCast(fork_ret), &wait_status_bg, 0);
 
                                 const execFn2: *const fn (*Shell, []const u8) anyerror!void = &Shell.executeCommand;
                                 execFn2(self, pipe_cmd) catch {};
@@ -1525,12 +1533,7 @@ pub const Shell = struct {
                             _ = std.c.close(read_fd);
 
                             var wait_status_sub: c_int = 0;
-                            while (true) {
-                                const r = std.c.waitpid(@intCast(fork_ret), &wait_status_sub, 0);
-                                if (r >= 0) break;
-                                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                                break;
-                            }
+                            _ = process_util.waitpidIntr(@intCast(fork_ret), &wait_status_sub, 0);
 
                             const execFn: *const fn (*Shell, []const u8) anyerror!void = &Shell.executeCommand;
                             execFn(self, pipe_cmd) catch {};
@@ -1556,12 +1559,7 @@ pub const Shell = struct {
                             }
                             // Parent: wait for child (retry on EINTR)
                             var wait_status: c_int = 0;
-                            while (true) {
-                                const r = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
-                                if (r >= 0) break;
-                                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                                break;
-                            }
+                            _ = process_util.waitpidIntr(@intCast(fork_ret), &wait_status, 0);
                             if (wait_status & 0x7f == 0) {
                                 self.last_exit_code = @as(i32, @intCast((wait_status >> 8) & 0xff));
                             } else {
@@ -2671,12 +2669,7 @@ pub const Shell = struct {
 
                 // Wait for writer to finish (retry on EINTR)
                 var wait_status_heredoc: c_int = 0;
-                while (true) {
-                    const r = std.c.waitpid(@intCast(fork_ret), &wait_status_heredoc, 0);
-                    if (r >= 0) break;
-                    if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                    break;
-                }
+                _ = process_util.waitpidIntr(@intCast(fork_ret), &wait_status_heredoc, 0);
 
                 // Execute the command with stdin redirected
                 self.executeCommand(cmd_part) catch {};
@@ -3374,12 +3367,7 @@ pub const Shell = struct {
 
                 // Wait for control flow child to finish writing (retry on EINTR)
                 var wait_status_cf: c_int = 0;
-                while (true) {
-                    const r = std.c.waitpid(@intCast(fork_ret), &wait_status_cf, 0);
-                    if (r >= 0) break;
-                    if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                    break;
-                }
+                _ = process_util.waitpidIntr(@intCast(fork_ret), &wait_status_cf, 0);
 
                 // Execute the pipe command(s) — use function pointer to
                 // break the inferred error set cycle (executeCommand →
@@ -3540,12 +3528,7 @@ pub const Shell = struct {
 
             // Wait for child (retry on EINTR)
             var wait_status_pipe: c_int = 0;
-            while (true) {
-                const r = std.c.waitpid(pid, &wait_status_pipe, 0);
-                if (r >= 0) break;
-                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                break;
-            }
+            _ = process_util.waitpidIntr(pid, &wait_status_pipe, 0);
 
             return true;
         }

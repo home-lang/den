@@ -1088,9 +1088,11 @@ pub const ControlFlowParser = struct {
 
         // Create slices and copy data
         const then_body = try self.allocator.alloc([]const u8, then_body_count);
+        errdefer self.allocator.free(then_body);
         @memcpy(then_body, then_body_buffer[0..then_body_count]);
 
         const elif_clauses = try self.allocator.alloc(ElifClause, elif_count);
+        errdefer self.allocator.free(elif_clauses);
         @memcpy(elif_clauses, elif_buffer[0..elif_count]);
 
         const else_body: ?[][]const u8 = if (has_else) blk: {

@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const compat = @import("compat");
 const Arithmetic = @import("arithmetic.zig").Arithmetic;
 const env_utils = @import("env.zig");
+const process_util = @import("process.zig");
 
 const is_windows = builtin.os.tag == .windows;
 
@@ -2170,12 +2171,7 @@ pub const Expansion = struct {
         // Wait for child to finish and capture exit code for $?
         var wait_status: c_int = 0;
         if (comptime builtin.os.tag != .windows) {
-            while (true) {
-                const r = std.c.waitpid(pid, &wait_status, 0);
-                if (r >= 0) break;
-                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                break;
-            }
+            _ = process_util.waitpidIntr(pid, &wait_status, 0);
             const exit_code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
             self.last_exit_code = exit_code;
             // Also update the shell's exit code if available

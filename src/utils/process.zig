@@ -246,6 +246,28 @@ pub fn getStderr() FileHandle {
 // Process Control
 // =============================================================================
 
+/// Low-level POSIX waitpid that retries on EINTR. Returns the kernel's
+/// raw status word in `status_out`. On non-POSIX targets this is a no-op
+/// that returns 0 (callers must guard with `builtin.os.tag` themselves
+/// when meaningful behavior is required).
+///
+/// Most direct waitpid sites in this codebase want the raw `c_int` status
+/// (so they can call `std.posix.W.*` macros against it), and they want
+/// signal-induced EINTR returns to be retried rather than silently dropped
+/// — which is exactly what this helper provides.
+pub fn waitpidIntr(pid: std.posix.pid_t, status_out: *c_int, flags: c_int) std.posix.pid_t {
+    if (comptime builtin.os.tag == .windows) {
+        status_out.* = 0;
+        return 0;
+    }
+    while (true) {
+        const r = std.c.waitpid(pid, status_out, flags);
+        if (r >= 0) return @intCast(r);
+        if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+        return @intCast(r);
+    }
+}
+
 /// Wait for a process to exit
 pub fn waitProcess(pid: ProcessId, options: WaitOptions) !WaitResult {
     if (builtin.os.tag == .windows) {
@@ -260,7 +282,7 @@ fn waitProcessPosix(pid: std.posix.pid_t, options: WaitOptions) !WaitResult {
 
     var wait_status: c_int = 0;
     const wait_pid = if (comptime builtin.os.tag != .windows)
-        std.c.waitpid(pid, &wait_status, flags)
+        waitpidIntr(pid, &wait_status, flags)
     else
         unreachable;
     const status_u32: u32 = @bitCast(wait_status);

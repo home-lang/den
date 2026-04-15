@@ -195,7 +195,7 @@ pub const JobManager = struct {
                         // Reap the zombie
                         var reap_status: c_int = 0;
                         if (comptime builtin.os.tag != .windows) {
-                            _ = std.c.waitpid(job.pid, &reap_status, 0);
+                            _ = process.waitpidIntr(job.pid, &reap_status, 0);
                         }
                     }
                 }
@@ -386,12 +386,7 @@ pub const JobManager = struct {
             var fg_wait_status: c_int = 0;
             // Retry on EINTR: SIGCHLD/SIGWINCH/etc. can interrupt this wait,
             // leaving an uninitialized status if we don't loop.
-            while (true) {
-                const r = std.c.waitpid(job.pid, &fg_wait_status, std.c.W.UNTRACED);
-                if (r >= 0) break;
-                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                break;
-            }
+            _ = process.waitpidIntr(job.pid, &fg_wait_status, std.c.W.UNTRACED);
 
             const raw: u32 = @bitCast(fg_wait_status);
             if (std.posix.W.IFSTOPPED(raw)) {
@@ -535,14 +530,7 @@ pub const JobManager = struct {
 
                 const job = self.jobs[slot.?].?;
                 var specific_wait_status: c_int = 0;
-                if (comptime builtin.os.tag != .windows) {
-                    while (true) {
-                        const r = std.c.waitpid(job.pid, &specific_wait_status, 0);
-                        if (r >= 0) break;
-                        if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                        break;
-                    }
-                }
+                _ = process.waitpidIntr(job.pid, &specific_wait_status, 0);
                 last_status = getExitStatus(@as(u32, @bitCast(specific_wait_status)));
                 self.remove(slot.?);
             }
@@ -554,7 +542,7 @@ pub const JobManager = struct {
                 if (maybe_job.*) |job| {
                     var all_wait_status: c_int = 0;
                     if (comptime builtin.os.tag != .windows) {
-                        _ = std.c.waitpid(job.pid, &all_wait_status, 0);
+                        _ = process.waitpidIntr(job.pid, &all_wait_status, 0);
                     }
                     last_status = getExitStatus(@as(u32, @bitCast(all_wait_status)));
                     self.allocator.free(job.command);

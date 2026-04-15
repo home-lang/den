@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const types = @import("../../types/mod.zig");
 const IO = @import("../../utils/io.zig").IO;
 const common = @import("common.zig");
+const process_util = @import("../../utils/process.zig");
 
 /// Developer helper builtins: wip, code, pstorm
 /// Note: bookmark remains in executor/mod.zig as it requires shell named_dirs state
@@ -85,7 +86,7 @@ pub fn code(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             std.c._exit(127);
         } else {
             var wait_status: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status, 0);
+            _ = process_util.waitpidIntr(pid, &wait_status, 0);
             return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
         }
     }
@@ -123,7 +124,7 @@ pub fn pstorm(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
             std.c._exit(127);
         } else {
             var wait_status2: c_int = 0;
-            _ = std.c.waitpid(pid2, &wait_status2, 0);
+            _ = process_util.waitpidIntr(pid2, &wait_status2, 0);
             return @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status2))));
         }
     }

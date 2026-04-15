@@ -101,7 +101,7 @@ fn spawnAndWaitPosix(allocator: std.mem.Allocator, opts: SpawnOptions) !i32 {
 
     var wait_status: c_int = 0;
     if (comptime builtin.os.tag != .windows) {
-        _ = std.c.waitpid(pid, &wait_status, 0);
+        _ = process.waitpidIntr(pid, &wait_status, 0);
     }
     const status_u32: u32 = @bitCast(wait_status);
 
@@ -153,7 +153,7 @@ fn captureOutputPosix(allocator: std.mem.Allocator, opts: SpawnOptions) !Capture
     // Wait for child
     var wait_status: c_int = 0;
     if (comptime builtin.os.tag != .windows) {
-        _ = std.c.waitpid(pid, &wait_status, 0);
+        _ = process.waitpidIntr(pid, &wait_status, 0);
     }
     const status_u32: u32 = @bitCast(wait_status);
 
@@ -379,7 +379,7 @@ fn spawnPipelinePosix(allocator: std.mem.Allocator, commands: []const SpawnOptio
     for (pids_buffer[0..commands.len]) |pid| {
         var wait_status: c_int = 0;
         if (comptime builtin.os.tag != .windows) {
-            _ = std.c.waitpid(pid, &wait_status, 0);
+            _ = process.waitpidIntr(pid, &wait_status, 0);
         }
         const status_u32: u32 = @bitCast(wait_status);
         const status: i32 = @intCast(posix.W.EXITSTATUS(status_u32));

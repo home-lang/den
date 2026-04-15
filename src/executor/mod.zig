@@ -502,12 +502,7 @@ pub const Executor = struct {
         for (pids_buffer[0..commands.len], 0..) |pid, pi| {
             var wait_status: c_int = 0;
             if (comptime builtin.os.tag != .windows) {
-                while (true) {
-                    const ret = std.c.waitpid(pid, &wait_status, 0);
-                    if (ret >= 0) break;
-                    if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                    break;
-                }
+                _ = process.waitpidIntr(pid, &wait_status, 0);
             }
             const raw: u32 = @bitCast(wait_status);
             const status: i32 = if (std.posix.W.IFSIGNALED(raw))
@@ -1672,12 +1667,7 @@ pub const Executor = struct {
             // Parent process - wait for child (retry on EINTR from signals)
             var wait_status_exec: c_int = 0;
             if (comptime builtin.os.tag != .windows) {
-                while (true) {
-                    const ret = std.c.waitpid(pid, &wait_status_exec, 0);
-                    if (ret >= 0) break;
-                    if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                    break; // Other error
-                }
+                _ = process.waitpidIntr(pid, &wait_status_exec, 0);
                 const raw: u32 = @bitCast(wait_status_exec);
                 if (std.posix.W.IFSIGNALED(raw)) {
                     return 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(raw))));

@@ -143,7 +143,15 @@ pub fn loadConfigWithPathAndSource(allocator: std.mem.Allocator, custom_path: ?[
     };
 }
 
-/// Load config from a specific file path
+/// Load config from a specific file path.
+///
+/// Memory model: parsed strings live in a `std.json.Parsed(T)` arena that is
+/// allocated on `std.heap.page_allocator`. We discard the `Parsed` handle and
+/// return only `.value`, which means the arena is intentionally leaked for the
+/// lifetime of the process. This keeps every `[]const u8` inside the returned
+/// `DenConfig` valid forever without forcing every consumer to thread a
+/// `Parsed` through. The OS reclaims the pages at exit. The leak is bounded
+/// by config file size and only happens once at startup.
 fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
     const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch |err| {
         IO.eprint("den: failed to open config file '{s}': {any}\n", .{ path, err }) catch {};
@@ -178,8 +186,8 @@ fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
     return parsed.value;
 }
 
-/// Try to load config from a path, return null on failure
-/// Uses page_allocator for JSON parsing since config lives for program lifetime
+/// Try to load config from a path, return null on failure.
+/// See `loadFromFile` for the page-allocator/arena lifetime rationale.
 fn tryLoadFromPath(comptime T: type, allocator: std.mem.Allocator, path: []const u8) ?T {
     const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch return null;
     defer file.close(std.Options.debug_io);
@@ -214,7 +222,8 @@ const PackageJsonWithDen = struct {
     den: ?DenConfig = null,
 };
 
-/// Try to load Den config from package.jsonc "den" key
+/// Try to load Den config from package.jsonc "den" key.
+/// See `loadFromFile` for the page-allocator/arena lifetime rationale.
 fn tryLoadDenFromPackageJson(allocator: std.mem.Allocator, path: []const u8) ?DenConfig {
     const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch return null;
     defer file.close(std.Options.debug_io);

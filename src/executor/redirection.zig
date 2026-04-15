@@ -4,6 +4,7 @@ const types = @import("../types/mod.zig");
 const IO = @import("../utils/io.zig").IO;
 const Expansion = @import("../utils/expansion.zig").Expansion;
 const networking = @import("networking.zig");
+const process_util = @import("../utils/process.zig");
 
 /// Apply I/O redirections for a command.
 /// Handles output/append, input, heredoc, herestring, fd duplication, and fd close.
@@ -230,14 +231,7 @@ fn applyHeredocOrHerestring(
     // Retry on EINTR so a stray signal doesn't abandon the writer.
     {
         var wait_status: c_int = 0;
-        if (comptime builtin.os.tag != .windows) {
-            while (true) {
-                const r = std.c.waitpid(writer_pid, &wait_status, 0);
-                if (r >= 0) break;
-                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
-                break;
-            }
-        }
+        _ = process_util.waitpidIntr(writer_pid, &wait_status, 0);
     }
 
     // Now dup read end to stdin
