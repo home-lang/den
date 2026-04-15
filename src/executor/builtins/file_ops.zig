@@ -110,10 +110,7 @@ pub fn grep(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     const pattern = command.args[pattern_idx];
     const files = if (pattern_idx + 1 < command.args.len) command.args[pattern_idx + 1 ..] else &[_][]const u8{};
 
-    if (files.len == 0) {
-        try IO.print("den: grep: reading from stdin not yet implemented\n", .{});
-        return 1;
-    }
+    const reading_stdin = files.len == 0;
 
     const display_filename = show_filename or files.len > 1;
     const color_match = "\x1b[1;31m";
@@ -123,31 +120,55 @@ pub fn grep(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
     var total_matches: usize = 0;
 
-    for (files) |file_path| {
-        const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, file_path, .{}) catch |err| {
-            try IO.eprint("den: grep: {s}: {}\n", .{ file_path, err });
-            continue;
-        };
-        defer file.close(std.Options.debug_io);
+    // When no files given, read from stdin; otherwise iterate files
+    const sources = if (reading_stdin) &[_][]const u8{"-"} else files;
 
-        const max_size: usize = 10 * 1024 * 1024;
-        const file_size = (file.stat(std.Options.debug_io) catch {
-            try IO.eprint("den: grep: error reading {s}\n", .{file_path});
-            continue;
-        }).size;
-        const read_size: usize = @min(file_size, max_size);
-        const buffer = allocator.alloc(u8, read_size) catch {
-            try IO.eprint("den: grep: out of memory\n", .{});
-            continue;
+    for (sources) |file_path| {
+        var owned_buf: ?[]u8 = null;
+        defer if (owned_buf) |b| allocator.free(b);
+
+        const content: []const u8 = if (std.mem.eql(u8, file_path, "-")) blk: {
+            // Read from stdin
+            const max_stdin: usize = 10 * 1024 * 1024;
+            var stdin_buf: std.ArrayList(u8) = .empty;
+            errdefer stdin_buf.deinit(allocator);
+            var read_buf: [4096]u8 = undefined;
+            while (true) {
+                const n = std.posix.read(std.posix.STDIN_FILENO, &read_buf) catch break;
+                if (n == 0) break;
+                stdin_buf.appendSlice(allocator, read_buf[0..n]) catch break;
+                if (stdin_buf.items.len >= max_stdin) break;
+            }
+            owned_buf = stdin_buf.toOwnedSlice(allocator) catch {
+                stdin_buf.deinit(allocator);
+                continue;
+            };
+            break :blk owned_buf.?;
+        } else blk: {
+            const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, file_path, .{}) catch |err| {
+                try IO.eprint("den: grep: {s}: {}\n", .{ file_path, err });
+                continue;
+            };
+            defer file.close(std.Options.debug_io);
+
+            const max_size: usize = 10 * 1024 * 1024;
+            const file_size = (file.stat(std.Options.debug_io) catch {
+                try IO.eprint("den: grep: error reading {s}\n", .{file_path});
+                continue;
+            }).size;
+            const read_size: usize = @min(file_size, max_size);
+            owned_buf = allocator.alloc(u8, read_size) catch {
+                try IO.eprint("den: grep: out of memory\n", .{});
+                continue;
+            };
+            var total_read: usize = 0;
+            while (total_read < read_size) {
+                const n = file.readStreaming(std.Options.debug_io, &.{owned_buf.?[total_read..]}) catch break;
+                if (n == 0) break;
+                total_read += n;
+            }
+            break :blk owned_buf.?[0..total_read];
         };
-        defer allocator.free(buffer);
-        var total_read: usize = 0;
-        while (total_read < read_size) {
-            const n = file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]}) catch break;
-            if (n == 0) break;
-            total_read += n;
-        }
-        const content = buffer[0..total_read];
 
         var line_iter = std.mem.splitScalar(u8, content, '\n');
         var line_num: usize = 1;
@@ -442,7 +463,7 @@ fn fuzzyFindRecursive(
     while (try iter.next(std.Options.debug_io)) |entry| {
         if (results.items.len >= max_collect) break;
 
-        if (entry.name[0] == '.') continue;
+        if (entry.name.len == 0 or entry.name[0] == '.') continue;
         if (std.mem.eql(u8, entry.name, "node_modules")) continue;
         if (std.mem.eql(u8, entry.name, "target")) continue;
         if (std.mem.eql(u8, entry.name, "zig-cache")) continue;
@@ -562,18 +583,25 @@ pub fn calc(command: *types.ParsedCommand) !i32 {
         return 1;
     }
 
-    var expr_buf: [1024]u8 = undefined;
+    var expr_buf: [8192]u8 = undefined;
     var expr_len: usize = 0;
 
     for (command.args, 0..) |arg, i| {
-        if (i > 0 and expr_len < expr_buf.len) {
+        if (i > 0) {
+            if (expr_len >= expr_buf.len) {
+                try IO.eprint("den: calc: expression too long\n", .{});
+                return 1;
+            }
             expr_buf[expr_len] = ' ';
             expr_len += 1;
         }
 
-        const copy_len = @min(arg.len, expr_buf.len - expr_len);
-        @memcpy(expr_buf[expr_len .. expr_len + copy_len], arg[0..copy_len]);
-        expr_len += copy_len;
+        if (arg.len > expr_buf.len - expr_len) {
+            try IO.eprint("den: calc: expression too long\n", .{});
+            return 1;
+        }
+        @memcpy(expr_buf[expr_len .. expr_len + arg.len], arg);
+        expr_len += arg.len;
     }
 
     const expr = expr_buf[0..expr_len];
@@ -589,27 +617,61 @@ pub fn calc(command: *types.ParsedCommand) !i32 {
 
 fn evaluateExpression(expr: []const u8) !f64 {
     const trimmed = std.mem.trim(u8, expr, " \t");
+    if (trimmed.len == 0) return error.InvalidCharacter;
 
-    var i: usize = trimmed.len;
-    while (i > 0) {
-        i -= 1;
-        const c = trimmed[i];
-        if (c == '+' or c == '-') {
-            if (i == 0) continue;
-            const left = try evaluateExpression(trimmed[0..i]);
-            const right = try evaluateExpression(trimmed[i + 1 ..]);
-            return if (c == '+') left + right else left - right;
+    // Handle parenthesized expressions
+    if (trimmed[0] == '(' and trimmed[trimmed.len - 1] == ')') {
+        // Verify the parens are matching (not e.g. "(1)+(2)")
+        var depth: i32 = 0;
+        var all_wrapped = true;
+        for (trimmed, 0..) |c, idx| {
+            if (c == '(') depth += 1;
+            if (c == ')') depth -= 1;
+            if (depth == 0 and idx < trimmed.len - 1) {
+                all_wrapped = false;
+                break;
+            }
+        }
+        if (all_wrapped) {
+            return evaluateExpression(trimmed[1 .. trimmed.len - 1]);
         }
     }
 
-    i = trimmed.len;
-    while (i > 0) {
-        i -= 1;
-        const c = trimmed[i];
-        if (c == '*' or c == '/') {
-            const left = try evaluateExpression(trimmed[0..i]);
-            const right = try evaluateExpression(trimmed[i + 1 ..]);
-            return if (c == '*') left * right else left / right;
+    // Lowest precedence: + and - (scan right-to-left, skip inside parens)
+    {
+        var i: usize = trimmed.len;
+        var depth: i32 = 0;
+        while (i > 0) {
+            i -= 1;
+            const c = trimmed[i];
+            if (c == ')') depth += 1;
+            if (c == '(') depth -= 1;
+            if (depth == 0 and (c == '+' or c == '-')) {
+                if (i == 0) continue;
+                const left = try evaluateExpression(trimmed[0..i]);
+                const right = try evaluateExpression(trimmed[i + 1 ..]);
+                return if (c == '+') left + right else left - right;
+            }
+        }
+    }
+
+    // Higher precedence: * / % (scan right-to-left, skip inside parens)
+    {
+        var i: usize = trimmed.len;
+        var depth: i32 = 0;
+        while (i > 0) {
+            i -= 1;
+            const c = trimmed[i];
+            if (c == ')') depth += 1;
+            if (c == '(') depth -= 1;
+            if (depth == 0 and (c == '*' or c == '/' or c == '%')) {
+                const left = try evaluateExpression(trimmed[0..i]);
+                const right = try evaluateExpression(trimmed[i + 1 ..]);
+                if ((c == '/' or c == '%') and right == 0) return error.Overflow;
+                if (c == '*') return left * right;
+                if (c == '/') return left / right;
+                return @mod(left, right);
+            }
         }
     }
 
@@ -723,7 +785,10 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     var iter = dir.iterate();
     while (try iter.next(std.Options.debug_io)) |entry| {
         if (!show_all and entry.name.len > 0 and entry.name[0] == '.') continue;
-        if (count >= 512) break;
+        if (count >= 512) {
+            try IO.eprint("den: ls: too many entries, listing truncated at 512\n", .{});
+            break;
+        }
 
         const stat = dir.statFile(std.Options.debug_io, entry.name, .{}) catch |err| {
             if (err == error.IsDir) {
@@ -764,33 +829,29 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         count += 1;
     }
 
-    // Sort entries
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        var j: usize = i + 1;
-        while (j < count) : (j += 1) {
-            const should_swap = if (sort_by_size)
-                if (reverse)
-                    entries[i].size < entries[j].size
-                else
-                    entries[i].size > entries[j].size
-            else if (sort_by_time)
-                if (reverse)
-                    entries[i].mtime_ns < entries[j].mtime_ns
-                else
-                    entries[i].mtime_ns > entries[j].mtime_ns
-            else if (reverse)
-                std.mem.order(u8, entries[i].name, entries[j].name) == .lt
+    // Sort entries using O(n log n) sort
+    const SortCtx = struct {
+        sort_size: bool,
+        sort_time: bool,
+        do_reverse: bool,
+    };
+    const sort_ctx = SortCtx{
+        .sort_size = sort_by_size,
+        .sort_time = sort_by_time,
+        .do_reverse = reverse,
+    };
+    std.mem.sort(EntryInfo, entries[0..count], sort_ctx, struct {
+        fn lessThan(ctx: SortCtx, a: EntryInfo, b: EntryInfo) bool {
+            const cmp: bool = if (ctx.sort_size)
+                a.size < b.size
+            else if (ctx.sort_time)
+                a.mtime_ns < b.mtime_ns
             else
-                std.mem.order(u8, entries[i].name, entries[j].name) == .gt;
-
-            if (should_swap) {
-                const temp = entries[i];
-                entries[i] = entries[j];
-                entries[j] = temp;
-            }
+                std.mem.order(u8, a.name, b.name) == .lt;
+            return if (ctx.do_reverse) !cmp else cmp;
         }
-    }
+    }.lessThan);
+    var i: usize = 0;
 
     if (long_format) {
         var total_blocks: u64 = 0;
@@ -876,10 +937,12 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
             const hours = seconds_today / 3600;
             const minutes = (seconds_today % 3600) / 60;
 
-            const day_of_year = @mod(days_since_epoch, 365);
             const month_names = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-            const month_idx = @min((day_of_year / 30), 11);
-            const day = @mod(day_of_year, 30) + 1;
+
+            // Convert days since epoch (1970-01-01) to month/day
+            const epoch_result = epochToDate(days_since_epoch);
+            const month_idx = epoch_result.month;
+            const day = epoch_result.day;
 
             const time_str = try std.fmt.allocPrint(
                 allocator,
@@ -1027,4 +1090,153 @@ pub fn ls(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     }
 
     return 0;
+}
+
+/// Convert days since Unix epoch (1970-01-01) to month (0-11) and day (1-31)
+fn epochToDate(total_days: u64) struct { month: usize, day: u64 } {
+    // Algorithm based on Howard Hinnant's civil_from_days
+    const z = total_days + 719468;
+    const era = z / 146097;
+    const doe = z - era * 146097; // day of era [0, 146096]
+    const yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era [0, 399]
+    const doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // day of year [0, 365]
+    const mp = (5 * doy + 2) / 153; // [0, 11]
+    const d = doy - (153 * mp + 2) / 5 + 1; // day [1, 31]
+    const m = if (mp < 10) mp + 3 else mp - 9; // month [1, 12]
+    const month_idx = if (m >= 1) m - 1 else 0;
+    return .{ .month = @min(month_idx, 11), .day = @max(d, 1) };
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "epochToDate unix epoch" {
+    // Day 0 = 1970-01-01 (Jan 1)
+    const jan1_1970 = epochToDate(0);
+    try std.testing.expectEqual(@as(usize, 0), jan1_1970.month); // January = 0
+    try std.testing.expectEqual(@as(u64, 1), jan1_1970.day);
+}
+
+test "epochToDate known dates" {
+    // 2000-01-01 is day 10957 since epoch
+    const y2k = epochToDate(10957);
+    try std.testing.expectEqual(@as(usize, 0), y2k.month); // January
+    try std.testing.expectEqual(@as(u64, 1), y2k.day);
+
+    // 1970-12-31 is day 364
+    const dec31_1970 = epochToDate(364);
+    try std.testing.expectEqual(@as(usize, 11), dec31_1970.month); // December = 11
+    try std.testing.expectEqual(@as(u64, 31), dec31_1970.day);
+
+    // 1970-02-01 is day 31
+    const feb1_1970 = epochToDate(31);
+    try std.testing.expectEqual(@as(usize, 1), feb1_1970.month); // February = 1
+    try std.testing.expectEqual(@as(u64, 1), feb1_1970.day);
+
+    // 1970-07-04 is day 184 (July 4th)
+    const jul4_1970 = epochToDate(184);
+    try std.testing.expectEqual(@as(usize, 6), jul4_1970.month); // July = 6
+    try std.testing.expectEqual(@as(u64, 4), jul4_1970.day);
+}
+
+test "epochToDate month boundaries" {
+    // All months in 1970 (non-leap year): verify first day of each month
+    const month_starts = [_]u64{ 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+    for (month_starts, 0..) |day, month_idx| {
+        const result = epochToDate(day);
+        try std.testing.expectEqual(month_idx, result.month);
+        try std.testing.expectEqual(@as(u64, 1), result.day);
+    }
+}
+
+test "epochToDate leap year 2000" {
+    // 2000-02-29 — 2000 is a leap year
+    // Days from epoch to 2000-02-29: 10957 (Jan 1) + 31 (Jan) + 28 (Feb 1-28) = 11016
+    const feb29_2000 = epochToDate(11016);
+    try std.testing.expectEqual(@as(usize, 1), feb29_2000.month); // February = 1
+    try std.testing.expectEqual(@as(u64, 29), feb29_2000.day);
+}
+
+test "epochToDate recent date 2024" {
+    // 2024-04-13: days since epoch
+    // Calculated: 19826 days from 1970-01-01 to 2024-04-13
+    const apr13_2024 = epochToDate(19826);
+    try std.testing.expectEqual(@as(usize, 3), apr13_2024.month); // April = 3
+    try std.testing.expectEqual(@as(u64, 13), apr13_2024.day);
+}
+
+test "epochToDate month range" {
+    // Verify all results have month in [0, 11] and day >= 1
+    var day: u64 = 0;
+    while (day < 30000) : (day += 137) { // Sample every 137 days
+        const result = epochToDate(day);
+        try std.testing.expect(result.month <= 11);
+        try std.testing.expect(result.day >= 1);
+        try std.testing.expect(result.day <= 31);
+    }
+}
+
+test "evaluateExpression basic arithmetic" {
+    // Simple numbers
+    try std.testing.expectEqual(@as(f64, 42.0), try evaluateExpression("42"));
+    try std.testing.expectEqual(@as(f64, 0.0), try evaluateExpression("0"));
+    try std.testing.expectEqual(@as(f64, -5.0), try evaluateExpression("-5"));
+
+    // Addition
+    try std.testing.expectEqual(@as(f64, 5.0), try evaluateExpression("2+3"));
+    try std.testing.expectEqual(@as(f64, 0.0), try evaluateExpression("5+-5"));
+
+    // Subtraction
+    try std.testing.expectEqual(@as(f64, 2.0), try evaluateExpression("5-3"));
+
+    // Multiplication
+    try std.testing.expectEqual(@as(f64, 12.0), try evaluateExpression("3*4"));
+
+    // Division
+    try std.testing.expectEqual(@as(f64, 2.5), try evaluateExpression("5/2"));
+}
+
+test "evaluateExpression operator precedence" {
+    // * binds tighter than +
+    try std.testing.expectEqual(@as(f64, 14.0), try evaluateExpression("2+3*4"));
+    try std.testing.expectEqual(@as(f64, 11.0), try evaluateExpression("3*3+2"));
+
+    // * binds tighter than -
+    try std.testing.expectEqual(@as(f64, -10.0), try evaluateExpression("2-3*4"));
+
+    // / binds tighter than +
+    try std.testing.expectEqual(@as(f64, 5.0), try evaluateExpression("3+8/4"));
+}
+
+test "evaluateExpression parentheses" {
+    // Parens override precedence
+    try std.testing.expectEqual(@as(f64, 20.0), try evaluateExpression("(2+3)*4"));
+    try std.testing.expectEqual(@as(f64, 15.0), try evaluateExpression("(2+3)*(1+2)"));
+    try std.testing.expectEqual(@as(f64, 9.0), try evaluateExpression("(1+2)*(1+2)"));
+
+    // Nested parens
+    try std.testing.expectEqual(@as(f64, 14.0), try evaluateExpression("((2+5))*2"));
+}
+
+test "evaluateExpression modulo" {
+    try std.testing.expectEqual(@as(f64, 1.0), try evaluateExpression("7%3"));
+    try std.testing.expectEqual(@as(f64, 0.0), try evaluateExpression("6%3"));
+    try std.testing.expectEqual(@as(f64, 2.0), try evaluateExpression("5%3"));
+}
+
+test "evaluateExpression division by zero" {
+    try std.testing.expectError(error.Overflow, evaluateExpression("1/0"));
+    try std.testing.expectError(error.Overflow, evaluateExpression("5%0"));
+}
+
+test "evaluateExpression empty and whitespace" {
+    try std.testing.expectError(error.InvalidCharacter, evaluateExpression(""));
+    try std.testing.expectError(error.InvalidCharacter, evaluateExpression("   "));
+}
+
+test "evaluateExpression floating point" {
+    try std.testing.expectEqual(@as(f64, 3.14), try evaluateExpression("3.14"));
+    const result = try evaluateExpression("1.5+2.5");
+    try std.testing.expectEqual(@as(f64, 4.0), result);
 }

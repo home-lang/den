@@ -22,7 +22,10 @@ pub fn detectColumns(allocator: std.mem.Allocator, command: *types.ParsedCommand
     var col_starts = std.ArrayList(usize).empty;
     defer col_starts.deinit(allocator);
     var col_names = std.ArrayList([]const u8).empty;
-    defer col_names.deinit(allocator);
+    errdefer {
+        for (col_names.items) |n| allocator.free(n);
+        col_names.deinit(allocator);
+    }
 
     var in_word = false;
     var word_start: usize = 0;
@@ -35,32 +38,59 @@ pub fn detectColumns(allocator: std.mem.Allocator, command: *types.ParsedCommand
             }
         } else {
             if (in_word) {
-                try col_names.append(allocator, try allocator.dupe(u8, header_line[word_start..i]));
+                const dup = try allocator.dupe(u8, header_line[word_start..i]);
+                errdefer allocator.free(dup);
+                try col_names.append(allocator, dup);
                 in_word = false;
             }
         }
     }
     if (in_word) {
-        try col_names.append(allocator, try allocator.dupe(u8, header_line[word_start..]));
+        const dup = try allocator.dupe(u8, header_line[word_start..]);
+        errdefer allocator.free(dup);
+        try col_names.append(allocator, dup);
     }
 
-    if (col_names.items.len == 0) return 0;
+    if (col_names.items.len == 0) {
+        col_names.deinit(allocator);
+        return 0;
+    }
 
-    // Build columns
+    // Build columns (takes ownership of col_names items)
     const columns = try allocator.alloc([]const u8, col_names.items.len);
+    errdefer allocator.free(columns);
     for (col_names.items, 0..) |name, i| {
         columns[i] = name;
     }
+    // col_names items are now owned by `columns`; only free the backing array
+    col_names.deinit(allocator);
 
     // Parse data rows
     var rows = std.ArrayList([]Value).empty;
-    defer rows.deinit(allocator);
+    errdefer {
+        for (rows.items) |row| {
+            for (row) |*v| {
+                var mv = v.*;
+                mv.deinit(allocator);
+            }
+            allocator.free(row);
+        }
+        rows.deinit(allocator);
+    }
+    // Free columns on error too (they're not transferred until toOwnedSlice succeeds)
+    errdefer for (columns) |c| allocator.free(c);
 
     while (lines.next()) |line| {
         if (line.len == 0) continue;
 
-        const row = try allocator.alloc(Value, col_names.items.len);
-        for (0..col_names.items.len) |ci| {
+        const row = try allocator.alloc(Value, columns.len);
+        errdefer allocator.free(row);
+        var row_filled: usize = 0;
+        errdefer for (row[0..row_filled]) |*v| {
+            var mv = v.*;
+            mv.deinit(allocator);
+        };
+        for (0..columns.len) |ci| {
             const start = if (ci < col_starts.items.len) col_starts.items[ci] else line.len;
             const end = if (ci + 1 < col_starts.items.len) col_starts.items[ci + 1] else line.len;
 
@@ -71,6 +101,7 @@ pub fn detectColumns(allocator: std.mem.Allocator, command: *types.ParsedCommand
             } else {
                 row[ci] = .{ .string = try allocator.dupe(u8, "") };
             }
+            row_filled = ci + 1;
         }
         try rows.append(allocator, row);
     }

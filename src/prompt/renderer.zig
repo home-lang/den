@@ -80,11 +80,7 @@ pub const PromptRenderer = struct {
 
     /// Expand template string with placeholders
     fn expandTemplate(self: *PromptRenderer, template_str: []const u8, ctx: *const PromptContext) ![]const u8 {
-        var result: std.array_list.Managed(u8) = .{
-            .allocator = self.allocator,
-            .items = &[_]u8{},
-            .capacity = 0,
-        };
+        var result: std.array_list.Managed(u8) = .init(self.allocator);
         defer result.deinit();
 
         var i: usize = 0;
@@ -138,11 +134,7 @@ pub const PromptRenderer = struct {
         const spaces_needed = terminal_width - total_width;
 
         // Build result with spacing
-        var result: std.array_list.Managed(u8) = .{
-            .allocator = self.allocator,
-            .items = &[_]u8{},
-            .capacity = 0,
-        };
+        var result: std.array_list.Managed(u8) = .init(self.allocator);
         defer result.deinit();
 
         try result.appendSlice(left);
@@ -174,7 +166,7 @@ pub fn visibleWidth(text: []const u8) usize {
             // Skip ANSI escape sequence
             i += 2;
             while (i < text.len and text[i] != 'm') : (i += 1) {}
-            i += 1;
+            if (i < text.len) i += 1; // skip the 'm' only if we found it
         } else {
             // Count visible character
             width += 1;
@@ -183,6 +175,41 @@ pub fn visibleWidth(text: []const u8) usize {
     }
 
     return width;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "visibleWidth plain text" {
+    try std.testing.expectEqual(@as(usize, 5), visibleWidth("hello"));
+    try std.testing.expectEqual(@as(usize, 0), visibleWidth(""));
+    try std.testing.expectEqual(@as(usize, 1), visibleWidth("x"));
+}
+
+test "visibleWidth with ANSI codes" {
+    // Bold red text "hi" = ESC[1;31m hi ESC[0m
+    try std.testing.expectEqual(@as(usize, 2), visibleWidth("\x1b[1;31mhi\x1b[0m"));
+    // Just an escape code, no visible text
+    try std.testing.expectEqual(@as(usize, 0), visibleWidth("\x1b[0m"));
+    // Multiple escape codes around single char
+    try std.testing.expectEqual(@as(usize, 1), visibleWidth("\x1b[32mx\x1b[0m"));
+}
+
+test "visibleWidth truncated escape sequence" {
+    // Escape sequence missing the closing 'm' — this is the bounds check fix
+    // "\x1b[31" has no 'm', the old code would increment past the end
+    try std.testing.expectEqual(@as(usize, 0), visibleWidth("\x1b[31"));
+    // Escape at very end of string
+    try std.testing.expectEqual(@as(usize, 0), visibleWidth("\x1b["));
+    // Escape followed by text but no m
+    try std.testing.expectEqual(@as(usize, 3), visibleWidth("\x1b[1abc"));
+}
+
+test "visibleWidth mixed content" {
+    // "hello " + colored "world" + " end"
+    const text = "hello \x1b[34mworld\x1b[0m end";
+    try std.testing.expectEqual(@as(usize, 15), visibleWidth(text));
 }
 
 /// Parse prompt segments from rendered text

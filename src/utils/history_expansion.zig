@@ -460,7 +460,8 @@ pub const HistoryExpansion = struct {
 
         var index: usize = undefined;
         if (offset < 0) {
-            const abs_offset: usize = @intCast(-offset);
+            // Use @abs() to avoid overflow on i64::MIN.
+            const abs_offset: usize = @intCast(@abs(offset));
             if (abs_offset > history_count) return null;
             index = history_count - abs_offset;
         } else {
@@ -781,7 +782,8 @@ pub const HistoryExpansion = struct {
 
         var actual_index: usize = undefined;
         if (index < 0) {
-            const abs_index: usize = @intCast(-index);
+            // Use @abs() to avoid overflow on i64::MIN.
+            const abs_index: usize = @intCast(@abs(index));
             if (abs_index > words_count) return null;
             actual_index = words_count - abs_index;
         } else {
@@ -1425,4 +1427,26 @@ test "Ranked search: empty pattern returns empty" {
     const results = try searchHistoryRanked(allocator, &history, 1, "", 10);
     // Empty pattern should return empty or be handled gracefully
     try std.testing.expect(results.len == 0);
+}
+
+test "@abs() pattern handles MIN safely" {
+    // Verify that @abs() doesn't overflow on i64::MIN
+    // @abs(i64::MIN) returns u64 (big positive number), avoiding overflow
+    const min_val: i64 = std.math.minInt(i64);
+    const abs_val: u64 = @abs(min_val);
+
+    // @abs(i64::MIN) = 2^63 = 9223372036854775808
+    try std.testing.expectEqual(@as(u64, 9223372036854775808), abs_val);
+
+    // Smaller negative values work as expected
+    const small: i64 = -5;
+    try std.testing.expectEqual(@as(u64, 5), @abs(small));
+
+    // Zero
+    const zero: i64 = 0;
+    try std.testing.expectEqual(@as(u64, 0), @abs(zero));
+
+    // Positive values
+    const pos: i64 = 42;
+    try std.testing.expectEqual(@as(u64, 42), @abs(pos));
 }

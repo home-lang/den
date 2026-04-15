@@ -511,7 +511,8 @@ pub fn hook(cmd: *types.ParsedCommand) !i32 {
         }
         const test_cmd = test_cmd_buf[0..pos];
 
-        const matches = registry.findMatchingHooks(test_cmd);
+        const matches = try registry.findMatchingHooks(test_cmd);
+        defer registry.allocator.free(matches);
         if (matches.len == 0) {
             try IO.print("\x1b[2mNo hooks match: {s}\x1b[0m\n", .{test_cmd});
         } else {

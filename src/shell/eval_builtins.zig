@@ -63,12 +63,24 @@ pub fn builtinRead(self: *Shell, cmd: *types.ParsedCommand) !void {
                         }
                     },
                     'n' => {
-                        // -n can have inline value (-n3) or next arg
+                        // -n can have inline value (-n3) or next arg. Report a
+                        // clear error on invalid numbers rather than silently
+                        // dropping to null.
                         if (ci + 1 < arg.len) {
-                            nchars = std.fmt.parseInt(usize, arg[ci + 1 ..], 10) catch null;
+                            const n_str = arg[ci + 1 ..];
+                            nchars = std.fmt.parseInt(usize, n_str, 10) catch {
+                                try IO.eprint("den: read: {s}: invalid number for -n\n", .{n_str});
+                                self.last_exit_code = 1;
+                                return;
+                            };
                             ci = arg.len;
                         } else if (var_start < cmd.args.len) {
-                            nchars = std.fmt.parseInt(usize, cmd.args[var_start], 10) catch null;
+                            const n_str = cmd.args[var_start];
+                            nchars = std.fmt.parseInt(usize, n_str, 10) catch {
+                                try IO.eprint("den: read: {s}: invalid number for -n\n", .{n_str});
+                                self.last_exit_code = 1;
+                                return;
+                            };
                             var_start += 1;
                         }
                     },

@@ -67,6 +67,7 @@ pub const Parser = struct {
 
         // Allocate and copy
         const commands = try self.allocator.alloc(types.ParsedCommand, cmd_count);
+        errdefer self.allocator.free(commands);
         @memcpy(commands, commands_buffer[0..cmd_count]);
 
         const operators = try self.allocator.alloc(types.Operator, op_count);
@@ -283,17 +284,18 @@ pub const Parser = struct {
                     // Parse token like "2>&1" or "3<&0"
                     const token_value = self.tokens[self.pos].value;
 
-                    // Find the operator position (>& or <&)
+                    // Find the operator position (>& or <&). A valid token must
+                    // contain one, so reject tokens that lack it instead of
+                    // reading past the end.
                     var op_pos: usize = 0;
-                    while (op_pos < token_value.len) : (op_pos += 1) {
-                        if (op_pos + 1 < token_value.len) {
-                            if ((token_value[op_pos] == '>' or token_value[op_pos] == '<') and
-                                token_value[op_pos + 1] == '&')
-                            {
-                                break;
-                            }
+                    while (op_pos + 1 < token_value.len) : (op_pos += 1) {
+                        if ((token_value[op_pos] == '>' or token_value[op_pos] == '<') and
+                            token_value[op_pos + 1] == '&')
+                        {
+                            break;
                         }
                     }
+                    if (op_pos + 1 >= token_value.len) return error.InvalidFileDescriptor;
 
                     // Extract source FD (default: 1 for >&, 0 for <&)
                     const source_fd_str = token_value[0..op_pos];
@@ -394,4 +396,37 @@ test "parser pipeline" {
     try std.testing.expectEqual(@as(usize, 2), chain.commands.len);
     try std.testing.expectEqual(@as(usize, 1), chain.operators.len);
     try std.testing.expectEqual(types.Operator.pipe, chain.operators[0]);
+}
+
+test "parser fd redirect with 2>&1" {
+    const allocator = std.testing.allocator;
+
+    var t = Tokenizer.init(allocator, "cmd 2>&1");
+    const tokens = try t.tokenize();
+    defer t.deinitTokens(tokens);
+
+    var p = Parser.init(allocator, tokens);
+    var chain = try p.parse();
+    defer chain.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands[0].redirections.len);
+    try std.testing.expectEqual(@as(u32, 2), chain.commands[0].redirections[0].fd);
+}
+
+test "parser fd redirect default source >&" {
+    const allocator = std.testing.allocator;
+
+    var t = Tokenizer.init(allocator, "cmd >&2");
+    const tokens = try t.tokenize();
+    defer t.deinitTokens(tokens);
+
+    var p = Parser.init(allocator, tokens);
+    var chain = try p.parse();
+    defer chain.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands[0].redirections.len);
+    // Default source for >& is fd 1 (stdout)
+    try std.testing.expectEqual(@as(u32, 1), chain.commands[0].redirections[0].fd);
 }

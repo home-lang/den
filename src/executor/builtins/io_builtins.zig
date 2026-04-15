@@ -166,6 +166,8 @@ fn printWithEscapes(s: []const u8) !void {
                     if (hex_count > 0) {
                         var utf8_buf: [4]u8 = undefined;
                         const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch {
+                            // Output U+FFFD replacement character for invalid codepoints
+                            try IO.print("\xEF\xBF\xBD", .{});
                             i = k;
                             continue;
                         };
@@ -201,6 +203,8 @@ fn printWithEscapes(s: []const u8) !void {
                     if (hex_count > 0) {
                         var utf8_buf: [4]u8 = undefined;
                         const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch {
+                            // Output U+FFFD replacement character for invalid codepoints
+                            try IO.print("\xEF\xBF\xBD", .{});
                             i = k;
                             continue;
                         };
@@ -529,6 +533,28 @@ fn printfUint(num: u64, width: usize, zero_pad: bool, left_justify: bool, base: 
     } else {
         try IO.print("{s}", .{str});
     }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "printfInt formatting" {
+    // Just verify the function compiles and doesn't crash with edge cases
+    // These write to stdout which we can't capture easily, but we verify no panic
+    try printfInt(0, 0, false, false);
+    try printfInt(-42, 0, false, false);
+    try printfInt(999999, 10, true, false);
+    try printfInt(5, 5, false, true);
+}
+
+test "printfUint formatting" {
+    // Verify no panics with edge cases
+    try printfUint(0, 0, false, false, 10, false);
+    try printfUint(255, 0, false, false, 16, false);
+    try printfUint(255, 0, false, false, 16, true);
+    try printfUint(8, 0, false, false, 8, false);
+    try printfUint(42, 10, true, false, 10, false);
 }
 
 fn printfFloat(num: f64, width: usize, precision: usize, left_justify: bool) !void {

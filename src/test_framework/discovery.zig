@@ -7,9 +7,13 @@ pub const TestModule = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8, path: []const u8) !TestModule {
+        const name_dup = try allocator.dupe(u8, name);
+        errdefer allocator.free(name_dup);
+        const path_dup = try allocator.dupe(u8, path);
+        errdefer allocator.free(path_dup);
         return .{
-            .name = try allocator.dupe(u8, name),
-            .path = try allocator.dupe(u8, path),
+            .name = name_dup,
+            .path = path_dup,
             .allocator = allocator,
         };
     }

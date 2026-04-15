@@ -76,6 +76,7 @@ pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void
     if (self.function_manager.currentFrame()) |frame| {
         if (frame.local_vars.getKey(resolved_name)) |_| {
             const val = if (case_buf) |buf| buf else try self.allocator.dupe(u8, final_value);
+            errdefer if (case_buf == null) self.allocator.free(val);
             const gop = try frame.local_vars.getOrPut(resolved_name);
             if (gop.found_existing) {
                 self.allocator.free(gop.value_ptr.*);
@@ -86,13 +87,15 @@ pub fn setVariableValue(self: *Shell, name: []const u8, value: []const u8) !void
     }
 
     // Set the value in global environment
+    const new_val = if (case_buf) |buf| buf else try self.allocator.dupe(u8, final_value);
+    errdefer if (case_buf == null) self.allocator.free(new_val);
     const gop = try self.environment.getOrPut(resolved_name);
     if (gop.found_existing) {
         self.allocator.free(gop.value_ptr.*);
     } else {
         gop.key_ptr.* = try self.allocator.dupe(u8, resolved_name);
     }
-    gop.value_ptr.* = if (case_buf) |buf| buf else try self.allocator.dupe(u8, final_value);
+    gop.value_ptr.* = new_val;
 
     // Fire env_change hook for environment variable changes (especially PWD, OLDPWD, PATH, etc.)
     fireEnvChangeHook(self, resolved_name);
@@ -138,6 +141,7 @@ pub fn executeArrayElementAssignment(self: *Shell, input: []const u8) !void {
     const index_str = trimmed[bracket_pos + 1 .. abs_close];
 
     // Value is everything after ]=
+    if (abs_close + 2 > trimmed.len) return;
     var raw_value = trimmed[abs_close + 2 ..];
     // Strip quotes
     if (raw_value.len >= 2 and
@@ -462,6 +466,7 @@ pub fn executeAssocArrayElementAssignment(self: *Shell, input: []const u8) !void
     const abs_close = bracket_pos + close_bracket;
     const key = trimmed[bracket_pos + 1 .. abs_close];
 
+    if (abs_close + 2 > trimmed.len) return;
     var raw_value = trimmed[abs_close + 2 ..];
     if (raw_value.len >= 2 and
         ((raw_value[0] == '"' and raw_value[raw_value.len - 1] == '"') or
@@ -485,4 +490,49 @@ pub fn executeAssocArrayElementAssignment(self: *Shell, input: []const u8) !void
     }
     inner_gop.value_ptr.* = try self.allocator.dupe(u8, raw_value);
     self.last_exit_code = 0;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "isArrayElementAssignment valid patterns" {
+    try std.testing.expect(isArrayElementAssignment("arr[0]=hello"));
+    try std.testing.expect(isArrayElementAssignment("my_arr[123]=value"));
+    try std.testing.expect(isArrayElementAssignment("x[0]="));
+}
+
+test "isArrayElementAssignment invalid patterns" {
+    try std.testing.expect(!isArrayElementAssignment("arr=hello"));
+    try std.testing.expect(!isArrayElementAssignment("arr[0]"));
+    try std.testing.expect(!isArrayElementAssignment("[0]=value"));
+    try std.testing.expect(!isArrayElementAssignment(""));
+    try std.testing.expect(!isArrayElementAssignment("="));
+    // No closing bracket
+    try std.testing.expect(!isArrayElementAssignment("arr[0"));
+}
+
+test "isArrayAssignment valid patterns" {
+    try std.testing.expect(isArrayAssignment("arr=(a b c)"));
+    try std.testing.expect(isArrayAssignment("my_arr=(one two three)"));
+    try std.testing.expect(isArrayAssignment("x=()"));
+    try std.testing.expect(isArrayAssignment("arr+=(d e)"));
+}
+
+test "isArrayAssignment invalid patterns" {
+    try std.testing.expect(!isArrayAssignment("arr=hello"));
+    try std.testing.expect(!isArrayAssignment("arr=("));
+    try std.testing.expect(!isArrayAssignment("=(a b c)"));
+    try std.testing.expect(!isArrayAssignment(""));
+    try std.testing.expect(!isArrayAssignment("1arr=(a b)"));
+    // Name with spaces (would be parsed as "declare -a arr")
+    try std.testing.expect(!isArrayAssignment("declare -a arr=(a b)"));
+}
+
+test "isArrayElementAssignment bounds check" {
+    // These inputs would cause OOB without the abs_close + 2 > trimmed.len check:
+    // "arr[0]" — has bracket pair but no '=' after closing bracket
+    try std.testing.expect(!isArrayElementAssignment("arr[0]"));
+    // "arr[0]" — bracket at very end
+    try std.testing.expect(!isArrayElementAssignment("a[x]"));
 }

@@ -983,8 +983,9 @@ test "mid-word path expansion - simple case" {
 
     if (expanded) |path| {
         defer allocator.free(path);
-        // Should expand to /usr/local/bin if it exists
-        std.debug.print("\nExpanded '{s}' to '{s}'\n", .{ test_path, path });
+        // Should expand to /usr/local/bin if it exists — no assertion since
+        // the result depends on filesystem state (test output removed for
+        // consistency with other tests).
     }
 }
 
@@ -1029,7 +1030,6 @@ test "mid-word path expansion - relative path" {
 
     if (expanded) |path| {
         defer allocator.free(path);
-        std.debug.print("\nExpanded '{s}' to '{s}'\n", .{ test_path, path });
         try std.testing.expect(std.mem.indexOf(u8, path, "testdir") != null);
         try std.testing.expect(std.mem.indexOf(u8, path, "subdir") != null);
     }

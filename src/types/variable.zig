@@ -45,20 +45,32 @@ pub const Variable = union(enum) {
             .array => |arr| blk: {
                 const new_arr = try allocator.alloc([]const u8, arr.len);
                 errdefer allocator.free(new_arr);
+                var filled: usize = 0;
+                errdefer for (new_arr[0..filled]) |item| allocator.free(item);
 
                 for (arr, 0..) |item, i| {
                     new_arr[i] = try allocator.dupe(u8, item);
+                    filled = i + 1;
                 }
                 break :blk Variable{ .array = new_arr };
             },
             .assoc => |map| blk: {
                 var new_map = std.StringHashMap([]const u8).init(allocator);
-                errdefer new_map.deinit();
+                errdefer {
+                    var cleanup_it = new_map.iterator();
+                    while (cleanup_it.next()) |e| {
+                        allocator.free(e.key_ptr.*);
+                        allocator.free(e.value_ptr.*);
+                    }
+                    new_map.deinit();
+                }
 
                 var it = map.iterator();
                 while (it.next()) |entry| {
                     const key = try allocator.dupe(u8, entry.key_ptr.*);
+                    errdefer allocator.free(key);
                     const value = try allocator.dupe(u8, entry.value_ptr.*);
+                    errdefer allocator.free(value);
                     try new_map.put(key, value);
                 }
                 break :blk Variable{ .assoc = new_map };

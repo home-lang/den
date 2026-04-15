@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const plugin_mod = @import("plugin.zig");
+const IO = @import("../utils/io.zig").IO;
 const Plugin = plugin_mod.Plugin;
 const PluginInfo = plugin_mod.PluginInfo;
 const PluginConfig = plugin_mod.PluginConfig;
@@ -216,21 +217,18 @@ pub const PluginManager = struct {
         try plugin.config.set(key, value);
     }
 
-    /// List all plugins
+    /// List all plugins. Returns a heap-allocated slice owned by the caller
+    /// (free with `self.allocator.free(result)`). No silent truncation.
     pub fn listPlugins(self: *PluginManager) ![][]const u8 {
-        var names_buffer: [256][]const u8 = undefined;
-        var count: usize = 0;
+        var names: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer names.deinit(self.allocator);
 
         var iter = self.plugins.iterator();
         while (iter.next()) |entry| {
-            if (count >= names_buffer.len) break;
-            names_buffer[count] = entry.key_ptr.*;
-            count += 1;
+            try names.append(self.allocator, entry.key_ptr.*);
         }
 
-        const names = try self.allocator.alloc([]const u8, count);
-        @memcpy(names, names_buffer[0..count]);
-        return names;
+        return try names.toOwnedSlice(self.allocator);
     }
 
     /// Initialize all plugins
@@ -240,7 +238,7 @@ pub const PluginManager = struct {
             var plugin = entry.value_ptr;
             if (plugin.state == .loaded) {
                 plugin.initialize() catch |err| {
-                    std.debug.print("Failed to initialize plugin '{s}': {}\n", .{ plugin.info.name, err });
+                    IO.eprint("den: failed to initialize plugin '{s}': {}\n", .{ plugin.info.name, err }) catch {};
                 };
             }
         }
@@ -254,7 +252,7 @@ pub const PluginManager = struct {
             if (plugin.config.enabled and plugin.config.auto_start) {
                 if (plugin.state == .initialized or plugin.state == .stopped) {
                     plugin.start() catch |err| {
-                        std.debug.print("Failed to start plugin '{s}': {}\n", .{ plugin.info.name, err });
+                        IO.eprint("den: failed to start plugin '{s}': {}\n", .{ plugin.info.name, err }) catch {};
                     };
                 }
             }
@@ -268,7 +266,7 @@ pub const PluginManager = struct {
             var plugin = entry.value_ptr;
             if (plugin.state == .started) {
                 plugin.stop() catch |err| {
-                    std.debug.print("Failed to stop plugin '{s}': {}\n", .{ plugin.info.name, err });
+                    IO.eprint("den: failed to stop plugin '{s}': {}\n", .{ plugin.info.name, err }) catch {};
                 };
             }
         }
@@ -319,3 +317,61 @@ pub const PluginManager = struct {
         return count;
     }
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "PluginManager init and deinit" {
+    var mgr = PluginManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), mgr.plugin_paths_count);
+    try std.testing.expect(!mgr.auto_reload);
+}
+
+test "PluginManager addPluginPath" {
+    var mgr = PluginManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    try mgr.addPluginPath("/tmp/plugins");
+    try std.testing.expectEqual(@as(usize, 1), mgr.plugin_paths_count);
+    try std.testing.expectEqualStrings("/tmp/plugins", mgr.plugin_paths[0].?);
+}
+
+test "PluginManager addPluginPath overflow" {
+    var mgr = PluginManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    // Fill to capacity
+    var i: usize = 0;
+    while (i < 32) : (i += 1) {
+        try mgr.addPluginPath("/tmp");
+    }
+    // Next one should fail
+    try std.testing.expectError(error.TooManyPaths, mgr.addPluginPath("/tmp"));
+}
+
+test "PluginManager listPlugins empty" {
+    var mgr = PluginManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    const names = try mgr.listPlugins();
+    defer std.testing.allocator.free(names);
+    try std.testing.expectEqual(@as(usize, 0), names.len);
+}
+
+test "PluginManager listPlugins is heap-allocated (no truncation)" {
+    // Verify the return type is a slice (not a stack array) — this prevents
+    // the 256-plugin silent truncation from before.
+    var mgr = PluginManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    const names = try mgr.listPlugins();
+    defer std.testing.allocator.free(names);
+    // Type check: []const u8 slice (pointer + len)
+    comptime {
+        const T = @TypeOf(names);
+        std.debug.assert(@typeInfo(T) == .pointer);
+    }
+}

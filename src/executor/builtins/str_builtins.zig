@@ -308,15 +308,13 @@ fn replaceAlloc(allocator: std.mem.Allocator, haystack: []const u8, needle: []co
     var result = std.ArrayList(u8).empty;
     errdefer result.deinit(allocator);
     var i: usize = 0;
-    while (i <= haystack.len) {
+    while (i < haystack.len) {
         if (i + needle.len <= haystack.len and std.mem.eql(u8, haystack[i..][0..needle.len], needle)) {
             try result.appendSlice(allocator, replacement);
             i += needle.len;
-        } else if (i < haystack.len) {
+        } else {
             try result.append(allocator, haystack[i]);
             i += 1;
-        } else {
-            break;
         }
     }
     return try result.toOwnedSlice(allocator);
@@ -342,4 +340,103 @@ fn levenshteinDistance(a: []const u8, b: []const u8, allocator: std.mem.Allocato
         @memcpy(prev, curr);
     }
     return prev[b.len];
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "replaceAlloc simple replacement" {
+    const allocator = std.testing.allocator;
+
+    const result = try replaceAlloc(allocator, "hello world", "world", "zig");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello zig", result);
+}
+
+test "replaceAlloc multiple replacements" {
+    const allocator = std.testing.allocator;
+
+    const result = try replaceAlloc(allocator, "a b a b a", "a", "X");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("X b X b X", result);
+}
+
+test "replaceAlloc no match" {
+    const allocator = std.testing.allocator;
+
+    const result = try replaceAlloc(allocator, "hello", "xyz", "abc");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello", result);
+}
+
+test "replaceAlloc empty needle returns copy" {
+    const allocator = std.testing.allocator;
+
+    const result = try replaceAlloc(allocator, "hello", "", "X");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello", result);
+}
+
+test "replaceAlloc empty haystack" {
+    const allocator = std.testing.allocator;
+
+    const result = try replaceAlloc(allocator, "", "x", "y");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("", result);
+}
+
+test "replaceAlloc replacement with empty" {
+    const allocator = std.testing.allocator;
+
+    const result = try replaceAlloc(allocator, "hello world", "l", "");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("heo word", result);
+}
+
+test "replaceAlloc needle at boundaries" {
+    const allocator = std.testing.allocator;
+
+    // At start
+    const r1 = try replaceAlloc(allocator, "abc", "a", "X");
+    defer allocator.free(r1);
+    try std.testing.expectEqualStrings("Xbc", r1);
+
+    // At end
+    const r2 = try replaceAlloc(allocator, "abc", "c", "X");
+    defer allocator.free(r2);
+    try std.testing.expectEqualStrings("abX", r2);
+
+    // Whole string
+    const r3 = try replaceAlloc(allocator, "abc", "abc", "X");
+    defer allocator.free(r3);
+    try std.testing.expectEqualStrings("X", r3);
+}
+
+test "replaceAlloc needle longer than haystack" {
+    const allocator = std.testing.allocator;
+
+    const result = try replaceAlloc(allocator, "hi", "hello", "X");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hi", result);
+}
+
+test "levenshteinDistance basic" {
+    const allocator = std.testing.allocator;
+
+    try std.testing.expectEqual(@as(usize, 0), try levenshteinDistance("abc", "abc", allocator));
+    try std.testing.expectEqual(@as(usize, 1), try levenshteinDistance("abc", "abd", allocator));
+    try std.testing.expectEqual(@as(usize, 3), try levenshteinDistance("abc", "xyz", allocator));
+    try std.testing.expectEqual(@as(usize, 3), try levenshteinDistance("", "abc", allocator));
+    try std.testing.expectEqual(@as(usize, 3), try levenshteinDistance("abc", "", allocator));
+    try std.testing.expectEqual(@as(usize, 0), try levenshteinDistance("", "", allocator));
+}
+
+test "levenshteinDistance classical examples" {
+    const allocator = std.testing.allocator;
+
+    // kitten -> sitting = 3 (k→s, e→i, +g)
+    try std.testing.expectEqual(@as(usize, 3), try levenshteinDistance("kitten", "sitting", allocator));
+    // saturday -> sunday = 3
+    try std.testing.expectEqual(@as(usize, 3), try levenshteinDistance("saturday", "sunday", allocator));
 }

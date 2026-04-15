@@ -57,7 +57,7 @@ pub fn cd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     if (path.len > 0 and path[0] == '~') {
         if (ctx.hasShell()) {
             if (path.len > 1 and path[1] != '/') {
-                const shell_ref = ctx.getShell() catch unreachable;
+                const shell_ref = ctx.getShell() catch return 1;
                 const name_end = std.mem.indexOfAny(u8, path[1..], &[_]u8{'/'}) orelse path.len - 1;
                 const name = path[1 .. name_end + 1];
 
@@ -373,8 +373,13 @@ pub fn read(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
             var value: []const u8 = "";
 
             if (var_idx == var_names.len - 1) {
+                // Last variable gets the rest of the line
                 if (word_iter.next()) |first_word| {
-                    const rest_start = @intFromPtr(first_word.ptr) - @intFromPtr(processed_line.ptr);
+                    // Find position of first_word within processed_line using indexOf
+                    const rest_start = if (std.mem.indexOf(u8, processed_line, first_word)) |pos|
+                        pos
+                    else
+                        processed_line.len;
                     value = processed_line[rest_start..];
                 }
             } else {

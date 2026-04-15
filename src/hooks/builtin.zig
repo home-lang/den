@@ -58,9 +58,13 @@ pub const CommandHookData = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, command: []const u8, args: []const []const u8) !CommandHookData {
+        const cmd_dup = try allocator.dupe(u8, command);
+        errdefer allocator.free(cmd_dup);
+        const args_dup = try allocator.dupe([]const u8, args);
+        errdefer allocator.free(args_dup);
         return .{
-            .command = try allocator.dupe(u8, command),
-            .args = try allocator.dupe([]const u8, args),
+            .command = cmd_dup,
+            .args = args_dup,
             .exit_code = null,
             .error_msg = null,
             .allocator = allocator,
@@ -83,9 +87,13 @@ pub const DirectoryHookData = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, old_path: []const u8, new_path: []const u8) !DirectoryHookData {
+        const old_dup = try allocator.dupe(u8, old_path);
+        errdefer allocator.free(old_dup);
+        const new_dup = try allocator.dupe(u8, new_path);
+        errdefer allocator.free(new_dup);
         return .{
-            .old_path = try allocator.dupe(u8, old_path),
-            .new_path = try allocator.dupe(u8, new_path),
+            .old_path = old_dup,
+            .new_path = new_dup,
             .allocator = allocator,
         };
     }
@@ -105,10 +113,16 @@ pub const PromptHookData = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, current_dir: []const u8, user: []const u8, hostname: []const u8) !PromptHookData {
+        const dir_dup = try allocator.dupe(u8, current_dir);
+        errdefer allocator.free(dir_dup);
+        const user_dup = try allocator.dupe(u8, user);
+        errdefer allocator.free(user_dup);
+        const host_dup = try allocator.dupe(u8, hostname);
+        errdefer allocator.free(host_dup);
         return .{
-            .current_dir = try allocator.dupe(u8, current_dir),
-            .user = try allocator.dupe(u8, user),
-            .hostname = try allocator.dupe(u8, hostname),
+            .current_dir = dir_dup,
+            .user = user_dup,
+            .hostname = host_dup,
             .custom_prompt = null,
             .allocator = allocator,
         };
@@ -142,10 +156,7 @@ pub const CompletionHookData = struct {
         return .{
             .input = try allocator.dupe(u8, input),
             .cursor_pos = cursor_pos,
-            .suggestions = .{
-                .items = &[_][]const u8{},
-                .capacity = 0,
-            },
+            .suggestions = .empty,
             .allocator = allocator,
         };
     }
@@ -160,6 +171,7 @@ pub const CompletionHookData = struct {
 
     pub fn addSuggestion(self: *CompletionHookData, suggestion: []const u8) !void {
         const dup = try self.allocator.dupe(u8, suggestion);
+        errdefer self.allocator.free(dup);
         try self.suggestions.append(self.allocator, dup);
     }
 };

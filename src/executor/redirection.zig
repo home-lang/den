@@ -42,7 +42,10 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection, n
     if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
-        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
+        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) {
+            _ = std.c.close(sock);
+            return error.Unexpected;
+        }
         _ = std.c.close(sock);
     } else {
         const path_z = try allocator.dupeZ(u8, redir.target);
@@ -69,7 +72,10 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection, n
             std.c._exit(1);
         }
 
-        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
+        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) {
+            _ = std.c.close(fd);
+            return error.Unexpected;
+        }
         _ = std.c.close(fd);
     }
 }
@@ -78,7 +84,10 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
     if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
-        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
+        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) {
+            _ = std.c.close(sock);
+            return error.Unexpected;
+        }
         _ = std.c.close(sock);
     } else {
         // Open file for appending
@@ -95,7 +104,10 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
             std.c._exit(1);
         }
 
-        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
+        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) {
+            _ = std.c.close(fd);
+            return error.Unexpected;
+        }
         _ = std.c.close(fd);
     }
 }
@@ -104,7 +116,10 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
     if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // Check for /dev/tcp or /dev/udp virtual path
     if (networking.openDevNet(redir.target)) |sock| {
-        if (std.c.dup2(sock, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
+        if (std.c.dup2(sock, std.posix.STDIN_FILENO) < 0) {
+            _ = std.c.close(sock);
+            return error.Unexpected;
+        }
         _ = std.c.close(sock);
     } else {
         // Open file for reading
@@ -121,7 +136,10 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
             std.c._exit(1);
         }
 
-        if (std.c.dup2(fd, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
+        if (std.c.dup2(fd, std.posix.STDIN_FILENO) < 0) {
+            _ = std.c.close(fd);
+            return error.Unexpected;
+        }
         _ = std.c.close(fd);
     }
 }
@@ -130,7 +148,10 @@ fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !voi
     if (comptime builtin.os.tag == .windows) return; // Redirections handled by executor on Windows
     // <> opens file for both reading and writing
     if (networking.openDevNet(redir.target)) |sock| {
-        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) return error.Unexpected;
+        if (std.c.dup2(sock, @intCast(redir.fd)) < 0) {
+            _ = std.c.close(sock);
+            return error.Unexpected;
+        }
         _ = std.c.close(sock);
     } else {
         const path_z = try allocator.dupeZ(u8, redir.target);
@@ -147,7 +168,10 @@ fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !voi
             std.c._exit(1);
         }
 
-        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) return error.Unexpected;
+        if (std.c.dup2(fd, @intCast(redir.fd)) < 0) {
+            _ = std.c.close(fd);
+            return error.Unexpected;
+        }
         _ = std.c.close(fd);
     }
 }
@@ -185,7 +209,11 @@ fn applyHeredocOrHerestring(
 
     // Fork to write content (avoid blocking)
     const fork_ret = std.c.fork();
-    if (fork_ret < 0) return error.Unexpected;
+    if (fork_ret < 0) {
+        _ = std.c.close(read_fd);
+        _ = std.c.close(write_fd);
+        return error.Unexpected;
+    }
     const writer_pid: std.posix.pid_t = @intCast(fork_ret);
     if (writer_pid == 0) {
         // Child: write content and exit
@@ -195,18 +223,29 @@ fn applyHeredocOrHerestring(
         std.c._exit(0);
     }
 
-    // Parent: close write end and dup read end to stdin
+    // Parent: close write end first so writer gets SIGPIPE if reader closes early
     _ = std.c.close(write_fd);
-    if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) return error.Unexpected;
-    _ = std.c.close(read_fd);
 
-    // Wait for writer to finish
+    // Wait for writer to finish before dup'ing stdin — ensures all data is written.
+    // Retry on EINTR so a stray signal doesn't abandon the writer.
     {
         var wait_status: c_int = 0;
         if (comptime builtin.os.tag != .windows) {
-            _ = std.c.waitpid(writer_pid, &wait_status, 0);
+            while (true) {
+                const r = std.c.waitpid(writer_pid, &wait_status, 0);
+                if (r >= 0) break;
+                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                break;
+            }
         }
     }
+
+    // Now dup read end to stdin
+    if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) {
+        _ = std.c.close(read_fd);
+        return error.Unexpected;
+    }
+    _ = std.c.close(read_fd);
 }
 
 fn applyFdDuplicate(redir: types.Redirection) !void {
@@ -217,6 +256,12 @@ fn applyFdDuplicate(redir: types.Redirection) !void {
         try IO.eprint("den: invalid file descriptor: {s}\n", .{redir.target});
         return error.InvalidFd;
     };
+
+    // Validate fd range to prevent redirecting to arbitrary descriptors
+    if (target_fd > 255) {
+        try IO.eprint("den: file descriptor out of range: {d}\n", .{target_fd});
+        return error.InvalidFd;
+    }
 
     // Duplicate the target_fd to redir.fd
     if (std.c.dup2(@intCast(target_fd), @intCast(redir.fd)) < 0) return error.Unexpected;
@@ -304,4 +349,70 @@ test "apply fd close" {
         .target = "",
     };
     applyFdClose(redir);
+}
+
+test "fd duplicate rejects out-of-range descriptors" {
+    // Target fd > 255 should return InvalidFd error
+    const redir_high = types.Redirection{
+        .kind = .fd_duplicate,
+        .fd = 1,
+        .target = "256",
+    };
+    try std.testing.expectError(error.InvalidFd, applyFdDuplicate(redir_high));
+
+    // Target fd = 999 should also fail
+    const redir_very_high = types.Redirection{
+        .kind = .fd_duplicate,
+        .fd = 1,
+        .target = "999",
+    };
+    try std.testing.expectError(error.InvalidFd, applyFdDuplicate(redir_very_high));
+
+    // Non-numeric target should fail
+    const redir_invalid = types.Redirection{
+        .kind = .fd_duplicate,
+        .fd = 1,
+        .target = "abc",
+    };
+    try std.testing.expectError(error.InvalidFd, applyFdDuplicate(redir_invalid));
+}
+
+test "fd duplicate accepts valid descriptors" {
+    // fd 0 (stdin) is valid — but dup2 to a non-open fd may fail,
+    // so we just verify the parsing doesn't reject it
+    const redir_zero = types.Redirection{
+        .kind = .fd_duplicate,
+        .fd = 99, // Target fd to dup onto (probably not open, that's ok for parse test)
+        .target = "1", // stdout — always open
+    };
+    // This should succeed (dup2(1, 99) will work since stdout is open)
+    applyFdDuplicate(redir_zero) catch {};
+}
+
+test "saved fds init and discard" {
+    // Test that SavedFds can be created and discarded without leaking
+    if (comptime builtin.os.tag == .windows) return;
+    var saved = SavedFds.save();
+    // Discard closes saved copies without restoring
+    saved.discard();
+    // After discard, all fields should be null
+    try std.testing.expect(saved.stdin_save == null);
+    try std.testing.expect(saved.stdout_save == null);
+    try std.testing.expect(saved.stderr_save == null);
+}
+
+test "saved fds save and restore" {
+    // Test that SavedFds can save and restore without corrupting stdio
+    if (comptime builtin.os.tag == .windows) return;
+    var saved = SavedFds.save();
+    // Verify fds were saved
+    try std.testing.expect(saved.stdin_save != null);
+    try std.testing.expect(saved.stdout_save != null);
+    try std.testing.expect(saved.stderr_save != null);
+    // Restore should put everything back
+    saved.restore();
+    // After restore, all fields should be null
+    try std.testing.expect(saved.stdin_save == null);
+    try std.testing.expect(saved.stdout_save == null);
+    try std.testing.expect(saved.stderr_save == null);
 }

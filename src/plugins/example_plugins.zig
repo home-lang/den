@@ -1,5 +1,6 @@
 const std = @import("std");
 const interface_mod = @import("interface.zig");
+const IO = @import("../utils/io.zig").IO;
 const HookContext = interface_mod.HookContext;
 const HookType = interface_mod.HookType;
 
@@ -14,13 +15,13 @@ pub fn counterPreCommand(ctx: *HookContext) !void {
 
 pub fn counterPostCommand(ctx: *HookContext) !void {
     if (ctx.getCommand()) |cmd| {
-        std.debug.print("[counter] Command #{}: {s}\n", .{ command_count, cmd });
+        IO.print("[counter] Command #{}: {s}\n", .{ command_count, cmd }) catch {};
     }
 }
 
 pub fn counterGetCount(args: []const []const u8) !i32 {
     _ = args;
-    std.debug.print("Total commands executed: {}\n", .{command_count});
+    IO.print("Total commands executed: {}\n", .{command_count}) catch {};
     return 0;
 }
 
@@ -28,7 +29,7 @@ pub fn counterResetCount(args: []const []const u8) !i32 {
     _ = args;
     const old_count = command_count;
     command_count = 0;
-    std.debug.print("Reset counter (was: {})\n", .{old_count});
+    IO.print("Reset counter (was: {})\n", .{old_count}) catch {};
     return 0;
 }
 
@@ -58,9 +59,9 @@ pub fn loggerPreCommand(ctx: *HookContext) !void {
 
 pub fn loggerShowLog(args: []const []const u8) !i32 {
     _ = args;
-    std.debug.print("Command log ({} entries):\n", .{log_count});
+    IO.print("Command log ({} entries):\n", .{log_count}) catch {};
     for (log_buffer[0..log_count], 0..) |cmd, i| {
-        std.debug.print("  [{}] {s}\n", .{ i + 1, cmd });
+        IO.print("  [{}] {s}\n", .{ i + 1, cmd }) catch {};
     }
     return 0;
 }
@@ -72,7 +73,7 @@ pub fn loggerClearLog(args: []const []const u8) !i32 {
         log_allocator.free(cmd);
     }
     log_count = 0;
-    std.debug.print("Log cleared\n", .{});
+    IO.print("Log cleared\n", .{}) catch {};
     return 0;
 }
 
@@ -90,19 +91,19 @@ pub fn loggerShutdown() void {
 /// Shows a message on shell init and exit
 pub fn greeterInit(ctx: *HookContext) !void {
     _ = ctx;
-    std.debug.print("Welcome to Den Shell! (greeter plugin active)\n", .{});
+    IO.print("Welcome to Den Shell! (greeter plugin active)\n", .{}) catch {};
 }
 
 pub fn greeterExit(ctx: *HookContext) !void {
     _ = ctx;
-    std.debug.print("Goodbye! Thanks for using Den Shell.\n", .{});
+    IO.print("Goodbye! Thanks for using Den Shell.\n", .{}) catch {};
 }
 
 pub fn greeterSayHello(args: []const []const u8) !i32 {
     if (args.len > 0) {
-        std.debug.print("Hello, {s}!\n", .{args[0]});
+        IO.print("Hello, {s}!\n", .{args[0]}) catch {};
     } else {
-        std.debug.print("Hello, stranger!\n", .{});
+        IO.print("Hello, stranger!\n", .{}) catch {};
     }
     return 0;
 }
@@ -139,37 +140,37 @@ pub fn pluginCompletion(input: []const u8, allocator: std.mem.Allocator) ![][]co
 /// Simple calculator commands
 pub fn mathAdd(args: []const []const u8) !i32 {
     if (args.len < 2) {
-        std.debug.print("Usage: add <num1> <num2>\n", .{});
+        IO.print("Usage: add <num1> <num2>\n", .{}) catch {};
         return 1;
     }
 
     const a = try std.fmt.parseInt(i32, args[0], 10);
     const b = try std.fmt.parseInt(i32, args[1], 10);
-    std.debug.print("Result: {}\n", .{a + b});
+    IO.print("Result: {}\n", .{a + b}) catch {};
     return 0;
 }
 
 pub fn mathSubtract(args: []const []const u8) !i32 {
     if (args.len < 2) {
-        std.debug.print("Usage: subtract <num1> <num2>\n", .{});
+        IO.print("Usage: subtract <num1> <num2>\n", .{}) catch {};
         return 1;
     }
 
     const a = try std.fmt.parseInt(i32, args[0], 10);
     const b = try std.fmt.parseInt(i32, args[1], 10);
-    std.debug.print("Result: {}\n", .{a - b});
+    IO.print("Result: {}\n", .{a - b}) catch {};
     return 0;
 }
 
 pub fn mathMultiply(args: []const []const u8) !i32 {
     if (args.len < 2) {
-        std.debug.print("Usage: multiply <num1> <num2>\n", .{});
+        IO.print("Usage: multiply <num1> <num2>\n", .{}) catch {};
         return 1;
     }
 
     const a = try std.fmt.parseInt(i32, args[0], 10);
     const b = try std.fmt.parseInt(i32, args[1], 10);
-    std.debug.print("Result: {}\n", .{a * b});
+    IO.print("Result: {}\n", .{a * b}) catch {};
     return 0;
 }
 
@@ -185,6 +186,6 @@ pub fn timerPreCommand(ctx: *HookContext) !void {
 pub fn timerPostCommand(ctx: *HookContext) !void {
     const elapsed = std.time.milliTimestamp() - timer_start;
     if (ctx.getCommand()) |cmd| {
-        std.debug.print("[timer] '{s}' took {}ms\n", .{ cmd, elapsed });
+        IO.print("[timer] '{s}' took {}ms\n", .{ cmd, elapsed }) catch {};
     }
 }

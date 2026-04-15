@@ -77,11 +77,20 @@ pub fn tabCompletionFn(input: []const u8, allocator: std.mem.Allocator) ![][]con
     if (prefix.len > 0 and prefix[0] == '-') {
         const items = try ctx_completion.completeOptions(command, prefix);
         if (items.len > 0) {
+            errdefer {
+                for (items) |item| allocator.free(item.text);
+                allocator.free(items);
+            }
             var results = try allocator.alloc([]const u8, items.len);
+            errdefer allocator.free(results);
+            var filled: usize = 0;
+            errdefer for (results[0..filled]) |r| allocator.free(r);
             for (items, 0..) |item, i| {
                 results[i] = try allocator.dupe(u8, item.text);
-                allocator.free(item.text);
+                filled = i + 1;
             }
+            // Success: free original items now that we own copies
+            for (items) |item| allocator.free(item.text);
             allocator.free(items);
             return results;
         }

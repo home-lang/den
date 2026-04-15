@@ -117,6 +117,7 @@ pub const PipelineMetadata = struct {
             const key = try allocator.dupe(u8, entry.key_ptr.*);
             errdefer allocator.free(key);
             const value = try allocator.dupe(u8, entry.value_ptr.*);
+            errdefer allocator.free(value);
             try new_tags.put(key, value);
         }
 

@@ -115,9 +115,11 @@ pub const FastStringMatcher = struct {
 
         var pos: usize = 0;
         while (pos <= text.len - self.pattern.len) {
+            // `i >= 0` is always true for usize and would be a no-op check.
+            // We compare characters right-to-left; return when i reaches 0
+            // with all chars matching, exit the inner loop on mismatch.
             var i: usize = self.pattern.len - 1;
-
-            while (i >= 0 and text[pos + i] == self.pattern[i]) {
+            while (text[pos + i] == self.pattern[i]) {
                 if (i == 0) return pos;
                 i -= 1;
             }
@@ -523,4 +525,47 @@ test "StringHashSet non-owning" {
     try std.testing.expect(!try set.add(s1)); // Duplicate
 
     try std.testing.expectEqual(@as(usize, 2), set.count());
+}
+
+test "FastStringMatcher find basic" {
+    const matcher = FastStringMatcher.init("world");
+    try std.testing.expectEqual(@as(?usize, 6), matcher.find("hello world"));
+    try std.testing.expectEqual(@as(?usize, 0), matcher.find("world class"));
+    try std.testing.expectEqual(@as(?usize, null), matcher.find("hello"));
+}
+
+test "FastStringMatcher find at end" {
+    const matcher = FastStringMatcher.init("end");
+    try std.testing.expectEqual(@as(?usize, 8), matcher.find("the very end"));
+    // Exact match
+    try std.testing.expectEqual(@as(?usize, 0), matcher.find("end"));
+}
+
+test "FastStringMatcher empty pattern" {
+    const matcher = FastStringMatcher.init("");
+    // Empty pattern should not match (per the implementation)
+    try std.testing.expectEqual(@as(?usize, null), matcher.find("anything"));
+}
+
+test "FastStringMatcher pattern longer than text" {
+    const matcher = FastStringMatcher.init("hello world");
+    try std.testing.expectEqual(@as(?usize, null), matcher.find("hi"));
+}
+
+test "FastStringMatcher no match" {
+    const matcher = FastStringMatcher.init("xyz");
+    try std.testing.expectEqual(@as(?usize, null), matcher.find("hello world"));
+}
+
+test "FastStringMatcher matches multiple occurrences" {
+    const matcher = FastStringMatcher.init("aa");
+    // Should find first occurrence
+    try std.testing.expectEqual(@as(?usize, 0), matcher.find("aa bb aa"));
+}
+
+test "FastStringMatcher single char pattern" {
+    const matcher = FastStringMatcher.init("a");
+    try std.testing.expectEqual(@as(?usize, 0), matcher.find("abc"));
+    try std.testing.expectEqual(@as(?usize, 1), matcher.find("bac"));
+    try std.testing.expectEqual(@as(?usize, null), matcher.find("xyz"));
 }

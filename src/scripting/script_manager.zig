@@ -3,12 +3,13 @@ const Shell = @import("../shell.zig").Shell;
 const ControlFlowParser = @import("control_flow.zig").ControlFlowParser;
 const ControlFlowExecutor = @import("control_flow.zig").ControlFlowExecutor;
 const FunctionParser = @import("functions.zig").FunctionParser;
+const IO = @import("../utils/io.zig").IO;
 
 /// Cached script entry
 const CachedScript = struct {
     path: []const u8,
     content: []const u8,
-    mtime_ns: i96, // File modification time (nanoseconds)
+    mtime_ns: i128, // File modification time (nanoseconds); i128 matches stat.mtime
     line_count: usize,
     allocator: std.mem.Allocator,
 
@@ -114,26 +115,26 @@ pub const ScriptManager = struct {
     /// Load script directly from file (bypassing cache)
     pub fn loadScriptFromFile(self: *ScriptManager, path: []const u8) ![]const u8 {
         const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch |err| {
-            std.debug.print("Error loading script '{s}': {}\n", .{ path, err });
+            IO.eprint("den: error loading script '{s}': {}\n", .{ path, err }) catch {};
             return error.ScriptLoadFailed;
         };
         defer file.close(std.Options.debug_io);
 
         const max_size: usize = 10 * 1024 * 1024;
         const file_size = (file.stat(std.Options.debug_io) catch |err| {
-            std.debug.print("Error reading script '{s}': {}\n", .{ path, err });
+            IO.eprint("den: error reading script '{s}': {}\n", .{ path, err }) catch {};
             return error.ScriptReadFailed;
         }).size;
         const read_size: usize = @min(file_size, max_size);
         const buffer = self.allocator.alloc(u8, read_size) catch |err| {
-            std.debug.print("Error allocating for script '{s}': {}\n", .{ path, err });
+            IO.eprint("den: error allocating for script '{s}': {}\n", .{ path, err }) catch {};
             return error.ScriptReadFailed;
         };
         errdefer self.allocator.free(buffer);
         var total_read: usize = 0;
         while (total_read < read_size) {
             const n = file.readStreaming(std.Options.debug_io, &.{buffer[total_read..]}) catch |err| {
-                std.debug.print("Error reading script '{s}': {}\n", .{ path, err });
+                IO.eprint("den: error reading script '{s}': {}\n", .{ path, err }) catch {};
                 return error.ScriptReadFailed;
             };
             if (n == 0) break;
@@ -208,13 +209,15 @@ pub const ScriptManager = struct {
         };
 
         // Store in cache
-        try self.cache.put(try self.allocator.dupe(u8, path), cached);
+        const path_key = try self.allocator.dupe(u8, path);
+        errdefer self.allocator.free(path_key);
+        try self.cache.put(path_key, cached);
     }
 
     /// Evict oldest cache entry
     fn evictOldest(self: *ScriptManager) !void {
         var oldest_key: ?[]const u8 = null;
-        var oldest_time: i96 = std.math.maxInt(i96);
+        var oldest_time: i128 = std.math.maxInt(i128);
 
         var iter = self.cache.iterator();
         while (iter.next()) |entry| {
@@ -346,17 +349,17 @@ pub const ScriptManager = struct {
         }
 
         if (in_single_quote or in_double_quote) {
-            std.debug.print("Validation error: Unmatched quotes in '{s}'\n", .{path});
+            IO.eprint("den: validation error: unmatched quotes in '{s}'\n", .{path}) catch {};
             return false;
         }
 
         if (brace_count != 0) {
-            std.debug.print("Validation error: Unmatched braces in '{s}'\n", .{path});
+            IO.eprint("den: validation error: unmatched braces in '{s}'\n", .{path}) catch {};
             return false;
         }
 
         if (paren_count != 0) {
-            std.debug.print("Validation error: Unmatched parentheses in '{s}'\n", .{path});
+            IO.eprint("den: validation error: unmatched parentheses in '{s}'\n", .{path}) catch {};
             return false;
         }
 
@@ -645,3 +648,71 @@ pub const ScriptManager = struct {
         };
     }
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "ScriptManager init and deinit" {
+    var mgr = ScriptManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    try std.testing.expect(mgr.cache_enabled);
+    try std.testing.expectEqual(ScriptManager.DEFAULT_CACHE_SIZE, mgr.max_cache_size);
+}
+
+test "ScriptManager cache stats" {
+    var mgr = ScriptManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    const stats = mgr.getCacheStats();
+    try std.testing.expectEqual(@as(usize, 0), stats.count);
+    try std.testing.expect(stats.enabled);
+}
+
+test "CachedScript uses i128 for mtime" {
+    // Ensures the i96 → i128 change is in effect
+    const field_info = @typeInfo(CachedScript).@"struct".fields;
+    var found = false;
+    for (field_info) |f| {
+        if (std.mem.eql(u8, f.name, "mtime_ns")) {
+            // Type should be i128 now, not i96
+            try std.testing.expectEqual(i128, f.type);
+            found = true;
+            break;
+        }
+    }
+    try std.testing.expect(found);
+}
+
+test "extractHeredocDelimiter basic" {
+    // EOF marker
+    const d1 = extractHeredocDelimiter("cat << EOF");
+    try std.testing.expect(d1 != null);
+    try std.testing.expectEqualStrings("EOF", d1.?);
+
+    // Quoted delimiter
+    const d2 = extractHeredocDelimiter("cat << 'END'");
+    try std.testing.expect(d2 != null);
+    try std.testing.expectEqualStrings("END", d2.?);
+
+    // Double-quoted
+    const d3 = extractHeredocDelimiter("cat << \"FOO\"");
+    try std.testing.expect(d3 != null);
+    try std.testing.expectEqualStrings("FOO", d3.?);
+
+    // <<- variant (tab strip)
+    const d4 = extractHeredocDelimiter("cat <<- TAB_EOF");
+    try std.testing.expect(d4 != null);
+    try std.testing.expectEqualStrings("TAB_EOF", d4.?);
+}
+
+test "extractHeredocDelimiter rejects herestring" {
+    // <<< is a herestring, not a heredoc
+    try std.testing.expect(extractHeredocDelimiter("cat <<< text") == null);
+}
+
+test "extractHeredocDelimiter handles no delimiter" {
+    try std.testing.expect(extractHeredocDelimiter("cat hello") == null);
+    try std.testing.expect(extractHeredocDelimiter("cat <<") == null);
+}

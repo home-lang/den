@@ -1,5 +1,6 @@
 const std = @import("std");
 const interface_mod = @import("interface.zig");
+const IO = @import("../utils/io.zig").IO;
 
 const HookType = interface_mod.HookType;
 const HookFn = interface_mod.HookFn;
@@ -166,22 +167,24 @@ pub const PluginAPI = struct {
 
     // === Utility Functions ===
 
-    /// Split a string by delimiter
+    /// Split a string by delimiter. Uses dynamic allocation to avoid silent
+    /// truncation at 64 parts and to ensure duped items are properly cleaned
+    /// up on allocation failure (previously they leaked).
     pub fn splitString(self: *PluginAPI, string: []const u8, delimiter: u8) ![][]const u8 {
-        var parts_buffer: [64][]const u8 = undefined;
-        var parts_count: usize = 0;
+        var parts: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer {
+            for (parts.items) |p| self.allocator.free(p);
+            parts.deinit(self.allocator);
+        }
 
         var iter = std.mem.splitScalar(u8, string, delimiter);
         while (iter.next()) |part| {
-            if (parts_count < parts_buffer.len) {
-                parts_buffer[parts_count] = try self.allocator.dupe(u8, part);
-                parts_count += 1;
-            }
+            const duped = try self.allocator.dupe(u8, part);
+            errdefer self.allocator.free(duped);
+            try parts.append(self.allocator, duped);
         }
 
-        const result = try self.allocator.alloc([]const u8, parts_count);
-        @memcpy(result, parts_buffer[0..parts_count]);
-        return result;
+        return try parts.toOwnedSlice(self.allocator);
     }
 
     /// Join strings with delimiter
@@ -254,19 +257,16 @@ pub const PluginAPI = struct {
             return try self.allocator.alloc([2][]const u8, 0);
         };
 
-        var env_buffer: [256][2][]const u8 = undefined;
-        var count: usize = 0;
+        // Use dynamic allocation to avoid silent truncation at 256 vars.
+        var env_list: std.ArrayListUnmanaged([2][]const u8) = .empty;
+        errdefer env_list.deinit(self.allocator);
 
         var iter = shell.environment.iterator();
         while (iter.next()) |entry| {
-            if (count >= env_buffer.len) break;
-            env_buffer[count] = .{ entry.key_ptr.*, entry.value_ptr.* };
-            count += 1;
+            try env_list.append(self.allocator, .{ entry.key_ptr.*, entry.value_ptr.* });
         }
 
-        const result = try self.allocator.alloc([2][]const u8, count);
-        @memcpy(result, env_buffer[0..count]);
-        return result;
+        return try env_list.toOwnedSlice(self.allocator);
     }
 
     /// Get current working directory
@@ -327,19 +327,16 @@ pub const PluginAPI = struct {
             return try self.allocator.alloc([2][]const u8, 0);
         };
 
-        var alias_buffer: [256][2][]const u8 = undefined;
-        var count: usize = 0;
+        // Use dynamic allocation to avoid silent truncation at 256 aliases.
+        var alias_list: std.ArrayListUnmanaged([2][]const u8) = .empty;
+        errdefer alias_list.deinit(self.allocator);
 
         var iter = shell.aliases.iterator();
         while (iter.next()) |entry| {
-            if (count >= alias_buffer.len) break;
-            alias_buffer[count] = .{ entry.key_ptr.*, entry.value_ptr.* };
-            count += 1;
+            try alias_list.append(self.allocator, .{ entry.key_ptr.*, entry.value_ptr.* });
         }
 
-        const result = try self.allocator.alloc([2][]const u8, count);
-        @memcpy(result, alias_buffer[0..count]);
-        return result;
+        return try alias_list.toOwnedSlice(self.allocator);
     }
 
     /// Check if shell reference is available
@@ -377,7 +374,7 @@ pub const Logger = struct {
         const message = try std.fmt.allocPrint(self.allocator, format, args);
         defer self.allocator.free(message);
 
-        std.debug.print("[{s}] [{s}] {s}\n", .{ self.plugin_name, level_str, message });
+        IO.eprint("[{s}] [{s}] {s}\n", .{ self.plugin_name, level_str, message }) catch {};
     }
 
     pub fn setMinLevel(self: *Logger, level: LogLevel) void {
@@ -428,3 +425,14 @@ pub const PluginContext = struct {
         return self.api.getConfig(key);
     }
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "LogLevel enum values" {
+    try std.testing.expectEqual(@as(u32, 0), @intFromEnum(LogLevel.debug));
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(LogLevel.info));
+    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(LogLevel.warn));
+    try std.testing.expectEqual(@as(u32, 3), @intFromEnum(LogLevel.err));
+}

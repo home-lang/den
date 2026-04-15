@@ -152,7 +152,10 @@ fn writeStderr(msg: []const u8) void {
 /// Helper to get milliseconds since some reference point
 fn getMilliTimestamp() i64 {
     const now = compat.Instant.now() catch return 0;
-    return @intCast(@divFloor(now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000), 1));
+    // sec * 1000 + nsec / 1_000_000 already yields milliseconds as the
+    // arithmetic is performed on signed integer fields; the previous
+    // @divFloor(x, 1) and @intCast were both no-ops.
+    return now.timestamp.sec * 1000 + @divFloor(now.timestamp.nsec, 1_000_000);
 }
 
 /// Trace point for debugging execution flow
@@ -245,4 +248,24 @@ pub fn trace(comptime src: std.builtin.SourceLocation, name: []const u8) TracePo
         point.print();
     }
     return point;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "getMilliTimestamp returns non-negative value" {
+    // The simplified version (no redundant @intCast/@divFloor) should still
+    // produce a sensible millisecond value.
+    const ms = getMilliTimestamp();
+    // On platforms where Instant.now() works, this is non-zero; on unsupported
+    // platforms it returns 0. Both are valid.
+    try std.testing.expect(ms >= 0);
+}
+
+test "TracePoint creation" {
+    const point = TracePoint.init(@src(), "test");
+    try std.testing.expectEqualStrings("test", point.name);
+    // Time should be non-negative (0 if Instant not supported)
+    try std.testing.expect(point.time >= 0);
 }

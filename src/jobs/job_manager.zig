@@ -384,7 +384,14 @@ pub const JobManager = struct {
             _ = std.posix.kill(-job.pid, std.posix.SIG.CONT) catch {};
 
             var fg_wait_status: c_int = 0;
-            _ = std.c.waitpid(job.pid, &fg_wait_status, std.c.W.UNTRACED);
+            // Retry on EINTR: SIGCHLD/SIGWINCH/etc. can interrupt this wait,
+            // leaving an uninitialized status if we don't loop.
+            while (true) {
+                const r = std.c.waitpid(job.pid, &fg_wait_status, std.c.W.UNTRACED);
+                if (r >= 0) break;
+                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                break;
+            }
 
             const raw: u32 = @bitCast(fg_wait_status);
             if (std.posix.W.IFSTOPPED(raw)) {
@@ -529,7 +536,12 @@ pub const JobManager = struct {
                 const job = self.jobs[slot.?].?;
                 var specific_wait_status: c_int = 0;
                 if (comptime builtin.os.tag != .windows) {
-                    _ = std.c.waitpid(job.pid, &specific_wait_status, 0);
+                    while (true) {
+                        const r = std.c.waitpid(job.pid, &specific_wait_status, 0);
+                        if (r >= 0) break;
+                        if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                        break;
+                    }
                 }
                 last_status = getExitStatus(@as(u32, @bitCast(specific_wait_status)));
                 self.remove(slot.?);

@@ -116,10 +116,7 @@ pub const SystemInfo = struct {
             return try self.allocator.dupe(u8, path);
         }
 
-        var components: std.ArrayList([]const u8) = .{
-            .items = &[_][]const u8{},
-            .capacity = 0,
-        };
+        var components: std.ArrayList([]const u8) = .empty;
         defer components.deinit(self.allocator);
 
         var iter = std.mem.splitScalar(u8, path, '/');
@@ -135,10 +132,7 @@ pub const SystemInfo = struct {
         }
 
         // Keep first component and last (max_components - 1) components
-        var result: std.ArrayList(u8) = .{
-            .items = &[_]u8{},
-            .capacity = 0,
-        };
+        var result: std.ArrayList(u8) = .empty;
         defer result.deinit(self.allocator);
 
         const starts_with_slash = path.len > 0 and path[0] == '/';

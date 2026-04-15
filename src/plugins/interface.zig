@@ -80,36 +80,59 @@ pub const CustomHookRegistry = struct {
 
     /// Register a custom command hook
     pub fn register(self: *CustomHookRegistry, name: []const u8, pattern: []const u8, script: ?[]const u8, function: ?HookFn, condition: ?HookCondition, priority: i32) !void {
+        const name_dup = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(name_dup);
+        const pattern_dup = try self.allocator.dupe(u8, pattern);
+        errdefer self.allocator.free(pattern_dup);
+        const script_dup: ?[]const u8 = if (script) |s| try self.allocator.dupe(u8, s) else null;
+        errdefer if (script_dup) |s| self.allocator.free(s);
+
+        var cond_dup: ?HookCondition = null;
+        errdefer if (cond_dup) |cd| switch (cd) {
+            .file_exists => |path| self.allocator.free(path),
+            .env_set => |n| self.allocator.free(n),
+            .env_equals => |eq| {
+                self.allocator.free(eq.name);
+                self.allocator.free(eq.value);
+            },
+            .always => {},
+        };
+        if (condition) |cond| {
+            cond_dup = switch (cond) {
+                .file_exists => |path| HookCondition{ .file_exists = try self.allocator.dupe(u8, path) },
+                .env_set => |name_str| HookCondition{ .env_set = try self.allocator.dupe(u8, name_str) },
+                .env_equals => |eq| blk: {
+                    const n = try self.allocator.dupe(u8, eq.name);
+                    errdefer self.allocator.free(n);
+                    const v = try self.allocator.dupe(u8, eq.value);
+                    break :blk HookCondition{ .env_equals = .{ .name = n, .value = v } };
+                },
+                .always => HookCondition{ .always = {} },
+            };
+        }
+
         const hook = CustomHook{
-            .name = try self.allocator.dupe(u8, name),
-            .pattern = try self.allocator.dupe(u8, pattern),
-            .script = if (script) |s| try self.allocator.dupe(u8, s) else null,
+            .name = name_dup,
+            .pattern = pattern_dup,
+            .script = script_dup,
             .function = function,
             .enabled = true,
             .priority = priority,
-            .condition = if (condition) |cond| blk: {
-                break :blk switch (cond) {
-                    .file_exists => |path| HookCondition{ .file_exists = try self.allocator.dupe(u8, path) },
-                    .env_set => |name_str| HookCondition{ .env_set = try self.allocator.dupe(u8, name_str) },
-                    .env_equals => |eq| HookCondition{ .env_equals = .{
-                        .name = try self.allocator.dupe(u8, eq.name),
-                        .value = try self.allocator.dupe(u8, eq.value),
-                    } },
-                    .always => HookCondition{ .always = {} },
-                };
-            } else null,
+            .condition = cond_dup,
         };
         try self.hooks.append(self.allocator, hook);
     }
 
-    /// Find hooks matching a command
-    pub fn findMatchingHooks(self: *CustomHookRegistry, command: []const u8) []const CustomHook {
-        var matches: [32]CustomHook = undefined;
-        var count: usize = 0;
+    /// Find hooks matching a command. Returns a heap-allocated slice owned by
+    /// the caller — call `allocator.free(result)` when done. The hook entries
+    /// themselves are borrowed from the registry (not copied), so they remain
+    /// valid only as long as the registry is not modified.
+    pub fn findMatchingHooks(self: *CustomHookRegistry, command: []const u8) ![]CustomHook {
+        var matches: std.ArrayListUnmanaged(CustomHook) = .empty;
+        errdefer matches.deinit(self.allocator);
 
         for (self.hooks.items) |hook| {
             if (!hook.enabled) continue;
-            if (count >= matches.len) break;
 
             // Check if command starts with pattern
             if (std.mem.startsWith(u8, command, hook.pattern)) {
@@ -117,22 +140,21 @@ pub const CustomHookRegistry = struct {
                 if (command.len == hook.pattern.len or
                     (command.len > hook.pattern.len and command[hook.pattern.len] == ' '))
                 {
-                    matches[count] = hook;
-                    count += 1;
+                    try matches.append(self.allocator, hook);
                 }
             }
         }
 
+        const result = try matches.toOwnedSlice(self.allocator);
+
         // Sort by priority (lower first)
-        const slice = matches[0..count];
-        std.mem.sort(CustomHook, slice, {}, struct {
+        std.mem.sort(CustomHook, result, {}, struct {
             fn lessThan(_: void, a: CustomHook, b: CustomHook) bool {
                 return a.priority < b.priority;
             }
         }.lessThan);
 
-        // Return static slice (caller should copy if needed)
-        return slice;
+        return result;
     }
 
     /// Check if a hook condition is met
@@ -306,20 +328,14 @@ pub const PluginRegistry = struct {
     pub fn init(allocator: std.mem.Allocator) PluginRegistry {
         var hooks: [8]std.ArrayList(Hook) = undefined;
         inline for (0..8) |i| {
-            hooks[i] = .{
-                .items = &[_]Hook{},
-                .capacity = 0,
-            };
+            hooks[i] = .empty;
         }
 
         return .{
             .allocator = allocator,
             .hooks = hooks,
             .commands = std.StringHashMap(PluginCommand).init(allocator),
-            .completions = .{
-                .items = &[_]CompletionProvider{},
-                .capacity = 0,
-            },
+            .completions = .empty,
             .error_stats = std.StringHashMap(PluginErrorStats).init(allocator),
             .verbose_errors = true,
         };
@@ -361,8 +377,11 @@ pub const PluginRegistry = struct {
 
     /// Register a hook
     pub fn registerHook(self: *PluginRegistry, plugin_name: []const u8, hook_type: HookType, function: HookFn, priority: i32) !void {
+        const name_dup = try self.allocator.dupe(u8, plugin_name);
+        errdefer self.allocator.free(name_dup);
+
         const hook = Hook{
-            .plugin_name = try self.allocator.dupe(u8, plugin_name),
+            .plugin_name = name_dup,
             .hook_type = hook_type,
             .function = function,
             .priority = priority,
@@ -436,11 +455,16 @@ pub const PluginRegistry = struct {
                             err,
                         }) catch "[Plugin Error] Failed to format error message\n";
 
-                        const stderr_file = if (builtin.os.tag == .windows)
-                            std.Io.File{ .handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse unreachable, .flags = .{ .nonblocking = false } }
-                        else
-                            std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
-                        stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
+                        // Skip stderr output if we can't get a handle (rather
+                        // than panic via unreachable — this path is already
+                        // handling a plugin error and shouldn't cascade to a crash).
+                        const maybe_stderr: ?std.Io.File = if (builtin.os.tag == .windows) blk: {
+                            const h = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse break :blk null;
+                            break :blk std.Io.File{ .handle = h, .flags = .{ .nonblocking = false } };
+                        } else std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+                        if (maybe_stderr) |stderr_file| {
+                            stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
+                        }
                     }
                 };
             }
@@ -467,11 +491,16 @@ pub const PluginRegistry = struct {
                             err,
                         }) catch "[Plugin Error] Failed to format error message\n";
 
-                        const stderr_file = if (builtin.os.tag == .windows)
-                            std.Io.File{ .handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse unreachable, .flags = .{ .nonblocking = false } }
-                        else
-                            std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
-                        stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
+                        // Skip stderr output if we can't get a handle (rather
+                        // than panic via unreachable — this path is already
+                        // handling a plugin error and shouldn't cascade to a crash).
+                        const maybe_stderr: ?std.Io.File = if (builtin.os.tag == .windows) blk: {
+                            const h = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) orelse break :blk null;
+                            break :blk std.Io.File{ .handle = h, .flags = .{ .nonblocking = false } };
+                        } else std.Io.File{ .handle = std.posix.STDERR_FILENO, .flags = .{ .nonblocking = false } };
+                        if (maybe_stderr) |stderr_file| {
+                            stderr_file.writeStreamingAll(std.Options.debug_io, msg) catch {};
+                        }
                     }
                     continue;
                 };
@@ -489,10 +518,17 @@ pub const PluginRegistry = struct {
             return error.CommandAlreadyExists;
         }
 
+        const name_dup = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(name_dup);
+        const plugin_dup = try self.allocator.dupe(u8, plugin_name);
+        errdefer self.allocator.free(plugin_dup);
+        const desc_dup = try self.allocator.dupe(u8, description);
+        errdefer self.allocator.free(desc_dup);
+
         const cmd = PluginCommand{
-            .name = try self.allocator.dupe(u8, name),
-            .plugin_name = try self.allocator.dupe(u8, plugin_name),
-            .description = try self.allocator.dupe(u8, description),
+            .name = name_dup,
+            .plugin_name = plugin_dup,
+            .description = desc_dup,
             .function = function,
             .enabled = true,
             .allocator = self.allocator,
@@ -501,22 +537,23 @@ pub const PluginRegistry = struct {
         try self.commands.put(cmd.name, cmd);
     }
 
-    /// Unregister all commands for a plugin
+    /// Unregister all commands for a plugin. Previously capped at 256 commands
+    /// (silent truncation caused memory leaks on plugin shutdown if a plugin
+    /// registered more); now uses dynamic allocation.
     pub fn unregisterCommands(self: *PluginRegistry, plugin_name: []const u8) void {
-        var to_remove_buffer: [256][]const u8 = undefined;
-        var to_remove_count: usize = 0;
+        var to_remove: std.ArrayListUnmanaged([]const u8) = .empty;
+        defer to_remove.deinit(self.allocator);
 
         var iter = self.commands.iterator();
         while (iter.next()) |entry| {
             if (std.mem.eql(u8, entry.value_ptr.plugin_name, plugin_name)) {
-                if (to_remove_count < to_remove_buffer.len) {
-                    to_remove_buffer[to_remove_count] = entry.key_ptr.*;
-                    to_remove_count += 1;
-                }
+                // On append failure the plugin can't be fully cleaned up,
+                // but we continue so we at least remove what we can track.
+                to_remove.append(self.allocator, entry.key_ptr.*) catch break;
             }
         }
 
-        for (to_remove_buffer[0..to_remove_count]) |name| {
+        for (to_remove.items) |name| {
             if (self.commands.fetchRemove(name)) |kv| {
                 var cmd = kv.value;
                 cmd.deinit();
@@ -535,21 +572,19 @@ pub const PluginRegistry = struct {
         return try cmd.execute(args);
     }
 
-    /// List all registered commands
+    /// List all registered commands. Returns a heap-allocated slice owned by
+    /// the caller (free with `self.allocator.free(result)`). No silent
+    /// truncation — all commands are returned regardless of count.
     pub fn listCommands(self: *PluginRegistry) ![][]const u8 {
-        var names_buffer: [256][]const u8 = undefined;
-        var count: usize = 0;
+        var names: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer names.deinit(self.allocator);
 
         var iter = self.commands.iterator();
         while (iter.next()) |entry| {
-            if (count >= names_buffer.len) break;
-            names_buffer[count] = entry.key_ptr.*;
-            count += 1;
+            try names.append(self.allocator, entry.key_ptr.*);
         }
 
-        const names = try self.allocator.alloc([]const u8, count);
-        @memcpy(names, names_buffer[0..count]);
-        return names;
+        return try names.toOwnedSlice(self.allocator);
     }
 
     /// Register a completion provider
@@ -578,27 +613,21 @@ pub const PluginRegistry = struct {
         }
     }
 
-    /// Get completions for input
+    /// Get completions for input. Previously capped at 1000 (with items beyond
+    /// the cap leaked as they were never freed); now uses dynamic allocation.
     pub fn getCompletions(self: *PluginRegistry, input: []const u8) ![][]const u8 {
-        var all_completions_buffer: [1000][]const u8 = undefined;
-        var all_completions_count: usize = 0;
+        var all_completions: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer all_completions.deinit(self.allocator);
 
         for (self.completions.items) |*completion| {
             if (completion.enabled and std.mem.startsWith(u8, input, completion.prefix)) {
                 const items = try completion.getCompletions(input, self.allocator);
-                for (items) |item| {
-                    if (all_completions_count < all_completions_buffer.len) {
-                        all_completions_buffer[all_completions_count] = item;
-                        all_completions_count += 1;
-                    }
-                }
-                self.allocator.free(items);
+                defer self.allocator.free(items);
+                try all_completions.appendSlice(self.allocator, items);
             }
         }
 
-        const result = try self.allocator.alloc([]const u8, all_completions_count);
-        @memcpy(result, all_completions_buffer[0..all_completions_count]);
-        return result;
+        return try all_completions.toOwnedSlice(self.allocator);
     }
 
     /// Get error statistics for a specific plugin
@@ -606,21 +635,18 @@ pub const PluginRegistry = struct {
         return self.error_stats.get(plugin_name);
     }
 
-    /// Get all plugin error statistics
+    /// Get all plugin error statistics. Returns a heap-allocated slice owned
+    /// by the caller. No silent truncation — all error stats are returned.
     pub fn getAllErrors(self: *PluginRegistry) ![]PluginErrorStats {
-        var stats_buffer: [256]PluginErrorStats = undefined;
-        var count: usize = 0;
+        var stats: std.ArrayListUnmanaged(PluginErrorStats) = .empty;
+        errdefer stats.deinit(self.allocator);
 
         var iter = self.error_stats.iterator();
         while (iter.next()) |entry| {
-            if (count >= stats_buffer.len) break;
-            stats_buffer[count] = entry.value_ptr.*;
-            count += 1;
+            try stats.append(self.allocator, entry.value_ptr.*);
         }
 
-        const result = try self.allocator.alloc(PluginErrorStats, count);
-        @memcpy(result, stats_buffer[0..count]);
-        return result;
+        return try stats.toOwnedSlice(self.allocator);
     }
 
     /// Clear error statistics for a plugin
@@ -642,4 +668,153 @@ pub const PluginRegistry = struct {
 /// Helper function for sorting hooks by priority
 fn hookCompare(_: void, a: Hook, b: Hook) bool {
     return a.priority < b.priority;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "CustomHookRegistry findMatchingHooks returns heap-allocated slice" {
+    var registry = CustomHookRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    try registry.register("test1", "git push", null, null, null, 0);
+    try registry.register("test2", "git pull", null, null, null, 0);
+    try registry.register("test3", "git push", null, null, null, 1);
+
+    // Returned slice should be owned by caller (heap-allocated)
+    const matches = try registry.findMatchingHooks("git push origin main");
+    defer std.testing.allocator.free(matches);
+
+    try std.testing.expectEqual(@as(usize, 2), matches.len);
+    // Sorted by priority: test1 (priority 0) should come first
+    try std.testing.expectEqualStrings("test1", matches[0].name);
+    try std.testing.expectEqualStrings("test3", matches[1].name);
+}
+
+test "findMatchingHooks empty when no match" {
+    var registry = CustomHookRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    try registry.register("test1", "git push", null, null, null, 0);
+
+    const matches = try registry.findMatchingHooks("ls -la");
+    defer std.testing.allocator.free(matches);
+
+    try std.testing.expectEqual(@as(usize, 0), matches.len);
+}
+
+test "findMatchingHooks exact command match" {
+    var registry = CustomHookRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    try registry.register("exact", "ls", null, null, null, 0);
+
+    // Exact match (no trailing space)
+    const matches1 = try registry.findMatchingHooks("ls");
+    defer std.testing.allocator.free(matches1);
+    try std.testing.expectEqual(@as(usize, 1), matches1.len);
+
+    // With space after should match
+    const matches2 = try registry.findMatchingHooks("ls -la");
+    defer std.testing.allocator.free(matches2);
+    try std.testing.expectEqual(@as(usize, 1), matches2.len);
+
+    // Substring should NOT match (no space boundary)
+    const matches3 = try registry.findMatchingHooks("lsof");
+    defer std.testing.allocator.free(matches3);
+    try std.testing.expectEqual(@as(usize, 0), matches3.len);
+}
+
+test "findMatchingHooks respects enabled flag" {
+    var registry = CustomHookRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    try registry.register("disabled_hook", "test", null, null, null, 0);
+    _ = registry.setEnabled("disabled_hook", false);
+
+    const matches = try registry.findMatchingHooks("test command");
+    defer std.testing.allocator.free(matches);
+
+    try std.testing.expectEqual(@as(usize, 0), matches.len);
+}
+
+test "findMatchingHooks supports many hooks (beyond old 32 limit)" {
+    var registry = CustomHookRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    // Register 50 hooks (more than the old fixed limit of 32)
+    var i: usize = 0;
+    while (i < 50) : (i += 1) {
+        var name_buf: [32]u8 = undefined;
+        const name = try std.fmt.bufPrint(&name_buf, "hook_{d}", .{i});
+        try registry.register(name, "run", null, null, null, @intCast(i));
+    }
+
+    const matches = try registry.findMatchingHooks("run all");
+    defer std.testing.allocator.free(matches);
+
+    try std.testing.expectEqual(@as(usize, 50), matches.len);
+    // Should be sorted by priority ascending
+    try std.testing.expectEqualStrings("hook_0", matches[0].name);
+    try std.testing.expectEqualStrings("hook_49", matches[49].name);
+}
+
+test "HookType enum values" {
+    try std.testing.expectEqual(@as(u32, 0), @intFromEnum(HookType.pre_command));
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(HookType.post_command));
+}
+
+test "CustomHook fields" {
+    const hook = CustomHook{
+        .name = "test",
+        .pattern = "git",
+        .script = null,
+        .function = null,
+        .enabled = true,
+        .priority = 5,
+        .condition = null,
+    };
+    try std.testing.expect(hook.enabled);
+    try std.testing.expectEqual(@as(i32, 5), hook.priority);
+}
+
+test "PluginRegistry listCommands is heap-allocated" {
+    var registry = PluginRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const names = try registry.listCommands();
+    defer std.testing.allocator.free(names);
+
+    // Empty registry returns empty slice, but type must be heap-owned
+    try std.testing.expectEqual(@as(usize, 0), names.len);
+}
+
+test "PluginRegistry getAllErrors is heap-allocated" {
+    var registry = PluginRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const stats = try registry.getAllErrors();
+    defer std.testing.allocator.free(stats);
+
+    // Empty registry returns empty slice, no silent truncation
+    try std.testing.expectEqual(@as(usize, 0), stats.len);
+}
+
+test "PluginRegistry getCompletions empty" {
+    var registry = PluginRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    const completions = try registry.getCompletions("test");
+    defer std.testing.allocator.free(completions);
+
+    try std.testing.expectEqual(@as(usize, 0), completions.len);
+}
+
+test "PluginRegistry unregisterCommands no-op on empty" {
+    var registry = PluginRegistry.init(std.testing.allocator);
+    defer registry.deinit();
+
+    // Should not panic on empty registry
+    registry.unregisterCommands("nonexistent");
 }

@@ -83,15 +83,19 @@ pub const OverlayLayer = struct {
             old_lines.deinit(allocator);
         }
 
-        var lines: std.ArrayList([]const u8) = .{
-            .items = &[_][]const u8{},
-            .capacity = 0,
-        };
+        var lines: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (lines.items) |line| allocator.free(line);
+            lines.deinit(allocator);
+        }
         for (body_lines) |line| {
-            try lines.append(allocator, try allocator.dupe(u8, line));
+            const dup = try allocator.dupe(u8, line);
+            errdefer allocator.free(dup);
+            try lines.append(allocator, dup);
         }
 
         const k = try allocator.dupe(u8, name);
+        errdefer allocator.free(k);
         try self.commands.put(allocator, k, lines);
     }
 
@@ -120,10 +124,7 @@ pub const OverlayStack = struct {
     /// automatically.
     pub fn init(allocator: std.mem.Allocator) !OverlayStack {
         var stack = OverlayStack{
-            .layers = .{
-                .items = &[_]OverlayLayer{},
-                .capacity = 0,
-            },
+            .layers = .empty,
         };
         // Push the implicit base layer.
         const base = try OverlayLayer.init(allocator, "global");
@@ -225,10 +226,8 @@ pub const OverlayStack = struct {
     /// Return a list of layer names, bottom to top.
     /// Caller owns the returned slice but NOT the strings.
     pub fn listLayers(self: *const OverlayStack, allocator: std.mem.Allocator) ![]const []const u8 {
-        var names: std.ArrayList([]const u8) = .{
-            .items = &[_][]const u8{},
-            .capacity = 0,
-        };
+        var names: std.ArrayList([]const u8) = .empty;
+        errdefer names.deinit(allocator);
         for (self.layers.items) |*layer| {
             try names.append(allocator, layer.name);
         }
@@ -271,7 +270,9 @@ pub const OverlayStack = struct {
                     allocator.free(removed.value);
                 }
                 const k = try allocator.dupe(u8, entry.key_ptr.*);
+                errdefer allocator.free(k);
                 const v = try allocator.dupe(u8, entry.value_ptr.*);
+                errdefer allocator.free(v);
                 try merged.put(allocator, k, v);
             }
         }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Shell = @import("../shell.zig").Shell;
+const IO = @import("../utils/io.zig").IO;
 const expansion_mod = @import("../utils/expansion.zig");
 const Expansion = expansion_mod.Expansion;
 const removeQuotes = expansion_mod.removeQuotes;
@@ -874,7 +875,7 @@ pub const ControlFlowExecutor = struct {
 
         // Execute as a command
         self.shell.executeCommand(trimmed) catch |err| {
-            std.debug.print("Error executing statement: {}\n", .{err});
+            IO.eprint("den: error executing statement: {}\n", .{err}) catch {};
             return 1;
         };
 
@@ -1060,20 +1061,24 @@ pub const ControlFlowParser = struct {
 
             // Add line to appropriate body
             if (line.len > 0 and line[0] != '#') {
+                // Check capacity BEFORE allocating to avoid leaking line_copy on
+                // a buffer-full error.
+                switch (current_section) {
+                    .then => if (then_body_count >= then_body_buffer.len) return error.TooManyLines,
+                    .elif => if (elif_body_count >= elif_body_buffer.len) return error.TooManyLines,
+                    .@"else" => if (else_body_count >= else_body_buffer.len) return error.TooManyLines,
+                }
                 const line_copy = try self.allocator.dupe(u8, line);
                 switch (current_section) {
                     .then => {
-                        if (then_body_count >= then_body_buffer.len) return error.TooManyLines;
                         then_body_buffer[then_body_count] = line_copy;
                         then_body_count += 1;
                     },
                     .elif => {
-                        if (elif_body_count >= elif_body_buffer.len) return error.TooManyLines;
                         elif_body_buffer[elif_body_count] = line_copy;
                         elif_body_count += 1;
                     },
                     .@"else" => {
-                        if (else_body_count >= else_body_buffer.len) return error.TooManyLines;
                         else_body_buffer[else_body_count] = line_copy;
                         else_body_count += 1;
                     },
@@ -1321,6 +1326,7 @@ pub const ControlFlowParser = struct {
         }
 
         const items = try self.allocator.alloc([]const u8, items_count);
+        errdefer self.allocator.free(items);
         @memcpy(items, items_buffer[0..items_count]);
 
         const body = try self.allocator.alloc([]const u8, body_count);

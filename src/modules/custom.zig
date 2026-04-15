@@ -15,9 +15,13 @@ pub const CustomModule = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8, command: []const u8) !CustomModule {
+        const name_dup = try allocator.dupe(u8, name);
+        errdefer allocator.free(name_dup);
+        const cmd_dup = try allocator.dupe(u8, command);
+        errdefer allocator.free(cmd_dup);
         return .{
-            .name = try allocator.dupe(u8, name),
-            .command = try allocator.dupe(u8, command),
+            .name = name_dup,
+            .command = cmd_dup,
             .format = null,
             .icon = null,
             .color = null,
@@ -107,10 +111,7 @@ pub const FormatString = struct {
     /// Render format string with module info
     /// Supports: {symbol}, {version}, {name}
     pub fn render(self: *const FormatString, info: *const ModuleInfo) ![]const u8 {
-        var result: std.array_list.Managed(u8) = .{
-            .items = &[_]u8{},
-            .capacity = 0,
-        };
+        var result: std.array_list.Managed(u8) = .empty;
         defer result.deinit(self.allocator);
 
         var i: usize = 0;

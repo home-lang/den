@@ -251,7 +251,7 @@ fn getWindowsMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
         const total_bytes = total_kb * 1024;
         const free_bytes = free_kb * 1024;
         const used_bytes = total_bytes - free_bytes;
-        const percentage = @as(u8, @intCast((used_bytes * 100) / total_bytes));
+        const percentage = @as(u8, @intCast((@as(u128, used_bytes) * 100) / total_bytes));
 
         return types.MemoryInfo{
             .used_bytes = used_bytes,
@@ -321,7 +321,7 @@ fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
 
             const used_bytes = (active_pages + inactive_pages) * page_size;
             const total_bytes = total_pages * page_size;
-            const percentage = @as(u8, @intCast((used_bytes * 100) / total_bytes));
+            const percentage = @as(u8, @intCast((@as(u128, used_bytes) * 100) / total_bytes));
 
             return types.MemoryInfo{
                 .used_bytes = used_bytes,
@@ -370,7 +370,7 @@ fn getMemoryUsage(allocator: std.mem.Allocator) !?types.MemoryInfo {
             if (mem_total == 0) return null;
 
             const used_bytes = mem_total - mem_available;
-            const percentage = @as(u8, @intCast((used_bytes * 100) / mem_total));
+            const percentage = @as(u8, @intCast((@as(u128, used_bytes) * 100) / mem_total));
 
             return types.MemoryInfo{
                 .used_bytes = used_bytes,

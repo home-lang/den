@@ -46,6 +46,7 @@ pub const BraceExpander = struct {
 
         // Not a valid brace pattern, return as-is
         const result = try self.allocator.alloc([]const u8, 1);
+        errdefer self.allocator.free(result);
         result[0] = try self.allocator.dupe(u8, input);
         return result;
     }
@@ -121,8 +122,12 @@ pub const BraceExpander = struct {
 
         // Build results
         const result = try self.allocator.alloc([]const u8, items.items.len);
+        errdefer self.allocator.free(result);
+        var filled: usize = 0;
+        errdefer for (result[0..filled]) |r| self.allocator.free(r);
         for (items.items, 0..) |item, i| {
             result[i] = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ prefix, item, suffix });
+            filled = i + 1;
         }
 
         return result;
@@ -202,22 +207,37 @@ pub const BraceExpander = struct {
     }
 
     fn expandNumericSequence(self: *BraceExpander, prefix: []const u8, start: i64, end: i64, suffix: []const u8, pad_width: usize, custom_step: ?i64) ![][]const u8 {
-        // Direction is always determined by start/end, step magnitude from user
+        // Direction is always determined by start/end, step magnitude from user.
+        // Guard against i64.min: @abs(i64.min) doesn't fit in i64 and would panic.
         const direction: i64 = if (start <= end) 1 else -1;
-        const step: i64 = if (custom_step) |cs| (if (cs == 0) direction else direction * @as(i64, @intCast(@abs(cs)))) else direction;
-        const abs_step = @abs(step);
-        const range = @abs(end - start);
+        const step: i64 = if (custom_step) |cs| blk: {
+            if (cs == 0) break :blk direction;
+            const abs_cs: u64 = @abs(cs);
+            const clamped: i64 = if (abs_cs > std.math.maxInt(i64)) std.math.maxInt(i64) else @intCast(abs_cs);
+            break :blk direction * clamped;
+        } else direction;
+        const abs_step: u128 = @abs(step);
+        // Use i128 intermediate so end - start cannot overflow for extreme values.
+        const range_i128: i128 = if (end >= start)
+            @as(i128, end) - @as(i128, start)
+        else
+            @as(i128, start) - @as(i128, end);
+        const range: u128 = @intCast(range_i128);
         const count = range / abs_step + 1;
 
         if (count > 1000) {
             // Limit to prevent abuse
             const result = try self.allocator.alloc([]const u8, 1);
+            errdefer self.allocator.free(result);
             const full = try std.fmt.allocPrint(self.allocator, "{s}{{{d}..{d}}}{s}", .{ prefix, start, end, suffix });
             result[0] = full;
             return result;
         }
 
         const result = try self.allocator.alloc([]const u8, @intCast(count));
+        errdefer self.allocator.free(result);
+        var filled: usize = 0;
+        errdefer for (result[0..filled]) |r| self.allocator.free(r);
         var i: usize = 0;
         var current = start;
 
@@ -231,6 +251,7 @@ pub const BraceExpander = struct {
             } else {
                 result[i] = try std.fmt.allocPrint(self.allocator, "{s}{d}{s}", .{ prefix, current, suffix });
             }
+            filled = i + 1;
         }
 
         return result;
@@ -243,8 +264,9 @@ pub const BraceExpander = struct {
         var num_str: []const u8 = undefined;
 
         if (num < 0) {
-            // Handle negative numbers: we need to pad after the minus sign
-            const abs_num: u64 = @intCast(-num);
+            // Handle negative numbers: we need to pad after the minus sign.
+            // Use @abs() to avoid overflow on i64::MIN.
+            const abs_num: u64 = @abs(num);
             const num_len = std.fmt.count("{d}", .{abs_num});
             const pad_len = if (width > num_len + 1) width - num_len - 1 else 0;
 
@@ -295,12 +317,16 @@ pub const BraceExpander = struct {
         if (count > 52) {
             // Limit to prevent abuse (a-z is 26, A-Z is 26)
             const result = try self.allocator.alloc([]const u8, 1);
+            errdefer self.allocator.free(result);
             const full = try std.fmt.allocPrint(self.allocator, "{s}{{{c}..{c}}}{s}", .{ prefix, start, end, suffix });
             result[0] = full;
             return result;
         }
 
         const result = try self.allocator.alloc([]const u8, @intCast(count));
+        errdefer self.allocator.free(result);
+        var filled: usize = 0;
+        errdefer for (result[0..filled]) |r| self.allocator.free(r);
         var i: usize = 0;
         var current: i16 = start;
 
@@ -309,6 +335,7 @@ pub const BraceExpander = struct {
             i += 1;
         }) {
             result[i] = try std.fmt.allocPrint(self.allocator, "{s}{c}{s}", .{ prefix, @as(u8, @intCast(current)), suffix });
+            filled = i + 1;
         }
 
         return result;
@@ -322,12 +349,16 @@ pub const BraceExpander = struct {
         }
 
         const result = try self.allocator.alloc([]const u8, count);
+        errdefer self.allocator.free(result);
+        var filled: usize = 0;
+        errdefer for (result[0..filled]) |r| self.allocator.free(r);
         var idx: usize = 0;
 
         var iter = std.mem.splitScalar(u8, content, ',');
         while (iter.next()) |item| : (idx += 1) {
             const trimmed = std.mem.trim(u8, item, &std.ascii.whitespace);
             result[idx] = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ prefix, trimmed, suffix });
+            filled = idx + 1;
         }
 
         return result;
@@ -620,4 +651,22 @@ test "brace expansion no braces" {
 
     try std.testing.expectEqual(@as(usize, 1), result.len);
     try std.testing.expectEqualStrings("hello", result[0]);
+}
+
+test "formatZeroPadded @abs() handles negative numbers safely" {
+    const allocator = std.testing.allocator;
+    var expander = BraceExpander.init(allocator);
+
+    // Test a negative range expansion - exercises formatZeroPadded with num < 0
+    // Use a format-width range like {-005..5} which requires zero-padding negatives
+    const result = try expander.expand("{-002..002}");
+    defer {
+        for (result) |item| allocator.free(item);
+        allocator.free(result);
+    }
+
+    // Should produce: -002, -001, 000, 001, 002 (5 items)
+    try std.testing.expectEqual(@as(usize, 5), result.len);
+    try std.testing.expectEqualStrings("-002", result[0]);
+    try std.testing.expectEqualStrings("002", result[4]);
 }

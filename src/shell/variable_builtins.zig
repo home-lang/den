@@ -109,21 +109,28 @@ pub fn builtinLocal(shell: *Shell, cmd: *types.ParsedCommand) !void {
                 var_value = num_str;
             }
 
-            // Apply case conversion
+            // Apply case conversion. setLocal dupes the value internally, so we
+            // use a temporary stack buffer for small values and only heap-allocate
+            // when necessary. This avoids the double-allocation pattern of
+            // alloc→setLocal(dupe)→free.
             if (attrs.lowercase) {
-                const lower = try shell.allocator.alloc(u8, var_value.len);
-                for (var_value, 0..) |c, i| {
-                    lower[i] = std.ascii.toLower(c);
-                }
-                shell.function_manager.setLocal(var_name, lower) catch {};
-                shell.allocator.free(lower);
+                var stack_buf: [512]u8 = undefined;
+                const buf = if (var_value.len <= stack_buf.len)
+                    stack_buf[0..var_value.len]
+                else
+                    try shell.allocator.alloc(u8, var_value.len);
+                defer if (var_value.len > stack_buf.len) shell.allocator.free(buf);
+                for (var_value, 0..) |c, i| buf[i] = std.ascii.toLower(c);
+                shell.function_manager.setLocal(var_name, buf) catch {};
             } else if (attrs.uppercase) {
-                const upper = try shell.allocator.alloc(u8, var_value.len);
-                for (var_value, 0..) |c, i| {
-                    upper[i] = std.ascii.toUpper(c);
-                }
-                shell.function_manager.setLocal(var_name, upper) catch {};
-                shell.allocator.free(upper);
+                var stack_buf: [512]u8 = undefined;
+                const buf = if (var_value.len <= stack_buf.len)
+                    stack_buf[0..var_value.len]
+                else
+                    try shell.allocator.alloc(u8, var_value.len);
+                defer if (var_value.len > stack_buf.len) shell.allocator.free(buf);
+                for (var_value, 0..) |c, i| buf[i] = std.ascii.toUpper(c);
+                shell.function_manager.setLocal(var_name, buf) catch {};
             } else {
                 shell.function_manager.setLocal(var_name, var_value) catch {
                     try IO.eprint("local: {s}: failed to set variable\n", .{var_name});

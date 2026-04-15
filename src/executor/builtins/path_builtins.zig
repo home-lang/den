@@ -68,16 +68,24 @@ fn pathParse(allocator: std.mem.Allocator, args: []const []const u8) !i32 {
 
     // Output as record format
     const keys = try allocator.alloc([]const u8, 4);
-    keys[0] = try allocator.dupe(u8, "stem");
-    keys[1] = try allocator.dupe(u8, "extension");
-    keys[2] = try allocator.dupe(u8, "parent");
-    keys[3] = try allocator.dupe(u8, "name");
+    errdefer allocator.free(keys);
+    var keys_filled: usize = 0;
+    errdefer for (keys[0..keys_filled]) |k| allocator.free(k);
+    const key_names = [_][]const u8{ "stem", "extension", "parent", "name" };
+    for (key_names, 0..) |kn, ki| {
+        keys[ki] = try allocator.dupe(u8, kn);
+        keys_filled = ki + 1;
+    }
 
     const values = try allocator.alloc(Value, 4);
-    values[0] = .{ .string = try allocator.dupe(u8, stem) };
-    values[1] = .{ .string = try allocator.dupe(u8, ext_no_dot) };
-    values[2] = .{ .string = try allocator.dupe(u8, dirname_val) };
-    values[3] = .{ .string = try allocator.dupe(u8, basename_val) };
+    errdefer allocator.free(values);
+    var values_filled: usize = 0;
+    errdefer for (values[0..values_filled]) |*v| v.deinit(allocator);
+    const value_strs = [_][]const u8{ stem, ext_no_dot, dirname_val, basename_val };
+    for (value_strs, 0..) |vs, vi| {
+        values[vi] = .{ .string = try allocator.dupe(u8, vs) };
+        values_filled = vi + 1;
+    }
 
     var record = Value{ .record = .{ .keys = keys, .values = values } };
     defer record.deinit(allocator);

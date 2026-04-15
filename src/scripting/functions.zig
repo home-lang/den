@@ -134,10 +134,19 @@ pub const FunctionManager = struct {
 
     /// Define a new function
     pub fn defineFunction(self: *FunctionManager, name: []const u8, body: [][]const u8, is_exported: bool) !void {
-        // Create new function
+        // Create new function. Allocate the pieces separately so we can clean
+        // up on failure between allocations.
+        const func_name = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(func_name);
+        const func_body = try self.copyBody(body);
+        errdefer {
+            for (func_body) |line| self.allocator.free(line);
+            self.allocator.free(func_body);
+        }
+
         const func = Function{
-            .name = try self.allocator.dupe(u8, name),
-            .body = try self.copyBody(body),
+            .name = func_name,
+            .body = func_body,
             .is_exported = is_exported,
             .allocator = self.allocator,
         };
@@ -181,10 +190,16 @@ pub const FunctionManager = struct {
         }
 
         var frame = CallFrame.init(self.allocator, function_name);
+        errdefer frame.deinit();
 
-        // Set positional parameters
+        // Set positional parameters. If the caller passes more args than
+        // positional_params can hold, return an error rather than silently
+        // truncating — the function would otherwise see a partial argv.
+        if (args.len > frame.positional_params.len) {
+            return error.TooManyArguments;
+        }
         var i: usize = 0;
-        while (i < args.len and i < frame.positional_params.len) : (i += 1) {
+        while (i < args.len) : (i += 1) {
             frame.positional_params[i] = try self.allocator.dupe(u8, args[i]);
             frame.positional_params_count = i + 1;
         }
@@ -386,27 +401,27 @@ pub const FunctionManager = struct {
     /// Helper: Copy function body
     fn copyBody(self: *FunctionManager, body: [][]const u8) ![][]const u8 {
         const new_body = try self.allocator.alloc([]const u8, body.len);
+        errdefer self.allocator.free(new_body);
+        var filled: usize = 0;
+        errdefer for (new_body[0..filled]) |line| self.allocator.free(line);
         for (body, 0..) |line, i| {
             new_body[i] = try self.allocator.dupe(u8, line);
+            filled = i + 1;
         }
         return new_body;
     }
 
-    /// List all functions
+    /// List all functions. Returns a heap-allocated slice (no silent truncation).
     pub fn listFunctions(self: *FunctionManager) ![][]const u8 {
-        var names_buffer: [256][]const u8 = undefined;
-        var count: usize = 0;
+        var names: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer names.deinit(self.allocator);
 
         var iter = self.functions.iterator();
         while (iter.next()) |entry| {
-            if (count >= names_buffer.len) break;
-            names_buffer[count] = entry.key_ptr.*;
-            count += 1;
+            try names.append(self.allocator, entry.key_ptr.*);
         }
 
-        const names = try self.allocator.alloc([]const u8, count);
-        @memcpy(names, names_buffer[0..count]);
-        return names;
+        return try names.toOwnedSlice(self.allocator);
     }
 };
 
@@ -679,4 +694,40 @@ pub fn validateTypedArgs(
     }
 
     return null;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "CallFrame positional_params capacity" {
+    // Verify that the fixed-size positional_params array is large enough
+    // for typical use cases but bounded to catch abuse.
+    const frame = CallFrame.init(std.testing.allocator, "test");
+    try std.testing.expect(frame.positional_params.len >= 10);
+    try std.testing.expect(frame.positional_params.len <= 1024);
+}
+
+test "FunctionDef struct fields" {
+    // Ensure FunctionDef has the fields we rely on
+    const has_exported_field = blk: {
+        for (@typeInfo(FunctionDef).@"struct".fields) |f| {
+            if (std.mem.eql(u8, f.name, "is_exported")) {
+                break :blk true;
+            }
+        }
+        break :blk false;
+    };
+    try std.testing.expect(has_exported_field);
+}
+
+test "FunctionManager listFunctions is heap-allocated with no truncation" {
+    var mgr = FunctionManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    const names = try mgr.listFunctions();
+    defer std.testing.allocator.free(names);
+
+    // Empty manager returns empty slice, but it's properly heap-allocated
+    try std.testing.expectEqual(@as(usize, 0), names.len);
 }

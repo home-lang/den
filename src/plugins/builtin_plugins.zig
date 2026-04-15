@@ -1,5 +1,6 @@
 const std = @import("std");
 const plugin_mod = @import("plugin.zig");
+const IO = @import("../utils/io.zig").IO;
 const PluginConfig = plugin_mod.PluginConfig;
 const PluginInterface = plugin_mod.PluginInterface;
 
@@ -13,25 +14,25 @@ pub const hello_plugin = PluginInterface{
 };
 
 fn helloInit(config: *PluginConfig) !void {
-    std.debug.print("[hello] Initialized (version: {s})\n", .{config.version});
+    IO.print("[hello] Initialized (version: {s})\n", .{config.version}) catch {};
 }
 
 fn helloStart(config: *PluginConfig) !void {
-    std.debug.print("[hello] Started (enabled: {})\n", .{config.enabled});
+    IO.print("[hello] Started (enabled: {})\n", .{config.enabled}) catch {};
 }
 
 fn helloStop() !void {
-    std.debug.print("[hello] Stopped\n", .{});
+    IO.print("[hello] Stopped\n", .{}) catch {};
 }
 
 fn helloShutdown() !void {
-    std.debug.print("[hello] Shutdown\n", .{});
+    IO.print("[hello] Shutdown\n", .{}) catch {};
 }
 
 fn helloExecute(args: []const []const u8) !i32 {
-    std.debug.print("[hello] Executing with {} args\n", .{args.len});
+    IO.print("[hello] Executing with {} args\n", .{args.len}) catch {};
     for (args, 0..) |arg, i| {
-        std.debug.print("  arg[{}]: {s}\n", .{ i, arg });
+        IO.print("  arg[{}]: {s}\n", .{ i, arg }) catch {};
     }
     return 0;
 }
@@ -50,7 +51,7 @@ pub const counter_plugin = PluginInterface{
 fn counterInit(config: *PluginConfig) !void {
     _ = config;
     counter_value = 0;
-    std.debug.print("[counter] Initialized (count: {})\n", .{counter_value});
+    IO.print("[counter] Initialized (count: {})\n", .{counter_value}) catch {};
 }
 
 fn counterStart(config: *PluginConfig) !void {
@@ -58,38 +59,38 @@ fn counterStart(config: *PluginConfig) !void {
     if (config.get("initial")) |initial_str| {
         counter_value = std.fmt.parseInt(i32, initial_str, 10) catch 0;
     }
-    std.debug.print("[counter] Started (initial: {})\n", .{counter_value});
+    IO.print("[counter] Started (initial: {})\n", .{counter_value}) catch {};
 }
 
 fn counterStop() !void {
-    std.debug.print("[counter] Stopped (final: {})\n", .{counter_value});
+    IO.print("[counter] Stopped (final: {})\n", .{counter_value}) catch {};
 }
 
 fn counterShutdown() !void {
-    std.debug.print("[counter] Shutdown\n", .{});
+    IO.print("[counter] Shutdown\n", .{}) catch {};
     counter_value = 0;
 }
 
 fn counterExecute(args: []const []const u8) !i32 {
     if (args.len == 0) {
         // No args: print current value
-        std.debug.print("[counter] Current value: {}\n", .{counter_value});
+        IO.print("[counter] Current value: {}\n", .{counter_value}) catch {};
     } else {
         const cmd = args[0];
         if (std.mem.eql(u8, cmd, "inc")) {
             counter_value += 1;
-            std.debug.print("[counter] Incremented to {}\n", .{counter_value});
+            IO.print("[counter] Incremented to {}\n", .{counter_value}) catch {};
         } else if (std.mem.eql(u8, cmd, "dec")) {
             counter_value -= 1;
-            std.debug.print("[counter] Decremented to {}\n", .{counter_value});
+            IO.print("[counter] Decremented to {}\n", .{counter_value}) catch {};
         } else if (std.mem.eql(u8, cmd, "reset")) {
             counter_value = 0;
-            std.debug.print("[counter] Reset to 0\n", .{});
+            IO.print("[counter] Reset to 0\n", .{}) catch {};
         } else if (std.mem.eql(u8, cmd, "set") and args.len > 1) {
             counter_value = std.fmt.parseInt(i32, args[1], 10) catch 0;
-            std.debug.print("[counter] Set to {}\n", .{counter_value});
+            IO.print("[counter] Set to {}\n", .{counter_value}) catch {};
         } else {
-            std.debug.print("[counter] Unknown command: {s}\n", .{cmd});
+            IO.print("[counter] Unknown command: {s}\n", .{cmd}) catch {};
             return 1;
         }
     }
@@ -110,20 +111,20 @@ pub const echo_plugin = PluginInterface{
 fn echoInit(config: *PluginConfig) !void {
     _ = config;
     echo_fail_next = false;
-    std.debug.print("[echo] Initialized\n", .{});
+    IO.print("[echo] Initialized\n", .{}) catch {};
 }
 
 fn echoStart(config: *PluginConfig) !void {
     _ = config;
-    std.debug.print("[echo] Started\n", .{});
+    IO.print("[echo] Started\n", .{}) catch {};
 }
 
 fn echoStop() !void {
-    std.debug.print("[echo] Stopped\n", .{});
+    IO.print("[echo] Stopped\n", .{}) catch {};
 }
 
 fn echoShutdown() !void {
-    std.debug.print("[echo] Shutdown\n", .{});
+    IO.print("[echo] Shutdown\n", .{}) catch {};
     echo_fail_next = false;
 }
 
@@ -131,21 +132,21 @@ fn echoExecute(args: []const []const u8) !i32 {
     // Simulate error if requested
     if (echo_fail_next) {
         echo_fail_next = false;
-        std.debug.print("[echo] Simulated error!\n", .{});
+        IO.print("[echo] Simulated error!\n", .{}) catch {};
         return error.SimulatedError;
     }
 
     // Echo all arguments
-    std.debug.print("[echo] ", .{});
+    IO.print("[echo] ", .{}) catch {};
     for (args, 0..) |arg, i| {
-        if (i > 0) std.debug.print(" ", .{});
-        std.debug.print("{s}", .{arg});
+        if (i > 0) IO.print(" ", .{}) catch {};
+        IO.print("{s}", .{arg}) catch {};
 
         // Special command: fail next
         if (std.mem.eql(u8, arg, "--fail-next")) {
             echo_fail_next = true;
         }
     }
-    std.debug.print("\n", .{});
+    IO.print("\n", .{}) catch {};
     return 0;
 }

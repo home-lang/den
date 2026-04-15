@@ -112,28 +112,30 @@ pub const History = struct {
         }
         const content = buffer[0..total_read];
 
-        // Split by newlines and add to history (with de-duplication)
+        // Split by newlines and add to history (with de-duplication).
+        // Uses a StringHashMap for O(1) dedup instead of O(n) linear scan.
+        var seen = std.StringHashMap(void).init(allocator);
+        defer seen.deinit();
+        // Pre-populate with any existing entries so cross-load dedup works
+        var pre_i: usize = 0;
+        while (pre_i < history_count.*) : (pre_i += 1) {
+            if (history[pre_i]) |existing| {
+                try seen.put(existing, {});
+            }
+        }
+
         var iter = std.mem.splitScalar(u8, content, '\n');
         while (iter.next()) |line| {
             const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
             if (trimmed.len > 0 and history_count.* < history.len) {
-                // Check for duplicates before adding
-                var is_duplicate = false;
-                var k: usize = 0;
-                while (k < history_count.*) : (k += 1) {
-                    if (history[k]) |existing| {
-                        if (std.mem.eql(u8, existing, trimmed)) {
-                            is_duplicate = true;
-                            break;
-                        }
-                    }
-                }
+                // O(1) dedup check
+                if (seen.contains(trimmed)) continue;
 
-                if (!is_duplicate) {
-                    const cmd_copy = try allocator.dupe(u8, trimmed);
-                    history[history_count.*] = cmd_copy;
-                    history_count.* += 1;
-                }
+                const cmd_copy = try allocator.dupe(u8, trimmed);
+                history[history_count.*] = cmd_copy;
+                history_count.* += 1;
+                // Track by the stored (owned) slice so the key remains valid
+                try seen.put(cmd_copy, {});
             }
         }
     }
@@ -151,13 +153,30 @@ pub const History = struct {
         }
     }
 
-    /// Append a single command to the history file.
+    /// Append a single command to the history file. Creates the file if it
+    /// doesn't exist. Uses O_APPEND semantics to avoid races on seek.
     pub fn appendToFile(history_file_path: []const u8, command: []const u8) !void {
-        const file = try std.Io.Dir.cwd().openFile(std.Options.debug_io, history_file_path, .{ .mode = .write_only });
+        // Try opening existing file first; if it doesn't exist, create it.
+        const file = std.Io.Dir.cwd().openFile(
+            std.Options.debug_io,
+            history_file_path,
+            .{ .mode = .write_only },
+        ) catch |err| switch (err) {
+            error.FileNotFound => try std.Io.Dir.cwd().createFile(
+                std.Options.debug_io,
+                history_file_path,
+                .{},
+            ),
+            else => return err,
+        };
         defer file.close(std.Options.debug_io);
 
-        // Seek to end of file
-        _ = std.c.lseek(file.handle, 0, std.c.SEEK.END);
+        // Seek to end of file. On failure (e.g., pipe, non-seekable), surface
+        // an error rather than silently writing at the wrong offset.
+        if (builtin.os.tag != .windows) {
+            const seek_result = std.c.lseek(file.handle, 0, std.c.SEEK.END);
+            if (seek_result < 0) return error.SeekFailed;
+        }
 
         // Append the command
         try file.writeStreamingAll(std.Options.debug_io, command);
@@ -332,3 +351,112 @@ pub const SubstringMatch = struct {
     entry: []const u8,
     index: usize,
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "appendToFile creates file if missing" {
+    const allocator = std.testing.allocator;
+
+    // Use a path in a temp dir so we can clean up
+    const tmp_name = "den_test_history_append.tmp";
+
+    // Ensure it doesn't exist first
+    std.Io.Dir.cwd().deleteFile(std.Options.debug_io, tmp_name) catch {};
+
+    // Call appendToFile — should create the file
+    try History.appendToFile(tmp_name, "echo hello");
+
+    // Verify file exists and contains the command
+    const file = try std.Io.Dir.cwd().openFile(std.Options.debug_io, tmp_name, .{});
+    defer file.close(std.Options.debug_io);
+    defer std.Io.Dir.cwd().deleteFile(std.Options.debug_io, tmp_name) catch {};
+
+    var buf: [256]u8 = undefined;
+    const n = try file.readStreaming(std.Options.debug_io, &.{&buf});
+    const content = buf[0..n];
+    try std.testing.expectEqualStrings("echo hello\n", content);
+
+    _ = allocator; // Unused but reserved for future
+}
+
+test "appendToFile appends to existing file" {
+    const tmp_name = "den_test_history_append2.tmp";
+
+    // Create file with initial content
+    {
+        const file = try std.Io.Dir.cwd().createFile(std.Options.debug_io, tmp_name, .{});
+        defer file.close(std.Options.debug_io);
+        try file.writeStreamingAll(std.Options.debug_io, "first\n");
+    }
+    defer std.Io.Dir.cwd().deleteFile(std.Options.debug_io, tmp_name) catch {};
+
+    try History.appendToFile(tmp_name, "second");
+
+    // Read and verify
+    const file = try std.Io.Dir.cwd().openFile(std.Options.debug_io, tmp_name, .{});
+    defer file.close(std.Options.debug_io);
+
+    var buf: [256]u8 = undefined;
+    const n = try file.readStreaming(std.Options.debug_io, &.{&buf});
+    const content = buf[0..n];
+    try std.testing.expectEqualStrings("first\nsecond\n", content);
+}
+
+test "fastExactSearch finds exact match" {
+    const allocator = std.testing.allocator;
+
+    var history = [_]?[]const u8{ null, null, null };
+    history[0] = try allocator.dupe(u8, "echo one");
+    history[1] = try allocator.dupe(u8, "ls -la");
+    history[2] = try allocator.dupe(u8, "echo two");
+    defer {
+        for (history) |maybe| if (maybe) |e| allocator.free(e);
+    }
+
+    try std.testing.expect(History.fastExactSearch(&history, 3, "ls -la") != null);
+    try std.testing.expect(History.fastExactSearch(&history, 3, "nonexistent") == null);
+    try std.testing.expect(History.fastExactSearch(&history, 3, "") == null);
+    try std.testing.expect(History.fastExactSearch(&history, 0, "anything") == null);
+}
+
+test "prefixSearch finds by prefix" {
+    const allocator = std.testing.allocator;
+
+    var history = [_]?[]const u8{ null, null, null };
+    history[0] = try allocator.dupe(u8, "git status");
+    history[1] = try allocator.dupe(u8, "git push");
+    history[2] = try allocator.dupe(u8, "ls -la");
+    defer {
+        for (history) |maybe| if (maybe) |e| allocator.free(e);
+    }
+
+    const found = History.prefixSearch(&history, 3, "git");
+    try std.testing.expect(found != null);
+    // Should find most recent (git push)
+    try std.testing.expectEqualStrings("git push", found.?);
+
+    try std.testing.expect(History.prefixSearch(&history, 3, "nonmatch") == null);
+    try std.testing.expect(History.prefixSearch(&history, 3, "") == null);
+}
+
+test "substringSearch finds by substring" {
+    const allocator = std.testing.allocator;
+
+    var history = [_]?[]const u8{ null, null, null };
+    history[0] = try allocator.dupe(u8, "echo hello world");
+    history[1] = try allocator.dupe(u8, "ls -la");
+    history[2] = try allocator.dupe(u8, "echo hello again");
+    defer {
+        for (history) |maybe| if (maybe) |e| allocator.free(e);
+    }
+
+    const found = History.substringSearch(&history, 3, "hello", 3);
+    try std.testing.expect(found != null);
+    // Should find most recent "hello"
+    try std.testing.expectEqualStrings("echo hello again", found.?.entry);
+
+    try std.testing.expect(History.substringSearch(&history, 3, "", 3) == null);
+    try std.testing.expect(History.substringSearch(&history, 0, "anything", 0) == null);
+}

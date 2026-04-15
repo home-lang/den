@@ -597,9 +597,15 @@ pub const Tokenizer = struct {
                                 const advance = hex_end - self.pos;
                                 self.pos = hex_end;
                                 self.column += advance;
-                                // Encode as UTF-8
+                                // Encode as UTF-8; on invalid codepoint, emit U+FFFD.
                                 var utf8_buf: [4]u8 = undefined;
-                                const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch 1;
+                                const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch blk: {
+                                    // U+FFFD REPLACEMENT CHARACTER (0xEF 0xBF 0xBD)
+                                    utf8_buf[0] = 0xEF;
+                                    utf8_buf[1] = 0xBF;
+                                    utf8_buf[2] = 0xBD;
+                                    break :blk 3;
+                                };
                                 if (word_len + utf8_len > word_buffer.len) return error.WordTooLong;
                                 var ui: usize = 0;
                                 while (ui < utf8_len) : (ui += 1) {
@@ -1019,4 +1025,52 @@ test "tokenizer operators" {
     try std.testing.expectEqual(@as(usize, 5), tokens.len);
     try std.testing.expectEqual(TokenType.and_op, tokens[1].type);
     try std.testing.expectEqual(TokenType.or_op, tokens[3].type);
+}
+
+test "tokenizer ANSI-C \\u escape with invalid codepoint emits U+FFFD" {
+    const allocator = std.testing.allocator;
+
+    // 0xD800 is a surrogate half — not a valid Unicode scalar value.
+    // Previously `catch 1` would emit 1 byte of uninitialized memory; now we
+    // emit the U+FFFD replacement character (0xEF 0xBF 0xBD).
+    var tokenizer = Tokenizer.init(allocator, "echo $'\\uD800'");
+    const tokens = try tokenizer.tokenize();
+    defer tokenizer.deinitTokens(tokens);
+
+    // Should tokenize successfully (no crash), with the ANSI-C word containing
+    // the replacement character bytes.
+    try std.testing.expect(tokens.len >= 2);
+
+    // Find the ANSI-C token (after 'echo')
+    var found_replacement = false;
+    for (tokens) |tok| {
+        if (tok.value.len >= 3) {
+            // Search for the U+FFFD byte sequence
+            if (std.mem.indexOf(u8, tok.value, "\xEF\xBF\xBD") != null) {
+                found_replacement = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(found_replacement);
+}
+
+test "tokenizer ANSI-C valid \\u escape" {
+    const allocator = std.testing.allocator;
+
+    // U+0041 = 'A'
+    var tokenizer = Tokenizer.init(allocator, "echo $'\\u0041'");
+    const tokens = try tokenizer.tokenize();
+    defer tokenizer.deinitTokens(tokens);
+
+    try std.testing.expect(tokens.len >= 2);
+    // The ANSI-C word should contain 'A'
+    var found_A = false;
+    for (tokens) |tok| {
+        if (std.mem.indexOfScalar(u8, tok.value, 'A') != null) {
+            found_A = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_A);
 }

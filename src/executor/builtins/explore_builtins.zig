@@ -447,12 +447,18 @@ fn buildTableData(allocator: std.mem.Allocator, items: []const std.json.Value, r
 fn buildRecordData(allocator: std.mem.Allocator, obj: std.json.ObjectMap, raw: []const u8) !ExploreData {
     const count = obj.count();
     const keys = try allocator.alloc([]const u8, count);
+    errdefer allocator.free(keys);
     const values = try allocator.alloc(CellValue, count);
+    errdefer allocator.free(values);
+
+    var keys_filled: usize = 0;
+    errdefer for (keys[0..keys_filled]) |k| allocator.free(k);
 
     var it = obj.iterator();
     var i: usize = 0;
     while (it.next()) |entry| {
         keys[i] = try allocator.dupe(u8, entry.key_ptr.*);
+        keys_filled = i + 1;
         values[i] = jsonValueToCell(allocator, entry.value_ptr.*) catch CellValue{ .text = "<error>", .kind = .other };
         i += 1;
     }
@@ -490,28 +496,39 @@ fn buildJsonLinesData(allocator: std.mem.Allocator, items: []const std.json.Valu
 fn makeTextData(allocator: std.mem.Allocator, raw: []const u8) !ExploreData {
     // Split raw text into lines
     var line_list = std.ArrayList([]const u8).empty;
-    defer line_list.deinit(allocator);
+    errdefer {
+        for (line_list.items) |l| allocator.free(l);
+        line_list.deinit(allocator);
+    }
 
     var start: usize = 0;
     for (raw, 0..) |c, i| {
         if (c == '\n') {
-            try line_list.append(allocator, try allocator.dupe(u8, raw[start..i]));
+            const dup = try allocator.dupe(u8, raw[start..i]);
+            errdefer allocator.free(dup);
+            try line_list.append(allocator, dup);
             start = i + 1;
         }
     }
     if (start <= raw.len) {
         const remainder = raw[start..];
         if (remainder.len > 0) {
-            try line_list.append(allocator, try allocator.dupe(u8, remainder));
+            const dup = try allocator.dupe(u8, remainder);
+            errdefer allocator.free(dup);
+            try line_list.append(allocator, dup);
         }
     }
 
     // If no lines at all, add one empty line
     if (line_list.items.len == 0) {
-        try line_list.append(allocator, try allocator.dupe(u8, ""));
+        const dup = try allocator.dupe(u8, "");
+        errdefer allocator.free(dup);
+        try line_list.append(allocator, dup);
     }
 
     const lines = try allocator.dupe([]const u8, line_list.items);
+    // Items now also referenced by `lines`; only free the backing storage.
+    line_list.deinit(allocator);
 
     return ExploreData{
         .kind = .plain_text,

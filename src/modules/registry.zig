@@ -172,10 +172,7 @@ pub const ModuleRegistry = struct {
             return try self.renderWithFormat(info, format_str);
         }
 
-        var result: std.ArrayList(u8) = .{
-            .items = &[_]u8{},
-            .capacity = 0,
-        };
+        var result: std.ArrayList(u8) = .empty;
         defer result.deinit(self.allocator);
 
         // Icon
@@ -196,10 +193,7 @@ pub const ModuleRegistry = struct {
 
     /// Render module with custom format string
     fn renderWithFormat(self: *ModuleRegistry, info: *const ModuleInfo, format_str: []const u8) ![]const u8 {
-        var result: std.ArrayList(u8) = .{
-            .items = &[_]u8{},
-            .capacity = 0,
-        };
+        var result: std.ArrayList(u8) = .empty;
         defer result.deinit(self.allocator);
 
         var i: usize = 0;
@@ -240,10 +234,11 @@ pub const ModuleRegistry = struct {
 
     /// Detect all registered modules
     pub fn detectAll(self: *ModuleRegistry, cwd: []const u8) !std.ArrayList(ModuleInfo) {
-        var modules: std.ArrayList(ModuleInfo) = .{
-            .items = &[_]ModuleInfo{},
-            .capacity = 0,
-        };
+        var modules: std.ArrayList(ModuleInfo) = .empty;
+        errdefer {
+            for (modules.items) |*m| m.deinit(self.allocator);
+            modules.deinit(self.allocator);
+        }
 
         var iter = self.detectors.iterator();
         while (iter.next()) |entry| {
@@ -270,10 +265,7 @@ pub const ModuleRegistry = struct {
             return try self.allocator.dupe(u8, "");
         }
 
-        var result: std.ArrayList(u8) = .{
-            .items = &[_]u8{},
-            .capacity = 0,
-        };
+        var result: std.ArrayList(u8) = .empty;
         defer result.deinit(self.allocator);
 
         for (modules.items, 0..) |*info, i| {

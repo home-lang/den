@@ -418,16 +418,17 @@ pub const Executor = struct {
             const pid: std.posix.pid_t = @intCast(fork_ret);
 
             if (pid == 0) {
-                // Child process
+                // Child process — dup2 failures must terminate immediately;
+                // returning an error would continue with unredirected fds.
 
                 // Set up stdin from previous pipe
                 if (i > 0) {
-                    if (std.c.dup2(pipes_buffer[i - 1][0], std.posix.STDIN_FILENO) < 0) return error.Unexpected;
+                    if (std.c.dup2(pipes_buffer[i - 1][0], std.posix.STDIN_FILENO) < 0) std.c._exit(1);
                 }
 
                 // Set up stdout to next pipe
                 if (i < num_pipes) {
-                    if (std.c.dup2(pipes_buffer[i][1], std.posix.STDOUT_FILENO) < 0) return error.Unexpected;
+                    if (std.c.dup2(pipes_buffer[i][1], std.posix.STDOUT_FILENO) < 0) std.c._exit(1);
                 }
 
                 // Close all pipe fds in child
@@ -478,8 +479,10 @@ pub const Executor = struct {
                     std.c._exit(@intCast(exit_code));
                 } else {
                     _ = try self.executeExternalInChild(cmd);
+                    // executeExternalInChild normally execves and never returns;
+                    // if it does return, exit explicitly.
+                    std.c._exit(0);
                 }
-                unreachable;
             } else {
                 // Parent - store pid
                 pids_buffer[i] = pid;
@@ -529,9 +532,10 @@ pub const Executor = struct {
                 shell.allocator.free(kv.value);
                 shell.allocator.free(kv.key);
             }
-            // Create new PIPESTATUS array
-            const ps_arr = shell.allocator.alloc([]const u8, commands.len) catch null;
-            if (ps_arr) |arr| {
+            // Create new PIPESTATUS array. On any failure we must free all
+            // already-allocated elements and the array itself to avoid leaks.
+            if (shell.allocator.alloc([]const u8, commands.len) catch null) |arr| {
+                var filled: usize = 0;
                 var all_ok = true;
                 for (0..commands.len) |pi| {
                     var num_buf: [12]u8 = undefined;
@@ -540,12 +544,27 @@ pub const Executor = struct {
                         all_ok = false;
                         break;
                     };
+                    filled += 1;
                 }
                 if (all_ok) {
-                    const key = shell.allocator.dupe(u8, "PIPESTATUS") catch null;
-                    if (key) |k| {
-                        shell.arrays.put(k, arr) catch {};
+                    if (shell.allocator.dupe(u8, "PIPESTATUS") catch null) |k| {
+                        shell.arrays.put(k, arr) catch {
+                            // put failed — free the key and array contents to
+                            // prevent a leak (previously arr+elements+k leaked).
+                            shell.allocator.free(k);
+                            for (arr) |item| shell.allocator.free(item);
+                            shell.allocator.free(arr);
+                        };
+                    } else {
+                        // Key allocation failed — free the array contents.
+                        for (arr) |item| shell.allocator.free(item);
+                        shell.allocator.free(arr);
                     }
+                } else {
+                    // Partial failure — free the elements we did allocate,
+                    // then the array slice itself.
+                    for (arr[0..filled]) |item| shell.allocator.free(item);
+                    shell.allocator.free(arr);
                 }
             }
 
@@ -573,8 +592,9 @@ pub const Executor = struct {
 
         // Allocate args as null-terminated strings
         var arg_zs = try self.allocator.alloc([:0]u8, command.args.len);
+        var arg_zs_filled: usize = 0;
         defer {
-            for (arg_zs) |arg_z| {
+            for (arg_zs[0..arg_zs_filled]) |arg_z| {
                 self.allocator.free(arg_z);
             }
             self.allocator.free(arg_zs);
@@ -582,6 +602,7 @@ pub const Executor = struct {
 
         for (command.args, 0..) |arg, i| {
             arg_zs[i] = try self.allocator.dupeZ(u8, arg);
+            arg_zs_filled = i + 1;
             argv[i + 1] = arg_zs[i].ptr;
         }
         argv[argv_len] = null;
@@ -685,21 +706,22 @@ pub const Executor = struct {
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(c_uint, 0o644));
                                 if (fd < 0) return 1;
-                                _ = std.c.close(@intCast(fd));
+                                // fd is c_int, std.c.close takes c_int — no cast needed
+                                _ = std.c.close(fd);
                             },
                             .output_append => {
                                 const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, @as(c_uint, 0o644));
                                 if (fd < 0) return 1;
-                                _ = std.c.close(@intCast(fd));
+                                _ = std.c.close(fd);
                             },
                             .input => {
                                 const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{}, @as(c_uint, 0));
                                 if (fd < 0) return 1;
-                                _ = std.c.close(@intCast(fd));
+                                _ = std.c.close(fd);
                             },
                             else => {},
                         }
@@ -1410,11 +1432,14 @@ pub const Executor = struct {
                     var dir = std.Io.Dir.cwd().openDir(std.Options.debug_io, command.name, .{}) catch null;
                     if (dir) |*d| {
                         d.close(std.Options.debug_io);
-                        // Save OLDPWD, change directory, update PWD
+                        // Save OLDPWD, change directory, update PWD. Use
+                        // setVariableValue (which dupes) rather than raw .put —
+                        // cwd_buf is a stack buffer that would otherwise be
+                        // referenced by the hashmap after this frame returns.
                         var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                         const cwd_len = std.process.currentPath(std.Options.debug_io, &cwd_buf) catch 0;
                         if (cwd_len > 0) {
-                            shell.environment.put("OLDPWD", cwd_buf[0..cwd_len]) catch {};
+                            shell.setVariableValue("OLDPWD", cwd_buf[0..cwd_len]) catch {};
                         }
                         std.process.setCurrentPath(std.Options.debug_io, command.name) catch {
                             try IO.eprint("den: cd: {s}: No such file or directory\n", .{command.name});
@@ -1423,7 +1448,7 @@ pub const Executor = struct {
                         // Update PWD
                         const new_len = std.process.currentPath(std.Options.debug_io, &cwd_buf) catch 0;
                         if (new_len > 0) {
-                            shell.environment.put("PWD", cwd_buf[0..new_len]) catch {};
+                            shell.setVariableValue("PWD", cwd_buf[0..new_len]) catch {};
                         }
                         return 0;
                     }
@@ -1612,8 +1637,9 @@ pub const Executor = struct {
 
         // Allocate args as null-terminated strings
         var arg_zs = try self.allocator.alloc([:0]u8, command.args.len);
+        var arg_zs_filled: usize = 0;
         defer {
-            for (arg_zs) |arg_z| {
+            for (arg_zs[0..arg_zs_filled]) |arg_z| {
                 self.allocator.free(arg_z);
             }
             self.allocator.free(arg_zs);
@@ -1621,6 +1647,7 @@ pub const Executor = struct {
 
         for (command.args, 0..) |arg, i| {
             arg_zs[i] = try self.allocator.dupeZ(u8, arg);
+            arg_zs_filled = i + 1;
             argv[i + 1] = arg_zs[i].ptr;
         }
         argv[argv_len] = null;
@@ -1686,8 +1713,9 @@ pub const Executor = struct {
 
         // Allocate args as null-terminated strings
         var arg_zs = try self.allocator.alloc([:0]u8, command.args.len);
+        var arg_zs_filled: usize = 0;
         defer {
-            for (arg_zs) |arg_z| {
+            for (arg_zs[0..arg_zs_filled]) |arg_z| {
                 self.allocator.free(arg_z);
             }
             self.allocator.free(arg_zs);
@@ -1695,6 +1723,7 @@ pub const Executor = struct {
 
         for (command.args, 0..) |arg, i| {
             arg_zs[i] = try self.allocator.dupeZ(u8, arg);
+            arg_zs_filled = i + 1;
             argv[i + 1] = arg_zs[i].ptr;
         }
         argv[argv_len] = null;

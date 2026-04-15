@@ -90,8 +90,9 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
 
     // Allocate cmd name and args as null-terminated strings
     var arg_zs = try ctx.allocator.alloc([:0]u8, cmd.args.len);
+    var arg_zs_filled: usize = 0;
     defer {
-        for (arg_zs) |arg_z| {
+        for (arg_zs[0..arg_zs_filled]) |arg_z| {
             ctx.allocator.free(arg_z);
         }
         ctx.allocator.free(arg_zs);
@@ -99,6 +100,7 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
 
     for (cmd.args, 0..) |arg, i| {
         arg_zs[i] = try ctx.allocator.dupeZ(u8, arg);
+        arg_zs_filled = i + 1;
         argv[i] = arg_zs[i].ptr;
     }
     argv[cmd.args.len] = null;
@@ -113,8 +115,9 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
 
     // Allocate storage for the environment strings
     var env_strings = try ctx.allocator.alloc([:0]u8, env_count);
+    var env_strings_filled: usize = 0;
     defer {
-        for (env_strings) |env_str| {
+        for (env_strings[0..env_strings_filled]) |env_str| {
             ctx.allocator.free(env_str);
         }
         ctx.allocator.free(env_strings);
@@ -127,6 +130,7 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         const env_formatted = try std.fmt.allocPrint(ctx.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
         defer ctx.allocator.free(env_formatted);
         env_strings[i] = try ctx.allocator.dupeZ(u8, env_formatted);
+        env_strings_filled = i + 1;
         envp[i] = env_strings[i].ptr;
         i += 1;
     }
@@ -138,17 +142,16 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     // Replace the current process with the new program
     if (comptime builtin.os.tag == .windows) {
         // On Windows, we can't replace the process. Spawn and exit instead.
+        // Use dynamic allocation so we don't silently truncate at 128 args.
         const spawn = @import("../../utils/spawn.zig");
-        // Build argv with exe_path as first element followed by remaining args
-        var win_argv_buf: [128][]const u8 = undefined;
-        win_argv_buf[0] = exe_path.?;
         const remaining = if (cmd.args.len > 1) cmd.args[1..] else &[_][]const u8{};
+        const win_argv = try ctx.allocator.alloc([]const u8, 1 + remaining.len);
+        defer ctx.allocator.free(win_argv);
+        win_argv[0] = exe_path.?;
         for (remaining, 0..) |arg, idx| {
-            if (idx + 1 >= win_argv_buf.len) break;
-            win_argv_buf[idx + 1] = arg;
+            win_argv[idx + 1] = arg;
         }
-        const win_argv_len = @min(1 + remaining.len, win_argv_buf.len);
-        const exit_code = spawn.spawnAndWait(ctx.allocator, .{ .argv = win_argv_buf[0..win_argv_len] }) catch {
+        const exit_code = spawn.spawnAndWait(ctx.allocator, .{ .argv = win_argv }) catch {
             try IO.eprint("den: exec: failed to execute\n", .{});
             return 1;
         };
@@ -368,12 +371,14 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         _ = std.c.close(pipe_to_coproc[1]);
         _ = std.c.close(pipe_from_coproc[0]);
 
-        // Redirect stdin from pipe_to_coproc[0]
-        if (std.c.dup2(pipe_to_coproc[0], std.posix.STDIN_FILENO) < 0) std.process.exit(1);
+        // Redirect stdin from pipe_to_coproc[0].
+        // Use std.c._exit in forked children to avoid flushing parent-shared
+        // stdio buffers or invoking atexit handlers.
+        if (std.c.dup2(pipe_to_coproc[0], std.posix.STDIN_FILENO) < 0) std.c._exit(1);
         _ = std.c.close(pipe_to_coproc[0]);
 
         // Redirect stdout to pipe_from_coproc[1]
-        if (std.c.dup2(pipe_from_coproc[1], std.posix.STDOUT_FILENO) < 0) std.process.exit(1);
+        if (std.c.dup2(pipe_from_coproc[1], std.posix.STDOUT_FILENO) < 0) std.c._exit(1);
         _ = std.c.close(pipe_from_coproc[1]);
 
         // Execute the command
@@ -381,7 +386,7 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
 
         // Convert command name to null-terminated
         const cmd_z = std.posix.toPosixPath(cmd_name) catch {
-            std.process.exit(127);
+            std.c._exit(127);
         };
 
         // Build argv - allocate on stack
@@ -392,7 +397,7 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         for (cmd.args[cmd_start..]) |arg| {
             if (argv_idx >= 63) break;
             const arg_z = std.posix.toPosixPath(arg) catch {
-                std.process.exit(127);
+                std.c._exit(127);
             };
             @memcpy(argv_storage[argv_idx][0..arg_z.len], arg_z[0..arg_z.len]);
             argv_storage[argv_idx][arg_z.len] = 0;
@@ -405,7 +410,7 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         _ = common.c_exec.execvp(&cmd_z, @ptrCast(argv[0..argv_idx :null]));
 
         // If exec failed
-        std.process.exit(127);
+        std.c._exit(127);
     }
 
     // Parent process
@@ -435,7 +440,10 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         ctx.allocator.free(pid_name_dup);
         return 1;
     };
-    ctx.environment.put(pid_name_dup, pid_str_dup) catch {};
+    ctx.environment.put(pid_name_dup, pid_str_dup) catch {
+        ctx.allocator.free(pid_name_dup);
+        ctx.allocator.free(pid_str_dup);
+    };
 
     // For array-like access, we store as NAME_0 and NAME_1
     // (full array support is a separate feature)
@@ -451,7 +459,10 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         ctx.allocator.free(read_name_dup);
         return 1;
     };
-    ctx.environment.put(read_name_dup, read_str_dup) catch {};
+    ctx.environment.put(read_name_dup, read_str_dup) catch {
+        ctx.allocator.free(read_name_dup);
+        ctx.allocator.free(read_str_dup);
+    };
 
     var write_fd_name_buf: [128]u8 = undefined;
     const write_fd_name = std.fmt.bufPrint(&write_fd_name_buf, "{s}_1", .{name}) catch name;
@@ -465,11 +476,27 @@ pub fn coproc(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
         ctx.allocator.free(write_name_dup);
         return 1;
     };
-    ctx.environment.put(write_name_dup, write_str_dup) catch {};
+    ctx.environment.put(write_name_dup, write_str_dup) catch {
+        ctx.allocator.free(write_name_dup);
+        ctx.allocator.free(write_str_dup);
+    };
 
     // Store coproc info in shell for later cleanup
     ctx.setCoprocState(pid, pipe_from_coproc[0], pipe_to_coproc[1]) catch {};
 
     try IO.print("[coproc] {d}\n", .{pid});
     return 0;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "exec module imports compile" {
+    // Basic smoke test: module should compile and types are usable.
+    const spawn = @import("../../utils/spawn.zig");
+    _ = spawn;
+    _ = std;
+    _ = IO;
+    _ = builtin;
 }

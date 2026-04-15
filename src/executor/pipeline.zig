@@ -34,11 +34,17 @@ pub fn executePosix(
 
     if (num_pipes > MAX_PIPES) return error.TooManyPipes;
 
-    // Create all pipes
+    // Create all pipes, cleaning up on partial failure
+    var pipes_created: usize = 0;
+    errdefer for (0..pipes_created) |j| {
+        _ = std.c.close(pipes_buffer[j][0]);
+        _ = std.c.close(pipes_buffer[j][1]);
+    };
     for (0..num_pipes) |i| {
         var fds: [2]std.posix.fd_t = undefined;
         if (std.c.pipe(&fds) != 0) return error.Unexpected;
         pipes_buffer[i] = fds;
+        pipes_created += 1;
     }
 
     // Spawn all commands in the pipeline
@@ -50,16 +56,18 @@ pub fn executePosix(
         const pid: std.posix.pid_t = @intCast(fork_ret);
 
         if (pid == 0) {
-            // Child process
+            // Child process — dup2 failures here must terminate the child
+            // immediately; returning an error would continue executing the
+            // command with unredirected fds.
 
             // Set up stdin from previous pipe
             if (i > 0) {
-                if (std.c.dup2(pipes_buffer[i - 1][0], std.posix.STDIN_FILENO) < 0) return error.Unexpected;
+                if (std.c.dup2(pipes_buffer[i - 1][0], std.posix.STDIN_FILENO) < 0) std.c._exit(1);
             }
 
             // Set up stdout to next pipe
             if (i < num_pipes) {
-                if (std.c.dup2(pipes_buffer[i][1], std.posix.STDOUT_FILENO) < 0) return error.Unexpected;
+                if (std.c.dup2(pipes_buffer[i][1], std.posix.STDOUT_FILENO) < 0) std.c._exit(1);
             }
 
             // Close all pipe fds in child
@@ -69,16 +77,22 @@ pub fn executePosix(
             }
 
             // Apply redirections
-            applyRedirectionsFn(cmd.redirections) catch {};
+            applyRedirectionsFn(cmd.redirections) catch {
+                std.c._exit(1);
+            };
 
             // Execute the command
             if (isBuiltinFn(cmd.name)) {
                 const exit_code = executeBuiltinFn(cmd) catch 1;
                 std.c._exit(@intCast(exit_code));
             } else {
-                executeExternalFn(cmd) catch {};
+                executeExternalFn(cmd) catch {
+                    std.c._exit(127);
+                };
+                // executeExternalFn normally execves and does not return;
+                // if it does, terminate the child explicitly.
+                std.c._exit(0);
             }
-            unreachable;
         } else {
             // Parent - store pid
             pids_buffer[i] = pid;
@@ -97,7 +111,14 @@ pub fn executePosix(
     for (pids_buffer[0..commands.len]) |pid| {
         var wait_status: c_int = 0;
         if (comptime builtin.os.tag != .windows) {
-            _ = std.c.waitpid(pid, &wait_status, 0);
+            // Retry on EINTR so that incoming signals don't leave children as
+            // zombies or cause us to read uninitialized wait_status.
+            while (true) {
+                const r = std.c.waitpid(pid, &wait_status, 0);
+                if (r >= 0) break;
+                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                break;
+            }
         }
         const raw_status: u32 = @bitCast(wait_status);
         var status: i32 = undefined;
@@ -177,4 +198,28 @@ pub fn supportsNativePipelines() bool {
 // Tests
 test "pipeline constants" {
     try std.testing.expect(MAX_PIPES >= 16);
+}
+
+test "pipeline result struct" {
+    const result = PipelineResult{
+        .exit_code = 0,
+        .pipefail_code = 0,
+    };
+    try std.testing.expectEqual(@as(i32, 0), result.exit_code);
+    try std.testing.expectEqual(@as(i32, 0), result.pipefail_code);
+
+    // Non-zero pipefail with zero last exit
+    const result2 = PipelineResult{
+        .exit_code = 0,
+        .pipefail_code = 1,
+    };
+    try std.testing.expectEqual(@as(i32, 0), result2.exit_code);
+    try std.testing.expectEqual(@as(i32, 1), result2.pipefail_code);
+}
+
+test "supports native pipelines" {
+    // On non-Windows, should return true
+    if (comptime builtin.os.tag != .windows) {
+        try std.testing.expect(supportsNativePipelines());
+    }
 }

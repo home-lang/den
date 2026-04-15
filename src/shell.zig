@@ -317,7 +317,9 @@ pub const Shell = struct {
                 const entry_str = std.mem.span(@as([*:0]const u8, @ptrCast(entry)));
                 if (std.mem.indexOfScalar(u8, entry_str, '=')) |eq_pos| {
                     const key = try allocator.dupe(u8, entry_str[0..eq_pos]);
+                    errdefer allocator.free(key);
                     const val = try allocator.dupe(u8, entry_str[eq_pos + 1 ..]);
+                    errdefer allocator.free(val);
                     try env.put(key, val);
                 }
             }
@@ -330,14 +332,19 @@ pub const Shell = struct {
             const fallback = getEnvOwned(allocator, "USERPROFILE") orelse
                 try allocator.dupe(u8, "/");
             const home_key = try allocator.dupe(u8, "HOME");
-            try env.put(home_key, try allocator.dupe(u8, fallback));
+            errdefer allocator.free(home_key);
+            const home_val = try allocator.dupe(u8, fallback);
+            errdefer allocator.free(home_val);
+            try env.put(home_key, home_val);
             break :blk fallback;
         };
         defer allocator.free(home);
 
         if (!env.contains("PATH")) {
             const path_key = try allocator.dupe(u8, "PATH");
+            errdefer allocator.free(path_key);
             const path_val = try allocator.dupe(u8, "/usr/bin:/bin");
+            errdefer allocator.free(path_val);
             try env.put(path_key, path_val);
         }
 
@@ -347,7 +354,9 @@ pub const Shell = struct {
             for (types.EnvironmentConfig.defaults) |default_var| {
                 if (!env.contains(default_var.name)) {
                     const key_copy = try allocator.dupe(u8, default_var.name);
+                    errdefer allocator.free(key_copy);
                     const value_copy = try allocator.dupe(u8, default_var.value);
+                    errdefer allocator.free(value_copy);
                     try env.put(key_copy, value_copy);
                 }
             }
@@ -356,12 +365,14 @@ pub const Shell = struct {
             if (config.environment.variables) |custom_vars| {
                 for (custom_vars) |env_var| {
                     const value_copy = try allocator.dupe(u8, env_var.value);
+                    errdefer allocator.free(value_copy);
+                    const key_copy = try allocator.dupe(u8, env_var.name);
+                    errdefer allocator.free(key_copy);
                     // Free old key and value if exists
                     if (env.fetchRemove(env_var.name)) |old_kv| {
                         allocator.free(old_kv.key);
                         allocator.free(old_kv.value);
                     }
-                    const key_copy = try allocator.dupe(u8, env_var.name);
                     try env.put(key_copy, value_copy);
                 }
             }
@@ -383,7 +394,7 @@ pub const Shell = struct {
 
         // Install signal handlers
         signals.installHandlers() catch |err| {
-            std.debug.print("Warning: Failed to install signal handlers: {}\n", .{err});
+            IO.eprint("den: warning: failed to install signal handlers: {}\n", .{err}) catch {};
         };
 
         var shell = Shell{
@@ -1252,14 +1263,19 @@ pub const Shell = struct {
                                 _ = std.c.close(read_fd);
 
                                 var wait_status_bg: c_int = 0;
-                                _ = std.c.waitpid(@intCast(fork_ret), &wait_status_bg, 0);
+                                while (true) {
+                                    const r = std.c.waitpid(@intCast(fork_ret), &wait_status_bg, 0);
+                                    if (r >= 0) break;
+                                    if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                                    break;
+                                }
 
                                 const execFn2: *const fn (*Shell, []const u8) anyerror!void = &Shell.executeCommand;
                                 execFn2(self, pipe_cmd) catch {};
 
                                 if (saved_stdin >= 0) {
                                     _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                                    _ = std.c.close(@intCast(saved_stdin));
+                                    _ = std.c.close(saved_stdin);
                                 }
                             } else {
                                 self.executeCommand(inner) catch {};
@@ -1329,10 +1345,17 @@ pub const Shell = struct {
                                 const target = redir_str[0..target_end];
                                 redir_str = redir_str[target_end..];
 
-                                // Save original fd
-                                const ufd: usize = @intCast(src_fd);
-                                if (ufd < saved_fds.len and saved_fds[ufd] == -1) {
-                                    saved_fds[ufd] = std.c.dup(src_fd);
+                                // Save original fd. Guard against negative fds
+                                // (@intCast would wrap to MAX_USIZE) and against
+                                // dup() failures which return -1 — storing -1
+                                // here would cause dup2(-1, fd) later during
+                                // restoration.
+                                if (src_fd >= 0) {
+                                    const ufd: usize = @intCast(src_fd);
+                                    if (ufd < saved_fds.len and saved_fds[ufd] == -1) {
+                                        const dup_fd = std.c.dup(src_fd);
+                                        if (dup_fd >= 0) saved_fds[ufd] = dup_fd;
+                                    }
                                 }
 
                                 switch (mode) {
@@ -1363,7 +1386,8 @@ pub const Shell = struct {
                                         const fd = std.c.open(path_z, flags, @as(std.c.mode_t, 0o644));
                                         if (fd >= 0) {
                                             _ = std.c.dup2(fd, src_fd);
-                                            _ = std.c.close(@intCast(fd));
+                                            // fd is already c_int — std.c.close accepts c_int directly.
+                                            _ = std.c.close(fd);
                                         } else {
                                             redir_ok = false;
                                         }
@@ -1381,7 +1405,7 @@ pub const Shell = struct {
                                         const fd = std.c.open(path_z, .{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
                                         if (fd >= 0) {
                                             _ = std.c.dup2(fd, src_fd);
-                                            _ = std.c.close(@intCast(fd));
+                                            _ = std.c.close(fd);
                                         } else {
                                             redir_ok = false;
                                         }
@@ -1396,7 +1420,7 @@ pub const Shell = struct {
                                     for (saved_fds, 0..) |sfd, fi| {
                                         if (sfd != -1) {
                                             _ = std.c.dup2(sfd, @intCast(fi));
-                                            _ = std.c.close(@intCast(sfd));
+                                            _ = std.c.close(sfd);
                                         }
                                     }
                                     return err;
@@ -1407,7 +1431,7 @@ pub const Shell = struct {
                             for (saved_fds, 0..) |sfd, fi| {
                                 if (sfd != -1) {
                                     _ = std.c.dup2(sfd, @intCast(fi));
-                                    _ = std.c.close(@intCast(sfd));
+                                    _ = std.c.close(sfd);
                                 }
                             }
                             return;
@@ -1501,14 +1525,19 @@ pub const Shell = struct {
                             _ = std.c.close(read_fd);
 
                             var wait_status_sub: c_int = 0;
-                            _ = std.c.waitpid(@intCast(fork_ret), &wait_status_sub, 0);
+                            while (true) {
+                                const r = std.c.waitpid(@intCast(fork_ret), &wait_status_sub, 0);
+                                if (r >= 0) break;
+                                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                                break;
+                            }
 
                             const execFn: *const fn (*Shell, []const u8) anyerror!void = &Shell.executeCommand;
                             execFn(self, pipe_cmd) catch {};
 
                             if (saved_stdin >= 0) {
                                 _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                                _ = std.c.close(@intCast(saved_stdin));
+                                _ = std.c.close(saved_stdin);
                             }
                         } else {
                             const fork_ret = std.c.fork();
@@ -1525,9 +1554,14 @@ pub const Shell = struct {
                                 std.c._exit(@as(u8, @intCast(@as(u32, @bitCast(self.last_exit_code)) & 0xff)));
                                 unreachable;
                             }
-                            // Parent: wait for child
+                            // Parent: wait for child (retry on EINTR)
                             var wait_status: c_int = 0;
-                            _ = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
+                            while (true) {
+                                const r = std.c.waitpid(@intCast(fork_ret), &wait_status, 0);
+                                if (r >= 0) break;
+                                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                                break;
+                            }
                             if (wait_status & 0x7f == 0) {
                                 self.last_exit_code = @as(i32, @intCast((wait_status >> 8) & 0xff));
                             } else {
@@ -2328,7 +2362,7 @@ pub const Shell = struct {
                                 if (fd >= 0) {
                                     saved_fds[0] = std.c.dup(std.posix.STDIN_FILENO);
                                     _ = std.c.dup2(fd, std.posix.STDIN_FILENO);
-                                    _ = std.c.close(@intCast(fd));
+                                    _ = std.c.close(fd);
                                     applied = true;
                                 }
                             },
@@ -2343,7 +2377,7 @@ pub const Shell = struct {
                                 if (fd >= 0) {
                                     saved_fds[1] = std.c.dup(std.posix.STDOUT_FILENO);
                                     _ = std.c.dup2(fd, std.posix.STDOUT_FILENO);
-                                    _ = std.c.close(@intCast(fd));
+                                    _ = std.c.close(fd);
                                     applied = true;
                                 }
                             },
@@ -2378,14 +2412,14 @@ pub const Shell = struct {
                     }
                     if (applied) {
                         const result = shell_mod.dispatchBuiltin(self, cmd) catch .not_builtin;
-                        // Restore saved fds
+                        // Restore saved fds — saved_fds is [3]c_int, so no @intCast needed
                         if (saved_fds[0] >= 0) {
                             _ = std.c.dup2(saved_fds[0], std.posix.STDIN_FILENO);
-                            _ = std.c.close(@intCast(saved_fds[0]));
+                            _ = std.c.close(saved_fds[0]);
                         }
                         if (saved_fds[1] >= 0) {
                             _ = std.c.dup2(saved_fds[1], std.posix.STDOUT_FILENO);
-                            _ = std.c.close(@intCast(saved_fds[1]));
+                            _ = std.c.close(saved_fds[1]);
                         }
                         if (result == .handled) {
                             if (self.last_exit_code != 0) {
@@ -2630,14 +2664,19 @@ pub const Shell = struct {
                 const saved_stdin = std.c.dup(std.posix.STDIN_FILENO);
                 if (std.c.dup2(read_fd, std.posix.STDIN_FILENO) < 0) {
                     _ = std.c.close(read_fd);
-                    if (saved_stdin >= 0) _ = std.c.close(@intCast(saved_stdin));
+                    if (saved_stdin >= 0) _ = std.c.close(saved_stdin);
                     return null;
                 }
                 _ = std.c.close(read_fd);
 
-                // Wait for writer to finish
+                // Wait for writer to finish (retry on EINTR)
                 var wait_status_heredoc: c_int = 0;
-                _ = std.c.waitpid(@intCast(fork_ret), &wait_status_heredoc, 0);
+                while (true) {
+                    const r = std.c.waitpid(@intCast(fork_ret), &wait_status_heredoc, 0);
+                    if (r >= 0) break;
+                    if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                    break;
+                }
 
                 // Execute the command with stdin redirected
                 self.executeCommand(cmd_part) catch {};
@@ -2645,7 +2684,7 @@ pub const Shell = struct {
                 // Restore stdin
                 if (saved_stdin >= 0) {
                     _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                    _ = std.c.close(@intCast(saved_stdin));
+                    _ = std.c.close(saved_stdin);
                 }
 
                 // Execute any trailing content after the delimiter line
@@ -3333,9 +3372,14 @@ pub const Shell = struct {
                 _ = std.c.dup2(read_fd, std.posix.STDIN_FILENO);
                 _ = std.c.close(read_fd);
 
-                // Wait for control flow child to finish writing
+                // Wait for control flow child to finish writing (retry on EINTR)
                 var wait_status_cf: c_int = 0;
-                _ = std.c.waitpid(@intCast(fork_ret), &wait_status_cf, 0);
+                while (true) {
+                    const r = std.c.waitpid(@intCast(fork_ret), &wait_status_cf, 0);
+                    if (r >= 0) break;
+                    if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                    break;
+                }
 
                 // Execute the pipe command(s) — use function pointer to
                 // break the inferred error set cycle (executeCommand →
@@ -3346,7 +3390,7 @@ pub const Shell = struct {
                 // Restore stdin
                 if (saved_stdin >= 0) {
                     _ = std.c.dup2(saved_stdin, std.posix.STDIN_FILENO);
-                    _ = std.c.close(@intCast(saved_stdin));
+                    _ = std.c.close(saved_stdin);
                 }
                 return;
             } else {
@@ -3494,9 +3538,14 @@ pub const Shell = struct {
                 _ = std.c.close(saved_stdin);
             }
 
-            // Wait for child
+            // Wait for child (retry on EINTR)
             var wait_status_pipe: c_int = 0;
-            _ = std.c.waitpid(pid, &wait_status_pipe, 0);
+            while (true) {
+                const r = std.c.waitpid(pid, &wait_status_pipe, 0);
+                if (r >= 0) break;
+                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                break;
+            }
 
             return true;
         }

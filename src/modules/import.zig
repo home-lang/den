@@ -79,10 +79,7 @@ pub const ImportResolver = struct {
         return .{
             .store = store,
             .importing = std.StringHashMap(void).empty,
-            .search_paths = .{
-                .items = &[_][]const u8{},
-                .capacity = 0,
-            },
+            .search_paths = .empty,
         };
     }
 
@@ -131,24 +128,15 @@ pub const ImportResolver = struct {
         }
 
         var result = ImportResult{
-            .imported_commands = .{
-                .items = &[_]ImportResult.ImportedCommand{},
-                .capacity = 0,
-            },
-            .imported_variables = .{
-                .items = &[_]ImportResult.ImportedVariable{},
-                .capacity = 0,
-            },
+            .imported_commands = .empty,
+            .imported_variables = .empty,
             .module_name = allocator.dupe(u8, module_name) catch return ImportError.OutOfMemory,
         };
 
         // Import all commands.
         var cmd_iter = module.commands.iterator();
         while (cmd_iter.next()) |entry| {
-            var body_lines: std.ArrayList([]const u8) = .{
-                .items = &[_][]const u8{},
-                .capacity = 0,
-            };
+            var body_lines: std.ArrayList([]const u8) = .empty;
             for (entry.value_ptr.items) |line| {
                 const duped = allocator.dupe(u8, line) catch return ImportError.OutOfMemory;
                 body_lines.append(allocator, duped) catch return ImportError.OutOfMemory;
@@ -204,24 +192,15 @@ pub const ImportResolver = struct {
         }
 
         var result = ImportResult{
-            .imported_commands = .{
-                .items = &[_]ImportResult.ImportedCommand{},
-                .capacity = 0,
-            },
-            .imported_variables = .{
-                .items = &[_]ImportResult.ImportedVariable{},
-                .capacity = 0,
-            },
+            .imported_commands = .empty,
+            .imported_variables = .empty,
             .module_name = allocator.dupe(u8, module_name) catch return ImportError.OutOfMemory,
         };
 
         for (selected_names) |name| {
             // Try as a command first.
             if (module.getCommand(name)) |body| {
-                var body_lines: std.ArrayList([]const u8) = .{
-                    .items = &[_][]const u8{},
-                    .capacity = 0,
-                };
+                var body_lines: std.ArrayList([]const u8) = .empty;
                 for (body) |line| {
                     const duped = allocator.dupe(u8, line) catch return ImportError.OutOfMemory;
                     body_lines.append(allocator, duped) catch return ImportError.OutOfMemory;
@@ -324,10 +303,7 @@ pub fn parseImportList(allocator: std.mem.Allocator, input: []const u8) ![][]con
 
     const inner = trimmed[1 .. trimmed.len - 1];
 
-    var names: std.ArrayList([]const u8) = .{
-        .items = &[_][]const u8{},
-        .capacity = 0,
-    };
+    var names: std.ArrayList([]const u8) = .empty;
     errdefer {
         for (names.items) |n| allocator.free(n);
         names.deinit(allocator);

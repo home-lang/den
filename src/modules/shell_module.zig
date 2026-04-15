@@ -81,10 +81,11 @@ pub const ShellModule = struct {
             old_lines.deinit(allocator);
         }
 
-        var lines: std.ArrayList([]const u8) = .{
-            .items = &[_][]const u8{},
-            .capacity = 0,
-        };
+        var lines: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (lines.items) |item| allocator.free(item);
+            lines.deinit(allocator);
+        }
         for (body_lines) |line| {
             const duped = try allocator.dupe(u8, line);
             try lines.append(allocator, duped);
@@ -125,10 +126,8 @@ pub const ShellModule = struct {
     /// Caller owns the returned slice but NOT the individual strings
     /// (they are borrowed from the module).
     pub fn listCommands(self: *const ShellModule, allocator: std.mem.Allocator) ![]const []const u8 {
-        var names: std.ArrayList([]const u8) = .{
-            .items = &[_][]const u8{},
-            .capacity = 0,
-        };
+        var names: std.ArrayList([]const u8) = .empty;
+        errdefer names.deinit(allocator);
         var iter = self.commands.iterator();
         while (iter.next()) |entry| {
             try names.append(allocator, entry.key_ptr.*);
@@ -139,10 +138,8 @@ pub const ShellModule = struct {
     /// Return a list of all exported variable names.
     /// Caller owns the returned slice but NOT the individual strings.
     pub fn listVariables(self: *const ShellModule, allocator: std.mem.Allocator) ![]const []const u8 {
-        var names: std.ArrayList([]const u8) = .{
-            .items = &[_][]const u8{},
-            .capacity = 0,
-        };
+        var names: std.ArrayList([]const u8) = .empty;
+        errdefer names.deinit(allocator);
         var iter = self.variables.iterator();
         while (iter.next()) |entry| {
             try names.append(allocator, entry.key_ptr.*);
@@ -215,10 +212,8 @@ pub const ModuleStore = struct {
     /// Return a list of all registered module names.
     /// Caller owns the returned slice but NOT the individual strings.
     pub fn listModules(self: *const ModuleStore, allocator: std.mem.Allocator) ![]const []const u8 {
-        var names: std.ArrayList([]const u8) = .{
-            .items = &[_][]const u8{},
-            .capacity = 0,
-        };
+        var names: std.ArrayList([]const u8) = .empty;
+        errdefer names.deinit(allocator);
         var iter = self.modules.iterator();
         while (iter.next()) |entry| {
             try names.append(allocator, entry.key_ptr.*);

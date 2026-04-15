@@ -63,23 +63,37 @@ fn jsonValueToValue(jv: std.json.Value, allocator: std.mem.Allocator) std.mem.Al
                     break;
                 }
             }
-            if (all_objects and arr.items.len > 0) {
+            if (all_objects) {
                 break :blk try jsonArrayToTable(arr.items, allocator);
             }
             const items = try allocator.alloc(Value, arr.items.len);
+            var filled: usize = 0;
+            errdefer {
+                for (items[0..filled]) |*v| v.deinit(allocator);
+                allocator.free(items);
+            }
             for (arr.items, 0..) |item, i| {
                 items[i] = try jsonValueToValue(item, allocator);
+                filled = i + 1;
             }
             break :blk .{ .list = .{ .items = items } };
         },
         .object => |obj| blk: {
             const keys = try allocator.alloc([]const u8, obj.count());
+            errdefer allocator.free(keys);
             const values = try allocator.alloc(Value, obj.count());
+            errdefer allocator.free(values);
+            var keys_filled: usize = 0;
+            errdefer for (keys[0..keys_filled]) |k| allocator.free(k);
+            var values_filled: usize = 0;
+            errdefer for (values[0..values_filled]) |*v| v.deinit(allocator);
             var it = obj.iterator();
             var i: usize = 0;
             while (it.next()) |entry| {
                 keys[i] = try allocator.dupe(u8, entry.key_ptr.*);
+                keys_filled = i + 1;
                 values[i] = try jsonValueToValue(entry.value_ptr.*, allocator);
+                values_filled = i + 1;
                 i += 1;
             }
             break :blk .{ .record = .{ .keys = keys, .values = values } };
@@ -176,34 +190,65 @@ fn csvToValue(input: []const u8, allocator: std.mem.Allocator) !Value {
     // Parse header
     const header_line = lines_iter.first();
     var header_fields = std.ArrayList([]const u8).empty;
-    defer header_fields.deinit(allocator);
+    errdefer {
+        for (header_fields.items) |f| allocator.free(f);
+        header_fields.deinit(allocator);
+    }
     try parseCsvLine(allocator, header_line, &header_fields);
 
-    if (header_fields.items.len == 0) return .nothing;
+    if (header_fields.items.len == 0) {
+        header_fields.deinit(allocator);
+        return .nothing;
+    }
 
     const columns = try allocator.alloc([]const u8, header_fields.items.len);
+    errdefer allocator.free(columns);
     for (header_fields.items, 0..) |field, i| {
         columns[i] = field;
     }
+    // Ownership of header field strings has moved to `columns`.
+    header_fields.deinit(allocator);
+    errdefer for (columns) |c| allocator.free(c);
 
     // Parse data rows
     var rows_list = std.ArrayList([]Value).empty;
-    defer rows_list.deinit(allocator);
+    errdefer {
+        for (rows_list.items) |row| {
+            for (row) |*v| {
+                var mv = v.*;
+                mv.deinit(allocator);
+            }
+            allocator.free(row);
+        }
+        rows_list.deinit(allocator);
+    }
 
     while (lines_iter.next()) |line| {
         if (std.mem.trim(u8, line, &std.ascii.whitespace).len == 0) continue;
         var fields = std.ArrayList([]const u8).empty;
-        defer fields.deinit(allocator);
+        errdefer {
+            for (fields.items) |f| allocator.free(f);
+            fields.deinit(allocator);
+        }
         try parseCsvLine(allocator, line, &fields);
 
         const row = try allocator.alloc(Value, columns.len);
+        errdefer allocator.free(row);
+        var row_filled: usize = 0;
+        errdefer for (row[0..row_filled]) |*v| {
+            var mv = v.*;
+            mv.deinit(allocator);
+        };
         for (0..columns.len) |ci| {
             if (ci < fields.items.len) {
                 row[ci] = .{ .string = fields.items[ci] };
             } else {
                 row[ci] = .{ .string = try allocator.dupe(u8, "") };
             }
+            row_filled = ci + 1;
         }
+        // Field strings moved to row; only free the backing array for fields.
+        fields.deinit(allocator);
         try rows_list.append(allocator, row);
     }
 
@@ -213,8 +258,7 @@ fn csvToValue(input: []const u8, allocator: std.mem.Allocator) !Value {
 
 fn parseCsvLine(allocator: std.mem.Allocator, line: []const u8, fields: *std.ArrayList([]const u8)) !void {
     var i: usize = 0;
-    while (i <= line.len) {
-        if (i >= line.len) break;
+    while (i < line.len) {
         if (line[i] == '"') {
             // Quoted field
             i += 1;
@@ -540,4 +584,79 @@ pub fn toCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
 
     try IO.eprint("Unknown format: {s}\nSupported: json, csv, toml, yaml\n", .{format});
     return 1;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "parseCsvLine simple fields" {
+    const allocator = std.testing.allocator;
+    var fields: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (fields.items) |item| allocator.free(item);
+        fields.deinit(allocator);
+    }
+
+    try parseCsvLine(allocator, "a,b,c", &fields);
+    try std.testing.expectEqual(@as(usize, 3), fields.items.len);
+    try std.testing.expectEqualStrings("a", fields.items[0]);
+    try std.testing.expectEqualStrings("b", fields.items[1]);
+    try std.testing.expectEqualStrings("c", fields.items[2]);
+}
+
+test "parseCsvLine quoted fields" {
+    const allocator = std.testing.allocator;
+    var fields: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (fields.items) |item| allocator.free(item);
+        fields.deinit(allocator);
+    }
+
+    try parseCsvLine(allocator, "\"hello\",\"world\"", &fields);
+    try std.testing.expectEqual(@as(usize, 2), fields.items.len);
+    try std.testing.expectEqualStrings("hello", fields.items[0]);
+    try std.testing.expectEqualStrings("world", fields.items[1]);
+}
+
+test "parseCsvLine escaped quotes" {
+    const allocator = std.testing.allocator;
+    var fields: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (fields.items) |item| allocator.free(item);
+        fields.deinit(allocator);
+    }
+
+    // "" inside quoted field is an escaped "
+    try parseCsvLine(allocator, "\"say \"\"hi\"\"\"", &fields);
+    try std.testing.expectEqual(@as(usize, 1), fields.items.len);
+    try std.testing.expectEqualStrings("say \"hi\"", fields.items[0]);
+}
+
+test "parseCsvLine empty line" {
+    const allocator = std.testing.allocator;
+    var fields: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (fields.items) |item| allocator.free(item);
+        fields.deinit(allocator);
+    }
+
+    try parseCsvLine(allocator, "", &fields);
+    // Empty line produces zero fields
+    try std.testing.expectEqual(@as(usize, 0), fields.items.len);
+}
+
+test "parseCsvLine with commas in quoted" {
+    const allocator = std.testing.allocator;
+    var fields: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (fields.items) |item| allocator.free(item);
+        fields.deinit(allocator);
+    }
+
+    try parseCsvLine(allocator, "a,\"b,c\",d", &fields);
+    try std.testing.expectEqual(@as(usize, 3), fields.items.len);
+    try std.testing.expectEqualStrings("a", fields.items[0]);
+    try std.testing.expectEqualStrings("b,c", fields.items[1]);
+    try std.testing.expectEqualStrings("d", fields.items[2]);
 }

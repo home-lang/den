@@ -4,18 +4,20 @@ const posix = std.posix;
 
 const is_windows = builtin.os.tag == .windows;
 
-fn getStdinFile() std.Io.File {
+fn getStdinFile() !std.Io.File {
     if (is_windows) {
-        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse unreachable;
+        // Return an error rather than panic via `unreachable` if stdin isn't
+        // available (e.g., GUI apps, detached processes).
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) orelse return error.NoStdin;
         return .{ .handle = handle, .flags = .{ .nonblocking = false } };
     } else {
         return .{ .handle = posix.STDIN_FILENO, .flags = .{ .nonblocking = false } };
     }
 }
 
-fn getStdoutFile() std.Io.File {
+fn getStdoutFile() !std.Io.File {
     if (is_windows) {
-        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse unreachable;
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.NoStdout;
         return .{ .handle = handle, .flags = .{ .nonblocking = false } };
     } else {
         return .{ .handle = posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
@@ -221,7 +223,7 @@ pub const LspServer = struct {
 
     fn sendMessage(self: *LspServer, json_bytes: []const u8) !void {
         _ = self;
-        const stdout_file = getStdoutFile();
+        const stdout_file = try getStdoutFile();
         var header_buf: [64]u8 = undefined;
         const header = try std.fmt.bufPrint(&header_buf, "Content-Length: {d}\r\n\r\n", .{json_bytes.len});
         try stdout_file.writeStreamingAll(std.Options.debug_io, header);

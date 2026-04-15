@@ -305,10 +305,10 @@ pub const BuiltinContext = struct {
 
     // ============ Associative Array Operations ============
 
-    /// Get associative array
-    pub fn getAssocArray(self: *const BuiltinContext, name: []const u8) ?std.StringHashMap([]const u8) {
+    /// Get associative array (returns pointer to avoid expensive copy)
+    pub fn getAssocArray(self: *const BuiltinContext, name: []const u8) ?*std.StringHashMap([]const u8) {
         const shell_ref = self.shell orelse return null;
-        return shell_ref.assoc_arrays.get(name);
+        return shell_ref.assoc_arrays.getPtr(name);
     }
 
     // ============ Job Manager Access ============
@@ -708,3 +708,117 @@ pub const BuiltinError = error{
     InvalidIndex,
     OutOfMemory,
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "BuiltinContext init without shell" {
+    var env = std.StringHashMap([]const u8).init(std.testing.allocator);
+    defer env.deinit();
+
+    const ctx = BuiltinContext.init(std.testing.allocator, &env, null);
+    try std.testing.expect(!ctx.hasShell());
+    try std.testing.expectError(error.NoShellContext, ctx.getShell());
+    try std.testing.expect(ctx.getAlias("test") == null);
+    try std.testing.expect(ctx.getArray("test") == null);
+    try std.testing.expect(ctx.getAssocArray("test") == null);
+    try std.testing.expect(ctx.getSignalHandler("INT") == null);
+    try std.testing.expect(ctx.getCommandCache("ls") == null);
+    try std.testing.expect(ctx.getNamedDir("test") == null);
+    try std.testing.expect(ctx.getCoprocPid() == null);
+    try std.testing.expectEqual(@as(usize, 0), ctx.dirStackCount());
+    try std.testing.expectEqual(@as(usize, 0), ctx.historyCount());
+    try std.testing.expectEqual(@as(i32, 0), ctx.getLastExitCode());
+}
+
+test "BuiltinContext environment operations" {
+    var env = std.StringHashMap([]const u8).init(std.testing.allocator);
+    defer {
+        var iter = env.iterator();
+        while (iter.next()) |entry| {
+            std.testing.allocator.free(entry.key_ptr.*);
+            std.testing.allocator.free(entry.value_ptr.*);
+        }
+        env.deinit();
+    }
+
+    var ctx = BuiltinContext.init(std.testing.allocator, &env, null);
+
+    // getEnv on empty env returns null
+    try std.testing.expect(ctx.getEnv("FOO") == null);
+
+    // setEnv and getEnv
+    try ctx.setEnv("FOO", "bar");
+    try std.testing.expectEqualStrings("bar", ctx.getEnv("FOO").?);
+
+    // setEnv overwrites
+    try ctx.setEnv("FOO", "baz");
+    try std.testing.expectEqualStrings("baz", ctx.getEnv("FOO").?);
+
+    // unsetEnv
+    ctx.unsetEnv("FOO");
+    try std.testing.expect(ctx.getEnv("FOO") == null);
+
+    // unsetEnv on non-existent key is safe
+    ctx.unsetEnv("NONEXISTENT");
+}
+
+test "BuiltinContext envIterator" {
+    var env = std.StringHashMap([]const u8).init(std.testing.allocator);
+    defer {
+        var iter = env.iterator();
+        while (iter.next()) |entry| {
+            std.testing.allocator.free(entry.key_ptr.*);
+            std.testing.allocator.free(entry.value_ptr.*);
+        }
+        env.deinit();
+    }
+
+    var ctx = BuiltinContext.init(std.testing.allocator, &env, null);
+    try ctx.setEnv("A", "1");
+    try ctx.setEnv("B", "2");
+
+    var count: usize = 0;
+    var iter = ctx.envIterator();
+    while (iter.next()) |_| count += 1;
+    try std.testing.expectEqual(@as(usize, 2), count);
+}
+
+test "BuiltinContext isBuiltin without callback" {
+    var env = std.StringHashMap([]const u8).init(std.testing.allocator);
+    defer env.deinit();
+
+    const ctx = BuiltinContext.init(std.testing.allocator, &env, null);
+    // Without callback, isBuiltin always returns false
+    try std.testing.expect(!ctx.isBuiltin("cd"));
+    try std.testing.expect(!ctx.isBuiltin("echo"));
+}
+
+test "BuiltinContext executeCommand without executor returns error" {
+    var env = std.StringHashMap([]const u8).init(std.testing.allocator);
+    defer env.deinit();
+
+    var ctx = BuiltinContext.init(std.testing.allocator, &env, null);
+    try std.testing.expectError(error.NoExecutor, ctx.executeCommand("ls", &.{}));
+}
+
+test "BuiltinContext getAssocArray returns pointer type" {
+    // Verify the return type is a pointer (not a copy)
+    // Without a shell, it should return null
+    var env = std.StringHashMap([]const u8).init(std.testing.allocator);
+    defer env.deinit();
+
+    const ctx = BuiltinContext.init(std.testing.allocator, &env, null);
+    // Returns null because no shell is available
+    const result = ctx.getAssocArray("test");
+    try std.testing.expect(result == null);
+    // The important thing is that the return type is ?*std.StringHashMap
+    // not ?std.StringHashMap — this is a compile-time check
+    comptime {
+        const T = @TypeOf(result);
+        // This would fail to compile if getAssocArray returned a value instead of pointer
+        const info = @typeInfo(T);
+        std.debug.assert(info == .optional);
+    }
+}

@@ -63,8 +63,15 @@ pub const PluginManifest = struct {
         var license: ?[]const u8 = null;
         var min_shell_version: ?[]const u8 = null;
 
-        var dependencies_buffer: [32]Dependency = undefined;
-        var dependencies_count: usize = 0;
+        // Use dynamic allocation to avoid silent truncation at 32 dependencies.
+        var dependencies: std.ArrayListUnmanaged(Dependency) = .empty;
+        errdefer {
+            for (dependencies.items) |dep| {
+                allocator.free(dep.name);
+                allocator.free(dep.version_requirement);
+            }
+            dependencies.deinit(allocator);
+        }
 
         var line_iter = std.mem.splitScalar(u8, content, '\n');
         while (line_iter.next()) |line| {
@@ -89,37 +96,30 @@ pub const PluginManifest = struct {
                     min_shell_version = try allocator.dupe(u8, value);
                 } else if (std.mem.eql(u8, key, "dependency")) {
                     // Format: "name:version[:optional]"
-                    if (dependencies_count < dependencies_buffer.len) {
-                        const dep = try parseDependency(allocator, value);
-                        dependencies_buffer[dependencies_count] = dep;
-                        dependencies_count += 1;
+                    const dep = try parseDependency(allocator, value);
+                    errdefer {
+                        allocator.free(dep.name);
+                        allocator.free(dep.version_requirement);
                     }
+                    try dependencies.append(allocator, dep);
                 }
             }
         }
 
         // Validate required fields
         if (name == null or version == null or description == null or author == null) {
-            // Clean up any allocated fields before returning error
+            // Clean up any allocated fields before returning error.
+            // (dependencies cleanup is handled by the errdefer above.)
             if (name) |n| allocator.free(n);
             if (version) |v| allocator.free(v);
             if (description) |d| allocator.free(d);
             if (author) |a| allocator.free(a);
             if (license) |l| allocator.free(l);
             if (min_shell_version) |v| allocator.free(v);
-            for (dependencies_buffer[0..dependencies_count]) |dep| {
-                allocator.free(dep.name);
-                allocator.free(dep.version_requirement);
-            }
             return error.InvalidManifest;
         }
 
-        // Copy dependencies to owned slice
-        var deps: []Dependency = &[_]Dependency{};
-        if (dependencies_count > 0) {
-            deps = try allocator.alloc(Dependency, dependencies_count);
-            @memcpy(deps, dependencies_buffer[0..dependencies_count]);
-        }
+        const deps = try dependencies.toOwnedSlice(allocator);
 
         return .{
             .name = name.?,
@@ -355,3 +355,75 @@ pub const PluginDiscovery = struct {
         return true;
     }
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "PluginManifest.parse basic manifest" {
+    const content =
+        \\name = testplugin
+        \\version = 1.0.0
+        \\description = A test plugin
+        \\author = Test Author
+    ;
+
+    var manifest = try PluginManifest.parse(std.testing.allocator, content);
+    defer manifest.deinit();
+
+    try std.testing.expectEqualStrings("testplugin", manifest.name);
+    try std.testing.expectEqualStrings("1.0.0", manifest.version);
+    try std.testing.expectEqualStrings("A test plugin", manifest.description);
+    try std.testing.expectEqualStrings("Test Author", manifest.author);
+    try std.testing.expect(manifest.dependencies.len == 0);
+}
+
+test "PluginManifest.parse missing required fields" {
+    const content = "name = onlyname\n";
+    try std.testing.expectError(error.InvalidManifest, PluginManifest.parse(std.testing.allocator, content));
+}
+
+test "PluginManifest.parse with many dependencies (more than old 32 cap)" {
+    // Build a manifest with 50 dependencies (more than the previous 32-cap)
+    var content: std.ArrayListUnmanaged(u8) = .empty;
+    defer content.deinit(std.testing.allocator);
+
+    try content.appendSlice(std.testing.allocator,
+        \\name = testplugin
+        \\version = 1.0.0
+        \\description = Many deps
+        \\author = Test
+        \\
+    );
+    var i: usize = 0;
+    while (i < 50) : (i += 1) {
+        var buf: [64]u8 = undefined;
+        const line = try std.fmt.bufPrint(&buf, "dependency = dep{d}:1.0.0\n", .{i});
+        try content.appendSlice(std.testing.allocator, line);
+    }
+
+    var manifest = try PluginManifest.parse(std.testing.allocator, content.items);
+    defer manifest.deinit();
+
+    // All 50 dependencies should be present (no silent truncation)
+    try std.testing.expectEqual(@as(usize, 50), manifest.dependencies.len);
+}
+
+test "PluginManifest.parse optional fields" {
+    const content =
+        \\name = p
+        \\version = 1
+        \\description = d
+        \\author = a
+        \\license = MIT
+        \\min_shell_version = 0.5
+    ;
+
+    var manifest = try PluginManifest.parse(std.testing.allocator, content);
+    defer manifest.deinit();
+
+    try std.testing.expect(manifest.license != null);
+    try std.testing.expectEqualStrings("MIT", manifest.license.?);
+    try std.testing.expect(manifest.min_shell_version != null);
+    try std.testing.expectEqualStrings("0.5", manifest.min_shell_version.?);
+}

@@ -208,10 +208,7 @@ pub fn detectGCP(allocator: std.mem.Allocator, _: []const u8) !?CloudContext {
 
 /// Render cloud context to string
 pub fn renderCloudContext(allocator: std.mem.Allocator, ctx: *const CloudContext) ![]const u8 {
-    var result: std.ArrayList(u8) = .{
-        .items = &[_]u8{},
-        .capacity = 0,
-    };
+    var result: std.ArrayList(u8) = .empty;
     defer result.deinit(allocator);
 
     // Icon

@@ -186,27 +186,25 @@ pub const ColorRenderer = struct {
 
 /// Strip ANSI escape codes from text
 pub fn stripAnsi(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
-    var result: std.ArrayList(u8) = .{
-        .items = &[_]u8{},
-        .capacity = 0,
-    };
-    defer result.deinit(allocator);
+    var result: std.ArrayList(u8) = .empty;
+    // Use errdefer so that on allocation failure before toOwnedSlice we free
+    // the buffer, but on success toOwnedSlice transfers ownership.
+    errdefer result.deinit(allocator);
 
     var i: usize = 0;
     while (i < text.len) {
         if (text[i] == '\x1b' and i + 1 < text.len and text[i + 1] == '[') {
-            // Skip ANSI escape sequence
+            // Skip ANSI escape sequence (bounds-safe — don't overshoot if 'm' missing)
             i += 2;
             while (i < text.len and text[i] != 'm') : (i += 1) {}
-            i += 1;
+            if (i < text.len) i += 1;
         } else {
             try result.append(allocator, text[i]);
             i += 1;
         }
     }
 
-    const slice = try result.toOwnedSlice(allocator);
-    return slice;
+    return try result.toOwnedSlice(allocator);
 }
 
 /// Get visible width of text (without ANSI codes)
@@ -216,10 +214,11 @@ pub fn visibleWidth(text: []const u8) usize {
 
     while (i < text.len) {
         if (text[i] == '\x1b' and i + 1 < text.len and text[i + 1] == '[') {
-            // Skip ANSI escape sequence
+            // Skip ANSI escape sequence; only consume the trailing 'm' if present
+            // (a truncated escape at end-of-string must not read past the buffer).
             i += 2;
             while (i < text.len and text[i] != 'm') : (i += 1) {}
-            i += 1;
+            if (i < text.len) i += 1;
         } else {
             width += 1;
             i += 1;
@@ -227,4 +226,69 @@ pub fn visibleWidth(text: []const u8) usize {
     }
 
     return width;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "stripAnsi basic text" {
+    const allocator = std.testing.allocator;
+
+    const r1 = try stripAnsi(allocator, "hello");
+    defer allocator.free(r1);
+    try std.testing.expectEqualStrings("hello", r1);
+
+    const r2 = try stripAnsi(allocator, "");
+    defer allocator.free(r2);
+    try std.testing.expectEqualStrings("", r2);
+}
+
+test "stripAnsi with ANSI codes" {
+    const allocator = std.testing.allocator;
+
+    // Red text
+    const r1 = try stripAnsi(allocator, "\x1b[31mred\x1b[0m");
+    defer allocator.free(r1);
+    try std.testing.expectEqualStrings("red", r1);
+
+    // Bold + color
+    const r2 = try stripAnsi(allocator, "\x1b[1;31mBold red\x1b[0m");
+    defer allocator.free(r2);
+    try std.testing.expectEqualStrings("Bold red", r2);
+
+    // Multiple codes with text
+    const r3 = try stripAnsi(allocator, "\x1b[32mhello\x1b[0m \x1b[33mworld\x1b[0m");
+    defer allocator.free(r3);
+    try std.testing.expectEqualStrings("hello world", r3);
+}
+
+test "stripAnsi truncated escape sequence" {
+    const allocator = std.testing.allocator;
+
+    // Truncated escape at end (missing 'm')
+    const r1 = try stripAnsi(allocator, "\x1b[31");
+    defer allocator.free(r1);
+    try std.testing.expectEqualStrings("", r1);
+
+    // Just ESC[
+    const r2 = try stripAnsi(allocator, "\x1b[");
+    defer allocator.free(r2);
+    try std.testing.expectEqualStrings("", r2);
+}
+
+test "visibleWidth plain text" {
+    try std.testing.expectEqual(@as(usize, 5), visibleWidth("hello"));
+    try std.testing.expectEqual(@as(usize, 0), visibleWidth(""));
+}
+
+test "visibleWidth with ANSI codes" {
+    try std.testing.expectEqual(@as(usize, 3), visibleWidth("\x1b[31mfoo\x1b[0m"));
+    try std.testing.expectEqual(@as(usize, 11), visibleWidth("\x1b[1mhello world\x1b[0m"));
+}
+
+test "visibleWidth truncated escape safe" {
+    // Previously-buggy: unconditional i += 1 after the 'm' search would read past buf
+    try std.testing.expectEqual(@as(usize, 0), visibleWidth("\x1b[31"));
+    try std.testing.expectEqual(@as(usize, 0), visibleWidth("\x1b["));
 }

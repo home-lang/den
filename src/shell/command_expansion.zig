@@ -89,9 +89,15 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
         // to preserve patterns like a* for pattern matching
         const skip_globs = std.mem.eql(u8, cmd.name, "[[");
 
-        // Expand arguments (variables + braces + globs)
-        var expanded_args_buffer: [128][]const u8 = undefined;
-        var expanded_args_count: usize = 0;
+        // Expand arguments (variables + braces + globs). Uses dynamic
+        // allocation to avoid the old 128-arg cap — glob expansion can easily
+        // produce thousands of arguments (e.g. `ls src/**/*.zig` in a large
+        // project).
+        var expanded_args: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer {
+            for (expanded_args.items) |a| self.allocator.free(a);
+            expanded_args.deinit(self.allocator);
+        }
 
         var prev_arg_is_v: bool = false;
         for (cmd.args, 0..) |arg, arg_idx| {
@@ -118,12 +124,9 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
                     var split_iter = std.mem.splitAny(u8, spread_expanded, " \t\n");
                     while (split_iter.next()) |part| {
                         if (part.len > 0) {
-                            if (expanded_args_count >= expanded_args_buffer.len) {
-                                self.allocator.free(arg);
-                                return error.TooManyArguments;
-                            }
-                            expanded_args_buffer[expanded_args_count] = try self.allocator.dupe(u8, part);
-                            expanded_args_count += 1;
+                            const duped = try self.allocator.dupe(u8, part);
+                            errdefer self.allocator.free(duped);
+                            try expanded_args.append(self.allocator, duped);
                         }
                     }
                     self.allocator.free(arg);
@@ -143,13 +146,7 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
 
             if (skip_globs) {
                 // For [[ ]], only do variable expansion, no brace/glob expansion
-                if (expanded_args_count >= expanded_args_buffer.len) {
-                    self.allocator.free(var_expanded);
-                    self.allocator.free(arg);
-                    return error.TooManyArguments;
-                }
-                expanded_args_buffer[expanded_args_count] = var_expanded;
-                expanded_args_count += 1;
+                try expanded_args.append(self.allocator, var_expanded);
                 self.allocator.free(arg);
                 continue;
             }
@@ -185,10 +182,9 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
                             self.allocator.free(glob_exp);
                         }
                         for (glob_exp) |path| {
-                            if (expanded_args_count >= expanded_args_buffer.len)
-                                return error.TooManyArguments;
-                            expanded_args_buffer[expanded_args_count] = try stripGlobEscapes(self.allocator, path);
-                            expanded_args_count += 1;
+                            const stripped = try stripGlobEscapes(self.allocator, path);
+                            errdefer self.allocator.free(stripped);
+                            try expanded_args.append(self.allocator, stripped);
                         }
                     }
                 }
@@ -219,11 +215,9 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
 
                 // Add all glob matches to args, stripping glob escape backslashes
                 for (glob_expanded) |path| {
-                    if (expanded_args_count >= expanded_args_buffer.len) {
-                        return error.TooManyArguments;
-                    }
-                    expanded_args_buffer[expanded_args_count] = try stripGlobEscapes(self.allocator, path);
-                    expanded_args_count += 1;
+                    const stripped = try stripGlobEscapes(self.allocator, path);
+                    errdefer self.allocator.free(stripped);
+                    try expanded_args.append(self.allocator, stripped);
                 }
             }
 
@@ -237,9 +231,7 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
             self.allocator.free(qa);
             cmd.quoted_args = null;
         }
-        const new_args = try self.allocator.alloc([]const u8, expanded_args_count);
-        @memcpy(new_args, expanded_args_buffer[0..expanded_args_count]);
-        cmd.args = new_args;
+        cmd.args = try expanded_args.toOwnedSlice(self.allocator);
 
         // Expand redirection targets (variables only, no globs)
         for (cmd.redirections, 0..) |*redir, i| {
@@ -372,7 +364,9 @@ pub fn expandAliases(self: *Shell, chain: *types.CommandChain) !void {
 
                         if (extra_count > 0) {
                             const new_args = try self.allocator.alloc([]const u8, extra_count + cmd.args.len);
+                            errdefer self.allocator.free(new_args);
                             var idx: usize = 0;
+                            errdefer for (new_args[0..idx]) |a| self.allocator.free(a);
                             var split_iter = std.mem.splitScalar(u8, extra_args_str, ' ');
                             while (split_iter.next()) |part| {
                                 if (part.len > 0) {
@@ -426,4 +420,39 @@ fn containsVariableRef(s: []const u8) bool {
         }
     }
     return false;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "containsVariableRef basic" {
+    try std.testing.expect(containsVariableRef("$var"));
+    try std.testing.expect(containsVariableRef("hello $VAR world"));
+    try std.testing.expect(containsVariableRef("${BRACED}"));
+    try std.testing.expect(containsVariableRef("$(cmd)"));
+
+    try std.testing.expect(!containsVariableRef("plain text"));
+    try std.testing.expect(!containsVariableRef(""));
+    try std.testing.expect(!containsVariableRef("\\$escaped"));
+}
+
+test "containsVariableRef mixed" {
+    // $var with preceding \$ shouldn't match the \$, but should match the $var
+    try std.testing.expect(containsVariableRef("\\$first $real"));
+}
+
+test "isDenBuiltin known builtins" {
+    try std.testing.expect(isDenBuiltin("str"));
+    try std.testing.expect(isDenBuiltin("path"));
+    try std.testing.expect(isDenBuiltin("math"));
+    try std.testing.expect(isDenBuiltin("watch"));
+    try std.testing.expect(isDenBuiltin("use"));
+}
+
+test "isDenBuiltin unknown commands" {
+    try std.testing.expect(!isDenBuiltin("ls"));
+    try std.testing.expect(!isDenBuiltin("cat"));
+    try std.testing.expect(!isDenBuiltin(""));
+    try std.testing.expect(!isDenBuiltin("strXY"));
 }

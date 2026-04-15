@@ -353,23 +353,25 @@ pub const ScriptSuggesterPlugin = struct {
             try self.refreshCache(environment);
         }
 
-        var suggestions_buffer: [50][]const u8 = undefined;
-        var suggestions_count: usize = 0;
+        // Use dynamic allocation to avoid silent truncation at 50 suggestions.
+        var suggestions: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer {
+            for (suggestions.items) |s| self.allocator.free(s);
+            suggestions.deinit(self.allocator);
+        }
 
         // Search cached scripts
         if (self.cached_scripts) |scripts| {
             for (scripts) |script| {
-                if (suggestions_count >= suggestions_buffer.len) break;
                 if (std.mem.startsWith(u8, script, input)) {
-                    suggestions_buffer[suggestions_count] = try self.allocator.dupe(u8, script);
-                    suggestions_count += 1;
+                    const duped = try self.allocator.dupe(u8, script);
+                    errdefer self.allocator.free(duped);
+                    try suggestions.append(self.allocator, duped);
                 }
             }
         }
 
-        const result = try self.allocator.alloc([]const u8, suggestions_count);
-        @memcpy(result, suggestions_buffer[0..suggestions_count]);
-        return result;
+        return try suggestions.toOwnedSlice(self.allocator);
     }
 
     /// Refresh the cache of available scripts
@@ -383,8 +385,13 @@ pub const ScriptSuggesterPlugin = struct {
             self.cached_scripts = null;
         }
 
-        var scripts_buffer: [500][]const u8 = undefined;
-        var scripts_count: usize = 0;
+        // Use dynamic allocation to avoid silent truncation at 500 scripts.
+        // /usr/bin alone can have 2000+ executables on modern systems.
+        var scripts: std.ArrayListUnmanaged([]const u8) = .empty;
+        errdefer {
+            for (scripts.items) |s| self.allocator.free(s);
+            scripts.deinit(self.allocator);
+        }
 
         // Get PATH environment variable
         const path = environment.get("PATH") orelse return;
@@ -403,28 +410,22 @@ pub const ScriptSuggesterPlugin = struct {
             while (iter.next(std.Options.debug_io) catch null) |entry| {
                 if (entry.kind == .file) {
                     // Check if executable (simplified - would need stat in real impl)
-                    if (scripts_count < scripts_buffer.len) {
-                        scripts_buffer[scripts_count] = try self.allocator.dupe(u8, entry.name);
-                        scripts_count += 1;
-                    }
+                    const duped = try self.allocator.dupe(u8, entry.name);
+                    errdefer self.allocator.free(duped);
+                    try scripts.append(self.allocator, duped);
                 }
             }
         }
 
         // Sort scripts alphabetically
-        if (scripts_count > 0) {
-            const scripts_slice = scripts_buffer[0..scripts_count];
-            std.mem.sort([]const u8, scripts_slice, {}, struct {
-                fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-                    return std.mem.order(u8, a, b) == .lt;
-                }
-            }.lessThan);
-        }
+        std.mem.sort([]const u8, scripts.items, {}, struct {
+            fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+                return std.mem.order(u8, a, b) == .lt;
+            }
+        }.lessThan);
 
-        // Store in cache
-        const result = try self.allocator.alloc([]const u8, scripts_count);
-        @memcpy(result, scripts_buffer[0..scripts_count]);
-        self.cached_scripts = result;
+        // Transfer ownership to cached_scripts
+        self.cached_scripts = try scripts.toOwnedSlice(self.allocator);
         self.cache_valid = true;
     }
 
@@ -444,3 +445,48 @@ pub const ScriptSuggesterPlugin = struct {
         return try allocator.alloc([]const u8, 0);
     }
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "ScriptSuggesterPlugin complete returns heap-allocated slice" {
+    // Verify the completion function returns a properly heap-allocated slice
+    const result = try ScriptSuggesterPlugin.complete("test", std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqual(@as(usize, 0), result.len);
+}
+
+test "ScriptSuggesterPlugin refreshCache with empty PATH" {
+    var plugin = ScriptSuggesterPlugin{
+        .allocator = std.testing.allocator,
+        .enabled = true,
+        .cached_scripts = null,
+        .cache_scripts = true,
+        .cache_valid = false,
+    };
+    defer if (plugin.cached_scripts) |scripts| {
+        for (scripts) |s| plugin.allocator.free(s);
+        plugin.allocator.free(scripts);
+    };
+
+    // Empty env should return gracefully (no PATH set)
+    var env = std.StringHashMap([]const u8).init(std.testing.allocator);
+    defer env.deinit();
+
+    try plugin.refreshCache(&env);
+    // cache remains invalid or scripts is null
+}
+
+test "ScriptSuggesterPlugin invalidateCache" {
+    var plugin = ScriptSuggesterPlugin{
+        .allocator = std.testing.allocator,
+        .enabled = true,
+        .cached_scripts = null,
+        .cache_scripts = true,
+        .cache_valid = true,
+    };
+
+    plugin.invalidateCache();
+    try std.testing.expect(!plugin.cache_valid);
+}

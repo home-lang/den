@@ -88,13 +88,20 @@ pub const StructuredHistory = struct {
 
         const timestamp = getTimestamp();
 
+        const cmd_dup = try self.allocator.dupe(u8, command);
+        errdefer self.allocator.free(cmd_dup);
+        const cwd_dup = try self.allocator.dupe(u8, cwd);
+        errdefer self.allocator.free(cwd_dup);
+        const session_dup = try self.allocator.dupe(u8, self.session_id);
+        errdefer self.allocator.free(session_dup);
+
         const entry = HistoryEntry{
-            .command = try self.allocator.dupe(u8, command),
+            .command = cmd_dup,
             .timestamp = timestamp,
             .duration_ms = duration_ms,
             .exit_code = exit_code,
-            .cwd = try self.allocator.dupe(u8, cwd),
-            .session_id = try self.allocator.dupe(u8, self.session_id),
+            .cwd = cwd_dup,
+            .session_id = session_dup,
         };
 
         try self.entries.append(self.allocator, entry);
@@ -215,17 +222,20 @@ pub const StructuredHistory = struct {
             const cnt = kv.value_ptr.*;
 
             if (most_used_count < 10) {
+                const dup = try allocator.dupe(u8, cmd);
                 most_used[most_used_count] = .{
-                    .command = try allocator.dupe(u8, cmd),
+                    .command = dup,
                     .count = cnt,
                 };
                 most_used_count += 1;
                 // Bubble-sort the new entry into position.
                 sortMostUsed(most_used[0..most_used_count]);
             } else if (cnt > most_used[most_used_count - 1].count) {
+                // Dupe first so a failure doesn't leave a dangling pointer.
+                const dup = try allocator.dupe(u8, cmd);
                 allocator.free(most_used[most_used_count - 1].command);
                 most_used[most_used_count - 1] = .{
-                    .command = try allocator.dupe(u8, cmd),
+                    .command = dup,
                     .count = cnt,
                 };
                 sortMostUsed(most_used[0..most_used_count]);

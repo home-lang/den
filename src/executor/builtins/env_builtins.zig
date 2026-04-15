@@ -188,6 +188,8 @@ pub fn exportBuiltin(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                     @memcpy(val_buf[0..var_value.len], var_value);
                     val_buf[var_value.len] = 0;
                     _ = libc_env.setenv(name_buf[0..var_name.len :0], val_buf[0..var_value.len :0], 1);
+                } else {
+                    try IO.eprint("den: export: variable name or value too long for process environment\n", .{});
                 }
             }
         } else {
@@ -207,6 +209,8 @@ pub fn exportBuiltin(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
                     @memcpy(val_buf[0..val.len], val);
                     val_buf[val.len] = 0;
                     _ = libc_env.setenv(name_buf[0..arg.len :0], val_buf[0..val.len :0], 1);
+                } else {
+                    try IO.eprint("den: export: variable name or value too long for process environment\n", .{});
                 }
             }
         }
@@ -644,7 +648,9 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         // Save original OS env value
         const original = getenvFromSlice(unset_var);
         if (original) |orig| {
-            try saved_os_env.put(unset_var, try ctx.allocator.dupe(u8, orig));
+            const saved = try ctx.allocator.dupe(u8, orig);
+            errdefer ctx.allocator.free(saved);
+            try saved_os_env.put(unset_var, saved);
         } else {
             try saved_os_env.put(unset_var, null);
         }
@@ -662,7 +668,9 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         if (!saved_os_env.contains(override.key)) {
             const original = getenvFromSlice(override.key);
             if (original) |orig| {
-                try saved_os_env.put(override.key, try ctx.allocator.dupe(u8, orig));
+                const saved = try ctx.allocator.dupe(u8, orig);
+                errdefer ctx.allocator.free(saved);
+                try saved_os_env.put(override.key, saved);
             } else {
                 try saved_os_env.put(override.key, null);
             }
@@ -706,6 +714,41 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
     restoreOsEnv(ctx.allocator, &saved_os_env);
 
     return result;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "getenvFromSlice returns null for missing key" {
+    // Use a key that's unlikely to be in the environment
+    const result = getenvFromSlice("__DEN_TEST_NONEXISTENT_VAR_XYZ__");
+    try std.testing.expect(result == null);
+}
+
+test "getenvFromSlice returns null for oversized key" {
+    // Key longer than 512 bytes should return null
+    const long_key = "A" ** 513;
+    const result = getenvFromSlice(long_key);
+    try std.testing.expect(result == null);
+}
+
+test "getenvFromSlice finds PATH" {
+    // PATH should exist in any normal environment
+    if (comptime builtin.os.tag == .windows) return;
+    const result = getenvFromSlice("PATH");
+    try std.testing.expect(result != null);
+    try std.testing.expect(result.?.len > 0);
+}
+
+test "env builtin returns zero" {
+    // Create a minimal context to test env()
+    var environment = std.StringHashMap([]const u8).init(std.testing.allocator);
+    defer environment.deinit();
+
+    var ctx = BuiltinContext.init(std.testing.allocator, &environment, null);
+    const result = try env(&ctx);
+    try std.testing.expectEqual(@as(i32, 0), result);
 }
 
 fn restoreOsEnv(allocator: std.mem.Allocator, saved_os_env: *std.StringHashMap(?[]const u8)) void {

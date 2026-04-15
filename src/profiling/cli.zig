@@ -2,6 +2,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Profiler = @import("profiler.zig").Profiler;
+const IO = @import("../utils/io.zig").IO;
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
@@ -28,7 +29,7 @@ pub fn main(init: std.process.Init) !void {
         try printHelp();
     } else if (std.mem.eql(u8, command, "run")) {
         if (args.len < 3) {
-            std.debug.print("Error: benchmark name required\n", .{});
+            IO.eprint("Error: benchmark name required\n", .{}) catch {};
             try printHelp();
             return error.InvalidArgs;
         }
@@ -38,7 +39,7 @@ pub fn main(init: std.process.Init) !void {
     } else if (std.mem.eql(u8, command, "all")) {
         try runAllBenchmarks(allocator);
     } else {
-        std.debug.print("Error: unknown command '{s}'\n", .{command});
+        IO.eprint("Error: unknown command '{s}'\n", .{command}) catch {};
         try printHelp();
         return error.UnknownCommand;
     }
@@ -46,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
 
 fn printHelp() !void {
     const stdout_file = if (builtin.os.tag == .windows) blk: {
-        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.StdoutUnavailable;
         break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
     } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var buffer: [4096]u8 = undefined;
@@ -88,7 +89,7 @@ fn printHelp() !void {
 
 fn listBenchmarks() !void {
     const stdout_file = if (builtin.os.tag == .windows) blk: {
-        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.StdoutUnavailable;
         break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
     } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var buffer: [4096]u8 = undefined;
@@ -125,7 +126,7 @@ fn listBenchmarks() !void {
 
 fn runBenchmark(allocator: std.mem.Allocator, name: []const u8) !void {
     const stdout_file = if (builtin.os.tag == .windows) blk: {
-        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse @panic("Failed to get stdout handle");
+        const handle = std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) orelse return error.StdoutUnavailable;
         break :blk std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
     } else std.Io.File{ .handle = std.posix.STDOUT_FILENO, .flags = .{ .nonblocking = false } };
     var buffer: [4096]u8 = undefined;
@@ -145,7 +146,7 @@ fn runBenchmark(allocator: std.mem.Allocator, name: []const u8) !void {
     } else if (std.mem.eql(u8, name, "prompt")) {
         try runExternalBenchmark(allocator, "prompt_bench");
     } else {
-        std.debug.print("Error: unknown benchmark '{s}'\n", .{name});
+        IO.eprint("Error: unknown benchmark '{s}'\n", .{name}) catch {};
         try listBenchmarks();
         return error.UnknownBenchmark;
     }
@@ -175,6 +176,6 @@ fn runAllBenchmarks(allocator: std.mem.Allocator) !void {
 
     for (benchmarks) |bench_name| {
         try runBenchmark(allocator, bench_name);
-        std.debug.print("\n{s}\n\n", .{"=" ** 80});
+        IO.eprint("\n{s}\n\n", .{"=" ** 80}) catch {};
     }
 }

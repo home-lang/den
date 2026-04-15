@@ -70,8 +70,12 @@ pub const GlobCache = struct {
         const results_copy = try self.allocator.alloc([]const u8, results.len);
         errdefer self.allocator.free(results_copy);
 
+        var copied: usize = 0;
+        errdefer for (results_copy[0..copied]) |r| self.allocator.free(r);
+
         for (results, 0..) |result, i| {
             results_copy[i] = try self.allocator.dupe(u8, result);
+            copied = i + 1;
         }
 
         self.access_counter += 1;
@@ -141,23 +145,33 @@ pub const Glob = struct {
         if (!self.hasGlobChars(pattern)) {
             // No glob characters - return pattern as-is
             const result = try self.allocator.alloc([]const u8, 1);
+            errdefer self.allocator.free(result);
             result[0] = try self.allocator.dupe(u8, pattern);
             return result;
         }
 
-        // Build cache key from pattern + cwd
+        // Build cache key from pattern + cwd. If the combined length exceeds
+        // the stack buffer, skip caching entirely rather than silently collide
+        // on a pattern-only key (which would cause different cwds to share
+        // bogus cached results).
         var cache_key_buf: [1024]u8 = undefined;
-        const cache_key = std.fmt.bufPrint(&cache_key_buf, "{s}:{s}", .{ cwd, pattern }) catch pattern;
+        const cache_key_opt: ?[]const u8 = blk: {
+            const needed = cwd.len + 1 + pattern.len;
+            if (needed > cache_key_buf.len) break :blk null;
+            break :blk std.fmt.bufPrint(&cache_key_buf, "{s}:{s}", .{ cwd, pattern }) catch null;
+        };
 
-        // Check cache first
+        // Check cache first (only when a valid cache key was produced)
         if (self.cache) |cache| {
-            if (cache.get(cache_key)) |cached_results| {
-                // Return a copy of cached results
-                const result = try self.allocator.alloc([]const u8, cached_results.len);
-                for (cached_results, 0..) |r, i| {
-                    result[i] = try self.allocator.dupe(u8, r);
+            if (cache_key_opt) |cache_key| {
+                if (cache.get(cache_key)) |cached_results| {
+                    // Return a copy of cached results
+                    const result = try self.allocator.alloc([]const u8, cached_results.len);
+                    for (cached_results, 0..) |r, i| {
+                        result[i] = try self.allocator.dupe(u8, r);
+                    }
+                    return result;
                 }
-                return result;
             }
         }
 
@@ -236,9 +250,11 @@ pub const Glob = struct {
         const result = try self.allocator.alloc([]const u8, match_count);
         @memcpy(result, matches_buffer[0..match_count]);
 
-        // Store in cache
+        // Store in cache only when we computed a valid key (no silent collisions)
         if (self.cache) |cache| {
-            cache.put(cache_key, result) catch {};
+            if (cache_key_opt) |cache_key| {
+                cache.put(cache_key, result) catch {};
+            }
         }
 
         return result;
@@ -886,4 +902,13 @@ test "POSIX character classes" {
     try std.testing.expect(Glob.matchPosixClass("xdigit", 'F'));
     try std.testing.expect(Glob.matchPosixClass("xdigit", '5'));
     try std.testing.expect(!Glob.matchPosixClass("xdigit", 'g'));
+}
+
+test "Glob hasGlobChars detects wildcards" {
+    var glob = Glob.init(std.testing.allocator);
+    try std.testing.expect(glob.hasGlobChars("*.zig"));
+    try std.testing.expect(glob.hasGlobChars("file?"));
+    try std.testing.expect(glob.hasGlobChars("[abc]"));
+    try std.testing.expect(!glob.hasGlobChars("plain.txt"));
+    try std.testing.expect(!glob.hasGlobChars(""));
 }

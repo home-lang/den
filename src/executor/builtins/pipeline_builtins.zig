@@ -42,20 +42,36 @@ fn jsonValueToValue(jv: std.json.Value, allocator: std.mem.Allocator) !Value {
         .string => |s| .{ .string = try allocator.dupe(u8, s) },
         .array => |arr| blk: {
             const items = try allocator.alloc(Value, arr.items.len);
+            var filled: usize = 0;
+            errdefer {
+                for (items[0..filled]) |*v| v.deinit(allocator);
+                allocator.free(items);
+            }
             for (arr.items, 0..) |item, i| {
                 items[i] = try jsonValueToValue(item, allocator);
+                filled = i + 1;
             }
             break :blk .{ .list = .{ .items = items } };
         },
         .object => |obj| blk: {
             const keys = try allocator.alloc([]const u8, obj.count());
+            errdefer allocator.free(keys);
             const values = try allocator.alloc(Value, obj.count());
+            errdefer allocator.free(values);
+            // Track how many entries we've filled so errdefer can clean up on
+            // partial failure.
+            var filled: usize = 0;
+            errdefer {
+                for (keys[0..filled]) |k| allocator.free(k);
+                for (values[0..filled]) |*v| v.deinit(allocator);
+            }
             var it = obj.iterator();
             var i: usize = 0;
             while (it.next()) |entry| {
                 keys[i] = try allocator.dupe(u8, entry.key_ptr.*);
                 values[i] = try jsonValueToValue(entry.value_ptr.*, allocator);
                 i += 1;
+                filled = i;
             }
             break :blk .{ .record = .{ .keys = keys, .values = values } };
         },
@@ -93,14 +109,19 @@ pub fn selectCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
 
     if (val == .table) {
         var new_cols = std.ArrayList([]const u8).empty;
-        defer new_cols.deinit(allocator);
+        errdefer {
+            for (new_cols.items) |c| allocator.free(c);
+            new_cols.deinit(allocator);
+        }
         var col_indices = std.ArrayList(usize).empty;
         defer col_indices.deinit(allocator);
 
         for (command.args) |wanted| {
             for (val.table.columns, 0..) |col, ci| {
                 if (std.mem.eql(u8, col, wanted)) {
-                    try new_cols.append(allocator, try allocator.dupe(u8, col));
+                    const dup = try allocator.dupe(u8, col);
+                    errdefer allocator.free(dup);
+                    try new_cols.append(allocator, dup);
                     try col_indices.append(allocator, ci);
                     break;
                 }
@@ -108,11 +129,27 @@ pub fn selectCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
         }
 
         var new_rows = std.ArrayList([]Value).empty;
-        defer new_rows.deinit(allocator);
+        errdefer {
+            for (new_rows.items) |row| {
+                for (row) |*v| {
+                    var mv = v.*;
+                    mv.deinit(allocator);
+                }
+                allocator.free(row);
+            }
+            new_rows.deinit(allocator);
+        }
         for (val.table.rows) |row| {
             const new_row = try allocator.alloc(Value, col_indices.items.len);
+            errdefer allocator.free(new_row);
+            var row_filled: usize = 0;
+            errdefer for (new_row[0..row_filled]) |*v| {
+                var mv = v.*;
+                mv.deinit(allocator);
+            };
             for (col_indices.items, 0..) |ci, ni| {
                 new_row[ni] = if (ci < row.len) try row[ci].clone(allocator) else .nothing;
+                row_filled = ni + 1;
             }
             try new_rows.append(allocator, new_row);
         }
@@ -630,7 +667,10 @@ pub fn rejectCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
         var keep_indices = std.ArrayList(usize).empty;
         defer keep_indices.deinit(allocator);
         var new_cols = std.ArrayList([]const u8).empty;
-        defer new_cols.deinit(allocator);
+        errdefer {
+            for (new_cols.items) |c| allocator.free(c);
+            new_cols.deinit(allocator);
+        }
 
         for (val.table.columns, 0..) |col, ci| {
             var rejected = false;
@@ -642,16 +682,34 @@ pub fn rejectCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i
             }
             if (!rejected) {
                 try keep_indices.append(allocator, ci);
-                try new_cols.append(allocator, try allocator.dupe(u8, col));
+                const dup = try allocator.dupe(u8, col);
+                errdefer allocator.free(dup);
+                try new_cols.append(allocator, dup);
             }
         }
 
         var new_rows = std.ArrayList([]Value).empty;
-        defer new_rows.deinit(allocator);
+        errdefer {
+            for (new_rows.items) |row| {
+                for (row) |*v| {
+                    var mv = v.*;
+                    mv.deinit(allocator);
+                }
+                allocator.free(row);
+            }
+            new_rows.deinit(allocator);
+        }
         for (val.table.rows) |row| {
             const new_row = try allocator.alloc(Value, keep_indices.items.len);
+            errdefer allocator.free(new_row);
+            var row_filled: usize = 0;
+            errdefer for (new_row[0..row_filled]) |*v| {
+                var mv = v.*;
+                mv.deinit(allocator);
+            };
             for (keep_indices.items, 0..) |ci, ni| {
                 new_row[ni] = if (ci < row.len) try row[ci].clone(allocator) else .nothing;
+                row_filled = ni + 1;
             }
             try new_rows.append(allocator, new_row);
         }
@@ -975,4 +1033,47 @@ pub fn parEachCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     }
 
     return 0;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "jsonValueToValue null" {
+    const jv = std.json.Value{ .null = {} };
+    var v = try jsonValueToValue(jv, std.testing.allocator);
+    defer v.deinit(std.testing.allocator);
+    try std.testing.expect(v == .nothing);
+}
+
+test "jsonValueToValue bool" {
+    const jv = std.json.Value{ .bool = true };
+    var v = try jsonValueToValue(jv, std.testing.allocator);
+    defer v.deinit(std.testing.allocator);
+    try std.testing.expect(v == .bool_val);
+    try std.testing.expect(v.bool_val);
+}
+
+test "jsonValueToValue integer" {
+    const jv = std.json.Value{ .integer = 42 };
+    var v = try jsonValueToValue(jv, std.testing.allocator);
+    defer v.deinit(std.testing.allocator);
+    try std.testing.expect(v == .int);
+    try std.testing.expectEqual(@as(i64, 42), v.int);
+}
+
+test "jsonValueToValue float" {
+    const jv = std.json.Value{ .float = 3.14 };
+    var v = try jsonValueToValue(jv, std.testing.allocator);
+    defer v.deinit(std.testing.allocator);
+    try std.testing.expect(v == .float);
+    try std.testing.expectEqual(@as(f64, 3.14), v.float);
+}
+
+test "jsonValueToValue string" {
+    const jv = std.json.Value{ .string = "hello" };
+    var v = try jsonValueToValue(jv, std.testing.allocator);
+    defer v.deinit(std.testing.allocator);
+    try std.testing.expect(v == .string);
+    try std.testing.expectEqualStrings("hello", v.string);
 }

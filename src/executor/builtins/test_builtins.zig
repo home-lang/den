@@ -140,11 +140,15 @@ fn evaluateTestArgs(args: []const []const u8) !i32 {
             // String greater than (lexicographic)
             return if (std.mem.lessThan(u8, right, left)) 0 else 1;
         } else if (std.mem.eql(u8, op, "-nt")) {
+            // If either file doesn't exist, the "newer than" condition is false.
+            // Previously, left-missing returned 1 (false) but right-missing returned 0 (true),
+            // which is inconsistent.
             const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return 1;
-            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return 0;
+            const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return 1;
             return if (left_stat.mtime.nanoseconds > right_stat.mtime.nanoseconds) 0 else 1;
         } else if (std.mem.eql(u8, op, "-ot")) {
-            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return 0;
+            // If either file doesn't exist, the "older than" condition is false.
+            const left_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, left, .{}) catch return 1;
             const right_stat = std.Io.Dir.cwd().statFile(std.Options.debug_io, right, .{}) catch return 1;
             return if (left_stat.mtime.nanoseconds < right_stat.mtime.nanoseconds) 0 else 1;
         } else if (std.mem.eql(u8, op, "-ef")) {
@@ -576,4 +580,44 @@ fn matchElement(ch: u8, elem: []const u8) bool {
     }
 
     return ch == elem[0];
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "regex simple matches" {
+    // Literal match
+    try std.testing.expect(matchRegex("hello world", "hello"));
+    try std.testing.expect(matchRegex("hello world", "world"));
+    try std.testing.expect(!matchRegex("hello", "xyz"));
+
+    // Anchored
+    try std.testing.expect(matchRegex("hello", "^hello"));
+    try std.testing.expect(!matchRegex("xhello", "^hello"));
+    try std.testing.expect(matchRegex("hello", "hello$"));
+    try std.testing.expect(!matchRegex("hellox", "hello$"));
+}
+
+test "regex metacharacters" {
+    // . matches any char
+    try std.testing.expect(matchRegex("cat", "c.t"));
+    try std.testing.expect(matchRegex("cut", "c.t"));
+    try std.testing.expect(!matchRegex("ct", "c.t"));
+
+    // * zero or more
+    try std.testing.expect(matchRegex("", "a*"));
+    try std.testing.expect(matchRegex("a", "a*"));
+    try std.testing.expect(matchRegex("aaaa", "a*"));
+}
+
+test "regex empty pattern matches anything" {
+    try std.testing.expect(matchRegex("anything", ""));
+    try std.testing.expect(matchRegex("", ""));
+}
+
+test "regex anchored empty pattern" {
+    // ^$ matches only empty string
+    try std.testing.expect(matchRegex("", "^$"));
+    try std.testing.expect(!matchRegex("x", "^$"));
 }

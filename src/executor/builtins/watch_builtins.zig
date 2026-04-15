@@ -173,7 +173,8 @@ fn watchWithKqueue(allocator: std.mem.Allocator, watch_path: []const u8, shell_c
         try IO.eprint("den: watch: cannot open '{s}' for watching\n", .{watch_path});
         return 1;
     }
-    defer _ = std.c.close(@intCast(watch_fd));
+    // watch_fd is already a valid fd (c_int). std.c.close accepts c_int directly.
+    defer _ = std.c.close(watch_fd);
 
     // Create a kqueue file descriptor
     const kq_fd = c_kq.kqueue();
@@ -218,10 +219,13 @@ fn watchWithKqueue(allocator: std.mem.Allocator, watch_path: []const u8, shell_c
     while (!watch_interrupted.load(.acquire)) {
         var eventlist: [1]Kevent = undefined;
 
-        // Use a short timeout so we can check the interrupt flag periodically
+        // Use a short timeout so we can check the interrupt flag periodically.
+        // This timeout is deliberately independent of interval_ms — interval_ms
+        // controls the debounce between firing the command, not the event-wait
+        // interval. A 1-second wake-up keeps Ctrl+C responsive.
         const timeout = std.posix.timespec{
-            .sec = @intCast(1),
-            .nsec = @intCast(0),
+            .sec = 1,
+            .nsec = 0,
         };
 
         const nevents = c_kqueue.kevent(kq, &changelist, 0, &eventlist, 1, &timeout);

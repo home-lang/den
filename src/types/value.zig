@@ -48,8 +48,11 @@ pub const Value = union(enum) {
         pub fn clone(self: List, allocator: std.mem.Allocator) std.mem.Allocator.Error!List {
             const new_items = try allocator.alloc(Value, self.items.len);
             errdefer allocator.free(new_items);
+            var filled: usize = 0;
+            errdefer for (new_items[0..filled]) |*v| v.deinit(allocator);
             for (self.items, 0..) |item, i| {
                 new_items[i] = try item.clone(allocator);
+                filled = i + 1;
             }
             return .{ .items = new_items };
         }
@@ -75,11 +78,17 @@ pub const Value = union(enum) {
             errdefer allocator.free(new_keys);
             const new_values = try allocator.alloc(Value, self.values.len);
             errdefer allocator.free(new_values);
+            var keys_filled: usize = 0;
+            errdefer for (new_keys[0..keys_filled]) |k| allocator.free(k);
+            var values_filled: usize = 0;
+            errdefer for (new_values[0..values_filled]) |*v| v.deinit(allocator);
             for (self.keys, 0..) |key, i| {
                 new_keys[i] = try allocator.dupe(u8, key);
+                keys_filled = i + 1;
             }
             for (self.values, 0..) |val, i| {
                 new_values[i] = try val.clone(allocator);
+                values_filled = i + 1;
             }
             return .{ .keys = new_keys, .values = new_values };
         }
@@ -117,17 +126,33 @@ pub const Value = union(enum) {
         pub fn clone(self: Table, allocator: std.mem.Allocator) std.mem.Allocator.Error!Table {
             const new_cols = try allocator.alloc([]const u8, self.columns.len);
             errdefer allocator.free(new_cols);
+            var cols_filled: usize = 0;
+            errdefer for (new_cols[0..cols_filled]) |c| allocator.free(c);
             for (self.columns, 0..) |col, i| {
                 new_cols[i] = try allocator.dupe(u8, col);
+                cols_filled = i + 1;
             }
             const new_rows = try allocator.alloc([]Value, self.rows.len);
             errdefer allocator.free(new_rows);
+            var rows_filled: usize = 0;
+            errdefer for (new_rows[0..rows_filled]) |row| {
+                for (row) |*v| {
+                    var mv = v.*;
+                    mv.deinit(allocator);
+                }
+                allocator.free(row);
+            };
             for (self.rows, 0..) |row, i| {
                 const new_row = try allocator.alloc(Value, row.len);
+                errdefer allocator.free(new_row);
+                var row_filled: usize = 0;
+                errdefer for (new_row[0..row_filled]) |*v| v.deinit(allocator);
                 for (row, 0..) |val, j| {
                     new_row[j] = try val.clone(allocator);
+                    row_filled = j + 1;
                 }
                 new_rows[i] = new_row;
+                rows_filled = i + 1;
             }
             return .{ .columns = new_cols, .rows = new_rows };
         }
@@ -148,9 +173,15 @@ pub const Value = union(enum) {
             errdefer allocator.free(keys);
             const values = try allocator.alloc(Value, self.columns.len);
             errdefer allocator.free(values);
+            var keys_filled: usize = 0;
+            errdefer for (keys[0..keys_filled]) |k| allocator.free(k);
+            var values_filled: usize = 0;
+            errdefer for (values[0..values_filled]) |*v| v.deinit(allocator);
             for (self.columns, 0..) |col, i| {
                 keys[i] = try allocator.dupe(u8, col);
+                keys_filled = i + 1;
                 values[i] = if (i < row.len) try row[i].clone(allocator) else .nothing;
+                values_filled = i + 1;
             }
             return .{ .keys = keys, .values = values };
         }
@@ -174,7 +205,8 @@ pub const Value = union(enum) {
                 @as(u64, @intCast(self.end - self.start))
             else
                 @as(u64, @intCast(self.start - self.end));
-            const abs_step = if (self.step > 0) @as(u64, @intCast(self.step)) else @as(u64, @intCast(-self.step));
+            // @abs() returns u64 for i64 input, avoiding overflow on i64::MIN.
+            const abs_step: u64 = @abs(self.step);
             const count = diff / abs_step;
             return @intCast(if (self.inclusive) count + 1 else count);
         }
@@ -492,7 +524,8 @@ pub const Value = union(enum) {
 };
 
 fn formatDuration(nanos: i64, allocator: std.mem.Allocator) ![]const u8 {
-    const abs = if (nanos < 0) @as(u64, @intCast(-nanos)) else @as(u64, @intCast(nanos));
+    // @abs() returns u64 for i64 input, handling i64::MIN safely.
+    const abs: u64 = @abs(nanos);
     const sign: []const u8 = if (nanos < 0) "-" else "";
 
     if (abs < 1_000) return std.fmt.allocPrint(allocator, "{s}{d}ns", .{ sign, abs });
@@ -630,4 +663,46 @@ test "Duration parsing" {
     try std.testing.expectEqual(@as(?i64, 600_000_000_000), parseDuration("10min"));
     try std.testing.expectEqual(@as(?i64, 7_200_000_000_000), parseDuration("2hr"));
     try std.testing.expectEqual(@as(?i64, null), parseDuration("abc"));
+}
+
+test "formatDuration handles negative values without overflow" {
+    const allocator = std.testing.allocator;
+
+    const pos = try formatDuration(5_000_000_000, allocator);
+    defer allocator.free(pos);
+    try std.testing.expectEqualStrings("5sec", pos);
+
+    const neg = try formatDuration(-5_000_000_000, allocator);
+    defer allocator.free(neg);
+    try std.testing.expectEqualStrings("-5sec", neg);
+
+    // i64::MIN shouldn't crash (previously `@intCast(-nanos)` would overflow)
+    const min_dur = try formatDuration(std.math.minInt(i64), allocator);
+    defer allocator.free(min_dur);
+    // Just verify it returned a non-empty string with the minus sign
+    try std.testing.expect(min_dur.len > 1);
+    try std.testing.expectEqual(@as(u8, '-'), min_dur[0]);
+}
+
+test "formatDuration zero" {
+    const allocator = std.testing.allocator;
+    const z = try formatDuration(0, allocator);
+    defer allocator.free(z);
+    try std.testing.expectEqualStrings("0ns", z);
+}
+
+test "formatDuration units" {
+    const allocator = std.testing.allocator;
+
+    const ns = try formatDuration(500, allocator);
+    defer allocator.free(ns);
+    try std.testing.expectEqualStrings("500ns", ns);
+
+    const us = try formatDuration(500_000, allocator);
+    defer allocator.free(us);
+    try std.testing.expectEqualStrings("500us", us);
+
+    const ms = try formatDuration(500_000_000, allocator);
+    defer allocator.free(ms);
+    try std.testing.expectEqualStrings("500ms", ms);
 }

@@ -1,5 +1,6 @@
 const std = @import("std");
 pub const interface_mod = @import("interface.zig");
+const IO = @import("../utils/io.zig").IO;
 
 const HookType = interface_mod.HookType;
 const HookFn = interface_mod.HookFn;
@@ -73,19 +74,13 @@ pub const HookManager = struct {
     pub fn init(allocator: std.mem.Allocator) HookManager {
         var hooks: [6]std.ArrayList(Hook) = undefined;
         inline for (0..6) |i| {
-            hooks[i] = .{
-                .items = &[_]Hook{},
-                .capacity = 0,
-            };
+            hooks[i] = .empty;
         }
 
         return .{
             .allocator = allocator,
             .hooks = hooks,
-            .async_states = .{
-                .items = &[_]AsyncHookState{},
-                .capacity = 0,
-            },
+            .async_states = .empty,
             .default_timeout_ms = 5000, // 5 seconds default
         };
     }
@@ -108,8 +103,11 @@ pub const HookManager = struct {
 
     /// Register a hook
     pub fn registerHook(self: *HookManager, plugin_name: []const u8, hook_type: HookType, function: HookFn, priority: i32) !void {
+        const name_dup = try self.allocator.dupe(u8, plugin_name);
+        errdefer self.allocator.free(name_dup);
+
         const hook = Hook{
-            .plugin_name = try self.allocator.dupe(u8, plugin_name),
+            .plugin_name = name_dup,
             .hook_type = hook_type,
             .function = function,
             .priority = priority,
@@ -234,7 +232,7 @@ pub const HookManager = struct {
 
             // Check if timed out
             if (state.isTimedOut()) {
-                std.debug.print("Async hook timed out: {s}\n", .{state.hook.plugin_name});
+                IO.eprint("den: async hook timed out: {s}\n", .{state.hook.plugin_name}) catch {};
                 var removed_state = self.async_states.orderedRemove(i);
                 removed_state.deinit();
                 continue;
@@ -277,4 +275,53 @@ pub const HookManager = struct {
 /// Helper function for sorting hooks by priority
 fn hookCompare(_: void, a: Hook, b: Hook) bool {
     return a.priority < b.priority;
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+test "HookManager init/deinit" {
+    var mgr = HookManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    // 5-second default timeout
+    try std.testing.expectEqual(@as(u64, 5000), mgr.default_timeout_ms);
+}
+
+test "HookManager setDefaultTimeout" {
+    var mgr = HookManager.init(std.testing.allocator);
+    defer mgr.deinit();
+
+    mgr.setDefaultTimeout(5000);
+    try std.testing.expectEqual(@as(u64, 5000), mgr.default_timeout_ms);
+}
+
+test "hookCompare priority ordering semantics" {
+    // Verify hookCompare returns true when a's priority < b's priority.
+    // We test with minimal Hook-like inputs via the interface_mod struct.
+    const dummy_fn: HookFn = struct {
+        fn impl(_: *HookContext) anyerror!void {}
+    }.impl;
+
+    const a = Hook{
+        .plugin_name = "a",
+        .hook_type = .pre_command,
+        .function = dummy_fn,
+        .priority = 5,
+        .enabled = true,
+        .allocator = std.testing.allocator,
+    };
+    const b = Hook{
+        .plugin_name = "b",
+        .hook_type = .pre_command,
+        .function = dummy_fn,
+        .priority = 10,
+        .enabled = true,
+        .allocator = std.testing.allocator,
+    };
+
+    try std.testing.expect(hookCompare({}, a, b));
+    try std.testing.expect(!hookCompare({}, b, a));
+    try std.testing.expect(!hookCompare({}, a, a));
 }

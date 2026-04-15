@@ -1,4 +1,5 @@
 const std = @import("std");
+const IO = @import("io.zig").IO;
 
 /// LRU Cache for arithmetic expression results
 pub const ExpressionCache = struct {
@@ -740,7 +741,7 @@ const Parser = struct {
         // arithmetic expressions from modifying security-critical state.
         for (sensitive_vars) |sensitive| {
             if (std.mem.eql(u8, var_name, sensitive)) {
-                std.debug.print("den: warning: arithmetic assignment to sensitive variable '{s}' blocked\n", .{var_name});
+                IO.eprint("den: warning: arithmetic assignment to sensitive variable '{s}' blocked\n", .{var_name}) catch {};
                 return;
             }
         }
@@ -1405,4 +1406,43 @@ test "expression cache lru eviction" {
 
     // "0 + 1" should still be there since it was recently accessed
     try std.testing.expectEqual(@as(?i64, 1), cache.get("0 + 1"));
+}
+
+test "ExpressionCache put/get basic" {
+    const allocator = std.testing.allocator;
+    var cache = ExpressionCache.init(allocator);
+    defer cache.deinit();
+
+    try cache.put("2+2", 4);
+    try cache.put("3*5", 15);
+
+    try std.testing.expectEqual(@as(?i64, 4), cache.get("2+2"));
+    try std.testing.expectEqual(@as(?i64, 15), cache.get("3*5"));
+    try std.testing.expectEqual(@as(?i64, null), cache.get("missing"));
+}
+
+test "ExpressionCache update existing" {
+    const allocator = std.testing.allocator;
+    var cache = ExpressionCache.init(allocator);
+    defer cache.deinit();
+
+    try cache.put("key", 1);
+    try cache.put("key", 2); // Update
+
+    try std.testing.expectEqual(@as(?i64, 2), cache.get("key"));
+    try std.testing.expectEqual(@as(usize, 1), cache.count());
+}
+
+test "ExpressionCache clear" {
+    const allocator = std.testing.allocator;
+    var cache = ExpressionCache.init(allocator);
+    defer cache.deinit();
+
+    try cache.put("a", 1);
+    try cache.put("b", 2);
+    try std.testing.expectEqual(@as(usize, 2), cache.count());
+
+    cache.clear();
+    try std.testing.expectEqual(@as(usize, 0), cache.count());
+    try std.testing.expectEqual(@as(?i64, null), cache.get("a"));
 }

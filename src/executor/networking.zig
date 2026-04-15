@@ -357,8 +357,8 @@ fn doConnect(sock: std.posix.socket_t, addr: *const std.c.sockaddr, addrlen: std
         if (connect_result >= 0) return true;
 
         const errno = std.c._errno().*;
-        if (errno == 4) continue; // EINTR - retry
-        if (errno == 56) return true; // EISCONN - already connected
+        if (errno == @intFromEnum(std.c.E.INTR)) continue; // EINTR - retry
+        if (errno == @intFromEnum(std.c.E.ISCONN)) return true; // EISCONN - already connected
         return false;
     }
     return false;
@@ -437,4 +437,86 @@ test "parseDevNetPath IPv6" {
     try std.testing.expect(ipv6_path != null);
     try std.testing.expect(ipv6_path.?.is_tcp);
     try std.testing.expectEqual(@as(u16, 8080), ipv6_path.?.port);
+}
+
+test "parseDevNetPathWithError detailed errors" {
+    // NotNetworkPath for non-matching paths
+    try std.testing.expectError(DevNetError.NotNetworkPath, parseDevNetPathWithError("/some/other/path"));
+    try std.testing.expectError(DevNetError.NotNetworkPath, parseDevNetPathWithError(""));
+    try std.testing.expectError(DevNetError.NotNetworkPath, parseDevNetPathWithError("/dev/tcp"));
+
+    // MissingHost
+    try std.testing.expectError(DevNetError.MissingHost, parseDevNetPathWithError("/dev/tcp/"));
+
+    // MissingPort - host but no port separator or empty port
+    try std.testing.expectError(DevNetError.MissingPort, parseDevNetPathWithError("/dev/tcp/127.0.0.1"));
+    try std.testing.expectError(DevNetError.MissingPort, parseDevNetPathWithError("/dev/tcp/127.0.0.1/"));
+
+    // InvalidPort
+    try std.testing.expectError(DevNetError.InvalidPort, parseDevNetPathWithError("/dev/tcp/127.0.0.1/abc"));
+    try std.testing.expectError(DevNetError.InvalidPort, parseDevNetPathWithError("/dev/tcp/127.0.0.1/0")); // Port 0 rejected
+    try std.testing.expectError(DevNetError.InvalidPort, parseDevNetPathWithError("/dev/tcp/127.0.0.1/99999")); // > u16 max
+
+    // InvalidIPv4
+    try std.testing.expectError(DevNetError.InvalidIPv4, parseDevNetPathWithError("/dev/tcp/999.0.0.1/80"));
+    try std.testing.expectError(DevNetError.InvalidIPv4, parseDevNetPathWithError("/dev/tcp/abc/80"));
+
+    // InvalidIPv6
+    try std.testing.expectError(DevNetError.InvalidIPv6, parseDevNetPathWithError("/dev/tcp/[invalid]/80"));
+    try std.testing.expectError(DevNetError.MissingHost, parseDevNetPathWithError("/dev/tcp/[]/80"));
+}
+
+test "parseDevNetPath edge cases" {
+    // UDP path
+    const udp = parseDevNetPath("/dev/udp/10.0.0.1/1234");
+    try std.testing.expect(udp != null);
+    try std.testing.expect(!udp.?.is_tcp);
+    try std.testing.expectEqual(@as(u16, 1234), udp.?.port);
+
+    // Max valid port
+    const max_port = parseDevNetPath("/dev/tcp/127.0.0.1/65535");
+    try std.testing.expect(max_port != null);
+    try std.testing.expectEqual(@as(u16, 65535), max_port.?.port);
+
+    // Min valid port
+    const min_port = parseDevNetPath("/dev/tcp/127.0.0.1/1");
+    try std.testing.expect(min_port != null);
+    try std.testing.expectEqual(@as(u16, 1), min_port.?.port);
+
+    // Port 0 is invalid
+    try std.testing.expect(parseDevNetPath("/dev/tcp/127.0.0.1/0") == null);
+}
+
+test "parseIPv6 edge cases" {
+    // Short forms
+    try std.testing.expect(parseIPv6("::1") != null);
+    try std.testing.expect(parseIPv6("::") != null);
+    try std.testing.expect(parseIPv6("fe80::1") != null);
+
+    // Invalid: multiple double colons
+    try std.testing.expect(parseIPv6("::1::2") == null);
+
+    // Invalid: too many groups
+    try std.testing.expect(parseIPv6("1:2:3:4:5:6:7:8:9") == null);
+
+    // Invalid: empty string
+    try std.testing.expect(parseIPv6("") == null);
+
+    // Invalid: non-hex character
+    try std.testing.expect(parseIPv6("gggg::1") == null);
+
+    // Verify loopback bytes
+    const loopback = parseIPv6("::1").?;
+    try std.testing.expectEqual(@as(u8, 0), loopback[14]);
+    try std.testing.expectEqual(@as(u8, 1), loopback[15]);
+}
+
+test "errno constants are portable" {
+    // Verify the errno values we use are properly defined
+    // This test ensures the fix from magic numbers (4, 56) to portable enums works
+    const eintr = @intFromEnum(std.c.E.INTR);
+    const eisconn = @intFromEnum(std.c.E.ISCONN);
+    try std.testing.expect(eintr > 0);
+    try std.testing.expect(eisconn > 0);
+    try std.testing.expect(eintr != eisconn);
 }

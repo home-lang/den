@@ -1085,10 +1085,12 @@ pub const Expansion = struct {
                             offset = std.fmt.parseInt(i64, std.mem.trim(u8, clean_params, &std.ascii.whitespace), 10) catch 0;
                         }
 
-                        // Handle negative offset (from end of string)
+                        // Handle negative offset (from end of string).
+                        // Use @abs() to avoid overflow on i64::MIN (negating -2^63
+                        // as a signed i64 would overflow).
                         var start: usize = 0;
                         if (offset < 0) {
-                            const abs_offset: usize = @intCast(-offset);
+                            const abs_offset: usize = @intCast(@abs(offset));
                             if (abs_offset <= value.len) {
                                 start = value.len - abs_offset;
                             }
@@ -1364,8 +1366,14 @@ pub const Expansion = struct {
             // Assign and use default value - expand first
             const expanded = self.expandNested(default_value);
             const name_copy = try self.allocator.dupe(u8, var_name);
+            errdefer self.allocator.free(name_copy);
             const value_copy = try self.allocator.dupe(u8, expanded);
-            self.environment.put(name_copy, value_copy) catch {};
+            errdefer self.allocator.free(value_copy);
+            self.environment.put(name_copy, value_copy) catch {
+                // Free on put failure to avoid leaking both allocations.
+                self.allocator.free(name_copy);
+                self.allocator.free(value_copy);
+            };
             return ExpansionResult{ .value = expanded, .consumed = end + 1, .owned = true };
         }
 
@@ -2162,7 +2170,12 @@ pub const Expansion = struct {
         // Wait for child to finish and capture exit code for $?
         var wait_status: c_int = 0;
         if (comptime builtin.os.tag != .windows) {
-            _ = std.c.waitpid(pid, &wait_status, 0);
+            while (true) {
+                const r = std.c.waitpid(pid, &wait_status, 0);
+                if (r >= 0) break;
+                if (std.c._errno().* == @intFromEnum(std.c.E.INTR)) continue;
+                break;
+            }
             const exit_code: i32 = @intCast(std.posix.W.EXITSTATUS(@as(u32, @bitCast(wait_status))));
             self.last_exit_code = exit_code;
             // Also update the shell's exit code if available
@@ -2601,14 +2614,16 @@ pub const Expansion = struct {
         const fork_result: std.posix.pid_t = @intCast(fork_ret);
 
         if (fork_result == 0) {
-            // Child process
+            // Child process. Use std.c._exit instead of std.process.exit because
+            // the latter flushes stdio/atexit which can corrupt parent state
+            // after fork.
             if (is_input) {
                 // <(cmd) - child writes to pipe, parent reads
                 // Close read end
                 _ = std.c.close(pipe_fds[0]);
                 // Redirect stdout to write end of pipe
                 if (std.c.dup2(pipe_fds[1], std.posix.STDOUT_FILENO) < 0) {
-                    std.process.exit(1);
+                    std.c._exit(1);
                 }
                 _ = std.c.close(pipe_fds[1]);
             } else {
@@ -2617,7 +2632,7 @@ pub const Expansion = struct {
                 _ = std.c.close(pipe_fds[1]);
                 // Redirect stdin to read end of pipe
                 if (std.c.dup2(pipe_fds[0], std.posix.STDIN_FILENO) < 0) {
-                    std.process.exit(1);
+                    std.c._exit(1);
                 }
                 _ = std.c.close(pipe_fds[0]);
             }
@@ -2637,7 +2652,7 @@ pub const Expansion = struct {
             // Fallback: execute via /bin/sh -c when no shell reference available
             var cmd_buf: [4096]u8 = undefined;
             if (command.len >= cmd_buf.len) {
-                std.process.exit(1);
+                std.c._exit(1);
             }
             @memcpy(cmd_buf[0..command.len], command);
             cmd_buf[command.len] = 0;
@@ -2649,7 +2664,7 @@ pub const Expansion = struct {
                 null,
             };
             _ = std.c.execve("/bin/sh", &argv, @ptrCast(getCEnviron()));
-            std.process.exit(127);
+            std.c._exit(127);
         }
 
         // Parent process
@@ -3142,4 +3157,39 @@ test "removeQuotes - escape in double quotes" {
     const result = try removeQuotes(allocator, "\"hello \\\"world\\\"\"");
     defer allocator.free(result);
     try std.testing.expectEqualStrings("hello \"world\"", result);
+}
+
+test "negative offset overflow safety" {
+    // Verify that @abs() is used instead of @intCast(-offset) which would
+    // overflow on i64::MIN. This mirrors the pattern fixed in expansion.zig:1091
+    const min_val: i64 = std.math.minInt(i64);
+
+    // This should not panic or misbehave
+    const abs_val: u64 = @abs(min_val);
+    try std.testing.expectEqual(@as(u64, 1) << 63, abs_val);
+
+    // For "normal" negative values, @abs() behaves the same as -x
+    const normal: i64 = -42;
+    try std.testing.expectEqual(@as(u64, 42), @abs(normal));
+}
+
+test "removeQuotes preserves empty string" {
+    const allocator = std.testing.allocator;
+    const result = try removeQuotes(allocator, "");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("", result);
+}
+
+test "removeQuotes unchanged when no quotes" {
+    const allocator = std.testing.allocator;
+    const result = try removeQuotes(allocator, "hello world");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello world", result);
+}
+
+test "removeQuotes single-quoted string" {
+    const allocator = std.testing.allocator;
+    const result = try removeQuotes(allocator, "'hello'");
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("hello", result);
 }

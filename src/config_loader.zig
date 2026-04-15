@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("types/mod.zig");
+const IO = @import("utils/io.zig").IO;
 const DenConfig = types.DenConfig;
 
 /// Cross-platform file read helper
@@ -145,7 +146,7 @@ pub fn loadConfigWithPathAndSource(allocator: std.mem.Allocator, custom_path: ?[
 /// Load config from a specific file path
 fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
     const file = std.Io.Dir.cwd().openFile(std.Options.debug_io, path, .{}) catch |err| {
-        std.debug.print("Error: Failed to open config file '{s}': {any}\n", .{ path, err });
+        IO.eprint("den: failed to open config file '{s}': {any}\n", .{ path, err }) catch {};
         return error.ConfigFileNotFound;
     };
     defer file.close(std.Options.debug_io);
@@ -170,7 +171,7 @@ fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !DenConfig {
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
     }) catch |err| {
-        std.debug.print("Error: Failed to parse config file '{s}': {any}\n", .{ path, err });
+        IO.eprint("den: failed to parse config file '{s}': {any}\n", .{ path, err }) catch {};
         return error.ConfigParseError;
     };
 
@@ -1022,4 +1023,31 @@ test "ValidationResult - format output" {
     // (actual output testing would require a writer)
     try std.testing.expect(!result.valid);
     try std.testing.expect(result.errors.len > 0);
+}
+
+test "loadFromFile returns FileNotFound for missing file" {
+    const allocator = std.testing.allocator;
+    const result = loadFromFile(allocator, "__nonexistent_config_file_xyz123__.jsonc");
+    try std.testing.expectError(error.ConfigFileNotFound, result);
+}
+
+test "ConfigSource default source" {
+    const source = ConfigSource{
+        .path = null,
+        .source_type = .default,
+    };
+    try std.testing.expectEqual(ConfigSource.SourceType.default, source.source_type);
+    try std.testing.expect(source.path == null);
+}
+
+test "ConfigSource enum variants" {
+    try std.testing.expectEqual(@as(u32, 0), @intFromEnum(ConfigSource.SourceType.default));
+}
+
+test "DenConfig default values are reasonable" {
+    const config = DenConfig{};
+    // History should have positive max entries
+    try std.testing.expect(config.history.max_entries > 0);
+    // Completion should have positive max suggestions
+    try std.testing.expect(config.completion.max_suggestions > 0);
 }
