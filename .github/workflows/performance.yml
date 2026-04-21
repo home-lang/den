@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  ZIG_VERSION: '0.16.0-dev.2962+08416b44f'
+  ZIG_VERSION: '0.17.0-dev.56+a8226cd53'
   # Performance budgets
   MAX_STARTUP_MS: 10
   MAX_IDLE_MEMORY_MB: 5
