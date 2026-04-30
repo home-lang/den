@@ -117,6 +117,7 @@ fi
 ### Test Operators
 
 **File Tests:**
+
 | Operator | Description |
 |----------|-------------|
 | `-e file` | File exists |
@@ -129,6 +130,7 @@ fi
 | `-L file` | Symbolic link |
 
 **String Tests:**
+
 | Operator | Description |
 |----------|-------------|
 | `-z str` | String is empty |
@@ -137,6 +139,7 @@ fi
 | `str1 != str2` | Strings are not equal |
 
 **Numeric Tests:**
+
 | Operator | Description |
 |----------|-------------|
 | `-eq` | Equal |

@@ -51,31 +51,31 @@ Welcome to the Den Shell documentation! This directory contains comprehensive do
 
 ### I want to
 
-**...understand the codebase**
+#### ...understand the codebase
 
 1. Start with [Architecture](ARCHITECTURE.md) for high-level overview
 2. Read [Data Structures](DATA_STRUCTURES.md) for internal details
 3. Check [Algorithms](ALGORITHMS.md) for implementation details
 
-**...use the API**
+#### ...use the API
 
 1. Read [API Reference](API.md) for complete API documentation
 2. See [examples/](../examples/) for code examples
 
-**...contribute code**
+#### ...contribute code
 
 1. Read [Contributing Guide](CONTRIBUTING.md) for workflow
 2. Check [Architecture](ARCHITECTURE.md) to understand the design
 3. Follow coding standards in CONTRIBUTING.md
 
-**...optimize performance**
+#### ...optimize performance
 
 1. Read [Memory Optimization](MEMORY_OPTIMIZATION.md) for memory techniques
 2. Read [CPU Optimization](CPU_OPTIMIZATION.md) for CPU techniques
 3. Read [Concurrency](CONCURRENCY.md) for parallel operations
 4. Use [profiling.md](profiling.md) to measure performance
 
-**...add a feature**
+#### ...add a feature
 
 1. Check [Architecture](ARCHITECTURE.md) for extension points
 2. Read [API Reference](API.md) for existing APIs
