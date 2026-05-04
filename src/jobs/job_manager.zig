@@ -395,7 +395,7 @@ pub const JobManager = struct {
                     self.jobs[slot].?.status = .stopped;
                 }
                 try IO.print("\n", .{});
-                exit_status = 128 + @as(i32, @intCast(std.posix.W.STOPSIG(raw)));
+                exit_status = 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.STOPSIG(raw))));
             } else if (std.posix.W.IFSIGNALED(raw)) {
                 exit_status = 128 + @as(i32, @intCast(@intFromEnum(std.posix.W.TERMSIG(raw))));
                 if (job_slot) |slot| self.remove(slot);

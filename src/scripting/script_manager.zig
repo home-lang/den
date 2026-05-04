@@ -674,7 +674,7 @@ test "CachedScript uses i128 for mtime" {
     // Ensures the i96 → i128 change is in effect
     const field_info = @typeInfo(CachedScript).@"struct".fields;
     var found = false;
-    for (field_info) |f| {
+    inline for (field_info) |f| {
         if (std.mem.eql(u8, f.name, "mtime_ns")) {
             // Type should be i128 now, not i96
             try std.testing.expectEqual(i128, f.type);

@@ -2,7 +2,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Profiler = @import("profiler.zig").Profiler;
-const IO = @import("../utils/io.zig").IO;
+const IO = @import("io").IO;
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;

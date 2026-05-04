@@ -223,7 +223,7 @@ pub const FunctionManager = struct {
     }
 
     /// Execute a function
-    pub fn executeFunction(self: *FunctionManager, shell: *Shell, name: []const u8, args: []const []const u8) error{ FunctionNotFound, CallStackOverflow, OutOfMemory }!i32 {
+    pub fn executeFunction(self: *FunctionManager, shell: *Shell, name: []const u8, args: []const []const u8) error{ FunctionNotFound, CallStackOverflow, OutOfMemory, TooManyArguments }!i32 {
         const func = self.getFunction(name) orelse return error.FunctionNotFound;
 
         // Push call frame
@@ -709,9 +709,9 @@ test "CallFrame positional_params capacity" {
 }
 
 test "FunctionDef struct fields" {
-    // Ensure FunctionDef has the fields we rely on
-    const has_exported_field = blk: {
-        for (@typeInfo(FunctionDef).@"struct".fields) |f| {
+    // Ensure Function has the fields we rely on
+    const has_exported_field = comptime blk: {
+        for (@typeInfo(Function).@"struct".fields) |f| {
             if (std.mem.eql(u8, f.name, "is_exported")) {
                 break :blk true;
             }

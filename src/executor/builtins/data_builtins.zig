@@ -114,13 +114,13 @@ fn jsonValueToValue(jv: std.json.Value, allocator: std.mem.Allocator) std.mem.Al
 
 fn jsonArrayToTable(items: []const std.json.Value, allocator: std.mem.Allocator) std.mem.Allocator.Error!Value {
     // Collect all unique keys across all objects
-    var key_set = std.StringArrayHashMap(void).init(allocator);
-    defer key_set.deinit();
+    var key_set: std.StringArrayHashMapUnmanaged(void) = .empty;
+    defer key_set.deinit(allocator);
     for (items) |item| {
         if (item == .object) {
             var it = item.object.iterator();
             while (it.next()) |entry| {
-                try key_set.put(entry.key_ptr.*, {});
+                try key_set.put(allocator, entry.key_ptr.*, {});
             }
         }
     }

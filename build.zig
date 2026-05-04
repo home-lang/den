@@ -159,6 +159,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    test_module.addImport("compat", compat_module);
     const unit_tests = b.addTest(.{
         .root_module = test_module,
     });
@@ -858,6 +859,15 @@ pub fn build(b: *std.Build) void {
     });
 
     profiling_cli_module.addImport("compat", compat_module);
+
+    // Expose src/utils/io.zig as a module so profiling/cli.zig can import it
+    // without reaching outside its own module's source path.
+    const io_module = b.createModule(.{
+        .root_source_file = b.path("src/utils/io.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    profiling_cli_module.addImport("io", io_module);
 
     const profiling_cli = b.addExecutable(.{
         .name = "den-profile",

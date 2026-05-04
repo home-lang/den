@@ -385,14 +385,14 @@ fn buildJsonData(allocator: std.mem.Allocator, jval: std.json.Value, raw: []cons
 
 fn buildTableData(allocator: std.mem.Allocator, items: []const std.json.Value, raw: []const u8) !ExploreData {
     // Collect unique column names preserving insertion order
-    var col_set = std.StringArrayHashMap(void).init(allocator);
-    defer col_set.deinit();
+    var col_set: std.StringArrayHashMapUnmanaged(void) = .empty;
+    defer col_set.deinit(allocator);
 
     for (items) |item| {
         if (item == .object) {
             var it = item.object.iterator();
             while (it.next()) |entry| {
-                try col_set.put(entry.key_ptr.*, {});
+                try col_set.put(allocator, entry.key_ptr.*, {});
             }
         }
     }

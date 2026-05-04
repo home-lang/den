@@ -774,14 +774,14 @@ pub fn groupByCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
     const group_col = command.args[0];
 
     if (val == .list) {
-        var groups = std.StringArrayHashMap(std.ArrayList(Value)).init(allocator);
+        var groups: std.StringArrayHashMapUnmanaged(std.ArrayList(Value)) = .empty;
         defer {
             var it = groups.iterator();
             while (it.next()) |entry| {
                 if (entry.key_ptr.*.len > 0) allocator.free(entry.key_ptr.*);
                 entry.value_ptr.deinit(allocator);
             }
-            groups.deinit();
+            groups.deinit(allocator);
         }
 
         for (val.list.items) |item| {
@@ -793,7 +793,7 @@ pub fn groupByCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !
                     key_allocated = true;
                 }
             }
-            const gop = try groups.getOrPut(key);
+            const gop = try groups.getOrPut(allocator, key);
             if (!gop.found_existing) {
                 gop.value_ptr.* = std.ArrayList(Value).empty;
             } else if (key_allocated) {
