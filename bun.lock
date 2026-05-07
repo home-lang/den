@@ -5,7 +5,7 @@
     "": {
       "name": "den",
       "devDependencies": {
-        "better-dx": "^0.2.7",
+        "better-dx": "^0.2.12",
         "typescript": "^5.9.2",
       },
     },
