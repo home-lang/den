@@ -15,6 +15,47 @@ pub const DenConfig = struct {
     aliases: AliasConfig = .{},
     keybindings: KeybindingConfig = .{},
     environment: EnvironmentConfig = .{},
+    line_editor: LineEditorConfig = .{},
+    zsh: ZshCompatConfig = .{},
+    ai: AiConfig = .{},
+};
+
+/// Interactive line-editor configuration (syntax highlighting, autosuggestions)
+pub const LineEditorConfig = struct {
+    /// Colorize the command line as you type
+    syntax_highlighting: bool = true,
+    /// Fish-style inline suggestions sourced from history
+    autosuggestions: bool = true,
+    /// Minimum number of characters typed before a suggestion is offered
+    suggestion_min_chars: u32 = 1,
+};
+
+/// zsh compatibility layer configuration
+pub const ZshCompatConfig = struct {
+    /// Master toggle for zsh-compatible behaviors
+    enabled: bool = true,
+    /// Honor zsh glob qualifiers like *(.) *(/) *(x)
+    glob_qualifiers: bool = true,
+    /// Expand zsh %-style prompt escapes (%n %m %~ %# ...)
+    prompt_escapes: bool = true,
+    /// Accept `setopt`/`unsetopt` with zsh option names
+    setopt: bool = true,
+};
+
+/// AI-assisted completion configuration
+pub const AiConfig = struct {
+    /// Enable AI-assisted command suggestions
+    enabled: bool = false,
+    /// OpenAI-compatible chat-completions endpoint
+    endpoint: []const u8 = "https://api.openai.com/v1/chat/completions",
+    /// Model identifier to request
+    model: []const u8 = "gpt-4o-mini",
+    /// Name of the environment variable holding the API key
+    api_key_env: []const u8 = "OPENAI_API_KEY",
+    /// Maximum tokens to request for a suggestion
+    max_tokens: u32 = 64,
+    /// Request timeout in milliseconds
+    timeout_ms: u32 = 4000,
 };
 
 /// Environment configuration - default environment variables

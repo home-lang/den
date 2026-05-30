@@ -66,7 +66,7 @@ pub fn code(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     const path = if (command.args.len > 0) command.args[0] else ".";
 
     // Execute: open -a "Visual Studio Code" <path>
-    const path_z = try allocator.dupeZ(u8, path);
+    const path_z = try allocator.dupeSentinel(u8, path, 0);
     defer allocator.free(path_z);
 
     const argv = [_]?[*:0]const u8{
@@ -104,7 +104,7 @@ pub fn pstorm(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 
     const path = if (command.args.len > 0) command.args[0] else ".";
 
     // Execute: open -a "PhpStorm" <path>
-    const path_z = try allocator.dupeZ(u8, path);
+    const path_z = try allocator.dupeSentinel(u8, path, 0);
     defer allocator.free(path_z);
 
     const argv = [_]?[*:0]const u8{

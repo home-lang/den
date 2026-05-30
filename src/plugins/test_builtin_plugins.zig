@@ -8,7 +8,7 @@ const ScriptSuggesterPlugin = builtin_plugins.ScriptSuggesterPlugin;
 test "AutoSuggestPlugin - initialization" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();
@@ -22,7 +22,7 @@ test "AutoSuggestPlugin - initialization" {
 test "AutoSuggestPlugin - suggest from history" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();
@@ -69,7 +69,7 @@ test "AutoSuggestPlugin - suggest from history" {
 test "AutoSuggestPlugin - suggest builtins" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();
@@ -101,7 +101,7 @@ test "AutoSuggestPlugin - suggest builtins" {
 test "AutoSuggestPlugin - no duplicates" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();
@@ -143,7 +143,7 @@ test "AutoSuggestPlugin - no duplicates" {
 test "AutoSuggestPlugin - empty input" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();
@@ -159,7 +159,7 @@ test "AutoSuggestPlugin - empty input" {
 test "AutoSuggestPlugin - disabled" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();
@@ -176,7 +176,7 @@ test "AutoSuggestPlugin - disabled" {
 test "AutoSuggestPlugin - max suggestions" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();

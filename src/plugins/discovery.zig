@@ -236,7 +236,7 @@ pub const PluginDiscovery = struct {
     pub fn init(allocator: std.mem.Allocator) PluginDiscovery {
         return .{
             .allocator = allocator,
-            .search_paths = [_]?[]const u8{null} ** 16,
+            .search_paths = @splat(null),
             .search_paths_count = 0,
         };
     }

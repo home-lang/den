@@ -261,7 +261,8 @@ test "StringBuilder stack and heap" {
     try std.testing.expectEqualStrings("Hello World", sb.toSlice());
 
     sb.reset();
-    const large = "x" ** 300;
+    const large_buf: [300]u8 = @splat('x');
+    const large: []const u8 = &large_buf;
     try sb.append(large);
     try std.testing.expectEqual(@as(usize, 300), sb.toSlice().len);
 }

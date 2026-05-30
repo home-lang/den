@@ -1083,7 +1083,7 @@ test "HistoryExpansion: !! expands to last command" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello";
     history[1] = "ls -la";
 
@@ -1098,7 +1098,7 @@ test "HistoryExpansion: !-1 expands to last command" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello";
     history[1] = "ls -la";
 
@@ -1113,7 +1113,7 @@ test "HistoryExpansion: !-2 expands to second last" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello";
     history[1] = "ls -la";
 
@@ -1128,7 +1128,7 @@ test "HistoryExpansion: !1 expands to first command" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "first command";
     history[1] = "second command";
 
@@ -1143,7 +1143,7 @@ test "HistoryExpansion: !string searches prefix" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello";
     history[1] = "ls -la";
     history[2] = "echo world";
@@ -1159,7 +1159,7 @@ test "HistoryExpansion: !?string? searches substring" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "cat /etc/passwd";
     history[1] = "ls -la";
     history[2] = "echo hello";
@@ -1175,7 +1175,7 @@ test "HistoryExpansion: ^old^new substitution" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello";
 
     const result = try expander.expand("^hello^world", &history, 1);
@@ -1189,7 +1189,7 @@ test "HistoryExpansion: !$ gets last argument" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo one two three";
 
     const result = try expander.expand("echo !$", &history, 1);
@@ -1203,7 +1203,7 @@ test "HistoryExpansion: !* gets all arguments" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo one two three";
 
     const result = try expander.expand("rm !*", &history, 1);
@@ -1217,7 +1217,7 @@ test "HistoryExpansion: word designator :0" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "git commit -m message";
 
     const result = try expander.expand("!!:0", &history, 1);
@@ -1231,7 +1231,7 @@ test "HistoryExpansion: word designator :1" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "git commit -m message";
 
     const result = try expander.expand("!!:1", &history, 1);
@@ -1245,7 +1245,7 @@ test "HistoryExpansion: no expansion in single quotes" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello";
 
     const result = try expander.expand("echo '!!'", &history, 1);
@@ -1259,7 +1259,7 @@ test "HistoryExpansion: no history returns original" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
 
     const result = try expander.expand("!!", &history, 0);
     defer allocator.free(result.text);
@@ -1272,7 +1272,7 @@ test "HistoryExpansion: mixed text and expansion" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "ls -la";
 
     const result = try expander.expand("echo before !! after", &history, 1);
@@ -1285,7 +1285,7 @@ test "HistoryExpansion: mixed text and expansion" {
 test "HistoryExpansion: fuzzy search matches" {
     var expander = HistoryExpansion.init(std.testing.allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "git checkout main";
     history[1] = "ls -la";
     history[2] = "echo hello";
@@ -1299,7 +1299,7 @@ test "HistoryExpansion: fuzzy search matches" {
 test "HistoryExpansion: fuzzy search case insensitive" {
     var expander = HistoryExpansion.init(std.testing.allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "Git Checkout Main";
 
     const match = expander.searchHistoryFuzzy(&history, 1, "GCM");
@@ -1310,7 +1310,7 @@ test "HistoryExpansion: fuzzy search case insensitive" {
 test "HistoryExpansion: regex search basic" {
     var expander = HistoryExpansion.init(std.testing.allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello world";
     history[1] = "ls -la";
 
@@ -1322,7 +1322,7 @@ test "HistoryExpansion: regex search basic" {
 test "HistoryExpansion: regex search with dot" {
     var expander = HistoryExpansion.init(std.testing.allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "cat file.txt";
     history[1] = "ls -la";
 
@@ -1334,7 +1334,7 @@ test "HistoryExpansion: regex search with dot" {
 test "HistoryExpansion: regex search with anchor" {
     var expander = HistoryExpansion.init(std.testing.allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello";
     history[1] = "ls -la";
 
@@ -1347,7 +1347,7 @@ test "HistoryExpansion: !# expansion" {
     const allocator = std.testing.allocator;
     var expander = HistoryExpansion.init(allocator);
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo hello";
 
     // !# should expand (returns empty string in basic impl)
@@ -1360,7 +1360,7 @@ test "HistoryExpansion: !# expansion" {
 test "Ranked search: exact match scores highest" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "git status";
     history[1] = "git commit";
     history[2] = "ls -la";
@@ -1376,7 +1376,7 @@ test "Ranked search: exact match scores highest" {
 test "Ranked search: prefix beats substring" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "echo git"; // substring match
     history[1] = "git status"; // prefix match
 
@@ -1391,7 +1391,7 @@ test "Ranked search: prefix beats substring" {
 test "Ranked search: recency bonus" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "git status"; // older
     history[1] = "git status"; // newer (same command)
 
@@ -1406,7 +1406,7 @@ test "Ranked search: recency bonus" {
 test "Ranked search: fuzzy matching works" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "git checkout main";
     history[1] = "ls -la";
 
@@ -1421,7 +1421,7 @@ test "Ranked search: fuzzy matching works" {
 test "Ranked search: empty pattern returns empty" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 10;
+    var history: [10]?[]const u8 = @splat(null);
     history[0] = "git status";
 
     const results = try searchHistoryRanked(allocator, &history, 1, "", 10);

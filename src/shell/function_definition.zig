@@ -271,7 +271,7 @@ pub fn resetMultilineState(self: *Shell) void {
             self.allocator.free(line_content);
         }
     }
-    self.multiline_buffer = [_]?[]const u8{null} ** 100;
+    self.multiline_buffer = @splat(null);
     self.multiline_count = 0;
     self.multiline_brace_count = 0;
     self.multiline_mode = .none;

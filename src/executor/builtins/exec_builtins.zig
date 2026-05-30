@@ -99,7 +99,7 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     }
 
     for (cmd.args, 0..) |arg, i| {
-        arg_zs[i] = try ctx.allocator.dupeZ(u8, arg);
+        arg_zs[i] = try ctx.allocator.dupeSentinel(u8, arg, 0);
         arg_zs_filled = i + 1;
         argv[i] = arg_zs[i].ptr;
     }
@@ -129,14 +129,14 @@ pub fn exec(ctx: *BuiltinContext, cmd: *types.ParsedCommand) !i32 {
     while (env_iter.next()) |entry| {
         const env_formatted = try std.fmt.allocPrint(ctx.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* });
         defer ctx.allocator.free(env_formatted);
-        env_strings[i] = try ctx.allocator.dupeZ(u8, env_formatted);
+        env_strings[i] = try ctx.allocator.dupeSentinel(u8, env_formatted, 0);
         env_strings_filled = i + 1;
         envp[i] = env_strings[i].ptr;
         i += 1;
     }
     envp[env_count] = null;
 
-    const exe_path_z = try ctx.allocator.dupeZ(u8, exe_path.?);
+    const exe_path_z = try ctx.allocator.dupeSentinel(u8, exe_path.?, 0);
     defer ctx.allocator.free(exe_path_z);
 
     // Replace the current process with the new program

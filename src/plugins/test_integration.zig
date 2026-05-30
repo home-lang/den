@@ -8,7 +8,7 @@ const ScriptSuggesterPlugin = builtin_plugins.ScriptSuggesterPlugin;
 test "Integration - AutoSuggest with realistic history" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();
@@ -139,7 +139,7 @@ test "Integration - Highlight different command types" {
 test "Integration - Combined AutoSuggest and Highlight" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();
@@ -232,7 +232,7 @@ test "Integration - ScriptSuggester performance" {
 test "Integration - Plugin configuration changes" {
     const allocator = std.testing.allocator;
 
-    var history = [_]?[]const u8{null} ** 1000;
+    var history: [1000]?[]const u8 = @splat(null);
     var history_count: usize = 0;
     var environment = std.StringHashMap([]const u8).init(allocator);
     defer environment.deinit();

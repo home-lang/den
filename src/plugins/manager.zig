@@ -20,7 +20,7 @@ pub const PluginManager = struct {
         return .{
             .allocator = allocator,
             .plugins = std.StringHashMap(Plugin).init(allocator),
-            .plugin_paths = [_]?[]const u8{null} ** 32,
+            .plugin_paths = @splat(null),
             .plugin_paths_count = 0,
             .auto_reload = false,
         };

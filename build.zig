@@ -135,9 +135,7 @@ pub fn build(b: *std.Build) void {
     const test_runner_cmd = b.addRunArtifact(test_runner_exe);
     test_runner_cmd.step.dependOn(b.getInstallStep());
 
-    if (b.args) |args| {
-        test_runner_cmd.addArgs(args);
-    }
+    test_runner_cmd.addPassthruArgs();
 
     const test_runner_step = b.step("test-runner", "Run the test runner");
     test_runner_step.dependOn(&test_runner_cmd.step);
@@ -146,9 +144,7 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     const run_step = b.step("run", "Run the den shell");
     run_step.dependOn(&run_cmd.step);
@@ -846,6 +842,19 @@ pub fn build(b: *std.Build) void {
     all_tests_step.dependOn(&run_fuzzing_tests.step);
     all_tests_step.dependOn(&run_terminal_tests.step);
     all_tests_step.dependOn(&run_performance_tests.step);
+
+    // New-feature subsystems (zsh compat, AI, sessions, WebAssembly)
+    const features_test_module = b.createModule(.{
+        .root_source_file = b.path("src/test_new_features.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    features_test_module.addImport("compat", compat_module);
+    const features_tests = b.addTest(.{ .root_module = features_test_module });
+    const run_features_tests = b.addRunArtifact(features_tests);
+    const features_test_step = b.step("test-features", "Run zsh/AI/session/wasm subsystem tests");
+    features_test_step.dependOn(&run_features_tests.step);
+    all_tests_step.dependOn(&run_features_tests.step);
 
     // ========================================
     // Profiling and Benchmarks

@@ -187,7 +187,7 @@ fn forkAndExecPosix(allocator: std.mem.Allocator, opts: SpawnOptions) !posix.pid
     }
 
     for (opts.argv, 0..) |arg, i| {
-        arg_zs[i] = try allocator.dupeZ(u8, arg);
+        arg_zs[i] = try allocator.dupeSentinel(u8, arg, 0);
         argv_buf[i] = arg_zs[i].ptr;
     }
     argv_buf[opts.argv.len] = null;
@@ -215,7 +215,7 @@ fn forkAndExecPosix(allocator: std.mem.Allocator, opts: SpawnOptions) !posix.pid
 
         // Change cwd if requested
         if (opts.cwd) |cwd| {
-            const cwd_z = allocator.dupeZ(u8, cwd) catch std.c._exit(1);
+            const cwd_z = allocator.dupeSentinel(u8, cwd, 0) catch std.c._exit(1);
             _ = std.c.chdir(cwd_z.ptr);
         }
 

@@ -17,7 +17,7 @@ pub fn LRUCache(comptime K: type, comptime V: type, comptime capacity: usize) ty
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return .{
-                .entries = [_]?Entry{null} ** capacity,
+                .entries = @splat(null),
                 .current_age = 0,
                 .allocator = allocator,
             };
@@ -94,7 +94,7 @@ pub const FastStringMatcher = struct {
 
     pub fn init(pattern: []const u8) FastStringMatcher {
         var matcher = FastStringMatcher{
-            .bad_char_skip = [_]usize{pattern.len} ** 256,
+            .bad_char_skip = @splat(pattern.len),
             .pattern = pattern,
         };
 
@@ -232,8 +232,8 @@ pub const HistoryIndex = struct {
 
     pub fn init(allocator: std.mem.Allocator) HistoryIndex {
         return .{
-            .hash_table = [_]?usize{null} ** HASH_SIZE,
-            .entries = [_]?[]const u8{null} ** MAX_ENTRIES,
+            .hash_table = @splat(null),
+            .entries = @splat(null),
             .count = 0,
             .allocator = allocator,
         };

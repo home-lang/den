@@ -45,7 +45,7 @@ pub fn bench(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     defer allocator.free(cmd_str);
 
     // Create null-terminated version for exec
-    const cmd_z = try allocator.dupeZ(u8, cmd_str);
+    const cmd_z = try allocator.dupeSentinel(u8, cmd_str, 0);
     defer allocator.free(cmd_z);
 
     try IO.print("Benchmarking: {s}\n", .{cmd_str});

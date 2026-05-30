@@ -176,6 +176,6 @@ fn runAllBenchmarks(allocator: std.mem.Allocator) !void {
 
     for (benchmarks) |bench_name| {
         try runBenchmark(allocator, bench_name);
-        IO.eprint("\n{s}\n\n", .{"=" ** 80}) catch {};
+        IO.eprint("\n{s}\n\n", .{@as([]const u8, &@as([80]u8, @splat('=')))}) catch {};
     }
 }

@@ -285,9 +285,9 @@ pub fn netCheck(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
             try IO.print("\x1b[1;33mPort Check:\x1b[0m {s}:{s}\n", .{ host, p });
         }
 
-        const host_z = try allocator.dupeZ(u8, host);
+        const host_z = try allocator.dupeSentinel(u8, host, 0);
         defer allocator.free(host_z);
-        const port_z = try allocator.dupeZ(u8, p);
+        const port_z = try allocator.dupeSentinel(u8, p, 0);
         defer allocator.free(port_z);
 
         const spawn = common.spawn;

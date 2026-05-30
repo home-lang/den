@@ -353,7 +353,8 @@ test "StringPool allocation" {
     try std.testing.expect(s1.ptr != s2.ptr);
 
     // Large string should fail
-    const large = "x" ** 100;
+    const large_buf: [100]u8 = @splat('x');
+    const large: []const u8 = &large_buf;
     try std.testing.expect(pool.tryAlloc(large) == null);
 
     // Reset and reuse

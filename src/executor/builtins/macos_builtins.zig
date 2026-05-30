@@ -218,7 +218,7 @@ pub fn show(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     var exit_code: i32 = 0;
     for (command.args) |file| {
         // Execute: chflags nohidden <file>
-        const file_z = try allocator.dupeZ(u8, file);
+        const file_z = try allocator.dupeSentinel(u8, file, 0);
         defer allocator.free(file_z);
 
         const spawn = common.spawn;
@@ -247,7 +247,7 @@ pub fn hide(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
     var exit_code: i32 = 0;
     for (command.args) |file| {
         // Execute: chflags hidden <file>
-        const file_z = try allocator.dupeZ(u8, file);
+        const file_z = try allocator.dupeSentinel(u8, file, 0);
         defer allocator.free(file_z);
 
         const spawn = common.spawn;

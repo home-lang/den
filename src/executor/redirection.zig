@@ -49,7 +49,7 @@ fn applyOutputTruncate(allocator: std.mem.Allocator, redir: types.Redirection, n
         }
         _ = std.c.close(sock);
     } else {
-        const path_z = try allocator.dupeZ(u8, redir.target);
+        const path_z = try allocator.dupeSentinel(u8, redir.target, 0);
         defer allocator.free(path_z);
 
         // If noclobber is set, check if file exists (skip for /dev/null etc.)
@@ -92,7 +92,7 @@ fn applyOutputAppend(allocator: std.mem.Allocator, redir: types.Redirection) !vo
         _ = std.c.close(sock);
     } else {
         // Open file for appending
-        const path_z = try allocator.dupeZ(u8, redir.target);
+        const path_z = try allocator.dupeSentinel(u8, redir.target, 0);
         defer allocator.free(path_z);
 
         const fd = std.c.open(
@@ -124,7 +124,7 @@ fn applyInput(allocator: std.mem.Allocator, redir: types.Redirection) !void {
         _ = std.c.close(sock);
     } else {
         // Open file for reading
-        const path_z = try allocator.dupeZ(u8, redir.target);
+        const path_z = try allocator.dupeSentinel(u8, redir.target, 0);
         defer allocator.free(path_z);
 
         const fd = std.c.open(
@@ -155,7 +155,7 @@ fn applyInputOutput(allocator: std.mem.Allocator, redir: types.Redirection) !voi
         }
         _ = std.c.close(sock);
     } else {
-        const path_z = try allocator.dupeZ(u8, redir.target);
+        const path_z = try allocator.dupeSentinel(u8, redir.target, 0);
         defer allocator.free(path_z);
 
         // Open for read+write, create if doesn't exist

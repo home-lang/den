@@ -55,7 +55,7 @@ pub const JobManager = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .jobs = [_]?BackgroundJob{null} ** MAX_JOBS,
+            .jobs = @splat(null),
             .job_count = 0,
             .next_job_id = 1,
             .last_background_pid = if (builtin.os.tag == .windows) std.os.windows.INVALID_HANDLE_VALUE else 0,

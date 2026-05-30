@@ -486,11 +486,11 @@ test "perf: glob pattern matching" {
 
 test "perf: summary" {
     std.debug.print("\n", .{});
-    std.debug.print("=" ** 60 ++ "\n", .{});
+    std.debug.print("============================================================" ++ "\n", .{});
     std.debug.print("Performance Test Summary\n", .{});
-    std.debug.print("=" ** 60 ++ "\n", .{});
+    std.debug.print("============================================================" ++ "\n", .{});
     std.debug.print("All performance benchmarks completed.\n", .{});
     std.debug.print("Iterations per test: {d}\n", .{BENCHMARK_ITERATIONS});
     std.debug.print("Warmup iterations: {d}\n", .{WARMUP_ITERATIONS});
-    std.debug.print("=" ** 60 ++ "\n\n", .{});
+    std.debug.print("============================================================" ++ "\n\n", .{});
 }

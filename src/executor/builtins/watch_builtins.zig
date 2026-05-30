@@ -164,7 +164,7 @@ pub fn watchCmd(allocator: std.mem.Allocator, command: *types.ParsedCommand) !i3
 /// Watch a path using macOS kqueue for efficient file system event notification.
 fn watchWithKqueue(allocator: std.mem.Allocator, watch_path: []const u8, shell_cmd: []const u8, interval_ms: u64) !i32 {
     // Create null-terminated path for C open()
-    const path_z = try allocator.dupeZ(u8, watch_path);
+    const path_z = try allocator.dupeSentinel(u8, watch_path, 0);
     defer allocator.free(path_z);
 
     // Open the target path for event monitoring (read-only)
@@ -206,7 +206,7 @@ fn watchWithKqueue(allocator: std.mem.Allocator, watch_path: []const u8, shell_c
     }
 
     // Create null-terminated shell command for exec
-    const cmd_z = try allocator.dupeZ(u8, shell_cmd);
+    const cmd_z = try allocator.dupeSentinel(u8, shell_cmd, 0);
     defer allocator.free(cmd_z);
 
     try IO.print("Watching '{s}' for changes (Ctrl+C to stop)...\n", .{watch_path});
@@ -275,7 +275,7 @@ fn watchWithPolling(allocator: std.mem.Allocator, watch_path: []const u8, shell_
     var last_size = getFileSize(watch_path) catch 0;
 
     // Create null-terminated shell command for exec
-    const cmd_z = try allocator.dupeZ(u8, shell_cmd);
+    const cmd_z = try allocator.dupeSentinel(u8, shell_cmd, 0);
     defer allocator.free(cmd_z);
 
     try IO.print("Watching '{s}' for changes (polling every {d}ms, Ctrl+C to stop)...\n", .{ watch_path, interval_ms });

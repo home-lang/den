@@ -656,7 +656,7 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         }
         // Unset in OS environment
         if (builtin.os.tag != .windows) {
-            const unset_var_z = try ctx.allocator.dupeZ(u8, unset_var);
+            const unset_var_z = try ctx.allocator.dupeSentinel(u8, unset_var, 0);
             defer ctx.allocator.free(unset_var_z);
             _ = libc_env.unsetenv(unset_var_z.ptr);
         }
@@ -677,9 +677,9 @@ pub fn envCmd(ctx: *BuiltinContext, command: *types.ParsedCommand) !i32 {
         }
         // Set in OS environment
         if (builtin.os.tag != .windows) {
-            const key_z = try ctx.allocator.dupeZ(u8, override.key);
+            const key_z = try ctx.allocator.dupeSentinel(u8, override.key, 0);
             defer ctx.allocator.free(key_z);
-            const value_z = try ctx.allocator.dupeZ(u8, override.value);
+            const value_z = try ctx.allocator.dupeSentinel(u8, override.value, 0);
             defer ctx.allocator.free(value_z);
             _ = libc_env.setenv(key_z.ptr, value_z.ptr, 1);
         }
@@ -728,7 +728,8 @@ test "getenvFromSlice returns null for missing key" {
 
 test "getenvFromSlice returns null for oversized key" {
     // Key longer than 512 bytes should return null
-    const long_key = "A" ** 513;
+    const long_key_buf: [513]u8 = @splat('A');
+    const long_key: []const u8 = &long_key_buf;
     const result = getenvFromSlice(long_key);
     try std.testing.expect(result == null);
 }
@@ -756,12 +757,12 @@ fn restoreOsEnv(allocator: std.mem.Allocator, saved_os_env: *std.StringHashMap(?
     var iter = saved_os_env.iterator();
     while (iter.next()) |entry| {
         const key = entry.key_ptr.*;
-        const key_z = allocator.dupeZ(u8, key) catch continue;
+        const key_z = allocator.dupeSentinel(u8, key, 0) catch continue;
         defer allocator.free(key_z);
 
         if (entry.value_ptr.*) |original_value| {
             // Restore original value
-            const value_z = allocator.dupeZ(u8, original_value) catch continue;
+            const value_z = allocator.dupeSentinel(u8, original_value, 0) catch continue;
             defer allocator.free(value_z);
             _ = libc_env.setenv(key_z.ptr, value_z.ptr, 1);
         } else {

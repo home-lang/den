@@ -16,7 +16,7 @@ pub fn ObjectPool(comptime T: type, comptime capacity: usize) type {
         pub fn init(allocator: std.mem.Allocator) Self {
             var self = Self{
                 .allocator = allocator,
-                .available = [_]?*T{null} ** capacity,
+                .available = @splat(null),
                 .available_count = capacity,
                 .all_items = undefined,
             };

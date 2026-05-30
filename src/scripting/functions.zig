@@ -71,7 +71,7 @@ pub const CallFrame = struct {
     pub fn init(allocator: std.mem.Allocator, function_name: []const u8) CallFrame {
         return .{
             .function_name = function_name,
-            .positional_params = [_]?[]const u8{null} ** 64,
+            .positional_params = @splat(null),
             .positional_params_count = 0,
             .local_vars = std.StringHashMap([]const u8).init(allocator),
             .return_requested = false,

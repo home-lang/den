@@ -54,6 +54,9 @@ pub const LineEditor = struct {
     suggestion: ?[]const u8 = null, // The suggested text from history
     // Syntax highlighting
     syntax_highlighting: bool = true, // Enable/disable syntax highlighting
+    // Inline autosuggestions (fish-style)
+    autosuggestions: bool = true, // Enable/disable inline autosuggestions
+    suggestion_min_chars: usize = 1, // Minimum chars typed before suggesting
     // Prompt refresh callback
     prompt_refresh_fn: ?*const fn (*LineEditor) anyerror!void = null,
     // User data for callbacks (e.g., pointer to Shell)
@@ -84,7 +87,7 @@ pub const LineEditor = struct {
     vi_last_count: usize = 1,
     // Emacs-style kill ring
     kill_ring: [16][4096]u8 = undefined,
-    kill_ring_lens: [16]usize = [_]usize{0} ** 16,
+    kill_ring_lens: [16]usize = @splat(0),
     kill_ring_count: usize = 0,
     kill_ring_index: usize = 0, // Current position for yank-pop
     // Fuzzy search mode (Ctrl+S to toggle during reverse search)
@@ -1216,8 +1219,8 @@ pub const LineEditor = struct {
             }
         }
 
-        // Update and display suggestion only if cursor is at end and we have at least 3 characters
-        if (self.cursor == self.length and self.length >= 3) {
+        // Update and display suggestion only if cursor is at end and threshold met
+        if (self.autosuggestions and self.cursor == self.length and self.length >= self.suggestion_min_chars) {
             try self.updateSuggestion();
             try self.displaySuggestion();
         }
@@ -1259,8 +1262,8 @@ pub const LineEditor = struct {
             try self.writeBytes("\x1B[D");
         }
 
-        // Update and display suggestion only if cursor is at end and we have at least 3 characters
-        if (self.cursor == self.length and self.length >= 3) {
+        // Update and display suggestion only if cursor is at end and threshold met
+        if (self.autosuggestions and self.cursor == self.length and self.length >= self.suggestion_min_chars) {
             try self.updateSuggestion();
             try self.displaySuggestion();
         }
@@ -2406,6 +2409,7 @@ pub const LineEditor = struct {
     fn updateSuggestion(self: *LineEditor) !void {
         self.clearSuggestion();
 
+        if (!self.autosuggestions) return;
         if (self.length == 0) return;
         if (self.history == null or self.history_count == null) return;
 

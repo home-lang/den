@@ -56,7 +56,7 @@ pub const CommandMemoryPool = struct {
 
     /// Duplicate a null-terminated string
     pub fn dupeZ(self: *CommandMemoryPool, s: []const u8) ![:0]u8 {
-        const slice = try self.arena.allocator().dupeZ(u8, s);
+        const slice = try self.arena.allocator().dupeSentinel(u8, s, 0);
         self.allocations += 1;
         self.bytes_allocated += s.len + 1;
         return slice;
@@ -85,7 +85,7 @@ pub const PipelineMemoryPool = struct {
 
     pub fn init(parent_allocator: std.mem.Allocator) PipelineMemoryPool {
         return .{
-            .stages = [_]?std.heap.ArenaAllocator{null} ** 16,
+            .stages = @splat(null),
             .stage_count = 0,
             .parent_allocator = parent_allocator,
         };

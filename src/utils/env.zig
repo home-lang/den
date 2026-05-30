@@ -11,7 +11,7 @@ const WindowsEnvCache = struct {
         value: []const u8,
     };
 
-    entries: [CACHE_SIZE]?Entry = [_]?Entry{null} ** CACHE_SIZE,
+    entries: [CACHE_SIZE]?Entry = @splat(null),
     allocator: std.heap.GeneralPurposeAllocator(.{}) = .{},
     next_slot: usize = 0,
 
@@ -479,7 +479,7 @@ pub const ExecutableCache = struct {
 
     pub fn init(allocator: std.mem.Allocator) ExecutableCache {
         return .{
-            .entries = [_]?Entry{null} ** CACHE_SIZE,
+            .entries = @splat(null),
             .allocator = allocator,
             .current_age = 0,
             .hits = 0,

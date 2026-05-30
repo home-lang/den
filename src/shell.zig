@@ -420,15 +420,15 @@ pub const Shell = struct {
             .suffix_aliases = std.StringHashMap([]const u8).init(allocator),
             .last_exit_code = 0,
             .job_manager = JobManager.init(allocator),
-            .history = [_]?[]const u8{null} ** HISTORY_HARD_LIMIT,
+            .history = @splat(null),
             .history_count = 0,
             .history_max = @min(config.history.max_entries, HISTORY_HARD_LIMIT),
             .history_file_path = history_path_owned,
             .structured_history = null,
             .history_expander = HistoryExpansion.init(allocator),
-            .dir_stack = [_]?[]const u8{null} ** 32,
+            .dir_stack = @splat(null),
             .dir_stack_count = 0,
-            .positional_params = [_]?[]const u8{null} ** 64,
+            .positional_params = @splat(null),
             .positional_params_count = 0,
             .shell_name = "den",
             .last_arg = "",
@@ -461,7 +461,7 @@ pub const Shell = struct {
             .prompt_renderer = null,
             .prompt_context = PromptContext.init(allocator),
             .async_git = AsyncGitFetcher.init(allocator),
-            .multiline_buffer = [_]?[]const u8{null} ** 100,
+            .multiline_buffer = @splat(null),
             .multiline_count = 0,
             .multiline_brace_count = 0,
             .multiline_mode = .none,
@@ -488,7 +488,7 @@ pub const Shell = struct {
             .shopt_histappend = false,
             .shopt_cmdhist = true,
             .shopt_autocd = true,
-            .call_stack = [_]CallFrame{CallFrame{ .line_number = 0, .function_name = "", .source_file = "" }} ** 64,
+            .call_stack = @splat(CallFrame{ .line_number = 0, .function_name = "", .source_file = "" }),
             .call_stack_depth = 0,
             .loadable_builtins = LoadableBuiltins.init(allocator),
         };
@@ -824,6 +824,9 @@ pub const Shell = struct {
                     if (self.line_editor == null) {
                         const prompt_str = try self.getPromptString();
                         var editor = LineEditor.init(self.allocator, prompt_str);
+                        editor.syntax_highlighting = self.config.line_editor.syntax_highlighting;
+                        editor.autosuggestions = self.config.line_editor.autosuggestions;
+                        editor.suggestion_min_chars = @max(1, self.config.line_editor.suggestion_min_chars);
                         editor.setHistory(&self.history, &self.history_count);
                         editor.setCompletionFn(shell_mod.tabCompletionFn);
                         editor.setPromptRefreshFn(refreshPromptCallback);
@@ -2354,7 +2357,7 @@ pub const Shell = struct {
                     for (cmd.redirections) |redir| {
                         switch (redir.kind) {
                             .input => {
-                                const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
+                                const path_z = self.allocator.dupeSentinel(u8, redir.target, 0) catch continue;
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{}, @as(c_uint, 0));
                                 if (fd >= 0) {
@@ -2365,7 +2368,7 @@ pub const Shell = struct {
                                 }
                             },
                             .output_truncate, .output_append, .output_clobber => {
-                                const path_z = self.allocator.dupeZ(u8, redir.target) catch continue;
+                                const path_z = self.allocator.dupeSentinel(u8, redir.target, 0) catch continue;
                                 defer self.allocator.free(path_z);
                                 const flags: std.c.O = if (redir.kind == .output_append)
                                     .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }

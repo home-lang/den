@@ -277,7 +277,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         const page_alloc = std.heap.page_allocator;
 
         // Create null-terminated command name
-        const cmd_z = page_alloc.dupeZ(u8, cmd_name) catch {
+        const cmd_z = page_alloc.dupeSentinel(u8, cmd_name, 0) catch {
             std.c._exit(127);
         };
 
@@ -288,7 +288,7 @@ pub fn timeout(_: std.mem.Allocator, command: *types.ParsedCommand) !i32 {
         var argv_idx: usize = 1;
         for (cmd_args) |arg| {
             if (argv_idx >= argv_buf.len - 1) break;
-            const arg_z = page_alloc.dupeZ(u8, arg) catch {
+            const arg_z = page_alloc.dupeSentinel(u8, arg, 0) catch {
                 std.c._exit(127);
             };
             argv_buf[argv_idx] = arg_z.ptr;

@@ -148,7 +148,7 @@ const ExploreState = struct {
     term_cols: u16 = 80,
     // Search
     search_active: bool = false,
-    search_buf: [SEARCH_BUF_SIZE]u8 = [_]u8{0} ** SEARCH_BUF_SIZE,
+    search_buf: [SEARCH_BUF_SIZE]u8 = @splat(0),
     search_len: usize = 0,
     search_match_row: ?usize = null,
     // Status message

@@ -581,7 +581,7 @@ pub const Executor = struct {
         defer self.allocator.free(argv);
 
         // Allocate command name as null-terminated string
-        const cmd_z = try self.allocator.dupeZ(u8, command.name);
+        const cmd_z = try self.allocator.dupeSentinel(u8, command.name, 0);
         defer self.allocator.free(cmd_z);
         argv[0] = cmd_z.ptr;
 
@@ -596,7 +596,7 @@ pub const Executor = struct {
         }
 
         for (command.args, 0..) |arg, i| {
-            arg_zs[i] = try self.allocator.dupeZ(u8, arg);
+            arg_zs[i] = try self.allocator.dupeSentinel(u8, arg, 0);
             arg_zs_filled = i + 1;
             argv[i + 1] = arg_zs[i].ptr;
         }
@@ -697,7 +697,7 @@ pub const Executor = struct {
                     for (command.redirections) |redir| {
                         switch (redir.kind) {
                             .output_truncate, .output_clobber => {
-                                const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
+                                const path_z = self.allocator.dupeSentinel(u8, redir.target, 0) catch return 1;
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(c_uint, 0o644));
                                 if (fd < 0) return 1;
@@ -705,14 +705,14 @@ pub const Executor = struct {
                                 _ = std.c.close(fd);
                             },
                             .output_append => {
-                                const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
+                                const path_z = self.allocator.dupeSentinel(u8, redir.target, 0) catch return 1;
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, @as(c_uint, 0o644));
                                 if (fd < 0) return 1;
                                 _ = std.c.close(fd);
                             },
                             .input => {
-                                const path_z = self.allocator.dupeZ(u8, redir.target) catch return 1;
+                                const path_z = self.allocator.dupeSentinel(u8, redir.target, 0) catch return 1;
                                 defer self.allocator.free(path_z);
                                 const fd = std.c.open(path_z, .{}, @as(c_uint, 0));
                                 if (fd < 0) return 1;
@@ -1626,7 +1626,7 @@ pub const Executor = struct {
         defer self.allocator.free(argv);
 
         // Allocate command name as null-terminated string
-        const cmd_z = try self.allocator.dupeZ(u8, command.name);
+        const cmd_z = try self.allocator.dupeSentinel(u8, command.name, 0);
         defer self.allocator.free(cmd_z);
         argv[0] = cmd_z.ptr;
 
@@ -1641,7 +1641,7 @@ pub const Executor = struct {
         }
 
         for (command.args, 0..) |arg, i| {
-            arg_zs[i] = try self.allocator.dupeZ(u8, arg);
+            arg_zs[i] = try self.allocator.dupeSentinel(u8, arg, 0);
             arg_zs_filled = i + 1;
             argv[i + 1] = arg_zs[i].ptr;
         }
@@ -1697,7 +1697,7 @@ pub const Executor = struct {
         defer self.allocator.free(argv);
 
         // Allocate command name as null-terminated string
-        const cmd_z = try self.allocator.dupeZ(u8, command.name);
+        const cmd_z = try self.allocator.dupeSentinel(u8, command.name, 0);
         defer self.allocator.free(cmd_z);
         argv[0] = cmd_z.ptr;
 
@@ -1712,7 +1712,7 @@ pub const Executor = struct {
         }
 
         for (command.args, 0..) |arg, i| {
-            arg_zs[i] = try self.allocator.dupeZ(u8, arg);
+            arg_zs[i] = try self.allocator.dupeSentinel(u8, arg, 0);
             arg_zs_filled = i + 1;
             argv[i + 1] = arg_zs[i].ptr;
         }
