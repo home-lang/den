@@ -618,6 +618,7 @@ set +x
 
 ## Next Steps
 
+- [Extended Features](./EXTENDED_FEATURES.md) - zsh compat, AI completions, distributed sessions, WebAssembly plugins
 - [Advanced Usage](./ADVANCED.md) - Advanced features and techniques
 - [API Reference](./API.md) - Complete API documentation
 - [Builtins Reference](./BUILTINS.md) - All built-in commands

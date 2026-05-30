@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  ZIG_VERSION: '0.17.0-dev.56+a8226cd53'
+  ZIG_VERSION: '0.17.0-dev.607+456b2ec07'
 
 jobs:
   build:

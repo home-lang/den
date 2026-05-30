@@ -7,7 +7,7 @@ Den is a modern shell that combines the familiarity of traditional shells with n
 - ⚡ **Native Performance**: No runtime overhead, instant startup (~5ms)
 - 📦 **Tiny Binary**: ~1.8MB executable with zero dependencies
 - 🛡️ **Memory Safe**: Zig's compile-time safety prevents common bugs
-- 🎯 **Feature Rich**: 54 builtins, job control, history, completion, tilde expansion
+- 🎯 **Feature Rich**: 58 builtins, job control, history, completion, tilde expansion
 - ✅ **Production Ready**: Thoroughly tested, proper memory management, POSIX-compliant
 
 ### Performance Comparison
@@ -69,7 +69,7 @@ echo 'echo "Hello from Den!"' | ./zig-out/bin/den
 - **Tab Completion**: Smart completion for commands and file paths
 - **Aliases**: Command aliases with expansion
 
-### 54 Built-in Commands
+### 58 Built-in Commands
 
 **Core** (4): `exit`, `help`, `true`, `false`
 
@@ -99,7 +99,20 @@ echo 'echo "Hello from Den!"' | ./zig-out/bin/den
 
 **Advanced Execution** (5): `exec`, `builtin`, `trap`, `getopts`, `times`
 
+**zsh & Extended** (4): `setopt`, `unsetopt`, `ai`, `wasm`
+
 Run `help` in Den for detailed information on each command.
+
+### Extended Capabilities
+
+- **zsh compatibility**: `setopt`/`unsetopt`, `%`-style prompt escapes, glob qualifiers, arrays, associative arrays, named directories, auto-cd
+- **Inline autosuggestions & syntax highlighting** in the interactive line editor
+- **AI-assisted completions**: `ai <describe a command>` (OpenAI/Anthropic-compatible)
+- **Distributed sessions**: `den --serve` / `den --connect` (loopback-only by default)
+- **WebAssembly plugins**: `wasm <module.wasm> <export> [args]` via a built-in WASM interpreter
+- **Language Server**: `den --lsp` for editor integration
+
+See [docs/EXTENDED_FEATURES.md](docs/EXTENDED_FEATURES.md) for details.
 
 ## Example Usage
 
@@ -172,7 +185,7 @@ den> bg %1
 
 ### Requirements
 
-- Zig 0.16-dev or later
+- Zig 0.17-dev or later
 - macOS, Linux, or BSD (Windows support planned)
 
 ### Build

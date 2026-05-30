@@ -7,7 +7,7 @@ on:
     branches: [main, develop]
 
 env:
-  ZIG_VERSION: '0.17.0-dev.56+a8226cd53'
+  ZIG_VERSION: '0.17.0-dev.607+456b2ec07'
 
 jobs:
   test:
@@ -58,6 +58,10 @@ jobs:
 
       - name: Run expander tests
         run: zig build test-expander
+        continue-on-error: true
+
+      - name: Run new-feature subsystem tests (zsh/AI/sessions/wasm)
+        run: zig build test-features
         continue-on-error: true
 
       - name: Test shell startup
