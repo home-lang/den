@@ -435,6 +435,7 @@ pub const ControlFlowExecutor = struct {
 
         for (expanded_items.items) |ei| {
             var glob_inst = Glob.init(self.allocator);
+            glob_inst.qualifiers_enabled = self.shell.config.zsh.enabled and self.shell.config.zsh.glob_qualifiers;
             if (glob_inst.hasGlobChars(ei)) {
                 const matches = glob_inst.expand(ei, cwd) catch {
                     try glob_expanded.append(self.allocator, ei);

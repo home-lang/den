@@ -24,6 +24,7 @@ pub fn getPromptString(self: *Shell) ![]const u8 {
     if (self.prompt_renderer == null) {
         const template = try PromptTemplate.initDefault(self.allocator);
         self.prompt_renderer = try PromptRenderer.init(self.allocator, template);
+        self.prompt_renderer.?.zsh_escapes = self.config.zsh.enabled and self.config.zsh.prompt_escapes;
     }
 
     // Update prompt context with current information

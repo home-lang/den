@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const placeholders_mod = @import("placeholders.zig");
+const zsh = @import("../compat/zsh.zig");
 
 const PromptContext = types.PromptContext;
 const PromptTemplate = types.PromptTemplate;
@@ -16,6 +17,8 @@ pub const PromptRenderer = struct {
     template: PromptTemplate,
     simple_mode: bool,
     transient_mode: bool,
+    /// Expand zsh `%`-style prompt escapes (configurable, off by default).
+    zsh_escapes: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, template: PromptTemplate) !PromptRenderer {
         var registry = PlaceholderRegistry.init(allocator);
@@ -112,6 +115,14 @@ pub const PromptRenderer = struct {
                 try result.append(template_str[i]);
                 i += 1;
             }
+        }
+
+        // Optionally expand zsh `%`-style escapes (e.g. %n %m %~ %#). Only run
+        // when enabled and the template actually contains a '%' so ordinary
+        // den `{...}` prompts pay nothing.
+        if (self.zsh_escapes and std.mem.indexOfScalar(u8, template_str, '%') != null) {
+            const expanded = try zsh.expandPromptEscapes(self.allocator, result.items, ctx);
+            return expanded;
         }
 
         return try result.toOwnedSlice();

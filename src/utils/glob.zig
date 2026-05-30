@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const zsh = @import("../compat/zsh.zig");
 
 /// Platform-specific path separator
 const path_sep = if (builtin.os.tag == .windows) '\\' else '/';
@@ -129,6 +130,8 @@ pub const GlobCache = struct {
 pub const Glob = struct {
     allocator: std.mem.Allocator,
     cache: ?*GlobCache,
+    /// Honor zsh glob qualifiers like `*(.)`, `*(/)`, `*(x)` (set from config).
+    qualifiers_enabled: bool = false,
 
     pub fn init(allocator: std.mem.Allocator) Glob {
         return .{ .allocator = allocator, .cache = null };
@@ -141,6 +144,28 @@ pub const Glob = struct {
     /// Expand glob pattern into list of matching files
     /// Returns allocated array of file paths
     pub fn expand(self: *Glob, pattern: []const u8, cwd: []const u8) ![][]const u8 {
+        // zsh glob qualifiers: split a trailing `(...)` group, expand the bare
+        // pattern, then filter the matches by file type / permission.
+        if (self.qualifiers_enabled) {
+            const sp = zsh.splitQualifier(pattern);
+            if (sp.qualifier) |qual| {
+                const matches = try self.expand(sp.pattern, cwd);
+                const io = std.Options.debug_io;
+                var dir = std.Io.Dir.cwd().openDir(io, cwd, .{}) catch return matches;
+                defer dir.close(io);
+                const filtered = try zsh.filterByQualifier(self.allocator, io, dir, matches, qual);
+                // Free the dropped entries and the outer slice of `matches`.
+                outer: for (matches) |m| {
+                    for (filtered) |f| {
+                        if (f.ptr == m.ptr) continue :outer;
+                    }
+                    self.allocator.free(m);
+                }
+                self.allocator.free(matches);
+                return filtered;
+            }
+        }
+
         // Check if pattern contains glob characters
         if (!self.hasGlobChars(pattern)) {
             // No glob characters - return pattern as-is

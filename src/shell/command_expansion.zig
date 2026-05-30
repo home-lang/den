@@ -63,6 +63,7 @@ pub fn expandCommandChain(self: *Shell, chain: *types.CommandChain) !void {
         expander.local_vars = &frame.local_vars;
     }
     var glob = Glob.init(self.allocator);
+    glob.qualifiers_enabled = self.config.zsh.enabled and self.config.zsh.glob_qualifiers;
     var brace = BraceExpander.init(self.allocator);
 
     // Get current working directory for glob expansion

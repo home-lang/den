@@ -57,7 +57,8 @@ pub fn isShellBuiltin(name: []const u8) bool {
         // Misc
             "times",
         "time",      "umask",    "hash",    "shopt",    "caller",
-        "enable",
+        "enable",    "setopt",   "unsetopt",
+        "ai",        "wasm",
     };
     for (shell_builtins) |b| {
         if (std.mem.eql(u8, name, b)) return true;
@@ -327,6 +328,22 @@ pub fn dispatchBuiltin(self: *Shell, cmd: *types.ParsedCommand) !DispatchResult 
     }
     if (std.mem.eql(u8, name, "enable")) {
         try shell_mod.builtinEnable(self, cmd);
+        return .handled;
+    }
+    if (std.mem.eql(u8, name, "setopt")) {
+        try shell_mod.builtinSetopt(self, cmd);
+        return .handled;
+    }
+    if (std.mem.eql(u8, name, "unsetopt")) {
+        try shell_mod.builtinUnsetopt(self, cmd);
+        return .handled;
+    }
+    if (std.mem.eql(u8, name, "ai")) {
+        try shell_mod.builtinAi(self, cmd);
+        return .handled;
+    }
+    if (std.mem.eql(u8, name, "wasm")) {
+        try shell_mod.builtinWasm(self, cmd);
         return .handled;
     }
 

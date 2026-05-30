@@ -89,6 +89,19 @@ pub const showLegacyCompletions = completion_builtins.showLegacyCompletions;
 // Re-export shopt builtin function
 pub const builtinShopt = shopt_builtin.builtinShopt;
 
+// Re-export zsh-style setopt/unsetopt builtins
+pub const setopt_builtin = @import("setopt_builtin.zig");
+pub const builtinSetopt = setopt_builtin.builtinSetopt;
+pub const builtinUnsetopt = setopt_builtin.builtinUnsetopt;
+
+// Re-export AI completion builtin
+pub const ai_builtin = @import("ai_builtin.zig");
+pub const builtinAi = ai_builtin.builtinAi;
+
+// Re-export WebAssembly plugin builtin
+pub const wasm_builtin = @import("wasm_builtin.zig");
+pub const builtinWasm = wasm_builtin.builtinWasm;
+
 // Re-export process builtin functions
 pub const builtinExec = process_builtins.builtinExec;
 pub const builtinKill = process_builtins.builtinKill;

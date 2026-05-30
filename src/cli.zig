@@ -6,6 +6,7 @@ const ShellCompletion = @import("shell_completion.zig").ShellCompletion;
 const env_utils = @import("utils/env.zig");
 const IO = @import("utils/io.zig").IO;
 const LspServer = @import("lsp/server.zig").LspServer;
+const net_session = @import("net/session.zig");
 
 /// Den Shell CLI
 /// Provides command-line interface and subcommand handling
@@ -26,6 +27,8 @@ pub const Command = enum {
     script, // Execute script file (implicit)
     command_string, // -c "command" - run command string
     lsp, // Start LSP server for IDE integration
+    serve, // Start a distributed shell session server (--serve [addr])
+    connect, // Connect to a remote shell session (--connect addr)
 };
 
 pub const CliArgs = struct {
@@ -245,6 +248,26 @@ pub fn parseArgs(allocator: std.mem.Allocator, process_args: std.process.Args) !
             .restricted = restricted_from_argv0,
             ._owned_argv = remaining_argv,
         };
+    } else if (std.mem.eql(u8, first_arg, "--serve")) {
+        return CliArgs{
+            .command = .serve,
+            .args = sub_args,
+            .allocator = allocator,
+            .config_path = config_path,
+            .norc = norc,
+            .restricted = restricted_from_argv0,
+            ._owned_argv = remaining_argv,
+        };
+    } else if (std.mem.eql(u8, first_arg, "--connect")) {
+        return CliArgs{
+            .command = .connect,
+            .args = sub_args,
+            .allocator = allocator,
+            .config_path = config_path,
+            .norc = norc,
+            .restricted = restricted_from_argv0,
+            ._owned_argv = remaining_argv,
+        };
     } else if (std.mem.eql(u8, first_arg, "-c")) {
         // -c "command" - run command string
         return CliArgs{
@@ -289,7 +312,66 @@ pub fn execute(cli_args: CliArgs) !void {
         .script => try runScript(cli_args.allocator, cli_args.args, effective_config_path, cli_args.norc, cli_args.restricted),
         .command_string => try runCommandString(cli_args.allocator, cli_args.args, effective_config_path, cli_args.json_output, cli_args.norc, cli_args.restricted),
         .lsp => try runLspServer(cli_args.allocator),
+        .serve => try runSessionServer(cli_args.allocator, cli_args.args, effective_config_path, cli_args.norc),
+        .connect => try runSessionClient(cli_args.args),
     }
+}
+
+/// Start a distributed shell-session server. Forks a Den shell per connection.
+fn runSessionServer(allocator: std.mem.Allocator, args: []const []const u8, config_path: ?[]const u8, norc: bool) !void {
+    const spec = if (args.len > 0) args[0] else "";
+    const addr = net_session.parseAddress(spec) orelse {
+        try IO.eprint("den: --serve: invalid address '{s}' (expected host:port)\n", .{spec});
+        return;
+    };
+
+    // Refuse non-loopback binds unless explicitly allowed.
+    if (!net_session.isLoopback(addr.ip)) {
+        const allow = std.c.getenv("DEN_ALLOW_REMOTE");
+        const allowed = allow != null and std.mem.eql(u8, std.mem.span(allow.?), "1");
+        if (!allowed) {
+            try IO.eprint("den: --serve: refusing to bind non-loopback address {s} without DEN_ALLOW_REMOTE=1\n", .{addr.host});
+            return;
+        }
+    }
+
+    const listener = net_session.bindListen(addr.ip, addr.port) catch |err| {
+        try IO.eprint("den: --serve: {s}:{d}: {s}\n", .{ addr.host, addr.port, @errorName(err) });
+        return;
+    };
+    defer _ = std.c.close(listener);
+
+    try IO.print("den session server listening on {s}:{d} (UNAUTHENTICATED — loopback only)\n", .{ addr.host, addr.port });
+
+    while (true) {
+        const conn = net_session.acceptConn(listener) catch continue;
+        const pid = std.c.fork();
+        if (pid == 0) {
+            // Child: wire the socket to stdio and run the shell, then exit.
+            _ = std.c.close(listener);
+            _ = std.c.dup2(conn, 0);
+            _ = std.c.dup2(conn, 1);
+            _ = std.c.dup2(conn, 2);
+            _ = std.c.close(conn);
+            runInteractiveShell(allocator, config_path, norc, false) catch {};
+            std.c._exit(0);
+        } else {
+            // Parent: hand the connection to the child and keep accepting.
+            _ = std.c.close(conn);
+        }
+    }
+}
+
+/// Connect the local terminal to a remote Den session.
+fn runSessionClient(args: []const []const u8) !void {
+    const spec = if (args.len > 0) args[0] else "";
+    const addr = net_session.parseAddress(spec) orelse {
+        try IO.eprint("den: --connect: invalid address '{s}' (expected host:port)\n", .{spec});
+        return;
+    };
+    net_session.runClient(addr.host, addr.port) catch |err| {
+        try IO.eprint("den: --connect: {s}:{d}: {s}\n", .{ addr.host, addr.port, @errorName(err) });
+    };
 }
 
 /// Start LSP server for IDE integration
