@@ -1263,29 +1263,88 @@ pub const LineEditor = struct {
             try self.writeBytes("\x1b[0K"); // Clear from cursor to end of line
         }
 
-        // Move characters after cursor to the left
-        var i = self.cursor - 1;
-        while (i < self.length - 1) : (i += 1) {
-            self.buffer[i] = self.buffer[i + 1];
+        // Delete the whole codepoint before the cursor (1-4 bytes), not one byte,
+        // so a multibyte character isn't left as a dangling continuation byte.
+        const del = self.prevCodepointLen();
+        const start = self.cursor - del;
+        var i = start;
+        while (i < self.length - del) : (i += 1) {
+            self.buffer[i] = self.buffer[i + del];
         }
 
-        self.cursor -= 1;
-        self.length -= 1;
+        self.cursor = start;
+        self.length -= del;
 
-        // Move cursor back, redraw line, clear to end
-        try self.writeBytes("\x1B[D"); // Move cursor left
+        // Move cursor back one display column, reprint the tail, clear, reposition.
+        try self.writeBytes("\x1B[D"); // Move cursor left one column
         try self.writeBytes(self.buffer[self.cursor..self.length]);
-        try self.writeBytes(" "); // Clear the last character
+        try self.writeBytes(" "); // Clear the freed cell
         try self.writeBytes("\x1B[K"); // Clear to end of line
 
-        // Move cursor back to correct position
-        const back_count = self.length - self.cursor + 1;
+        // Move cursor back by display columns (codepoints) in the tail, +1 for
+        // the space printed above.
+        var back_count: usize = 1;
+        var p = self.cursor;
+        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += 1;
         var j: usize = 0;
         while (j < back_count) : (j += 1) {
             try self.writeBytes("\x1B[D");
         }
 
         // Update and display suggestion only if cursor is at end and threshold met
+        if (self.autosuggestions and self.cursor == self.length and self.length >= self.suggestion_min_chars) {
+            try self.updateSuggestion();
+            try self.displaySuggestion();
+        }
+    }
+
+    /// Insert a full multibyte UTF-8 codepoint given its lead byte. The
+    /// continuation bytes are read from the terminal so the whole codepoint is
+    /// placed atomically and the cursor advances one display column — this is
+    /// what makes typing accented/CJK/emoji characters work.
+    fn insertUtf8(self: *LineEditor, lead: u8) !void {
+        var bytes: [4]u8 = undefined;
+        bytes[0] = lead;
+        const total = utf8SeqLen(lead);
+        var got: usize = 1;
+        while (got < total) : (got += 1) {
+            const b = (try self.terminal.readByte()) orelse break;
+            if (!isUtf8Continuation(b)) {
+                // Malformed sequence — handle the stray byte as its own input.
+                if (b < 0x80) try self.insertChar(b);
+                break;
+            }
+            bytes[got] = b;
+        }
+        if (self.length + got > self.buffer.len) return;
+
+        self.saveUndoState();
+        self.clearHistorySearch();
+        if (self.suggestion != null) {
+            try self.writeBytes("\x1b[0K");
+        }
+
+        // Make room and copy the codepoint's bytes at the cursor.
+        var i = self.length;
+        while (i > self.cursor) : (i -= 1) {
+            self.buffer[i + got - 1] = self.buffer[i - 1];
+        }
+        for (bytes[0..got], 0..) |b, k| self.buffer[self.cursor + k] = b;
+        self.cursor += got;
+        self.length += got;
+
+        // Reprint the tail starting at the inserted codepoint, then reposition
+        // the cursor by display columns (one per codepoint) in the tail.
+        try self.writeBytes(self.buffer[self.cursor - got .. self.length]);
+        try self.writeBytes("\x1B[K");
+        var back_count: usize = 0;
+        var p = self.cursor;
+        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += 1;
+        var j: usize = 0;
+        while (j < back_count) : (j += 1) {
+            try self.writeBytes("\x1B[D");
+        }
+
         if (self.autosuggestions and self.cursor == self.length and self.length >= self.suggestion_min_chars) {
             try self.updateSuggestion();
             try self.displaySuggestion();
