@@ -54,6 +54,9 @@ pub const LineEditor = struct {
     suggestion: ?[]const u8 = null, // The suggested text from history
     // Syntax highlighting
     syntax_highlighting: bool = true, // Enable/disable syntax highlighting
+    // Wrap-aware redraw: cursor's display row (0-based) within the wrapped line
+    // at the last redrawLine(), so the next redraw can move back to the block top.
+    rendered_cursor_row: usize = 0,
     // Inline autosuggestions (fish-style)
     autosuggestions: bool = true, // Enable/disable inline autosuggestions
     suggestion_min_chars: usize = 1, // Minimum chars typed before suggesting
@@ -510,6 +513,9 @@ pub const LineEditor = struct {
         // Reset state
         self.cursor = 0;
         self.length = 0;
+        // Fresh line: the prompt was just printed at the current row, so the
+        // cursor is on row 0 of this line's (not-yet-wrapped) block.
+        self.rendered_cursor_row = 0;
         self.history_index = null;
         if (self.saved_line) |saved| {
             self.allocator.free(saved);
@@ -1333,17 +1339,8 @@ pub const LineEditor = struct {
         self.cursor += got;
         self.length += got;
 
-        // Reprint the tail starting at the inserted codepoint, then reposition
-        // the cursor by display columns (one per codepoint) in the tail.
-        try self.writeBytes(self.buffer[self.cursor - got .. self.length]);
-        try self.writeBytes("\x1B[K");
-        var back_count: usize = 0;
-        var p = self.cursor;
-        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += self.widthAt(p);
-        var j: usize = 0;
-        while (j < back_count) : (j += 1) {
-            try self.writeBytes("\x1B[D");
-        }
+        // Wrap-aware repaint (positions the cursor correctly across rows).
+        try self.redrawLine();
 
         if (self.autosuggestions and self.cursor == self.length and self.length >= self.suggestion_min_chars) {
             try self.updateSuggestion();
@@ -1434,20 +1431,8 @@ pub const LineEditor = struct {
 
         self.length -= del;
 
-        // Redraw from cursor to end
-        try self.writeBytes(self.buffer[self.cursor..self.length]);
-        try self.writeBytes(" ");
-        try self.writeBytes("\x1B[K");
-
-        // Move cursor back by display columns (codepoints) in the tail, +1 for
-        // the space we printed above.
-        var back_count: usize = 1;
-        var p = self.cursor;
-        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += self.widthAt(p);
-        var j: usize = 0;
-        while (j < back_count) : (j += 1) {
-            try self.writeBytes("\x1B[D");
-        }
+        // Wrap-aware repaint (positions the cursor correctly across rows).
+        try self.redrawLine();
     }
 
     /// UTF-8: true if `b` is a continuation byte (10xxxxxx).
@@ -1545,19 +1530,17 @@ pub const LineEditor = struct {
     fn moveCursorLeft(self: *LineEditor) !void {
         const n = self.prevCodepointLen();
         if (n == 0) return;
-        const w = self.widthAt(self.cursor - n);
         self.cursor -= n;
-        var k: usize = 0;
-        while (k < w) : (k += 1) try self.writeBytes("\x1B[D");
+        // Wrap-aware repaint so the cursor can cross row boundaries (a relative
+        // \x1B[D cannot move up a row when the cursor is at column 0).
+        try self.redrawLine();
     }
 
     fn moveCursorRight(self: *LineEditor) !void {
         const n = self.curCodepointLen();
         if (n == 0) return;
-        const w = self.widthAt(self.cursor);
         self.cursor += n;
-        var k: usize = 0;
-        while (k < w) : (k += 1) try self.writeBytes("\x1B[C");
+        try self.redrawLine();
     }
 
     /// Find the start of the previous word
@@ -2600,20 +2583,107 @@ pub const LineEditor = struct {
     }
 
     /// Redraw the current line
-    fn redrawLine(self: *LineEditor) !void {
-        try self.writeBytes("\r");
-        try self.writeBytes("\x1b[2K");
+    /// Visible width of the prompt in columns, ignoring ANSI/OSC escape
+    /// sequences (which occupy zero columns) and counting wide codepoints as 2.
+    fn promptVisibleWidth(self: *LineEditor) usize {
+        var cols: usize = 0;
+        var i: usize = 0;
+        const p = self.prompt;
+        while (i < p.len) {
+            if (p[i] == 0x1B) {
+                i += 1;
+                if (i < p.len and p[i] == '[') {
+                    i += 1;
+                    while (i < p.len and !(p[i] >= 0x40 and p[i] <= 0x7E)) : (i += 1) {}
+                    if (i < p.len) i += 1;
+                } else if (i < p.len and p[i] == ']') {
+                    i += 1;
+                    while (i < p.len and p[i] != 0x07) : (i += 1) {}
+                    if (i < p.len) i += 1;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            if (p[i] == '\n') {
+                cols = 0;
+                i += 1;
+                continue;
+            }
+            const len = utf8SeqLen(p[i]);
+            const end = @min(i + len, p.len);
+            cols += codepointWidth(decodeCodepoint(p[i..end], end - i));
+            i = end;
+        }
+        return cols;
+    }
 
+    /// Wrap-aware full-line repaint. Repaints the prompt + buffer and positions
+    /// the cursor at its true (row, col), correctly handling lines that wrap
+    /// across multiple terminal rows — replacing the old single-row scheme whose
+    /// relative cursor moves corrupted the display on long input.
+    fn redrawLine(self: *LineEditor) !void {
+        const cols: usize = if (signals.getWindowSize()) |ws|
+            (if (ws.cols == 0) 80 else ws.cols)
+        else |_|
+            80;
+
+        const pwidth = self.promptVisibleWidth();
+        const total_cols = pwidth + self.displayWidth(0, self.length);
+        const cursor_cols = pwidth + self.displayWidth(0, self.cursor);
+
+        const last_row = total_cols / cols;
+        const cursor_row = cursor_cols / cols;
+        const cursor_col = cursor_cols % cols;
+
+        var buf: [32]u8 = undefined;
+
+        // 1. Move up to the first row of the previously rendered block.
+        if (self.rendered_cursor_row > 0) {
+            const seq = std.fmt.bufPrint(&buf, "\x1B[{d}A", .{self.rendered_cursor_row}) catch "";
+            try self.writeBytes(seq);
+        }
+
+        // 2. Column 0, clear everything below.
+        try self.writeBytes("\r\x1B[0J");
+
+        // 3. Prompt.
         try self.writeBytes(self.prompt);
 
+        // 4. Buffer (optionally syntax-highlighted).
         if (self.syntax_highlighting and self.length > 0) {
             var highlighter = SyntaxHighlighter.init(self.allocator);
-            const highlighted = try highlighter.highlight(self.buffer[0..self.length]);
-            defer self.allocator.free(highlighted);
-            try self.writeBytes(highlighted);
-        } else {
+            const highlighted = highlighter.highlight(self.buffer[0..self.length]) catch null;
+            if (highlighted) |h| {
+                defer self.allocator.free(h);
+                try self.writeBytes(h);
+            } else {
+                try self.writeBytes(self.buffer[0..self.length]);
+            }
+        } else if (self.length > 0) {
             try self.writeBytes(self.buffer[0..self.length]);
         }
+
+        // 5. If content fills the last row exactly, force a wrap so row math holds.
+        if (total_cols > 0 and total_cols % cols == 0) {
+            try self.writeBytes("\r\n");
+        }
+        const end_row = if (total_cols > 0 and total_cols % cols == 0) last_row + 1 else last_row;
+
+        // 6. Move up from the end row to the cursor's row.
+        if (end_row > cursor_row) {
+            const seq = std.fmt.bufPrint(&buf, "\x1B[{d}A", .{end_row - cursor_row}) catch "";
+            try self.writeBytes(seq);
+        }
+
+        // 7. Absolute column within the row.
+        try self.writeBytes("\r");
+        if (cursor_col > 0) {
+            const seq = std.fmt.bufPrint(&buf, "\x1B[{d}C", .{cursor_col}) catch "";
+            try self.writeBytes(seq);
+        }
+
+        self.rendered_cursor_row = cursor_row;
     }
 
     /// Handle terminal window resize (SIGWINCH)
@@ -2622,15 +2692,10 @@ pub const LineEditor = struct {
             try self.clearCompletionDisplay();
         }
 
+        // Width changed, so the previously tracked wrap layout is invalid —
+        // repaint from the current row. redrawLine positions the cursor itself.
+        self.rendered_cursor_row = 0;
         try self.redrawLine();
-
-        if (self.cursor < self.length) {
-            const moves_needed = self.length - self.cursor;
-            var i: usize = 0;
-            while (i < moves_needed) : (i += 1) {
-                try self.writeBytes("\x1B[D");
-            }
-        }
 
         if (self.completion_list != null) {
             try self.displayCompletionList();
