@@ -500,6 +500,13 @@ pub const LineEditor = struct {
         try self.terminal.enableRawMode();
         errdefer self.terminal.disableRawMode() catch {};
 
+        // Enable bracketed paste so the terminal wraps pasted text in
+        // ESC[200~ ... ESC[201~. The defer disables it on every exit path so we
+        // never leave the user's terminal stuck in bracketed-paste mode after
+        // Den hands control back. See handlePaste for how the text is consumed.
+        self.writeBytes("\x1B[?2004h") catch {};
+        defer self.writeBytes("\x1B[?2004l") catch {};
+
         // Reset state
         self.cursor = 0;
         self.length = 0;
@@ -1277,6 +1284,70 @@ pub const LineEditor = struct {
         }
     }
 
+    /// Consume a bracketed paste: after ESC[200~ we read raw bytes until the
+    /// ESC[201~ terminator and insert them as literal text. Embedded newlines are
+    /// inserted (normalized to spaces) rather than submitting the line, so
+    /// pasting a multi-line block never auto-executes — the footgun this prevents.
+    fn handlePaste(self: *LineEditor) !void {
+        self.saveUndoState();
+        self.clearHistorySearch();
+
+        // Terminator state machine for ESC [ 2 0 1 ~
+        const term = [_]u8{ 0x1B, '[', '2', '0', '1', '~' };
+        var matched: usize = 0;
+
+        while (true) {
+            const byte = (try self.terminal.readByte()) orelse {
+                // No byte ready yet — wait briefly; a paste arrives as a burst,
+                // so this only spins at the very end.
+                std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(@as(i96, 1_000_000)), .awake) catch {};
+                continue;
+            };
+
+            // Track progress toward the paste-end terminator.
+            if (byte == term[matched]) {
+                matched += 1;
+                if (matched == term.len) break; // full terminator seen
+                continue;
+            }
+
+            // Mismatch: bytes tentatively consumed as a partial terminator were
+            // actually pasted content — flush them, then reconsider this byte.
+            if (matched > 0) {
+                for (term[0..matched]) |pending| {
+                    self.insertPasteByte(pending);
+                }
+                matched = 0;
+                if (byte == term[0]) {
+                    matched = 1;
+                    continue;
+                }
+            }
+
+            self.insertPasteByte(byte);
+        }
+
+        try self.redrawLine();
+    }
+
+    /// Insert one pasted byte WITHOUT redrawing (handlePaste redraws once at the
+    /// end). Newline/CR/tab become a space so the paste stays on one editable
+    /// line and cannot submit itself.
+    fn insertPasteByte(self: *LineEditor, byte: u8) void {
+        if (self.length >= self.buffer.len) return;
+        const ch: u8 = switch (byte) {
+            '\n', '\r', '\t' => ' ',
+            else => byte,
+        };
+        var i: usize = self.length;
+        while (i > self.cursor) : (i -= 1) {
+            self.buffer[i] = self.buffer[i - 1];
+        }
+        self.buffer[self.cursor] = ch;
+        self.cursor += 1;
+        self.length += 1;
+    }
+
     fn deleteChar(self: *LineEditor) !void {
         if (self.cursor >= self.length) return;
 
@@ -1728,6 +1799,8 @@ pub const LineEditor = struct {
                 }
             },
             .delete => try self.deleteChar(),
+            .paste_start => try self.handlePaste(),
+            .paste_end => {}, // stray paste-end without a start: ignore
             else => {},
         }
     }
