@@ -1,0 +1,17 @@
+# Den plugin manifest (key = value).
+# Placed next to a plugin so Den can describe it without loading code.
+# Lines starting with '#' and blank lines are ignored.
+
+name = math
+version = 1.0.0
+description = Example WebAssembly plugin exposing add, mul and fib
+author = Den
+license = MIT
+
+# Minimum Den version this plugin targets (optional).
+min_shell_version = 0.1
+
+# Dependencies (optional, repeatable):
+#   dependency = <name>:<version-req>
+#   dependency = <name>:<version-req>:optional
+# (none for this example)

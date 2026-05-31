@@ -2,6 +2,61 @@
 
 This guide explains how to develop plugins for Den Shell. Plugins can extend the shell with custom commands, hooks, and completion providers.
 
+## Plugin types & current status
+
+Den has three ways to extend the shell, at different maturity levels. This table
+is the source of truth; the rest of this guide covers each in detail.
+
+| Type | What it is | Status | Start here |
+| --- | --- | --- | --- |
+| **WebAssembly plugins** | A separately-compiled `.wasm` module Den runs via the `wasm` builtin | ✅ **Works today** in a stock build | [`examples/plugins/wasm/`](../examples/plugins/wasm/) |
+| **Native (compiled-in) plugins** | Zig plugins registered through the hook/command/completion API and compiled into the binary | ✅ Works for plugins built into Den | [Hooks](#hooks) |
+| **External native loading** | Loading a third-party native plugin from disk at runtime | 🚧 **Not wired yet** — discovery/manifest scaffolding exists (`src/plugins/discovery.zig`) but startup does not yet scan for or load external plugins | — |
+
+To ship a plugin to other people **without recompiling Den**, use the
+**WebAssembly** path.
+
+### WebAssembly plugins
+
+A WASM plugin is any `wasm32-freestanding` module that exports the functions you
+want to call. Den runs them with a small built-in interpreter — no recompile and
+no host access (the module is sandboxed: it can compute and use its own linear
+memory, but cannot touch the filesystem, network, or environment).
+
+```bash
+# Call an exported function:  wasm <module.wasm> <export> [int-args...]
+den wasm math.wasm add 5 3      # => 8
+
+# List a module's exported functions
+den wasm --exports math.wasm
+```
+
+**ABI (current):** arguments and the return value are integers (`i32`/`i64`);
+linear memory is available via `i32.load`/`i32.store`; floats are not supported.
+
+A complete, runnable example — source, a `plugin.manifest`, and build/run
+instructions — lives in [`examples/plugins/wasm/`](../examples/plugins/wasm/).
+
+### The plugin manifest
+
+A plugin directory may include a `plugin.manifest` so tooling can describe the
+plugin without loading it. It is a simple `key = value` file (parsed by
+`src/plugins/discovery.zig`):
+
+```ini
+name = math
+version = 1.0.0
+description = Example WebAssembly plugin
+author = You
+license = MIT
+min_shell_version = 0.1
+# dependency = othername:^1.0.0
+# dependency = optionaldep:^2.0.0:optional
+```
+
+The remainder of this guide covers the **native, compiled-in** hook/command/
+completion API.
+
 ## Table of Contents
 
 - [Overview](#overview)
