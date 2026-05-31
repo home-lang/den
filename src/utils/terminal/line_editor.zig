@@ -796,6 +796,14 @@ pub const LineEditor = struct {
                     self.clearCompletionState();
                     try self.yank(); // Ctrl+Y - yank (paste from kill ring)
                 },
+                0x10 => {
+                    self.clearCompletionState();
+                    try self.navigateHistoryUp(); // Ctrl+P - previous history (like Up arrow)
+                },
+                0x0E => {
+                    self.clearCompletionState();
+                    try self.navigateHistoryDown(); // Ctrl+N - next history (like Down arrow)
+                },
                 0x1F => {
                     self.clearCompletionState();
                     try self.undo(); // Ctrl+_ (undo)
