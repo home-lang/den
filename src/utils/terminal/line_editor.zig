@@ -897,8 +897,16 @@ pub const LineEditor = struct {
                         try self.insertChar(byte);
                     }
                 },
+                0xC2...0xF4 => {
+                    // UTF-8 lead byte — assemble and insert the full codepoint so
+                    // accented/CJK/emoji input works. Ignored during reverse search.
+                    if (!self.reverse_search_mode) {
+                        self.clearCompletionState();
+                        try self.insertUtf8(byte);
+                    }
+                },
                 else => {
-                    // Ignore other control characters
+                    // Ignore other control / stray continuation bytes
                 },
             }
         }
@@ -1349,7 +1357,9 @@ pub const LineEditor = struct {
     }
 
     fn deleteChar(self: *LineEditor) !void {
-        if (self.cursor >= self.length) return;
+        // Delete the whole codepoint at the cursor (1-4 bytes), not one byte.
+        const del = self.curCodepointLen();
+        if (del == 0) return;
 
         // Save state for undo
         self.saveUndoState();
@@ -1357,36 +1367,75 @@ pub const LineEditor = struct {
         // Clear history search when user deletes
         self.clearHistorySearch();
 
-        // Move characters after cursor to the left
+        // Shift the tail left by the codepoint's byte length
         var i = self.cursor;
-        while (i < self.length - 1) : (i += 1) {
-            self.buffer[i] = self.buffer[i + 1];
+        while (i < self.length - del) : (i += 1) {
+            self.buffer[i] = self.buffer[i + del];
         }
 
-        self.length -= 1;
+        self.length -= del;
 
         // Redraw from cursor to end
         try self.writeBytes(self.buffer[self.cursor..self.length]);
         try self.writeBytes(" ");
         try self.writeBytes("\x1B[K");
 
-        // Move cursor back
-        const back_count = self.length - self.cursor + 1;
+        // Move cursor back by display columns (codepoints) in the tail, +1 for
+        // the space we printed above.
+        var back_count: usize = 1;
+        var p = self.cursor;
+        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += 1;
         var j: usize = 0;
         while (j < back_count) : (j += 1) {
             try self.writeBytes("\x1B[D");
         }
     }
 
+    /// UTF-8: true if `b` is a continuation byte (10xxxxxx).
+    fn isUtf8Continuation(b: u8) bool {
+        return (b & 0xC0) == 0x80;
+    }
+
+    /// UTF-8: byte length of the codepoint whose lead byte is `b`. Invalid lead
+    /// bytes count as one byte so editing never stalls on malformed input.
+    fn utf8SeqLen(b: u8) usize {
+        if (b < 0x80) return 1;
+        if ((b & 0xE0) == 0xC0) return 2;
+        if ((b & 0xF0) == 0xE0) return 3;
+        if ((b & 0xF8) == 0xF0) return 4;
+        return 1;
+    }
+
+    /// Byte length of the codepoint ending just before the cursor (0 at start).
+    fn prevCodepointLen(self: *LineEditor) usize {
+        if (self.cursor == 0) return 0;
+        var i = self.cursor - 1;
+        var n: usize = 1;
+        while (i > 0 and isUtf8Continuation(self.buffer[i]) and n < 4) : (i -= 1) {
+            n += 1;
+        }
+        return n;
+    }
+
+    /// Byte length of the codepoint at the cursor (0 at end), clamped to length.
+    fn curCodepointLen(self: *LineEditor) usize {
+        if (self.cursor >= self.length) return 0;
+        var n = utf8SeqLen(self.buffer[self.cursor]);
+        if (self.cursor + n > self.length) n = self.length - self.cursor;
+        return n;
+    }
+
     fn moveCursorLeft(self: *LineEditor) !void {
-        if (self.cursor == 0) return;
-        self.cursor -= 1;
+        const n = self.prevCodepointLen();
+        if (n == 0) return;
+        self.cursor -= n;
         try self.writeBytes("\x1B[D");
     }
 
     fn moveCursorRight(self: *LineEditor) !void {
-        if (self.cursor >= self.length) return;
-        self.cursor += 1;
+        const n = self.curCodepointLen();
+        if (n == 0) return;
+        self.cursor += n;
         try self.writeBytes("\x1B[C");
     }
 
