@@ -1646,34 +1646,6 @@ pub const LineEditor = struct {
     }
 
     /// Current terminal width in columns (fallback 80 if it can't be queried).
-    fn termCols(self: *LineEditor) usize {
-        _ = self;
-        const sz = platform.getTerminalSize() orelse return 80;
-        return if (sz.cols == 0) 80 else sz.cols;
-    }
-
-    /// Visible width of the prompt, ignoring ANSI/VT escape sequences (which
-    /// occupy zero columns). Handles CSI (ESC[...letter) and OSC (ESC]...BEL/ST).
-    fn promptVisibleWidth(self: *LineEditor) usize {
-        var cols: usize = 0;
-        var i: usize = 0;
-        const p = self.prompt;
-        while (i < p.len) {
-            if (p[i] == 0x1B) {
-                i += 1;
-                if (i < p.len and p[i] == '[') {
-                    i += 1;
-                    while (i < p.len and !(p[i] >= 0x40 and p[i] <= 0x7E)) : (i += 1) {}
-                    if (i < p.len) i += 1; // consume final byte
-                } else if (i < p.len and p[i] == ']') {
-            try self.writeBytes(seq);
-        }
-
-        // Remember where the cursor is for the next refresh.
-        self.rendered_cursor_row = cursor_row;
-    }
-
-    fn moveCursorLeft(self: *LineEditor) !void {
         const n = self.prevCodepointLen();
         if (n == 0) return;
         self.cursor -= n;
