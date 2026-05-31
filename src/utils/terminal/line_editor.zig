@@ -1285,7 +1285,7 @@ pub const LineEditor = struct {
         // the space printed above.
         var back_count: usize = 1;
         var p = self.cursor;
-        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += 1;
+        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += self.widthAt(p);
         var j: usize = 0;
         while (j < back_count) : (j += 1) {
             try self.writeBytes("\x1B[D");
@@ -1339,7 +1339,7 @@ pub const LineEditor = struct {
         try self.writeBytes("\x1B[K");
         var back_count: usize = 0;
         var p = self.cursor;
-        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += 1;
+        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += self.widthAt(p);
         var j: usize = 0;
         while (j < back_count) : (j += 1) {
             try self.writeBytes("\x1B[D");
@@ -1443,7 +1443,7 @@ pub const LineEditor = struct {
         // the space we printed above.
         var back_count: usize = 1;
         var p = self.cursor;
-        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += 1;
+        while (p < self.length) : (p += utf8SeqLen(self.buffer[p])) back_count += self.widthAt(p);
         var j: usize = 0;
         while (j < back_count) : (j += 1) {
             try self.writeBytes("\x1B[D");
@@ -1484,18 +1484,80 @@ pub const LineEditor = struct {
         return n;
     }
 
+    /// Decode the codepoint at `bytes[0..]` (whose length is `len`), best-effort.
+    fn decodeCodepoint(bytes: []const u8, len: usize) u21 {
+        if (len == 0 or bytes.len == 0) return 0;
+        return switch (len) {
+            1 => bytes[0],
+            2 => (@as(u21, bytes[0] & 0x1F) << 6) | (bytes[1] & 0x3F),
+            3 => (@as(u21, bytes[0] & 0x0F) << 12) | (@as(u21, bytes[1] & 0x3F) << 6) | (bytes[2] & 0x3F),
+            4 => (@as(u21, bytes[0] & 0x07) << 18) | (@as(u21, bytes[1] & 0x3F) << 12) | (@as(u21, bytes[2] & 0x3F) << 6) | (bytes[3] & 0x3F),
+            else => bytes[0],
+        };
+    }
+
+    /// Number of terminal columns a codepoint occupies: 0 for combining marks,
+    /// 2 for East-Asian wide / emoji, 1 otherwise. Covers the common wide ranges
+    /// (it is not the full Unicode width database, but matches CJK + emoji which
+    /// is what trips up cursor math in practice).
+    fn codepointWidth(cp: u21) usize {
+        if (cp == 0) return 0;
+        // Zero-width: combining marks, ZWJ/ZWNJ, variation selectors.
+        if ((cp >= 0x0300 and cp <= 0x036F) or
+            (cp >= 0x200B and cp <= 0x200F) or
+            (cp >= 0xFE00 and cp <= 0xFE0F) or
+            (cp >= 0x1AB0 and cp <= 0x1AFF) or
+            (cp >= 0x1DC0 and cp <= 0x1DFF)) return 0;
+        // Wide (2-column) ranges: CJK, Hangul, Kana, fullwidth forms, emoji.
+        if ((cp >= 0x1100 and cp <= 0x115F) or // Hangul Jamo
+            (cp >= 0x2E80 and cp <= 0x303E) or // CJK radicals, Kangxi
+            (cp >= 0x3041 and cp <= 0x33FF) or // Hiragana..CJK symbols
+            (cp >= 0x3400 and cp <= 0x4DBF) or // CJK Ext A
+            (cp >= 0x4E00 and cp <= 0x9FFF) or // CJK Unified
+            (cp >= 0xA000 and cp <= 0xA4CF) or // Yi
+            (cp >= 0xAC00 and cp <= 0xD7A3) or // Hangul syllables
+            (cp >= 0xF900 and cp <= 0xFAFF) or // CJK compat
+            (cp >= 0xFE30 and cp <= 0xFE4F) or // CJK compat forms
+            (cp >= 0xFF00 and cp <= 0xFF60) or // Fullwidth forms
+            (cp >= 0xFFE0 and cp <= 0xFFE6) or
+            (cp >= 0x1F300 and cp <= 0x1FAFF) or // emoji & symbols
+            (cp >= 0x20000 and cp <= 0x3FFFD)) return 2; // CJK Ext B+
+        return 1;
+    }
+
+    /// Display-column width of the codepoint whose bytes start at buffer[idx].
+    fn widthAt(self: *LineEditor, idx: usize) usize {
+        const len = utf8SeqLen(self.buffer[idx]);
+        const end = @min(idx + len, self.length);
+        return codepointWidth(decodeCodepoint(self.buffer[idx..end], end - idx));
+    }
+
+    /// Total display columns of buffer[from..to].
+    fn displayWidth(self: *LineEditor, from: usize, to: usize) usize {
+        var cols: usize = 0;
+        var p = from;
+        while (p < to) : (p += utf8SeqLen(self.buffer[p])) {
+            cols += self.widthAt(p);
+        }
+        return cols;
+    }
+
     fn moveCursorLeft(self: *LineEditor) !void {
         const n = self.prevCodepointLen();
         if (n == 0) return;
+        const w = self.widthAt(self.cursor - n);
         self.cursor -= n;
-        try self.writeBytes("\x1B[D");
+        var k: usize = 0;
+        while (k < w) : (k += 1) try self.writeBytes("\x1B[D");
     }
 
     fn moveCursorRight(self: *LineEditor) !void {
         const n = self.curCodepointLen();
         if (n == 0) return;
+        const w = self.widthAt(self.cursor);
         self.cursor += n;
-        try self.writeBytes("\x1B[C");
+        var k: usize = 0;
+        while (k < w) : (k += 1) try self.writeBytes("\x1B[C");
     }
 
     /// Find the start of the previous word
