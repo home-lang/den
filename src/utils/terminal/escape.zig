@@ -14,6 +14,8 @@ pub const EscapeSequence = enum {
     delete,
     page_up,
     page_down,
+    paste_start, // ESC[200~ (bracketed paste begin)
+    paste_end, // ESC[201~ (bracketed paste end)
     unknown,
 
     /// Parse escape sequence from input
@@ -36,23 +38,42 @@ pub const EscapeSequence = enum {
                 else => {},
             }
 
-            // Multi-character sequences
-            if (bytes.len >= 4 and bytes[3] == '~') {
-                switch (bytes[2]) {
-                    '3' => return .delete,
-                    '5' => return .page_up,
-                    '6' => return .page_down,
-                    else => {},
-                }
-            }
+            // Numeric-parameter sequences: ESC[<digits>~ (delete, paste, ...) and
+            // ESC[1;5C/D (ctrl arrows). bytes[2] is the first parameter digit.
+            // Return null while the parameter is still arriving so multi-digit
+            // codes like 200/201 (bracketed paste) are never truncated to .unknown.
+            if (bytes[2] >= '0' and bytes[2] <= '9') {
+                var idx: usize = 2;
+                while (idx < bytes.len and bytes[idx] >= '0' and bytes[idx] <= '9') : (idx += 1) {}
+                if (idx >= bytes.len) return null; // still reading digits
 
-            // Ctrl+Arrow sequences: ESC[1;5C (right) or ESC[1;5D (left)
-            if (bytes.len >= 6 and bytes[2] == '1' and bytes[3] == ';' and bytes[4] == '5') {
-                switch (bytes[5]) {
-                    'C' => return .ctrl_right,
-                    'D' => return .ctrl_left,
-                    else => {},
+                // ESC[<num>~
+                if (bytes[idx] == '~') {
+                    var num: u32 = 0;
+                    for (bytes[2..idx]) |d| num = num * 10 + (d - '0');
+                    return switch (num) {
+                        1 => .home,
+                        3 => .delete,
+                        4 => .end_key,
+                        5 => .page_up,
+                        6 => .page_down,
+                        200 => .paste_start,
+                        201 => .paste_end,
+                        else => .unknown,
+                    };
                 }
+
+                // ESC[1;5C / ESC[1;5D (ctrl arrows)
+                if (bytes[idx] == ';') {
+                    if (bytes.len < idx + 3) return null; // need ";5C"/";5D"
+                    return switch (bytes[idx + 2]) {
+                        'C' => .ctrl_right,
+                        'D' => .ctrl_left,
+                        else => .unknown,
+                    };
+                }
+
+                return .unknown;
             }
         }
 
