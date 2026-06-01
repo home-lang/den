@@ -16,3 +16,4 @@ bin/krusty
 /pantry_modules
 /pantry
 pantry
+.claude/scheduled_tasks.lock
