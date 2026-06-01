@@ -310,11 +310,12 @@ test "fuzz: path completion patterns" {
     var temp_dir = try TempDir.init(allocator);
     defer temp_dir.deinit();
 
-    // Create some test files
-    _ = try temp_dir.createFile("test1.txt", "");
-    _ = try temp_dir.createFile("test2.txt", "");
-    _ = try temp_dir.createFile("README.md", "");
-    _ = try temp_dir.createDir("subdir");
+    // Create some test files. createFile/createDir return owned paths, so
+    // free them to avoid leaking under the testing allocator.
+    inline for (.{ "test1.txt", "test2.txt", "README.md" }) |name| {
+        allocator.free(try temp_dir.createFile(name, ""));
+    }
+    allocator.free(try temp_dir.createDir("subdir"));
 
     // Verify directory exists
     var dir = try std.Io.Dir.cwd().openDir(std.testing.io, temp_dir.path, .{});
