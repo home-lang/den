@@ -177,11 +177,13 @@ pub const BenchmarkSuite = struct {
     }
 };
 
-// Example benchmark functions for testing
-fn exampleFunction(allocator: std.mem.Allocator, size: usize) ![]u8 {
+// Example benchmark functions for testing.
+// The benchmark harness discards the result, so free the buffer here to
+// avoid leaking on every iteration.
+fn exampleFunction(allocator: std.mem.Allocator, size: usize) !void {
     const buffer = try allocator.alloc(u8, size);
+    defer allocator.free(buffer);
     @memset(buffer, 0);
-    return buffer;
 }
 
 // Tests
@@ -208,14 +210,11 @@ test "BenchmarkSuite usage" {
 
     try suite.addResult(result);
 
-    var buffer: std.ArrayList(u8) = .empty;
-    defer buffer.deinit(allocator);
-
-    var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &buffer);
-    defer buffer = aw.toArrayList();
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     try suite.printSummary(&aw.writer);
 
-    const output = buffer.items;
+    const output = aw.written();
     try std.testing.expect(std.mem.indexOf(u8, output, "Test Suite") != null);
 }

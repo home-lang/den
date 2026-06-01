@@ -237,7 +237,9 @@ pub const PluginAPI = struct {
 
     /// Get current timestamp in milliseconds
     pub fn timestamp(_: *PluginAPI) i64 {
-        return std.time.milliTimestamp();
+        var ts: std.c.timespec = undefined;
+        if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+        return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
     }
 
     // === Shell State Access API ===

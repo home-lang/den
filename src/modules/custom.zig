@@ -111,7 +111,7 @@ pub const FormatString = struct {
     /// Render format string with module info
     /// Supports: {symbol}, {version}, {name}
     pub fn render(self: *const FormatString, info: *const ModuleInfo) ![]const u8 {
-        var result: std.array_list.Managed(u8) = .empty;
+        var result: std.ArrayList(u8) = .empty;
         defer result.deinit(self.allocator);
 
         var i: usize = 0;

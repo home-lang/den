@@ -178,13 +178,19 @@ pub fn mathMultiply(args: []const []const u8) !i32 {
 /// Measures command execution time
 var timer_start: i64 = 0;
 
+fn milliTimestamp() i64 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+}
+
 pub fn timerPreCommand(ctx: *HookContext) !void {
     _ = ctx;
-    timer_start = std.time.milliTimestamp();
+    timer_start = milliTimestamp();
 }
 
 pub fn timerPostCommand(ctx: *HookContext) !void {
-    const elapsed = std.time.milliTimestamp() - timer_start;
+    const elapsed = milliTimestamp() - timer_start;
     if (ctx.getCommand()) |cmd| {
         IO.print("[timer] '{s}' took {}ms\n", .{ cmd, elapsed }) catch {};
     }

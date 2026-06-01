@@ -315,7 +315,7 @@ pub fn profile(profiler: *Profiler, name: []const u8, category: ProfileEvent.Cat
 // Tests
 test "ProfileZone timing" {
     var zone = ProfileZone.init("test", null);
-    std.time.sleep(1_000_000); // 1ms
+    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(1_000_000), .awake) catch {}; // 1ms
     const duration = zone.endMs();
     try std.testing.expect(duration >= 0.5);
 }
@@ -330,7 +330,7 @@ test "Profiler basic usage" {
     try std.testing.expect(profiler.isEnabled());
 
     var zone = profiler.beginZone("test_operation");
-    std.time.sleep(1_000_000);
+    std.Io.sleep(std.Options.debug_io, std.Io.Duration.fromNanoseconds(1_000_000), .awake) catch {};
     try profiler.endZone(&zone, .other);
 
     try std.testing.expectEqual(@as(usize, 1), profiler.getEventCount());
@@ -349,12 +349,15 @@ test "Profiler report generation" {
     try profiler.recordEvent("parse", .parsing, 500_000);
     try profiler.recordEvent("execute", .command_execution, 2_000_000);
 
-    var buffer = std.array_list.Managed(u8).init(allocator);
-    defer buffer.deinit();
+    var buffer: std.ArrayList(u8) = .empty;
+    defer buffer.deinit(allocator);
 
-    try profiler.generateReport(buffer.writer());
+    var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &buffer);
+    defer buffer = aw.toArrayList();
 
-    const report = buffer.items;
+    try profiler.generateReport(&aw.writer);
+
+    const report = aw.written();
     try std.testing.expect(std.mem.indexOf(u8, report, "Den Shell Performance Profile") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "Category Summary") != null);
 }

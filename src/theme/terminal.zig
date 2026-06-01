@@ -75,8 +75,7 @@ pub fn isTTY() bool {
         var mode: win.DWORD = 0;
         return win.kernel32.GetConsoleMode(handle, &mode) != 0;
     } else {
-        const posix = std.posix;
-        return posix.isatty(posix.STDOUT_FILENO);
+        return std.c.isatty(std.posix.STDOUT_FILENO) != 0;
     }
 }
 
@@ -154,20 +153,15 @@ fn getTerminalSizeFromEnv() ?TerminalSize {
 fn getTerminalSizeUnix() ?TerminalSize {
     if (@import("builtin").os.tag == .windows) return null;
 
-    const c = @cImport({
-        @cInclude("sys/ioctl.h");
-        @cInclude("unistd.h");
-    });
-
-    var ws: c.winsize = undefined;
-
-    if (c.ioctl(c.STDOUT_FILENO, c.TIOCGWINSZ, &ws) == -1) {
+    var ws: std.posix.winsize = undefined;
+    const result = std.posix.system.ioctl(std.posix.STDOUT_FILENO, std.posix.T.IOCGWINSZ, @intFromPtr(&ws));
+    if (result != 0) {
         return null;
     }
 
     return .{
-        .width = @as(usize, @intCast(ws.ws_col)),
-        .height = @as(usize, @intCast(ws.ws_row)),
+        .width = @as(usize, @intCast(ws.col)),
+        .height = @as(usize, @intCast(ws.row)),
     };
 }
 

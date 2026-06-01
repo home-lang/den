@@ -255,7 +255,7 @@ pub const BatchProcessor = struct {
         return .{
             .allocator = allocator,
             .thread_pool = thread_pool,
-            .work_queue = .{},
+            .work_queue = .empty,
             .queue_mutex = .{},
         };
     }

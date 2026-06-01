@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 pub const interface_mod = @import("interface.zig");
 const IO = @import("../utils/io.zig").IO;
 
@@ -32,7 +33,7 @@ pub const AsyncHookState = struct {
     hook: Hook,
     context: HookContext,
     result: ?HookResult,
-    started_at: i64,
+    started_at: compat.Instant,
     timeout_ms: ?u64,
     allocator: std.mem.Allocator,
 
@@ -41,7 +42,7 @@ pub const AsyncHookState = struct {
             .hook = hook,
             .context = context,
             .result = null,
-            .started_at = std.time.milliTimestamp(),
+            .started_at = compat.Instant.now() catch std.mem.zeroes(compat.Instant),
             .timeout_ms = timeout_ms,
             .allocator = allocator,
         };
@@ -56,9 +57,9 @@ pub const AsyncHookState = struct {
     /// Check if execution has timed out
     pub fn isTimedOut(self: *AsyncHookState) bool {
         if (self.timeout_ms) |timeout| {
-            const now = std.time.milliTimestamp();
-            const elapsed = @as(u64, @intCast(now - self.started_at));
-            return elapsed > timeout;
+            const now = compat.Instant.now() catch return false;
+            const elapsed_ms = now.since(self.started_at) / 1_000_000;
+            return elapsed_ms > timeout;
         }
         return false;
     }
@@ -181,7 +182,7 @@ pub const HookManager = struct {
 
     /// Execute a single hook with timeout
     fn executeHookWithTimeout(self: *HookManager, hook: Hook, context: *HookContext, timeout_ms: u64) !HookResult {
-        const start_time = std.time.milliTimestamp();
+        const start_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
 
         var result = HookResult{
             .success = false,
@@ -199,13 +200,13 @@ pub const HookManager = struct {
             result.error_message = err_msg;
             result.success = false;
 
-            const end_time = std.time.milliTimestamp();
-            result.execution_time_ms = @intCast(end_time - start_time);
+            const end_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
+            result.execution_time_ms = end_time.since(start_time) / 1_000_000;
             return result;
         };
 
-        const end_time = std.time.milliTimestamp();
-        const elapsed = @as(u64, @intCast(end_time - start_time));
+        const end_time = compat.Instant.now() catch std.mem.zeroes(compat.Instant);
+        const elapsed = end_time.since(start_time) / 1_000_000;
 
         result.execution_time_ms = elapsed;
         result.success = true;

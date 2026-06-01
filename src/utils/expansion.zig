@@ -197,6 +197,7 @@ pub const Expansion = struct {
             .option_nounset = false,
             .cmd_cache = null,
             .line_number = 1,
+            .shell_start_time = if (compat.Instant.now()) |inst| (if (@import("builtin").os.tag == .windows) @as(i64, @intCast(inst.timestamp / 10_000_000)) else @as(i64, @intCast(inst.timestamp.sec))) else |_| 0,
         };
     }
 
