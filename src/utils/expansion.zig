@@ -319,7 +319,8 @@ pub const Expansion = struct {
                     (i + 1 >= input.len or input[i + 1] == ' ' or input[i + 1] == '\t');
 
                 const should_expand = !is_regex_op and (i == 0 or
-                    (i > 0 and (input[i - 1] == ':' or input[i - 1] == '=')));
+                    (i > 0 and (input[i - 1] == ':' or input[i - 1] == '=' or
+                        input[i - 1] == ' ' or input[i - 1] == '\t')));
 
                 if (should_expand) {
                     const expansion_result = try self.expandTilde(input[i..]);
