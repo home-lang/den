@@ -99,8 +99,11 @@ pub const ThreadPool = struct {
             // Check shutdown first
             if (pool.shutdown.load(.acquire)) break;
 
-            if (pool.queue.pop()) |job| {
-                _ = pool.active_jobs.fetchAdd(1, .acq_rel);
+            if (pool.queue.popActive(&pool.active_jobs)) |job| {
+                // active_jobs was incremented atomically with the pop (under the
+                // queue mutex) so there is never a moment where a job is neither
+                // queued nor counted as active. This prevents waitIdle() from
+                // returning prematurely while a job is in flight.
                 job.func(job.data);
                 // Note: data is freed by the wrapper function
                 _ = pool.active_jobs.fetchSub(1, .acq_rel);
@@ -148,6 +151,17 @@ pub const ThreadPool = struct {
             defer self.mutex.unlock();
 
             if (self.queue.items.len == 0) return null;
+            return self.queue.orderedRemove(0);
+        }
+
+        /// Pop a job and increment `active_jobs` atomically under the queue
+        /// mutex, so the job is always either queued or counted as active.
+        fn popActive(self: *JobQueue, active_jobs: *std.atomic.Value(usize)) ?JobItem {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            if (self.queue.items.len == 0) return null;
+            _ = active_jobs.fetchAdd(1, .acq_rel);
             return self.queue.orderedRemove(0);
         }
 
