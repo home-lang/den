@@ -112,8 +112,11 @@ pub const Tokenizer = struct {
     pub fn deinitTokens(self: *Tokenizer, tokens: []const Token) void {
         for (tokens) |token| {
             switch (token.type) {
-                // These token types have dynamically allocated values
-                .word, .process_sub_in, .process_sub_out => {
+                // These token types have dynamically allocated values.
+                // `parseWord` heap-allocates the value for plain words AND for
+                // every keyword it recognizes, so keyword tokens must be freed
+                // here too (they only ever originate from `parseWord`).
+                .word, .process_sub_in, .process_sub_out, .kw_if, .kw_then, .kw_else, .kw_elif, .kw_fi, .kw_for, .kw_while, .kw_do, .kw_done, .kw_case, .kw_esac, .kw_in, .kw_function, .kw_let, .kw_mut, .kw_try, .kw_catch, .kw_match => {
                     if (token.value.len > 0) {
                         self.allocator.free(token.value);
                     }
