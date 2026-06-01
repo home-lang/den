@@ -317,8 +317,8 @@ test "fuzz: path completion patterns" {
     _ = try temp_dir.createDir("subdir");
 
     // Verify directory exists
-    var dir = try std.fs.cwd().openDir(temp_dir.path, .{});
-    dir.close();
+    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, temp_dir.path, .{});
+    dir.close(std.testing.io);
 }
 
 test "fuzz: command name patterns" {

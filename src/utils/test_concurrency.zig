@@ -103,8 +103,8 @@ test "SPSCQueue: capacity limits" {
     try std.testing.expect(queue.push(2));
     try std.testing.expect(queue.push(3));
 
-    // Can push 3 items in size-4 queue (one slot reserved)
-    try std.testing.expect(!queue.isFull());
+    // After 3 items in a size-4 queue (one slot reserved) it is full
+    try std.testing.expect(queue.isFull());
 
     // Now it should be full
     try std.testing.expect(!queue.push(4));
@@ -172,11 +172,19 @@ test "ConcurrentHashMap: many items" {
     var map = parallel_discovery.ConcurrentHashMap([]const u8, i32, 16).init(std.testing.allocator);
     defer map.deinit();
 
+    // Track the caller-owned keys so we can free them (the map does not own them).
+    var keys: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (keys.items) |k| std.testing.allocator.free(k);
+        keys.deinit(std.testing.allocator);
+    }
+
     var i: i32 = 0;
     while (i < 100) : (i += 1) {
         var buf: [32]u8 = undefined;
         const key = try std.fmt.bufPrint(&buf, "key_{d}", .{i});
         const key_owned = try std.testing.allocator.dupe(u8, key);
+        try keys.append(std.testing.allocator, key_owned);
         try map.put(key_owned, i);
     }
 

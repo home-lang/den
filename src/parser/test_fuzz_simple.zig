@@ -12,7 +12,7 @@ test "Fuzz: empty strings" {
     for (inputs) |input| {
         var tokenizer = Tokenizer.init(allocator, input);
         const tokens = try tokenizer.tokenize();
-        defer allocator.free(tokens);
+        defer tokenizer.deinitTokens(tokens);
 
         // Should not crash
         try std.testing.expect(tokens.len >= 0);
@@ -27,7 +27,8 @@ test "Fuzz: single characters" {
     for (chars) |c| {
         const input = [_]u8{c};
         var tokenizer = Tokenizer.init(allocator, &input);
-        _ = tokenizer.tokenize() catch continue; // May error, that's ok
+        const tokens = tokenizer.tokenize() catch continue; // May error, that's ok
+        tokenizer.deinitTokens(tokens);
     }
 }
 
@@ -47,7 +48,8 @@ test "Fuzz: repeated operators" {
 
     for (inputs) |input| {
         var tokenizer = Tokenizer.init(allocator, input);
-        _ = tokenizer.tokenize() catch continue; // May error
+        const tokens = tokenizer.tokenize() catch continue; // May error
+        tokenizer.deinitTokens(tokens);
     }
 }
 
@@ -63,7 +65,7 @@ test "Fuzz: long strings" {
 
         var tokenizer = Tokenizer.init(allocator, buf[0..len]);
         const tokens = try tokenizer.tokenize();
-        defer allocator.free(tokens);
+        defer tokenizer.deinitTokens(tokens);
 
         try std.testing.expect(tokens.len > 0);
     }
@@ -82,7 +84,7 @@ test "Fuzz: mixed whitespace" {
     for (inputs) |input| {
         var tokenizer = Tokenizer.init(allocator, input);
         const tokens = try tokenizer.tokenize();
-        defer allocator.free(tokens);
+        defer tokenizer.deinitTokens(tokens);
 
         try std.testing.expect(tokens.len >= 2);
     }
@@ -101,7 +103,7 @@ test "Fuzz: operator combinations" {
     for (inputs) |input| {
         var tokenizer = Tokenizer.init(allocator, input);
         const tokens = try tokenizer.tokenize();
-        defer allocator.free(tokens);
+        defer tokenizer.deinitTokens(tokens);
 
         try std.testing.expect(tokens.len > 3);
     }
@@ -125,7 +127,7 @@ test "Fuzz: special characters" {
     for (inputs) |input| {
         var tokenizer = Tokenizer.init(allocator, input);
         const tokens = try tokenizer.tokenize();
-        defer allocator.free(tokens);
+        defer tokenizer.deinitTokens(tokens);
 
         try std.testing.expect(tokens.len >= 2);
     }
@@ -144,7 +146,7 @@ test "Fuzz: nested structures" {
     for (inputs) |input| {
         var tokenizer = Tokenizer.init(allocator, input);
         const tokens = try tokenizer.tokenize();
-        defer allocator.free(tokens);
+        defer tokenizer.deinitTokens(tokens);
 
         try std.testing.expect(tokens.len > 0);
     }

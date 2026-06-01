@@ -166,10 +166,11 @@ pub fn build(b: *std.Build) void {
 
     // Plugin tests
     const plugin_test_module = b.createModule(.{
-        .root_source_file = b.path("src/plugins/test_plugins.zig"),
+        .root_source_file = b.path("src/test_plugins_root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    plugin_test_module.addImport("compat", compat_module);
 
     const plugin_tests = b.addTest(.{
         .root_module = plugin_test_module,
@@ -181,10 +182,11 @@ pub fn build(b: *std.Build) void {
 
     // Plugin interface tests
     const interface_test_module = b.createModule(.{
-        .root_source_file = b.path("src/plugins/test_interface.zig"),
+        .root_source_file = b.path("src/test_plugin_interface_root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    interface_test_module.addImport("compat", compat_module);
 
     const interface_tests = b.addTest(.{
         .root_module = interface_test_module,
@@ -196,10 +198,11 @@ pub fn build(b: *std.Build) void {
 
     // Builtin plugin tests
     const builtin_plugin_test_module = b.createModule(.{
-        .root_source_file = b.path("src/plugins/test_builtin_plugins.zig"),
+        .root_source_file = b.path("src/test_plugin_builtin_root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    builtin_plugin_test_module.addImport("compat", compat_module);
 
     const builtin_plugin_tests = b.addTest(.{
         .root_module = builtin_plugin_test_module,
@@ -211,10 +214,11 @@ pub fn build(b: *std.Build) void {
 
     // Integration tests
     const integration_test_module = b.createModule(.{
-        .root_source_file = b.path("src/plugins/test_integration.zig"),
+        .root_source_file = b.path("src/test_plugin_integration_root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    integration_test_module.addImport("compat", compat_module);
 
     const integration_tests = b.addTest(.{
         .root_module = integration_test_module,
@@ -241,10 +245,11 @@ pub fn build(b: *std.Build) void {
 
     // API tests
     const api_test_module = b.createModule(.{
-        .root_source_file = b.path("src/plugins/test_api.zig"),
+        .root_source_file = b.path("src/test_plugin_api_root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    api_test_module.addImport("compat", compat_module);
 
     const api_tests = b.addTest(.{
         .root_module = api_test_module,
@@ -265,10 +270,11 @@ pub fn build(b: *std.Build) void {
 
     // Hook manager tests
     const hook_manager_test_module = b.createModule(.{
-        .root_source_file = b.path("src/hooks/test_manager.zig"),
+        .root_source_file = b.path("src/test_hook_manager_root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    hook_manager_test_module.addImport("compat", compat_module);
 
     const hook_manager_tests = b.addTest(.{
         .root_module = hook_manager_test_module,
@@ -280,10 +286,11 @@ pub fn build(b: *std.Build) void {
 
     // Built-in hooks tests
     const builtin_hooks_test_module = b.createModule(.{
-        .root_source_file = b.path("src/hooks/test_builtin.zig"),
+        .root_source_file = b.path("src/test_hook_builtin_root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    builtin_hooks_test_module.addImport("compat", compat_module);
 
     const builtin_hooks_tests = b.addTest(.{
         .root_module = builtin_hooks_test_module,
@@ -350,6 +357,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    system_module_test_module.addImport("compat", compat_module);
 
     const system_module_tests = b.addTest(.{
         .root_module = system_module_test_module,
@@ -359,9 +367,9 @@ pub fn build(b: *std.Build) void {
     const system_module_test_step = b.step("test-system-modules", "Run system module tests");
     system_module_test_step.dependOn(&run_system_module_tests.step);
 
-    // Parser tests
+    // Parser tests (rooted at src/ so parser.zig's `../types` import resolves)
     const parser_test_module = b.createModule(.{
-        .root_source_file = b.path("src/parser/test_parser.zig"),
+        .root_source_file = b.path("src/test_parser_root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -406,10 +414,11 @@ pub fn build(b: *std.Build) void {
 
     // Expansion tests
     const expansion_test_module = b.createModule(.{
-        .root_source_file = b.path("src/utils/test_expansion.zig"),
+        .root_source_file = b.path("src/test_expansion_root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    expansion_test_module.addImport("compat", compat_module);
 
     const expansion_tests = b.addTest(.{
         .root_module = expansion_test_module,
@@ -1059,6 +1068,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    profiler_test_module.addImport("compat", compat_module);
 
     const profiler_tests = b.addTest(.{
         .root_module = profiler_test_module,
@@ -1074,6 +1084,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    benchmark_test_module.addImport("compat", compat_module);
 
     const benchmark_tests = b.addTest(.{
         .root_module = benchmark_test_module,
@@ -1098,12 +1109,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    concurrency_import_module.addImport("compat", compat_module);
 
     const parallel_discovery_import_module = b.createModule(.{
         .root_source_file = b.path("src/utils/parallel_discovery.zig"),
         .target = target,
         .optimize = optimize,
     });
+    parallel_discovery_import_module.addImport("compat", compat_module);
     parallel_discovery_import_module.addImport("concurrency", concurrency_import_module);
 
     concurrency_test_module.addImport("concurrency", concurrency_import_module);

@@ -1,4 +1,5 @@
 const std = @import("std");
+const io = std.testing.io;
 
 // ============================================================================
 // Tab Completion Tests
@@ -17,12 +18,12 @@ test "completion: file path completion basics" {
     defer tmp_dir.cleanup();
 
     // Create test files
-    const file1 = try tmp_dir.dir.createFile("test_file1.txt", .{});
-    file1.close();
-    const file2 = try tmp_dir.dir.createFile("test_file2.txt", .{});
-    file2.close();
-    const file3 = try tmp_dir.dir.createFile("other.txt", .{});
-    file3.close();
+    const file1 = try tmp_dir.dir.createFile(io, "test_file1.txt", .{});
+    file1.close(io);
+    const file2 = try tmp_dir.dir.createFile(io, "test_file2.txt", .{});
+    file2.close(io);
+    const file3 = try tmp_dir.dir.createFile(io, "other.txt", .{});
+    file3.close(io);
 
     // Test that files exist
     var entries = std.ArrayList([]const u8).empty;
@@ -34,7 +35,7 @@ test "completion: file path completion basics" {
     }
 
     var iter = tmp_dir.dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(io)) |entry| {
         try entries.append(allocator, try allocator.dupe(u8, entry.name));
     }
 
@@ -46,16 +47,16 @@ test "completion: directory listing" {
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    try tmp_dir.dir.makeDir("subdir1");
-    try tmp_dir.dir.makeDir("subdir2");
-    const file = try tmp_dir.dir.createFile("file.txt", .{});
-    file.close();
+    try tmp_dir.dir.createDirPath(io, "subdir1");
+    try tmp_dir.dir.createDirPath(io, "subdir2");
+    const file = try tmp_dir.dir.createFile(io, "file.txt", .{});
+    file.close(io);
 
     var dir_count: usize = 0;
     var file_count: usize = 0;
 
     var iter = tmp_dir.dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(io)) |entry| {
         if (entry.kind == .directory) {
             dir_count += 1;
         } else {
@@ -162,16 +163,16 @@ test "completion: hidden files filtering" {
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const visible = try tmp_dir.dir.createFile("visible.txt", .{});
-    visible.close();
-    const hidden = try tmp_dir.dir.createFile(".hidden.txt", .{});
-    hidden.close();
+    const visible = try tmp_dir.dir.createFile(io, "visible.txt", .{});
+    visible.close(io);
+    const hidden = try tmp_dir.dir.createFile(io, ".hidden.txt", .{});
+    hidden.close(io);
 
     var visible_count: usize = 0;
     var hidden_count: usize = 0;
 
     var iter = tmp_dir.dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(io)) |entry| {
         if (entry.name.len > 0 and entry.name[0] == '.') {
             hidden_count += 1;
         } else {
@@ -191,12 +192,12 @@ test "completion: path with spaces" {
     defer tmp_dir.cleanup();
 
     // Create file with space in name
-    const file = try tmp_dir.dir.createFile("file with spaces.txt", .{});
-    file.close();
+    const file = try tmp_dir.dir.createFile(io, "file with spaces.txt", .{});
+    file.close(io);
 
     var found = false;
     var iter = tmp_dir.dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(io)) |entry| {
         if (std.mem.indexOf(u8, entry.name, " ") != null) {
             found = true;
             break;
@@ -219,11 +220,11 @@ test "completion: executable detection" {
     defer tmp_dir.cleanup();
 
     // Create a file and make it executable
-    const file = try tmp_dir.dir.createFile("script.sh", .{ .mode = 0o755 });
-    file.close();
+    const file = try tmp_dir.dir.createFile(io, "script.sh", .{ .permissions = std.Io.File.Permissions.fromMode(0o755) });
+    file.close(io);
 
-    const stat = try tmp_dir.dir.statFile("script.sh");
-    const is_executable = (stat.mode & 0o111) != 0;
+    const stat = try tmp_dir.dir.statFile(io, "script.sh", .{});
+    const is_executable = (stat.permissions.toMode() & 0o111) != 0;
 
     _ = allocator;
     try std.testing.expect(is_executable);
@@ -240,11 +241,11 @@ test "completion: symlink handling" {
     defer tmp_dir.cleanup();
 
     // Create target file
-    const target = try tmp_dir.dir.createFile("target.txt", .{});
-    target.close();
+    const target = try tmp_dir.dir.createFile(io, "target.txt", .{});
+    target.close(io);
 
     // Create symlink
-    tmp_dir.dir.symLink("target.txt", "link.txt", .{}) catch |err| {
+    tmp_dir.dir.symLink(io, "target.txt", "link.txt", .{}) catch |err| {
         if (err == error.AccessDenied) {
             // Skip on systems where we can't create symlinks
             return;
@@ -254,7 +255,7 @@ test "completion: symlink handling" {
 
     var link_count: usize = 0;
     var iter = tmp_dir.dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(io)) |entry| {
         if (entry.kind == .sym_link) {
             link_count += 1;
         }
@@ -271,14 +272,14 @@ test "completion: special characters in filename" {
     defer tmp_dir.cleanup();
 
     // Create files with special characters (excluding ones that are invalid)
-    const file1 = try tmp_dir.dir.createFile("file-with-dash.txt", .{});
-    file1.close();
-    const file2 = try tmp_dir.dir.createFile("file_with_underscore.txt", .{});
-    file2.close();
+    const file1 = try tmp_dir.dir.createFile(io, "file-with-dash.txt", .{});
+    file1.close(io);
+    const file2 = try tmp_dir.dir.createFile(io, "file_with_underscore.txt", .{});
+    file2.close(io);
 
     var count: usize = 0;
     var iter = tmp_dir.dir.iterate();
-    while (try iter.next()) |_| {
+    while (try iter.next(io)) |_| {
         count += 1;
     }
 

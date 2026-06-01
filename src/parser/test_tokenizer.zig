@@ -8,9 +8,9 @@ test "Tokenizer: simple command" {
 
     var tokenizer = Tokenizer.init(allocator, "echo hello");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 3), tokens.len); // echo, hello, EOF
+    try std.testing.expectEqual(@as(usize, 2), tokens.len); // echo, hello
     try std.testing.expectEqual(TokenType.word, tokens[0].type);
     try std.testing.expectEqualStrings("echo", tokens[0].value);
     try std.testing.expectEqual(TokenType.word, tokens[1].type);
@@ -22,9 +22,9 @@ test "Tokenizer: command with arguments" {
 
     var tokenizer = Tokenizer.init(allocator, "ls -la /tmp");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 4), tokens.len);
+    try std.testing.expectEqual(@as(usize, 3), tokens.len);
     try std.testing.expectEqualStrings("ls", tokens[0].value);
     try std.testing.expectEqualStrings("-la", tokens[1].value);
     try std.testing.expectEqualStrings("/tmp", tokens[2].value);
@@ -36,7 +36,7 @@ test "Tokenizer: pipe operator" {
 
     var tokenizer = Tokenizer.init(allocator, "ls | grep test");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.word, tokens[0].type);
     try std.testing.expectEqual(TokenType.pipe, tokens[1].type);
@@ -48,7 +48,7 @@ test "Tokenizer: AND operator" {
 
     var tokenizer = Tokenizer.init(allocator, "make && make install");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.word, tokens[0].type);
     try std.testing.expectEqual(TokenType.and_op, tokens[1].type);
@@ -60,7 +60,7 @@ test "Tokenizer: OR operator" {
 
     var tokenizer = Tokenizer.init(allocator, "cmd1 || cmd2");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.or_op, tokens[1].type);
     try std.testing.expectEqualStrings("||", tokens[1].value);
@@ -71,7 +71,7 @@ test "Tokenizer: semicolon operator" {
 
     var tokenizer = Tokenizer.init(allocator, "cmd1; cmd2");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.semicolon, tokens[1].type);
     try std.testing.expectEqualStrings(";", tokens[1].value);
@@ -82,7 +82,7 @@ test "Tokenizer: background operator" {
 
     var tokenizer = Tokenizer.init(allocator, "long-command &");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.background, tokens[1].type);
     try std.testing.expectEqualStrings("&", tokens[1].value);
@@ -94,7 +94,7 @@ test "Tokenizer: output redirection" {
 
     var tokenizer = Tokenizer.init(allocator, "echo hello > output.txt");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.redirect_out, tokens[2].type);
     try std.testing.expectEqualStrings(">", tokens[2].value);
@@ -105,7 +105,7 @@ test "Tokenizer: append redirection" {
 
     var tokenizer = Tokenizer.init(allocator, "echo hello >> output.txt");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.redirect_append, tokens[2].type);
     try std.testing.expectEqualStrings(">>", tokens[2].value);
@@ -116,7 +116,7 @@ test "Tokenizer: input redirection" {
 
     var tokenizer = Tokenizer.init(allocator, "cat < input.txt");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.redirect_in, tokens[1].type);
     try std.testing.expectEqualStrings("<", tokens[1].value);
@@ -127,7 +127,7 @@ test "Tokenizer: stderr redirection" {
 
     var tokenizer = Tokenizer.init(allocator, "command 2> error.log");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.redirect_err, tokens[1].type);
 }
@@ -137,7 +137,7 @@ test "Tokenizer: combined redirection" {
 
     var tokenizer = Tokenizer.init(allocator, "command &> output.txt");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.redirect_both, tokens[1].type);
 }
@@ -147,7 +147,7 @@ test "Tokenizer: heredoc" {
 
     var tokenizer = Tokenizer.init(allocator, "cat << EOF");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.heredoc, tokens[1].type);
     try std.testing.expectEqualStrings("<<", tokens[1].value);
@@ -158,7 +158,7 @@ test "Tokenizer: here-string" {
 
     var tokenizer = Tokenizer.init(allocator, "cat <<< \"hello\"");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.herestring, tokens[1].type);
     try std.testing.expectEqualStrings("<<<", tokens[1].value);
@@ -170,9 +170,9 @@ test "Tokenizer: double quoted string" {
 
     var tokenizer = Tokenizer.init(allocator, "echo \"hello world\"");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 3), tokens.len);
+    try std.testing.expectEqual(@as(usize, 2), tokens.len);
     try std.testing.expect(std.mem.indexOf(u8, tokens[1].value, "hello world") != null);
 }
 
@@ -181,7 +181,7 @@ test "Tokenizer: single quoted string" {
 
     var tokenizer = Tokenizer.init(allocator, "echo 'hello world'");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expect(std.mem.indexOf(u8, tokens[1].value, "hello world") != null);
 }
@@ -191,9 +191,9 @@ test "Tokenizer: mixed quotes" {
 
     var tokenizer = Tokenizer.init(allocator, "echo \"outer 'inner' outer\"");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 3), tokens.len);
+    try std.testing.expectEqual(@as(usize, 2), tokens.len);
 }
 
 test "Tokenizer: escaped quotes" {
@@ -201,9 +201,9 @@ test "Tokenizer: escaped quotes" {
 
     var tokenizer = Tokenizer.init(allocator, "echo \\\"escaped\\\"");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 3), tokens.len);
+    try std.testing.expectEqual(@as(usize, 2), tokens.len);
 }
 
 // Whitespace Handling Tests
@@ -212,9 +212,9 @@ test "Tokenizer: multiple spaces" {
 
     var tokenizer = Tokenizer.init(allocator, "echo    hello    world");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 4), tokens.len);
+    try std.testing.expectEqual(@as(usize, 3), tokens.len);
     try std.testing.expectEqualStrings("echo", tokens[0].value);
     try std.testing.expectEqualStrings("hello", tokens[1].value);
     try std.testing.expectEqualStrings("world", tokens[2].value);
@@ -225,9 +225,9 @@ test "Tokenizer: tabs and spaces" {
 
     var tokenizer = Tokenizer.init(allocator, "echo\thello\t  world");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 4), tokens.len);
+    try std.testing.expectEqual(@as(usize, 3), tokens.len);
 }
 
 test "Tokenizer: leading and trailing whitespace" {
@@ -235,9 +235,9 @@ test "Tokenizer: leading and trailing whitespace" {
 
     var tokenizer = Tokenizer.init(allocator, "  echo hello  ");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 3), tokens.len);
+    try std.testing.expectEqual(@as(usize, 2), tokens.len);
     try std.testing.expectEqualStrings("echo", tokens[0].value);
 }
 
@@ -247,10 +247,11 @@ test "Tokenizer: parentheses" {
 
     var tokenizer = Tokenizer.init(allocator, "(echo hello)");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
+    // "(echo hello)" -> lparen, echo, hello, rparen
     try std.testing.expectEqual(TokenType.lparen, tokens[0].type);
-    try std.testing.expectEqual(TokenType.rparen, tokens[2].type);
+    try std.testing.expectEqual(TokenType.rparen, tokens[3].type);
 }
 
 test "Tokenizer: escaped characters" {
@@ -258,9 +259,9 @@ test "Tokenizer: escaped characters" {
 
     var tokenizer = Tokenizer.init(allocator, "file\\ with\\ spaces");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 2), tokens.len);
+    try std.testing.expectEqual(@as(usize, 1), tokens.len);
 }
 
 // Keyword Recognition Tests
@@ -269,7 +270,7 @@ test "Tokenizer: if keyword" {
 
     var tokenizer = Tokenizer.init(allocator, "if test");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.kw_if, tokens[0].type);
 }
@@ -279,7 +280,7 @@ test "Tokenizer: for loop keyword" {
 
     var tokenizer = Tokenizer.init(allocator, "for i in 1 2 3");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.kw_for, tokens[0].type);
     try std.testing.expectEqual(TokenType.kw_in, tokens[2].type);
@@ -290,7 +291,7 @@ test "Tokenizer: while loop keyword" {
 
     var tokenizer = Tokenizer.init(allocator, "while true");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.kw_while, tokens[0].type);
 }
@@ -301,10 +302,10 @@ test "Tokenizer: empty input" {
 
     var tokenizer = Tokenizer.init(allocator, "");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 1), tokens.len);
-    try std.testing.expectEqual(TokenType.eof, tokens[0].type);
+    // tokenize() does not emit a trailing EOF token; empty input -> 0 tokens.
+    try std.testing.expectEqual(@as(usize, 0), tokens.len);
 }
 
 test "Tokenizer: only whitespace" {
@@ -312,9 +313,10 @@ test "Tokenizer: only whitespace" {
 
     var tokenizer = Tokenizer.init(allocator, "   \t  \n  ");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(TokenType.eof, tokens[tokens.len - 1].type);
+    // Whitespace-only input produces no tokens (newlines are skipped, no EOF).
+    try std.testing.expectEqual(@as(usize, 0), tokens.len);
 }
 
 test "Tokenizer: complex command chain" {
@@ -322,7 +324,7 @@ test "Tokenizer: complex command chain" {
 
     var tokenizer = Tokenizer.init(allocator, "cmd1 | cmd2 && cmd3 || cmd4");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.word, tokens[0].type);
     try std.testing.expectEqual(TokenType.pipe, tokens[1].type);
@@ -338,7 +340,7 @@ test "Tokenizer: operators without spaces" {
 
     var tokenizer = Tokenizer.init(allocator, "echo>output.txt");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(TokenType.word, tokens[0].type);
     try std.testing.expectEqual(TokenType.redirect_out, tokens[1].type);
@@ -349,7 +351,7 @@ test "Tokenizer: multiple redirections" {
 
     var tokenizer = Tokenizer.init(allocator, "command < in.txt > out.txt 2> err.txt");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     var redir_count: usize = 0;
     for (tokens) |token| {
@@ -365,7 +367,7 @@ test "Tokenizer: newline handling" {
 
     var tokenizer = Tokenizer.init(allocator, "echo hello\necho world");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     // Should have tokens for both lines
     try std.testing.expect(tokens.len >= 4);
@@ -376,7 +378,7 @@ test "Tokenizer: line and column tracking" {
 
     var tokenizer = Tokenizer.init(allocator, "echo hello");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expectEqual(@as(usize, 1), tokens[0].line);
     try std.testing.expectEqual(@as(usize, 1), tokens[0].column);
@@ -387,9 +389,9 @@ test "Tokenizer: special characters in words" {
 
     var tokenizer = Tokenizer.init(allocator, "file.txt file-name file_name");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 4), tokens.len);
+    try std.testing.expectEqual(@as(usize, 3), tokens.len);
     try std.testing.expectEqualStrings("file.txt", tokens[0].value);
 }
 
@@ -398,9 +400,9 @@ test "Tokenizer: numbers as arguments" {
 
     var tokenizer = Tokenizer.init(allocator, "sleep 10");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 3), tokens.len);
+    try std.testing.expectEqual(@as(usize, 2), tokens.len);
     try std.testing.expectEqualStrings("10", tokens[1].value);
 }
 
@@ -409,9 +411,9 @@ test "Tokenizer: environment variable syntax" {
 
     var tokenizer = Tokenizer.init(allocator, "echo $HOME");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
-    try std.testing.expectEqual(@as(usize, 3), tokens.len);
+    try std.testing.expectEqual(@as(usize, 2), tokens.len);
     try std.testing.expectEqualStrings("$HOME", tokens[1].value);
 }
 
@@ -420,7 +422,7 @@ test "Tokenizer: brace expansion syntax" {
 
     var tokenizer = Tokenizer.init(allocator, "touch file.{txt,log,conf}");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expect(tokens.len >= 2);
     try std.testing.expect(std.mem.indexOf(u8, tokens[1].value, "{") != null);
@@ -431,7 +433,7 @@ test "Tokenizer: command substitution syntax" {
 
     var tokenizer = Tokenizer.init(allocator, "echo $(date)");
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    defer tokenizer.deinitTokens(tokens);
 
     try std.testing.expect(tokens.len >= 2);
 }

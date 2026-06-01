@@ -1,4 +1,5 @@
 const std = @import("std");
+const io = std.testing.io;
 
 /// Test utilities for Den shell tests
 /// Provides helpers for temporary files, process mocking, and test assertions
@@ -25,7 +26,7 @@ pub const TempDir = struct {
         const full_path = try std.fmt.allocPrint(allocator, "/tmp/{s}", .{unique_name});
 
         // Create directory
-        try std.fs.cwd().makePath(full_path);
+        try std.Io.Dir.cwd().createDirPath(io, full_path);
 
         return TempDir{
             .path = full_path,
@@ -35,7 +36,7 @@ pub const TempDir = struct {
 
     pub fn deinit(self: *TempDir) void {
         // Clean up temp directory
-        std.fs.cwd().deleteTree(self.path) catch {};
+        std.Io.Dir.cwd().deleteTree(io, self.path) catch {};
         self.allocator.free(self.path);
     }
 
@@ -43,10 +44,10 @@ pub const TempDir = struct {
     pub fn createFile(self: *TempDir, name: []const u8, content: []const u8) ![]const u8 {
         const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.path, name });
 
-        const file = try std.fs.cwd().createFile(file_path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().createFile(io, file_path, .{ .truncate = true });
+        defer file.close(io);
 
-        try file.writeAll(content);
+        try file.writeStreamingAll(io, content);
 
         return file_path;
     }
@@ -54,7 +55,7 @@ pub const TempDir = struct {
     /// Create a directory in the temp directory
     pub fn createDir(self: *TempDir, name: []const u8) ![]const u8 {
         const dir_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.path, name });
-        try std.fs.cwd().makePath(dir_path);
+        try std.Io.Dir.cwd().createDirPath(io, dir_path);
         return dir_path;
     }
 
@@ -63,8 +64,8 @@ pub const TempDir = struct {
         const file_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.path, name });
         defer self.allocator.free(file_path);
 
-        const file = try std.fs.cwd().openFile(file_path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+        defer file.close(io);
 
         // Manual read for Zig 0.16 compatibility
         var result = std.ArrayList(u8).empty;
@@ -72,7 +73,7 @@ pub const TempDir = struct {
 
         var read_buf: [4096]u8 = undefined;
         while (true) {
-            const n = file.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
+            const n = file.readStreaming(io, &.{&read_buf}) catch break;
             if (n == 0) break;
             try result.appendSlice(self.allocator, read_buf[0..n]);
         }
@@ -225,12 +226,12 @@ pub const ShellFixture = struct {
         const script_path = try self.temp_dir.createFile(name, content);
 
         // Make executable
-        const file = try std.fs.cwd().openFile(script_path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().openFile(io, script_path, .{});
+        defer file.close(io);
 
         // Set executable permissions (0755)
         if (@import("builtin").os.tag != .windows) {
-            try file.chmod(0o755);
+            try file.setPermissions(io, std.Io.File.Permissions.fromMode(0o755));
         }
 
         return script_path;
@@ -241,26 +242,22 @@ pub const ShellFixture = struct {
 
         const args = [_][]const u8{ "sh", "-c", command };
 
-        var child = std.process.Child.init(&args, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-
-        // Pass environment variables to child process
-        if (self.env_vars.count() > 0) {
-            var env_map = std.process.EnvMap.init(self.allocator);
-            defer env_map.deinit();
-
-            // Copy all environment variables
+        var env_map = std.process.Environ.Map.init(self.allocator);
+        defer env_map.deinit();
+        const have_env = self.env_vars.count() > 0;
+        if (have_env) {
             var it = self.env_vars.iterator();
             while (it.next()) |entry| {
                 try env_map.put(entry.key_ptr.*, entry.value_ptr.*);
             }
-
-            child.env_map = &env_map;
-            try child.spawn();
-        } else {
-            try child.spawn();
         }
+
+        var child = try std.process.spawn(io, .{
+            .argv = &args,
+            .stdout = .pipe,
+            .stderr = .pipe,
+            .environ_map = if (have_env) &env_map else null,
+        });
 
         // Read output using ArrayList for Zig 0.16 compatibility
         var stdout_list = std.ArrayList(u8).empty;
@@ -272,7 +269,7 @@ pub const ShellFixture = struct {
 
         if (child.stdout) |stdout| {
             while (true) {
-                const n = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
+                const n = stdout.readStreaming(io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -280,13 +277,13 @@ pub const ShellFixture = struct {
 
         if (child.stderr) |stderr| {
             while (true) {
-                const n = stderr.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
+                const n = stderr.readStreaming(io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
             }
         }
 
-        const term = try child.wait();
+        const term = try child.wait(io);
         const exit_code: u8 = switch (term) {
             .exited => |code| @intCast(code),
             else => 1,
@@ -315,10 +312,11 @@ pub fn createTempFile(allocator: std.mem.Allocator, content: []const u8) ![]cons
 pub fn runCommand(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
     const args = [_][]const u8{ "sh", "-c", cmd };
 
-    var child = std.process.Child.init(&args, allocator);
-    child.stdout_behavior = .Pipe;
-
-    try child.spawn();
+    var child = try std.process.spawn(io, .{
+        .argv = &args,
+        .stdout = .pipe,
+        .stderr = .ignore,
+    });
 
     // Read output using ArrayList for Zig 0.16 compatibility
     var stdout_list = std.ArrayList(u8).empty;
@@ -327,13 +325,13 @@ pub fn runCommand(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
     var read_buf: [4096]u8 = undefined;
     if (child.stdout) |stdout| {
         while (true) {
-            const n = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
+            const n = stdout.readStreaming(io, &.{&read_buf}) catch break;
             if (n == 0) break;
             try stdout_list.appendSlice(allocator, read_buf[0..n]);
         }
     }
 
-    _ = try child.wait();
+    _ = try child.wait(io);
 
     return try stdout_list.toOwnedSlice(allocator);
 }
@@ -346,8 +344,8 @@ test "TempDir creates and cleans up" {
     defer temp_dir.deinit();
 
     // Verify directory exists
-    var dir = try std.fs.cwd().openDir(temp_dir.path, .{});
-    dir.close();
+    var dir = try std.Io.Dir.cwd().openDir(io, temp_dir.path, .{});
+    dir.close(io);
 }
 
 test "TempDir.createFile creates file" {
@@ -441,11 +439,11 @@ pub const DenShellFixture = struct {
 
         const args = [_][]const u8{ self.den_binary, "-c", full_command };
 
-        var child = std.process.Child.init(&args, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-
-        try child.spawn();
+        var child = try std.process.spawn(io, .{
+            .argv = &args,
+            .stdout = .pipe,
+            .stderr = .pipe,
+        });
 
         // Read output using ArrayList for Zig 0.16 compatibility
         var stdout_list = std.ArrayList(u8).empty;
@@ -457,7 +455,7 @@ pub const DenShellFixture = struct {
 
         if (child.stdout) |stdout| {
             while (true) {
-                const n = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
+                const n = stdout.readStreaming(io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -465,13 +463,13 @@ pub const DenShellFixture = struct {
 
         if (child.stderr) |stderr| {
             while (true) {
-                const n = stderr.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
+                const n = stderr.readStreaming(io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
             }
         }
 
-        const term = try child.wait();
+        const term = try child.wait(io);
         const exit_code: u8 = switch (term) {
             .exited => |code| @intCast(code),
             else => 1,
@@ -491,11 +489,11 @@ pub const DenShellFixture = struct {
     pub fn execDirect(self: *DenShellFixture, command: []const u8) !struct { stdout: []const u8, stderr: []const u8, exit_code: u8 } {
         const args = [_][]const u8{ self.den_binary, "-c", command };
 
-        var child = std.process.Child.init(&args, self.allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-
-        try child.spawn();
+        var child = try std.process.spawn(io, .{
+            .argv = &args,
+            .stdout = .pipe,
+            .stderr = .pipe,
+        });
 
         // Read output using ArrayList for Zig 0.16 compatibility
         var stdout_list = std.ArrayList(u8).empty;
@@ -507,7 +505,7 @@ pub const DenShellFixture = struct {
 
         if (child.stdout) |stdout| {
             while (true) {
-                const n = stdout.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
+                const n = stdout.readStreaming(io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stdout_list.appendSlice(self.allocator, read_buf[0..n]);
             }
@@ -515,13 +513,13 @@ pub const DenShellFixture = struct {
 
         if (child.stderr) |stderr| {
             while (true) {
-                const n = stderr.readStreaming(std.Options.debug_io, &.{&read_buf}) catch break;
+                const n = stderr.readStreaming(io, &.{&read_buf}) catch break;
                 if (n == 0) break;
                 try stderr_list.appendSlice(self.allocator, read_buf[0..n]);
             }
         }
 
-        const term = try child.wait();
+        const term = try child.wait(io);
         const exit_code: u8 = switch (term) {
             .exited => |code| @intCast(code),
             else => 1,

@@ -1,12 +1,15 @@
 const std = @import("std");
 const Parser = @import("parser.zig").Parser;
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
+const types = @import("../types/mod.zig");
 
 /// Helper function to parse input string
 fn parseInput(allocator: std.mem.Allocator, input: []const u8) !types.CommandChain {
     var tokenizer = Tokenizer.init(allocator, input);
     const tokens = try tokenizer.tokenize();
-    defer allocator.free(tokens);
+    // The parser dupes the strings it needs into the CommandChain, so free the
+    // tokens (including their heap-allocated values) once parsing is done.
+    defer tokenizer.deinitTokens(tokens);
 
     var parser = Parser.init(allocator, tokens);
     return try parser.parse();
@@ -20,10 +23,10 @@ test "Parser: expand variables during parsing" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("echo", chain.commands[0].name);
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands[0].args.len);
-    try TestAssert.expectEqualStrings("hello", chain.commands[0].args[0]);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("echo", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands[0].args.len);
+    try std.testing.expectEqualStrings("hello", chain.commands[0].args[0]);
 }
 
 test "Parser: basic command parsing" {
@@ -33,11 +36,11 @@ test "Parser: basic command parsing" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("ls", chain.commands[0].name);
-    try TestAssert.expectEqual(@as(usize, 2), chain.commands[0].args.len);
-    try TestAssert.expectEqualStrings("-la", chain.commands[0].args[0]);
-    try TestAssert.expectEqualStrings("/tmp", chain.commands[0].args[1]);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("ls", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 2), chain.commands[0].args.len);
+    try std.testing.expectEqualStrings("-la", chain.commands[0].args[0]);
+    try std.testing.expectEqualStrings("/tmp", chain.commands[0].args[1]);
 }
 
 test "Parser: command with multiple arguments" {
@@ -47,12 +50,12 @@ test "Parser: command with multiple arguments" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("echo", chain.commands[0].name);
-    try TestAssert.expectEqual(@as(usize, 3), chain.commands[0].args.len);
-    try TestAssert.expectEqualStrings("arg1", chain.commands[0].args[0]);
-    try TestAssert.expectEqualStrings("arg2", chain.commands[0].args[1]);
-    try TestAssert.expectEqualStrings("arg3", chain.commands[0].args[2]);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("echo", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 3), chain.commands[0].args.len);
+    try std.testing.expectEqualStrings("arg1", chain.commands[0].args[0]);
+    try std.testing.expectEqualStrings("arg2", chain.commands[0].args[1]);
+    try std.testing.expectEqualStrings("arg3", chain.commands[0].args[2]);
 }
 
 // Redirection Parsing Tests
@@ -63,20 +66,20 @@ test "Parser: output redirection" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("echo", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("echo", chain.commands[0].name);
 
     // Check for redirections
-    try TestAssert.expectTrue(chain.commands[0].redirections.len > 0);
+    try std.testing.expect(chain.commands[0].redirections.len > 0);
 
     var found_stdout = false;
     for (chain.commands[0].redirections) |redir| {
-        if (redir.type == .stdout) {
-            try TestAssert.expectEqualStrings("output.txt", redir.target);
+        if (redir.kind == .output_truncate) {
+            try std.testing.expectEqualStrings("output.txt", redir.target);
             found_stdout = true;
         }
     }
-    try TestAssert.expectTrue(found_stdout);
+    try std.testing.expect(found_stdout);
 }
 
 test "Parser: input redirection" {
@@ -86,17 +89,17 @@ test "Parser: input redirection" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("cat", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("cat", chain.commands[0].name);
 
     var found_stdin = false;
     for (chain.commands[0].redirections) |redir| {
-        if (redir.type == .stdin) {
-            try TestAssert.expectEqualStrings("input.txt", redir.target);
+        if (redir.kind == .input) {
+            try std.testing.expectEqualStrings("input.txt", redir.target);
             found_stdin = true;
         }
     }
-    try TestAssert.expectTrue(found_stdin);
+    try std.testing.expect(found_stdin);
 }
 
 test "Parser: stderr redirection" {
@@ -106,16 +109,17 @@ test "Parser: stderr redirection" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
 
     var found_stderr = false;
     for (chain.commands[0].redirections) |redir| {
-        if (redir.type == .stderr) {
-            try TestAssert.expectEqualStrings("error.log", redir.target);
+        // `2>` is an output-truncate redirection on fd 2 (stderr).
+        if (redir.kind == .output_truncate and redir.fd == 2) {
+            try std.testing.expectEqualStrings("error.log", redir.target);
             found_stderr = true;
         }
     }
-    try TestAssert.expectTrue(found_stderr);
+    try std.testing.expect(found_stderr);
 }
 
 test "Parser: append redirection" {
@@ -125,16 +129,16 @@ test "Parser: append redirection" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
 
     var found_append = false;
     for (chain.commands[0].redirections) |redir| {
-        if (redir.type == .stdout_append) {
-            try TestAssert.expectEqualStrings("output.txt", redir.target);
+        if (redir.kind == .output_append) {
+            try std.testing.expectEqualStrings("output.txt", redir.target);
             found_append = true;
         }
     }
-    try TestAssert.expectTrue(found_append);
+    try std.testing.expect(found_append);
 }
 
 // Pipe Tests
@@ -145,12 +149,12 @@ test "Parser: simple pipe" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 2), chain.commands.len);
-    try TestAssert.expectEqualStrings("ls", chain.commands[0].name);
-    try TestAssert.expectEqualStrings("grep", chain.commands[1].name);
+    try std.testing.expectEqual(@as(usize, 2), chain.commands.len);
+    try std.testing.expectEqualStrings("ls", chain.commands[0].name);
+    try std.testing.expectEqualStrings("grep", chain.commands[1].name);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.operators.len);
-    try TestAssert.expectEqual(types.Operator.pipe, chain.operators[0]);
+    try std.testing.expectEqual(@as(usize, 1), chain.operators.len);
+    try std.testing.expectEqual(types.Operator.pipe, chain.operators[0]);
 }
 
 test "Parser: multiple pipes" {
@@ -160,14 +164,14 @@ test "Parser: multiple pipes" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 3), chain.commands.len);
-    try TestAssert.expectEqualStrings("cat", chain.commands[0].name);
-    try TestAssert.expectEqualStrings("grep", chain.commands[1].name);
-    try TestAssert.expectEqualStrings("sort", chain.commands[2].name);
+    try std.testing.expectEqual(@as(usize, 3), chain.commands.len);
+    try std.testing.expectEqualStrings("cat", chain.commands[0].name);
+    try std.testing.expectEqualStrings("grep", chain.commands[1].name);
+    try std.testing.expectEqualStrings("sort", chain.commands[2].name);
 
-    try TestAssert.expectEqual(@as(usize, 2), chain.operators.len);
-    try TestAssert.expectEqual(types.Operator.pipe, chain.operators[0]);
-    try TestAssert.expectEqual(types.Operator.pipe, chain.operators[1]);
+    try std.testing.expectEqual(@as(usize, 2), chain.operators.len);
+    try std.testing.expectEqual(types.Operator.pipe, chain.operators[0]);
+    try std.testing.expectEqual(types.Operator.pipe, chain.operators[1]);
 }
 
 // Boolean Operators Tests
@@ -178,12 +182,12 @@ test "Parser: AND operator" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 2), chain.commands.len);
-    try TestAssert.expectEqualStrings("make", chain.commands[0].name);
-    try TestAssert.expectEqualStrings("make", chain.commands[1].name);
+    try std.testing.expectEqual(@as(usize, 2), chain.commands.len);
+    try std.testing.expectEqualStrings("make", chain.commands[0].name);
+    try std.testing.expectEqualStrings("make", chain.commands[1].name);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.operators.len);
-    try TestAssert.expectEqual(types.Operator.and_op, chain.operators[0]);
+    try std.testing.expectEqual(@as(usize, 1), chain.operators.len);
+    try std.testing.expectEqual(types.Operator.and_op, chain.operators[0]);
 }
 
 test "Parser: OR operator" {
@@ -193,9 +197,9 @@ test "Parser: OR operator" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 2), chain.commands.len);
-    try TestAssert.expectEqual(@as(usize, 1), chain.operators.len);
-    try TestAssert.expectEqual(types.Operator.or_op, chain.operators[0]);
+    try std.testing.expectEqual(@as(usize, 2), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.operators.len);
+    try std.testing.expectEqual(types.Operator.or_op, chain.operators[0]);
 }
 
 // Background Process Tests
@@ -206,11 +210,11 @@ test "Parser: background process" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("long-command", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("long-command", chain.commands[0].name);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.operators.len);
-    try TestAssert.expectEqual(types.Operator.background, chain.operators[0]);
+    try std.testing.expectEqual(@as(usize, 1), chain.operators.len);
+    try std.testing.expectEqual(types.Operator.background, chain.operators[0]);
 }
 
 // Semicolon Tests
@@ -221,12 +225,12 @@ test "Parser: semicolon separator" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 2), chain.commands.len);
-    try TestAssert.expectEqualStrings("echo", chain.commands[0].name);
-    try TestAssert.expectEqualStrings("echo", chain.commands[1].name);
+    try std.testing.expectEqual(@as(usize, 2), chain.commands.len);
+    try std.testing.expectEqualStrings("echo", chain.commands[0].name);
+    try std.testing.expectEqualStrings("echo", chain.commands[1].name);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.operators.len);
-    try TestAssert.expectEqual(types.Operator.semicolon, chain.operators[0]);
+    try std.testing.expectEqual(@as(usize, 1), chain.operators.len);
+    try std.testing.expectEqual(types.Operator.semicolon, chain.operators[0]);
 }
 
 // Complex Command Tests
@@ -237,10 +241,10 @@ test "Parser: mixed operators" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 3), chain.commands.len);
-    try TestAssert.expectEqual(@as(usize, 2), chain.operators.len);
-    try TestAssert.expectEqual(types.Operator.pipe, chain.operators[0]);
-    try TestAssert.expectEqual(types.Operator.and_op, chain.operators[1]);
+    try std.testing.expectEqual(@as(usize, 3), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 2), chain.operators.len);
+    try std.testing.expectEqual(types.Operator.pipe, chain.operators[0]);
+    try std.testing.expectEqual(types.Operator.and_op, chain.operators[1]);
 }
 
 test "Parser: command with redirections and pipes" {
@@ -250,9 +254,9 @@ test "Parser: command with redirections and pipes" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 2), chain.commands.len);
-    try TestAssert.expectEqualStrings("cat", chain.commands[0].name);
-    try TestAssert.expectEqualStrings("grep", chain.commands[1].name);
+    try std.testing.expectEqual(@as(usize, 2), chain.commands.len);
+    try std.testing.expectEqualStrings("cat", chain.commands[0].name);
+    try std.testing.expectEqualStrings("grep", chain.commands[1].name);
 }
 
 // Edge Cases
@@ -291,9 +295,9 @@ test "Parser: command with no arguments" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("ls", chain.commands[0].name);
-    try TestAssert.expectEqual(@as(usize, 0), chain.commands[0].args.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("ls", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 0), chain.commands[0].args.len);
 }
 
 test "Parser: command with quoted arguments" {
@@ -303,9 +307,9 @@ test "Parser: command with quoted arguments" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("echo", chain.commands[0].name);
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands[0].args.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("echo", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands[0].args.len);
 }
 
 test "Parser: command with single quotes" {
@@ -315,8 +319,8 @@ test "Parser: command with single quotes" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("echo", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("echo", chain.commands[0].name);
 }
 
 test "Parser: command with escaped spaces" {
@@ -326,8 +330,8 @@ test "Parser: command with escaped spaces" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("ls", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("ls", chain.commands[0].name);
 }
 
 test "Parser: command with flags" {
@@ -337,9 +341,9 @@ test "Parser: command with flags" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("ls", chain.commands[0].name);
-    try TestAssert.expectEqual(@as(usize, 2), chain.commands[0].args.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("ls", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 2), chain.commands[0].args.len);
 }
 
 test "Parser: command with equals in arguments" {
@@ -349,8 +353,8 @@ test "Parser: command with equals in arguments" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("env", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("env", chain.commands[0].name);
 }
 
 // Redirection Edge Cases
@@ -361,8 +365,8 @@ test "Parser: multiple redirections" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectTrue(chain.commands[0].redirections.len >= 3);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expect(chain.commands[0].redirections.len >= 3);
 }
 
 test "Parser: redirection with no space" {
@@ -372,8 +376,8 @@ test "Parser: redirection with no space" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("echo", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("echo", chain.commands[0].name);
 }
 
 test "Parser: here-string redirection" {
@@ -383,8 +387,8 @@ test "Parser: here-string redirection" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqualStrings("cat", chain.commands[0].name);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqualStrings("cat", chain.commands[0].name);
 }
 
 // Complex Scenarios
@@ -395,8 +399,8 @@ test "Parser: long command chain" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 5), chain.commands.len);
-    try TestAssert.expectEqual(@as(usize, 4), chain.operators.len);
+    try std.testing.expectEqual(@as(usize, 5), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 4), chain.operators.len);
 }
 
 test "Parser: command with many arguments" {
@@ -406,8 +410,8 @@ test "Parser: command with many arguments" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 1), chain.commands.len);
-    try TestAssert.expectEqual(@as(usize, 10), chain.commands[0].args.len);
+    try std.testing.expectEqual(@as(usize, 1), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 10), chain.commands[0].args.len);
 }
 
 test "Parser: background with pipe" {
@@ -417,8 +421,8 @@ test "Parser: background with pipe" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 2), chain.commands.len);
-    try TestAssert.expectEqual(@as(usize, 2), chain.operators.len);
+    try std.testing.expectEqual(@as(usize, 2), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 2), chain.operators.len);
 }
 
 test "Parser: consecutive semicolons" {
@@ -428,6 +432,6 @@ test "Parser: consecutive semicolons" {
     var chain = try parseInput(allocator, input);
     defer chain.deinit(allocator);
 
-    try TestAssert.expectEqual(@as(usize, 3), chain.commands.len);
-    try TestAssert.expectEqual(@as(usize, 2), chain.operators.len);
+    try std.testing.expectEqual(@as(usize, 3), chain.commands.len);
+    try std.testing.expectEqual(@as(usize, 2), chain.operators.len);
 }

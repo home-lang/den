@@ -5,6 +5,12 @@ const AutoSuggestPlugin = builtin_plugins.AutoSuggestPlugin;
 const HighlightPlugin = builtin_plugins.HighlightPlugin;
 const ScriptSuggesterPlugin = builtin_plugins.ScriptSuggesterPlugin;
 
+fn milliTimestamp() i64 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+}
+
 test "Integration - AutoSuggest with realistic history" {
     const allocator = std.testing.allocator;
 
@@ -196,9 +202,9 @@ test "Integration - ScriptSuggester performance" {
     try environment.put("PATH", "/usr/bin:/bin");
 
     // First call - builds cache
-    const start = std.time.milliTimestamp();
+    const start = milliTimestamp();
     const suggestions1 = try plugin.getSuggestions("l", &environment);
-    const first_duration = std.time.milliTimestamp() - start;
+    const first_duration = milliTimestamp() - start;
 
     defer {
         for (suggestions1) |suggestion| {
@@ -208,9 +214,9 @@ test "Integration - ScriptSuggester performance" {
     }
 
     // Second call - uses cache (should be faster or similar)
-    const start2 = std.time.milliTimestamp();
+    const start2 = milliTimestamp();
     const suggestions2 = try plugin.getSuggestions("l", &environment);
-    const second_duration = std.time.milliTimestamp() - start2;
+    const second_duration = milliTimestamp() - start2;
 
     defer {
         for (suggestions2) |suggestion| {
