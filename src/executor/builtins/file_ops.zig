@@ -648,6 +648,16 @@ fn evaluateExpression(expr: []const u8) !f64 {
             if (c == '(') depth -= 1;
             if (depth == 0 and (c == '+' or c == '-')) {
                 if (i == 0) continue;
+                // A '+'/'-' that follows another operator (or '(') is a unary
+                // sign on the right-hand operand, not a binary operator — skip
+                // it so e.g. "5+-5" splits at the '+' and evaluates 5 + (-5).
+                var j = i;
+                while (j > 0 and (trimmed[j - 1] == ' ' or trimmed[j - 1] == '\t')) : (j -= 1) {}
+                if (j == 0) continue;
+                switch (trimmed[j - 1]) {
+                    '+', '-', '*', '/', '%', '(' => continue,
+                    else => {},
+                }
                 const left = try evaluateExpression(trimmed[0..i]);
                 const right = try evaluateExpression(trimmed[i + 1 ..]);
                 return if (c == '+') left + right else left - right;
