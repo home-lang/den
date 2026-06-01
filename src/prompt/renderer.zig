@@ -174,10 +174,15 @@ pub fn visibleWidth(text: []const u8) usize {
 
     while (i < text.len) {
         if (text[i] == '\x1b' and i + 1 < text.len and text[i + 1] == '[') {
-            // Skip ANSI escape sequence
+            // Skip a CSI escape sequence. Prompts use SGR (color) codes which
+            // end in 'm', preceded only by parameter bytes (digits and ';').
+            // Consume those parameter bytes and the terminating 'm'. If the
+            // sequence is truncated or malformed (no 'm' terminator), stop here
+            // rather than swallowing the rest of the string as escape bytes —
+            // otherwise a stray "\x1b[" would zero out the visible width.
             i += 2;
-            while (i < text.len and text[i] != 'm') : (i += 1) {}
-            if (i < text.len) i += 1; // skip the 'm' only if we found it
+            while (i < text.len and (std.ascii.isDigit(text[i]) or text[i] == ';')) : (i += 1) {}
+            if (i < text.len and text[i] == 'm') i += 1; // consume terminator if present
         } else {
             // Count visible character
             width += 1;
