@@ -536,7 +536,8 @@ test "FastStringMatcher find basic" {
 
 test "FastStringMatcher find at end" {
     const matcher = FastStringMatcher.init("end");
-    try std.testing.expectEqual(@as(?usize, 8), matcher.find("the very end"));
+    // "the very end" — 'e' of "end" is at index 9 (t,h,e,sp,v,e,r,y,sp,e,n,d)
+    try std.testing.expectEqual(@as(?usize, 9), matcher.find("the very end"));
     // Exact match
     try std.testing.expectEqual(@as(?usize, 0), matcher.find("end"));
 }
