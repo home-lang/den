@@ -247,8 +247,9 @@ test "Expansion: no expansion for escaped dollar" {
     const result = try expansion.expand("Cost: \\$5");
     defer allocator.free(result);
 
-    // Backslash should be preserved
-    try std.testing.expectEqualStrings("Cost: \\$5", result);
+    // An escaped dollar drops the backslash and stays literal, matching
+    // POSIX shells (`echo "\$5"` → `$5`).
+    try std.testing.expectEqualStrings("Cost: $5", result);
 }
 
 test "Expansion: empty string" {
