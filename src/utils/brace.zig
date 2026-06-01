@@ -193,13 +193,20 @@ pub const BraceExpander = struct {
             return result;
         };
 
-        // Detect zero-padding: if start or end begins with '0' and has more than one digit
-        const start_has_zero_pad = start_str.len > 1 and start_str[0] == '0';
-        const end_has_zero_pad = end_str.len > 1 and end_str[0] == '0';
+        // Detect zero-padding: an operand triggers padding if its digits (after
+        // an optional leading sign) begin with '0' and there is more than one
+        // digit. The pad width is the digit count excluding the sign, so e.g.
+        // {-002..002} yields -002, -001, 000, 001, 002 (sign is not padded).
+        const start_off: usize = if (start_str.len > 0 and (start_str[0] == '-' or start_str[0] == '+')) 1 else 0;
+        const end_off: usize = if (end_str.len > 0 and (end_str[0] == '-' or end_str[0] == '+')) 1 else 0;
+        const start_digits = start_str.len - start_off;
+        const end_digits = end_str.len - end_off;
+        const start_has_zero_pad = start_digits > 1 and start_str[start_off] == '0';
+        const end_has_zero_pad = end_digits > 1 and end_str[end_off] == '0';
 
-        // Use the maximum width from either operand for zero-padding
+        // Use the maximum digit width from either operand for zero-padding
         const pad_width: usize = if (start_has_zero_pad or end_has_zero_pad)
-            @max(start_str.len, end_str.len)
+            @max(start_digits, end_digits)
         else
             0;
 
@@ -268,7 +275,9 @@ pub const BraceExpander = struct {
             // Use @abs() to avoid overflow on i64::MIN.
             const abs_num: u64 = @abs(num);
             const num_len = std.fmt.count("{d}", .{abs_num});
-            const pad_len = if (width > num_len + 1) width - num_len - 1 else 0;
+            // `width` is the digit count (sign excluded), so pad the magnitude
+            // to `width` digits and prepend the sign separately.
+            const pad_len = if (width > num_len) width - num_len else 0;
 
             var pos: usize = 0;
             num_buf[pos] = '-';
